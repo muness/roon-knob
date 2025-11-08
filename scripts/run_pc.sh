@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROON_BRIDGE_BASE=${ROON_BRIDGE_BASE:-http://127.0.0.1:8088}
-ZONE_ID=${ZONE_ID:-office}
+ZONE_ID=${ZONE_ID:-Bedroom}
 export ROON_BRIDGE_BASE
 export ZONE_ID
 

@@ -24,13 +24,16 @@ struct ui_state {
     bool online;
 };
 
+#include <time.h>
+
 static lv_display_t *s_display;
 static lv_obj_t *s_label_line1;
 static lv_obj_t *s_label_line2;
 static lv_obj_t *s_status_dot;
 static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_play_icon;
-static pthread_t s_lv_thread;
+static lv_obj_t *s_zone_label;
+
 static pthread_mutex_t s_state_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct ui_state s_pending = {
     .line1 = "Waiting for bridge",
@@ -40,13 +43,12 @@ static struct ui_state s_pending = {
     .online = false,
 };
 static bool s_dirty = true;
-static bool s_running = true;
 static lv_indev_t *s_keyboard;
 static lv_group_t *s_key_group;
 static ui_input_cb_t s_input_cb;
+static char s_zone_name[64] = "Zone";
 
 static void apply_state(const struct ui_state *state);
-static void *lvgl_thread(void *arg);
 static void build_layout(void);
 static void poll_pending(lv_timer_t *timer);
 static void set_status_dot(bool online);
@@ -73,7 +75,8 @@ void ui_init(void) {
         lv_obj_add_event_cb(screen, keyboard_event_cb, LV_EVENT_KEY, NULL);
     }
 
-    pthread_create(&s_lv_thread, NULL, lvgl_thread, NULL);
+    lv_label_set_text(s_zone_label, s_zone_name);
+    lv_label_set_text(s_label_line1, s_pending.line1);
 }
 
 void ui_update(const char *line1, const char *line2, bool playing, int volume) {
@@ -97,16 +100,6 @@ void ui_set_status(bool online) {
     s_pending.online = online;
     s_dirty = true;
     pthread_mutex_unlock(&s_state_lock);
-}
-
-static void *lvgl_thread(void *arg) {
-    (void)arg;
-    while (s_running) {
-        lv_tick_inc(5);
-        lv_timer_handler();
-        usleep(5000);
-    }
-    return NULL;
 }
 
 static void poll_pending(lv_timer_t *timer) {
@@ -148,11 +141,19 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(0x5b5f73), 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -16, 16);
 
+    s_zone_label = lv_label_create(screen);
+    lv_obj_remove_style_all(s_zone_label);
+    lv_label_set_text(s_zone_label, s_zone_name);
+    lv_obj_set_style_text_font(s_zone_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xaeb6d5), 0);
+    lv_obj_align(s_zone_label, LV_ALIGN_TOP_LEFT, 16, 16);
+
     s_label_line1 = lv_label_create(dial);
     lv_obj_set_width(s_label_line1, SAFE_SIZE - 32);
     lv_obj_set_style_text_color(s_label_line1, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(s_label_line1, &lv_font_montserrat_28, 0);
-    lv_label_set_long_mode(s_label_line1, LV_LABEL_LONG_CLIP);
+    lv_label_set_long_mode(s_label_line1, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(s_label_line1, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(s_label_line1, LV_ALIGN_TOP_MID, 0, 24);
 
     s_label_line2 = lv_label_create(dial);
@@ -160,6 +161,7 @@ static void build_layout(void) {
     lv_obj_set_style_text_color(s_label_line2, lv_color_hex(0xaeb6d5), 0);
     lv_obj_set_style_text_font(s_label_line2, &lv_font_montserrat_16, 0);
     lv_label_set_long_mode(s_label_line2, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_align(s_label_line2, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align_to(s_label_line2, s_label_line1, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
 
     s_volume_bar = lv_bar_create(dial);
@@ -192,6 +194,12 @@ void ui_set_input_handler(ui_input_cb_t handler) {
     s_input_cb = handler;
 }
 
+void ui_set_zone_name(const char *zone_name) {
+    if (!zone_name || !s_zone_label) return;
+    lv_label_set_text(s_zone_label, zone_name);
+    snprintf(s_zone_name, sizeof(s_zone_name), "%s", zone_name);
+}
+
 static void keyboard_event_cb(lv_event_t *e) {
     if(!s_input_cb) return;
     uint32_t key = lv_event_get_key(e);
@@ -209,4 +217,9 @@ static void keyboard_event_cb(lv_event_t *e) {
         default:
             break;
     }
+}
+
+void ui_loop_iter(void) {
+    lv_tick_inc(5);
+    lv_timer_handler();
 }
