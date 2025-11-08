@@ -10,6 +10,7 @@ const MIN_VOLUME = 0;
 function createRoonBridge(opts = {}) {
   const state = {
     core: null,
+    coreInfo: null,
     transport: null,
     zones: [],
     nowPlayingByZone: new Map(),
@@ -27,6 +28,11 @@ function createRoonBridge(opts = {}) {
     core_paired(core) {
       state.core = core;
       state.transport = core.services.RoonApiTransport;
+      state.coreInfo = {
+        id: core.core_id,
+        name: core.display_name,
+        version: core.display_version,
+      };
       subscribe(core);
     },
     core_unpaired() {
@@ -35,6 +41,7 @@ function createRoonBridge(opts = {}) {
       state.zones = [];
       state.nowPlayingByZone.clear();
       state.pendingRelative.clear();
+      state.coreInfo = null;
       svc_status.set_status('Waiting for Roon core', true);
     },
   });
@@ -199,6 +206,14 @@ function createRoonBridge(opts = {}) {
     getZones,
     getNowPlaying,
     control,
+    getStatus: () => ({
+      connected: !!state.core,
+      core: state.coreInfo,
+      zone_count: state.zones.length,
+      zones: getZones(),
+      now_playing: Array.from(state.nowPlayingByZone.values()),
+      updated_at: Date.now(),
+    }),
   };
 }
 

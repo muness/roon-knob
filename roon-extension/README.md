@@ -35,8 +35,13 @@ The process will auto-discover your Roon Core on the LAN. Keep the Core’s “E
 - `POST /control` → `{ zone_id, action, value? }` (`action ∈ { play_pause, vol_rel, vol_abs }`)
 - `GET /status` → `{ status, version }`
 - `GET /image?image_key=…` → 204 placeholder until album-art proxy lands.
+- `GET /admin` – Human dashboard showing Roon pairing state, zones, recent knob clients, and mDNS info (polls `/admin/status.json`).
 
 There is also `GET /now_playing/mock` for UI smoke tests without a running Core.
+
+### Identifying Knobs
+
+If the firmware or simulator includes `X-Knob-Id` and `X-Knob-Version` headers on requests, the dashboard will show each device’s last activity (zone, timestamp, IP). Fall back to anonymous IP tracking if those headers are missing.
 
 ## Notes
 
