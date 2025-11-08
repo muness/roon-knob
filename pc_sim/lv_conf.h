@@ -1,0 +1,22 @@
+#ifndef LV_CONF_H
+#define LV_CONF_H
+
+#define LV_CONF_INCLUDE_SIMPLE 1
+
+#define LV_COLOR_DEPTH 32
+#define LV_COLOR_CHROMA_KEY    lv_color_hex(0x00FF00)
+
+#define LV_USE_DRAW_SW 1
+#define LV_USE_LOG 0
+
+#define LV_FONT_MONTSERRAT_12 1
+#define LV_FONT_MONTSERRAT_16 1
+#define LV_FONT_MONTSERRAT_28 1
+
+#define LV_USE_SDL 1
+#define LV_SDL_INCLUDE_PATH <SDL2/SDL.h>
+
+#define LV_USE_PERF_MONITOR 0
+#define LV_USE_MEM_MONITOR 0
+
+#endif /* LV_CONF_H */
