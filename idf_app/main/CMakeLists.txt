@@ -14,6 +14,15 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "../../include"
+    REQUIRES
+        mdns
+        esp_event
+        esp_netif
+        esp_timer
+        esp_wifi
+    PRIV_REQUIRES
+        nvs_flash
+        esp_http_client
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

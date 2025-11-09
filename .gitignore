@@ -13,3 +13,4 @@ roon-extension/config.json
 
 # Beads db
 .beads/
+idf_app/managed_components/*

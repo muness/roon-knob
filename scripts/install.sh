@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-PORT="${PORT:-/dev/cu.wchusbserial10}"
+PORT="${PORT:-/dev/cu.usbmodem101}"
 SSID="${SSID:-YourWiFi}"
 PASS="${PASS:-YourPass}"
 BRIDGE_BASE="${BRIDGE_BASE:-http://192.168.1.10:8088}"

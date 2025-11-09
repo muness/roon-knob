@@ -52,10 +52,10 @@ roon-knob/
    - Ensure ESP-IDF is initialized (`source $IDF_PATH/export.sh`) and then run:
 
      ```bash
-     ./scripts/build_flash_idf.sh /dev/cu.wchusbserial10
+    ./scripts/build_flash_idf.sh /dev/cu.usbmodem101
      ```
 
-     The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If you ever see a yellow bootloader log complaining about “ESP32” instead of “ESP32-S3”, unplug and replug while holding/resetting the board—this toggles the S3 USB mode.
+    The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If the chip you are actually flashing identifies as plain ESP32 (and the host reports `ESP32, not ESP32-S3`), rerun `idf.py set-target esp32` (or edit `sdkconfig`/`sdkconfig.overrides` to the esp32 target) and flash again with `idf.py` directly so the build/flash toolchain matches the silicon. If the knob is still in bootloader mode and keeps logging “ESP32” despite using the S3 target, unplug/replug while holding/resetting the board to force the S3 USB controller to enumerate correctly.
      If `idf.py` complains about `No module named 'click'` or similar, rerun `source $IDF_PATH/export.sh` in that shell and reinstall the ESP-IDF Python requirements (`python -m pip install -r "$IDF_PATH/requirements.txt"` while the export script is active) so the helper script can find `click`.
 5. Launch the bridge: `cd roon-extension && npm install && npm start` (or `npm run dev` for hot reload).
 

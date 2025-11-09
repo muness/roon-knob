@@ -7,7 +7,8 @@
 #include <string.h>
 
 static const char *TAG = "mdns_client";
-static const char *SERVICE = "_roonknob._tcp";
+static const char *SERVICE_TYPE = "_roonknob";
+static const char *SERVICE_PROTO = "_tcp";
 
 static void copy_str(char *dst, size_t len, const char *src) {
     if (!dst || len == 0) {
@@ -59,7 +60,7 @@ bool mdns_client_discover_bridge(rk_cfg_t *cfg) {
         return false;
     }
     mdns_result_t *results = NULL;
-    esp_err_t err = mdns_query_ptr(SERVICE, 2000, 4, &results);
+    esp_err_t err = mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 2000, 4, &results);
     if (err != ESP_OK || !results) {
         if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
             ESP_LOGW(TAG, "mdns query failed: %s", esp_err_to_name(err));
