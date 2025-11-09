@@ -21,6 +21,7 @@ static char zone_id[64] = "";
 static bool net_ok = false;
 static int net_volume_step = 2;
 static volatile bool run_threads = true;
+static volatile bool trigger_poll = false;
 static char zone_label[64] = "Loading zone";
 static bool zone_resolved = false;
 
@@ -204,8 +205,14 @@ static void handle_input(ui_input_event_t ev) {
                     persist_zone_to_store(zone_id, zone_label);
                     zone_resolved = true;
                     log_msg("selected zone: %s (%s)", zone_label, zone_id);
+
+                    // Clear old data and show loading state
+                    ui_update("Loading...", "", false, 0, 0, 0);
                     ui_set_message("Loading zone...");
                     ui_set_status(false);
+
+                    // Trigger immediate poll
+                    trigger_poll = true;
                 }
                 ui_hide_zone_picker();
                 break;
@@ -285,7 +292,15 @@ static void *poll_thread(void *arg) {
             ui_set_status(false);
             ui_set_message("Waiting for data...");
         }
-        os_sleep_sec(POLL_INTERVAL_SECONDS);
+
+        // Sleep with interrupt capability for zone changes
+        for (int i = 0; i < POLL_INTERVAL_SECONDS * 10 && run_threads; i++) {
+            if (trigger_poll) {
+                trigger_poll = false;
+                break;
+            }
+            os_sleep_us(100000); // 100ms chunks
+        }
     }
     return NULL;
 }
