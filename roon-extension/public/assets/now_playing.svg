@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360" fill="none">
+  <rect width="360" height="360" rx="16" ry="16" fill="#0b1220" />
+  <circle cx="180" cy="140" r="90" fill="#1f2c44" />
+  <path d="M120 220h120v16H120z" fill="#3b71ff" />
+  <path d="M120 250h180v14H120z" fill="#3b71ff" />
+  <text x="50%" y="55%" fill="#9fb5d8" font-size="24" text-anchor="middle" font-family="Arial, sans-serif">Now Playing</text>
+</svg>
