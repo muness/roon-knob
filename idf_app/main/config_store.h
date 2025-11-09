@@ -1,15 +1,16 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdbool.h>
+#include <stdint.h>
 
-int config_store_init(void);
-int config_store_get_bridge_base(char *out, size_t max_len);
-int config_store_set_bridge_base(const char *base);
-int config_store_get_zone_id(char *out, size_t max_len);
-int config_store_set_zone_id(const char *zone);
+typedef struct {
+    char ssid[33];
+    char pass[65];
+    char bridge_base[128];
+    char zone_id[64];
+    uint8_t cfg_ver; // start at 1
+} rk_cfg_t;
 
-#ifdef __cplusplus
-}
-#endif
+bool rk_cfg_load(rk_cfg_t *out);            // returns false if empty
+bool rk_cfg_save(const rk_cfg_t *in);
+void rk_cfg_reset_wifi_only(void);          // clears ssid/pass only

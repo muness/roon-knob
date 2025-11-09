@@ -6,7 +6,10 @@ if [[ -z "${IDF_PATH:-}" ]]; then
   exit 1
 fi
 
+PORT=${1:-/dev/tty.usbmodemXYZ}
+TARGET=esp32s3
+
 pushd idf_app >/dev/null
-idf.py build
-idf.py -p ${1:-/dev/tty.usbmodemXYZ} flash
+idf.py set-target "$TARGET"
+idf.py -p "$PORT" build flash monitor
 popd >/dev/null

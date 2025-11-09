@@ -1,12 +1,8 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdbool.h>
 
-int mdns_client_init(void);
-int mdns_client_query_bridge(char *out_base, size_t max_len);
+#include "config_store.h"
 
-#ifdef __cplusplus
-}
-#endif
+void mdns_client_init(const char *hostname);           // e.g. "roon-knob-ABCD"
+bool mdns_client_discover_bridge(rk_cfg_t *cfg);       // query _roonknob._tcp; if TXT "base", set cfg->bridge_base

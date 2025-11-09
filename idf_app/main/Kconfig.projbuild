@@ -1,0 +1,19 @@
+menu "Roon-Knob Defaults"
+
+config RK_DEFAULT_SSID
+    string "Default WiFi SSID"
+    default ""
+
+config RK_DEFAULT_PASS
+    string "Default WiFi Password"
+    default ""
+
+config RK_DEFAULT_BRIDGE_BASE
+    string "Default Bridge Base URL"
+    default "http://127.0.0.1:8088"
+
+config RK_DEFAULT_ZONE_ID
+    string "Default Zone ID"
+    default "office"
+
+endmenu

@@ -1,66 +1,92 @@
 #include "config_store.h"
 
-#include <esp_err.h>
 #include <esp_log.h>
-#include <nvs_flash.h>
 #include <nvs.h>
+#include <nvs_flash.h>
 #include <string.h>
 
 static const char *TAG = "config_store";
-static nvs_handle_t s_handle;
+static const char *RK_CFG_NS = "rk_cfg";
+static const char *RK_CFG_KEY = "cfg";
+static const uint8_t RK_CFG_VER = 1;
 
-int config_store_init(void) {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+static esp_err_t open_namespace(nvs_handle_t *handle, nvs_open_mode_t mode) {
+    return nvs_open(RK_CFG_NS, mode, handle);
+}
+
+static void ensure_version(rk_cfg_t *cfg) {
+    if (!cfg) {
+        return;
     }
+    if (cfg->cfg_ver == 0) {
+        cfg->cfg_ver = RK_CFG_VER;
+    }
+}
+
+bool rk_cfg_load(rk_cfg_t *out) {
+    if (!out) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+
+    nvs_handle_t handle;
+    esp_err_t err = open_namespace(&handle, NVS_READONLY);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "nvs init failed: %s", esp_err_to_name(err));
-        return -1;
+        if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "open(ro) failed: %s", esp_err_to_name(err));
+        }
+        return false;
     }
 
-    err = nvs_open("rook", NVS_READWRITE, &s_handle);
+    size_t len = sizeof(*out);
+    err = nvs_get_blob(handle, RK_CFG_KEY, out, &len);
+    nvs_close(handle);
+    if (err != ESP_OK || len != sizeof(*out)) {
+        if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "load failed: %s", esp_err_to_name(err));
+        }
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+
+    ensure_version(out);
+    return out->ssid[0] != '\0';
+}
+
+bool rk_cfg_save(const rk_cfg_t *in) {
+    if (!in) {
+        return false;
+    }
+    rk_cfg_t copy = *in;
+    ensure_version(&copy);
+
+    nvs_handle_t handle;
+    esp_err_t err = open_namespace(&handle, NVS_READWRITE);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "nvs open failed: %s", esp_err_to_name(err));
-        return -1;
+        ESP_LOGE(TAG, "open(rw) failed: %s", esp_err_to_name(err));
+        return false;
     }
-    return 0;
-}
 
-static int config_string_get(const char *key, char *out, size_t max_len) {
-    size_t required = max_len;
-    esp_err_t err = nvs_get_str(s_handle, key, out, &required);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        out[0] = '\0';
-        return 1;
+    err = nvs_set_blob(handle, RK_CFG_KEY, &copy, sizeof(copy));
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
     }
+    nvs_close(handle);
     if (err != ESP_OK) {
-        return -1;
+        ESP_LOGE(TAG, "save failed: %s", esp_err_to_name(err));
+        return false;
     }
-    return 0;
+    return true;
 }
 
-static int config_string_set(const char *key, const char *value) {
-    esp_err_t err = nvs_set_str(s_handle, key, value);
-    if (err != ESP_OK) {
-        return -1;
+void rk_cfg_reset_wifi_only(void) {
+    rk_cfg_t cfg = {0};
+    bool ok = rk_cfg_load(&cfg);
+    if (!ok) {
+        memset(&cfg, 0, sizeof(cfg));
     }
-    return nvs_commit(s_handle) == ESP_OK ? 0 : -1;
-}
-
-int config_store_get_bridge_base(char *out, size_t max_len) {
-    return config_string_get("bridge_base", out, max_len);
-}
-
-int config_store_set_bridge_base(const char *base) {
-    return config_string_set("bridge_base", base);
-}
-
-int config_store_get_zone_id(char *out, size_t max_len) {
-    return config_string_get("zone_id", out, max_len);
-}
-
-int config_store_set_zone_id(const char *zone) {
-    return config_string_set("zone_id", zone);
+    cfg.ssid[0] = '\0';
+    cfg.pass[0] = '\0';
+    ensure_version(&cfg);
+    rk_cfg_save(&cfg);
 }

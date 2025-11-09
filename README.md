@@ -41,9 +41,23 @@ roon-knob/
      - Space/Enter: Select zone
      - Z or M: Close without selecting
    - Status dot shows connection health
-   Use `ROON_BRIDGE_BASE`/`ZONE_ID` env vars to target specific bridges/zones.
-3. Flash the ESP32-S3 target: set `IDF_PATH` and run `./scripts/build_flash_idf.sh /dev/tty.usbmodemXYZ`.
-4. Launch the bridge: `cd roon-extension && npm install && npm start` (or `npm run dev` for hot reload).
+   Use `ROON_BRIDGE_BASE` env vars to target specific bridges/zones.
+3. Install ESP-IDF
+   - TBD...
+4. Flash the ESP32-S3 target:
+   - Plug the knob into your Mac/Linux workstation with a USB-C cable. If the board enumerates as a non-ESP device (no `/dev/cu.*esp*` entry, or the USB-C socket feels loose), flip the cable or try the other USB-C port — the board can revert to a USB-to-serial bootloader mode that looks like a generic `wchusbserial` device.
+   - Identify the serial port:
+     - **macOS**: run `ls /dev/cu.*` and look for the `wchusbserial*` entry (e.g., `/dev/cu.wchusbserial10`).
+     - **Linux**: run `ls /dev/ttyUSB*` or `ls /dev/ttyACM*`.
+   - Ensure ESP-IDF is initialized (`source $IDF_PATH/export.sh`) and then run:
+
+     ```bash
+     ./scripts/build_flash_idf.sh /dev/cu.wchusbserial10
+     ```
+
+     The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If you ever see a yellow bootloader log complaining about “ESP32” instead of “ESP32-S3”, unplug and replug while holding/resetting the board—this toggles the S3 USB mode.
+     If `idf.py` complains about `No module named 'click'` or similar, rerun `source $IDF_PATH/export.sh` in that shell and reinstall the ESP-IDF Python requirements (`python -m pip install -r "$IDF_PATH/requirements.txt"` while the export script is active) so the helper script can find `click`.
+5. Launch the bridge: `cd roon-extension && npm install && npm start` (or `npm run dev` for hot reload).
 
 ## Task Management
 
