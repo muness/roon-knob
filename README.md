@@ -14,7 +14,7 @@ Roon Knob consists of three main components:
 | LVGL PC Simulator | SDL2 desktop build for macOS/Linux that mirrors the firmware UI for rapid development. |
 | Roon Sidecar (Bridge) | Node.js service exposing `/zones`, `/now_playing`, and `/control` endpoints and advertising `_roonknob._tcp`. |
 
-Hardware notes: this Waveshare board pairs an ESP32‑S3 (with 16 MB Flash + 8 MB PSRAM) and an ESP32 co‑processor, drives a 1.8" 360×360 IPS LCD (ST77916 over QSPI), and uses a CST816 capacitive touch controller over I2C with INT. It also includes a rotary encoder (push + A/B), mic + audio decoder, vibration motor, TF slot, and battery charge management. See docs/reference/hardware/board.md.
+Hardware notes: this Waveshare board pairs an ESP32‑S3 (with 16 MB Flash + 8 MB PSRAM) and an ESP32 co‑processor, drives a 1.8" 360×360 IPS LCD (ST77916 over QSPI), and uses a CST816 capacitive touch controller over I2C with INT. It also includes a rotary encoder (push + A/B), mic + audio decoder, vibration motor, TF slot, and battery charge management. See [board.md](docs/reference/hardware/board.md).
 
 The ESP32-S3 knob in this project has 16 MB of flash and 8 MB of PSRAM, so there is no need to shrink or adjust the partition table for space. The firmware can safely use the existing “factory + OTA0 + OTA1 + nvs + spiffs” layout. Do not change sdkconfig to a smaller table or add space-saving flags: there is plenty of room for both the app and future features.
 
@@ -61,8 +61,16 @@ roon-knob/
     ./scripts/build_flash_idf.sh /dev/cu.usbmodem101
      ```
 
-    The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If the chip you are actually flashing identifies as plain ESP32 (and the host reports `ESP32, not ESP32-S3`), rerun `idf.py set-target esp32` (or edit `sdkconfig`/`sdkconfig.overrides` to the esp32 target) and flash again with `idf.py` directly so the build/flash toolchain matches the silicon. If the knob is still in bootloader mode and keeps logging “ESP32” despite using the S3 target, unplug/replug while holding/resetting the board to force the S3 USB controller to enumerate correctly.
+    The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If the chip you are actually flashing identifies as plain ESP32 (and the host reports `ESP32, not ESP32-S3`), rerun `idf.py set-target esp32` (or edit `sdkconfig`/`sdkconfig.overrides` to the esp32 target) and flash again with `idf.py` directly so the build/flash toolchain matches the silicon. If the knob is still in bootloader mode and keeps logging "ESP32" despite using the S3 target, unplug/replug while holding/resetting the board to force the S3 USB controller to enumerate correctly.
      If `idf.py` complains about `No module named 'click'` or similar, rerun `source $IDF_PATH/export.sh` in that shell and reinstall the ESP-IDF Python requirements (`python -m pip install -r "$IDF_PATH/requirements.txt"` while the export script is active) so the helper script can find `click`.
+
+   - To monitor serial output after flashing:
+
+     ```bash
+     idf.py monitor -p /dev/cu.usbmodem101
+     ```
+
+     **Note:** To exit the monitor, press `Ctrl+]` (not Ctrl+C). This is easy to forget!
 5. Launch the bridge: `cd roon-extension && npm install && npm start` (or `npm run dev` for hot reload).
 
 ## Task Management

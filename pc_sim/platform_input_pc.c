@@ -63,6 +63,11 @@ void platform_input_init(void) {
     lv_obj_add_event_cb(screen, keyboard_event_cb, LV_EVENT_KEY, NULL);
 }
 
+void platform_input_process_events(void) {
+    // PC simulator dispatches events directly from LVGL callbacks
+    // No queued events to process
+}
+
 void platform_input_shutdown(void) {
     (void)s_keyboard;
 }

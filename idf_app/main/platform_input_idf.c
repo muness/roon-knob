@@ -6,11 +6,15 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
 static const char *TAG = "input";
+
+// Input event queue (for ISR-safe dispatch)
+static QueueHandle_t s_input_queue = NULL;
 
 // ============================================================================
 // Hardware Pin Configuration
@@ -19,8 +23,9 @@ static const char *TAG = "input";
 // Default values below assume common ESP32-S3 breakout board layout.
 
 // Rotary encoder quadrature signals (hardware-specific pins)
-#define ENCODER_GPIO_A    GPIO_NUM_8   // Encoder channel A (ECA)
-#define ENCODER_GPIO_B    GPIO_NUM_7   // Encoder channel B (ECB)
+// Note: Swapped A/B to fix direction (clockwise = volume up)
+#define ENCODER_GPIO_A    GPIO_NUM_7   // Encoder channel A (was GPIO_8, swapped)
+#define ENCODER_GPIO_B    GPIO_NUM_8   // Encoder channel B (was GPIO_7, swapped)
 
 // Touch screen - CST816 capacitive touch controller on I2C
 // Note: This device has NO physical buttons - all interactions via touchscreen or encoder
@@ -120,16 +125,18 @@ static void encoder_read_and_dispatch(void) {
     process_encoder_channel(phb_value, &s_encoder.encoder_b_level,
                            &s_encoder.debounce_b_cnt, &s_encoder.count_value, false);
 
-    // Detect count changes and dispatch events
+    // Detect count changes and queue events (ISR-safe)
     int delta = s_encoder.count_value - last_count;
     if (delta != 0) {
         ESP_LOGI(TAG, "Encoder count: %d (delta: %d)", s_encoder.count_value, delta);
         last_count = s_encoder.count_value;
 
-        if (delta > 0) {
-            ui_dispatch_input(UI_INPUT_VOL_UP);
-        } else {
-            ui_dispatch_input(UI_INPUT_VOL_DOWN);
+        ui_input_event_t input = (delta > 0) ? UI_INPUT_VOL_UP : UI_INPUT_VOL_DOWN;
+        // Use FromISR variant since this runs in esp_timer context
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xQueueSendFromISR(s_input_queue, &input, &xHigherPriorityTaskWoken);
+        if (xHigherPriorityTaskWoken) {
+            portYIELD_FROM_ISR();
         }
     }
 }
@@ -170,6 +177,13 @@ static esp_err_t poll_timer_init(void) {
 void platform_input_init(void) {
     ESP_LOGI(TAG, "Initializing platform input (encoder only - touch handled by LVGL)");
 
+    // Create input event queue (holds up to 10 events)
+    s_input_queue = xQueueCreate(10, sizeof(ui_input_event_t));
+    if (!s_input_queue) {
+        ESP_LOGE(TAG, "Failed to create input event queue");
+        return;
+    }
+
     esp_err_t err;
 
     err = encoder_init();
@@ -185,6 +199,14 @@ void platform_input_init(void) {
     }
 
     ESP_LOGI(TAG, "Platform input initialized successfully (encoder polling at %dms)", ENCODER_POLL_INTERVAL_MS);
+}
+
+void platform_input_process_events(void) {
+    ui_input_event_t input;
+    // Process all queued events (non-blocking)
+    while (xQueueReceive(s_input_queue, &input, 0) == pdTRUE) {
+        ui_dispatch_input(input);
+    }
 }
 
 void platform_input_shutdown(void) {

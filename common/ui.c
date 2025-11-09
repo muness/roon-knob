@@ -77,6 +77,7 @@ static void build_layout(void);
 static void poll_pending(lv_timer_t *timer);
 static void set_status_dot(bool online);
 static void zone_label_event_cb(lv_event_t *e);
+static void zone_button_event_cb(lv_event_t *e);
 static void show_message_overlay(const char *msg);
 static void hide_message_overlay(lv_timer_t *timer);
 
@@ -355,6 +356,10 @@ void ui_show_zone_picker(const char **zone_names, int zone_count, int selected_i
         lv_obj_t *btn = lv_list_add_button(s_zone_list, NULL, zone_names[i]);
         lv_obj_set_style_bg_color(btn, lv_color_hex(i == selected_idx ? 0x2a5a9a : 0x000000), 0);  // Pure black for unselected
         lv_obj_set_style_text_color(btn, lv_color_hex(0xffffff), 0);
+
+        // Add click handler to select zone and store zone index in user data
+        lv_obj_set_user_data(btn, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(btn, zone_button_event_cb, LV_EVENT_CLICKED, NULL);
     }
 }
 
@@ -407,6 +412,27 @@ void ui_zone_picker_scroll(int delta) {
 static void zone_label_event_cb(lv_event_t *e) {
     (void)e;
     ui_dispatch_input(UI_INPUT_MENU);
+}
+
+static void zone_button_event_cb(lv_event_t *e) {
+    lv_obj_t *btn = lv_event_get_target(e);
+    if (!btn) return;
+
+    // Update selected index from button's user data
+    int zone_idx = (int)(intptr_t)lv_obj_get_user_data(btn);
+    s_zone_picker_selected = zone_idx;
+
+    // Update button colors to reflect new selection
+    uint32_t child_count = lv_obj_get_child_count(s_zone_list);
+    for (uint32_t i = 0; i < child_count; i++) {
+        lv_obj_t *child = lv_obj_get_child(s_zone_list, i);
+        if (child) {
+            lv_obj_set_style_bg_color(child, lv_color_hex(i == (uint32_t)zone_idx ? 0x2a5a9a : 0x000000), 0);
+        }
+    }
+
+    // Dispatch play/pause to trigger zone selection
+    ui_dispatch_input(UI_INPUT_PLAY_PAUSE);
 }
 
 static void show_message_overlay(const char *msg) {

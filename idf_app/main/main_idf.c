@@ -80,7 +80,12 @@ static void ui_loop_task(void *arg) {
     (void)arg;
     ESP_LOGI(TAG, "UI loop task started");
     while (true) {
+        // Process queued input events from ISR context
+        platform_input_process_events();
+
+        // Run LVGL task handler
         ui_loop_iter();
+
         // Yield to lower priority tasks including IDLE
         vTaskDelay(pdMS_TO_TICKS(10));
     }
