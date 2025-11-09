@@ -156,6 +156,8 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_zone_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xaeb6d5), 0);
     lv_obj_align(s_zone_label, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_zone_label, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_MENU);
 
     s_message_label = lv_label_create(dial);
     lv_obj_remove_style_all(s_message_label);
@@ -167,7 +169,7 @@ static void build_layout(void) {
     s_label_line1 = lv_label_create(dial);
     lv_obj_set_width(s_label_line1, SAFE_SIZE - 32);
     lv_obj_set_style_text_color(s_label_line1, lv_color_hex(0xffffff), 0);
-    lv_obj_set_style_text_font(s_label_line1, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(s_label_line1, &lv_font_montserrat_16, 0);
     lv_label_set_long_mode(s_label_line1, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(s_label_line1, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(s_label_line1, LV_ALIGN_TOP_MID, 0, 24);
@@ -175,10 +177,10 @@ static void build_layout(void) {
     s_label_line2 = lv_label_create(dial);
     lv_obj_set_width(s_label_line2, SAFE_SIZE - 32);
     lv_obj_set_style_text_color(s_label_line2, lv_color_hex(0xaeb6d5), 0);
-    lv_obj_set_style_text_font(s_label_line2, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_label_line2, &lv_font_montserrat_12, 0);
     lv_label_set_long_mode(s_label_line2, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(s_label_line2, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align_to(s_label_line2, s_label_line1, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
+    lv_obj_align_to(s_label_line2, s_label_line1, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
     s_volume_bar = lv_bar_create(dial);
     lv_obj_set_size(s_volume_bar, SAFE_SIZE - 60, 12);
