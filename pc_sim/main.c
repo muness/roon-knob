@@ -12,8 +12,9 @@
 #include "ui.h"
 #include "components/net_client/curl_client.h"
 
-#define POLL_INTERVAL_SECONDS 1
+#define POLL_INTERVAL_SECONDS 3
 #define MAX_LINE 128
+#define MAX_ZONES 32
 
 static char bridge_base[256] = "http://127.0.0.1:8088";
 static char zone_id[64] = "";
@@ -22,6 +23,15 @@ static int net_volume_step = 2;
 static volatile bool run_threads = true;
 static char zone_label[64] = "Loading zone";
 static bool zone_resolved = false;
+
+struct zone_entry {
+    char zone_id[64];
+    char zone_name[64];
+};
+
+static struct zone_entry cached_zones[MAX_ZONES];
+static int cached_zone_count = 0;
+static bool show_zone_picker = false;
 
 struct now_playing {
     char line1[MAX_LINE];
@@ -60,6 +70,7 @@ static void log_msg(const char *fmt, ...);
 static const char *extract_json_string(const char *start, const char *key, char *out, size_t len);
 static void load_zone_from_store(void);
 static void persist_zone_to_store(const char *id, const char *name);
+static void parse_zones_from_response(const char *resp);
 
 static bool fetch_now_playing(struct now_playing *state) {
     if (!zone_resolved) {
@@ -123,6 +134,8 @@ static bool fetch_now_playing(struct now_playing *state) {
     }
     net_volume_step = state->volume_step;
 
+    parse_zones_from_response(resp);
+
     net_ok = true;
     http_free(resp);
     return true;
@@ -173,6 +186,14 @@ static void handle_input(ui_input_event_t ev) {
             if (!send_control_json(body)) {
                 ui_set_message("Play/pause failed");
             }
+            break;
+        }
+        case UI_INPUT_MENU: {
+            log_msg("zone picker: %d zones available", cached_zone_count);
+            for (int i = 0; i < cached_zone_count; i++) {
+                log_msg("  [%d] %s (%s)", i, cached_zones[i].zone_name, cached_zones[i].zone_id);
+            }
+            ui_set_message("Zone picker TODO");
             break;
         }
         default:
@@ -337,4 +358,36 @@ static void persist_zone_to_store(const char *id, const char *name) {
     if (name && name[0]) {
         storage_set("zone_name", name);
     }
+}
+
+static void parse_zones_from_response(const char *resp) {
+    if (!resp) return;
+
+    const char *zones_array = strstr(resp, "\"zones\":[");
+    if (!zones_array) return;
+
+    cached_zone_count = 0;
+    const char *cursor = zones_array;
+
+    while (cached_zone_count < MAX_ZONES && (cursor = strstr(cursor, "\"zone_id\""))) {
+        char id[64] = {0};
+        char name[64] = {0};
+
+        const char *after_id = extract_json_string(cursor, "\"zone_id\"", id, sizeof(id));
+        if (!after_id || !id[0]) break;
+
+        const char *after_name = extract_json_string(after_id, "\"zone_name\"", name, sizeof(name));
+        if (!after_name || !name[0]) {
+            cursor = after_id;
+            continue;
+        }
+
+        snprintf(cached_zones[cached_zone_count].zone_id, sizeof(cached_zones[0].zone_id), "%s", id);
+        snprintf(cached_zones[cached_zone_count].zone_name, sizeof(cached_zones[0].zone_name), "%s", name);
+        cached_zone_count++;
+
+        cursor = after_name;
+    }
+
+    log_msg("parsed %d zones from response", cached_zone_count);
 }
