@@ -441,8 +441,20 @@ static void zone_button_event_cb(lv_event_t *e) {
 }
 
 static void dial_touch_event_cb(lv_event_t *e) {
-    (void)e;
-    // Single tap on dial triggers play/pause
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+
+    // Get touch coordinates
+    lv_point_t point;
+    lv_indev_get_point(indev, &point);
+
+    // Exclude top 1/3 of screen from play/pause (for zone label)
+    // Top 1/3 of 360px = 0-120px
+    if (point.y < 120) {
+        return;  // Ignore touches in top 1/3
+    }
+
+    // Single tap on lower 2/3 of dial triggers play/pause
     ui_dispatch_input(UI_INPUT_PLAY_PAUSE);
 }
 
