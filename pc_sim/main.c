@@ -182,6 +182,8 @@ static void handle_input(ui_input_event_t ev) {
                     persist_zone_to_store(zone_id, zone_label);
                     zone_resolved = true;
                     log_msg("selected zone: %s (%s)", zone_label, zone_id);
+                    ui_set_message("Loading zone...");
+                    ui_set_status(false);
                 }
                 ui_hide_zone_picker();
                 break;
