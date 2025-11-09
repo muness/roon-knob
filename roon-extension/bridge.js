@@ -14,6 +14,8 @@ const fallbackSummary = (zone) => ({
   is_playing: false,
   volume: zone?.outputs?.[0]?.volume?.value ?? null,
   volume_step: zone?.outputs?.[0]?.volume?.step ?? 2,
+  seek_position: zone?.now_playing?.seek_position ?? null,
+  length: zone?.now_playing?.length ?? null,
   zone_id: zone?.zone_id,
 });
 
@@ -117,6 +119,8 @@ function createRoonBridge(opts = {}) {
       is_playing: zone.state === 'playing',
       volume: zone.outputs?.[0]?.volume?.value ?? null,
       volume_step: zone.outputs?.[0]?.volume?.step ?? 2,
+      seek_position: zone.now_playing?.seek_position ?? null,
+      length: zone.now_playing?.length ?? null,
       zone_id: zone.zone_id,
     };
     state.nowPlayingByZone.set(zone.zone_id, summary);

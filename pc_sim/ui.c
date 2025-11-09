@@ -22,6 +22,8 @@ struct ui_state {
     bool playing;
     int volume;
     bool online;
+    int seek_position;
+    int length;
 };
 
 #include <time.h>
@@ -31,12 +33,12 @@ static lv_obj_t *s_label_line1;
 static lv_obj_t *s_label_line2;
 static lv_obj_t *s_status_dot;
 static lv_obj_t *s_volume_bar;
+static lv_obj_t *s_progress_bar;
 static lv_obj_t *s_zone_label;
 static lv_obj_t *s_message_label;
-static lv_obj_t *s_play_button;
-static lv_obj_t *s_play_button_label;
-static lv_obj_t *s_vol_down_button;
-static lv_obj_t *s_vol_up_button;
+static lv_obj_t *s_play_overlay;
+static lv_obj_t *s_play_overlay_label;
+static lv_timer_t *s_overlay_timer;
 
 static lv_obj_t *s_zone_picker_container;
 static lv_obj_t *s_zone_list;
@@ -50,6 +52,8 @@ static struct ui_state s_pending = {
     .playing = false,
     .volume = 0,
     .online = false,
+    .seek_position = 0,
+    .length = 0,
 };
 static bool s_dirty = true;
 static lv_indev_t *s_keyboard;
@@ -62,6 +66,8 @@ static void build_layout(void);
 static void poll_pending(lv_timer_t *timer);
 static void set_status_dot(bool online);
 static void keyboard_event_cb(lv_event_t *e);
+static void show_play_overlay(bool playing);
+static void hide_play_overlay(lv_timer_t *timer);
 
 void ui_init(void) {
     lv_init();
@@ -88,7 +94,7 @@ void ui_init(void) {
     lv_label_set_text(s_label_line1, s_pending.line1);
 }
 
-void ui_update(const char *line1, const char *line2, bool playing, int volume) {
+void ui_update(const char *line1, const char *line2, bool playing, int volume, int seek_position, int length) {
     os_mutex_lock(&s_state_lock);
     if (line1) {
         snprintf(s_pending.line1, sizeof(s_pending.line1), "%s", line1);
@@ -100,6 +106,8 @@ void ui_update(const char *line1, const char *line2, bool playing, int volume) {
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
     s_pending.volume = volume;
+    s_pending.seek_position = seek_position > 0 ? seek_position : 0;
+    s_pending.length = length > 0 ? length : 0;
     s_dirty = true;
     os_mutex_unlock(&s_state_lock);
 }
@@ -163,53 +171,40 @@ static void build_layout(void) {
     lv_obj_remove_style_all(s_message_label);
     lv_obj_set_style_text_color(s_message_label, lv_color_hex(0xaeb6d5), 0);
     lv_obj_set_style_text_font(s_message_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(s_message_label, LV_ALIGN_TOP_MID, 0, 36);
+    lv_obj_align(s_message_label, LV_ALIGN_TOP_MID, 0, 30);
     lv_label_set_text(s_message_label, "Starting...");
 
     s_label_line1 = lv_label_create(dial);
     lv_obj_set_width(s_label_line1, SAFE_SIZE - 32);
     lv_obj_set_style_text_color(s_label_line1, lv_color_hex(0xffffff), 0);
-    lv_obj_set_style_text_font(s_label_line1, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_label_line1, &lv_font_montserrat_20, 0);
     lv_label_set_long_mode(s_label_line1, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(s_label_line1, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_label_line1, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_align(s_label_line1, LV_ALIGN_CENTER, 0, -20);
 
     s_label_line2 = lv_label_create(dial);
     lv_obj_set_width(s_label_line2, SAFE_SIZE - 32);
     lv_obj_set_style_text_color(s_label_line2, lv_color_hex(0xaeb6d5), 0);
-    lv_obj_set_style_text_font(s_label_line2, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_label_line2, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(s_label_line2, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(s_label_line2, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align_to(s_label_line2, s_label_line1, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
+    lv_obj_align_to(s_label_line2, s_label_line1, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
 
+    // Progress bar (for track position)
+    s_progress_bar = lv_bar_create(dial);
+    lv_obj_set_size(s_progress_bar, SAFE_SIZE - 40, 4);
+    lv_obj_align(s_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -50);
+    lv_bar_set_range(s_progress_bar, 0, 1000);
+    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x2a2c34), 0);
+    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x4a7ba7), LV_PART_INDICATOR);
+
+    // Volume bar
     s_volume_bar = lv_bar_create(dial);
-    lv_obj_set_size(s_volume_bar, SAFE_SIZE - 60, 12);
-    lv_obj_align(s_volume_bar, LV_ALIGN_BOTTOM_MID, 0, -32);
+    lv_obj_set_size(s_volume_bar, SAFE_SIZE - 40, 8);
+    lv_obj_align(s_volume_bar, LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_bar_set_range(s_volume_bar, 0, 100);
-
-    s_vol_down_button = lv_btn_create(dial);
-    lv_obj_set_size(s_vol_down_button, 40, 40);
-    lv_obj_align(s_vol_down_button, LV_ALIGN_BOTTOM_LEFT, 36, -70);
-    lv_obj_t *down_label = lv_label_create(s_vol_down_button);
-    lv_label_set_text(down_label, "-");
-    lv_obj_center(down_label);
-    lv_obj_add_event_cb(s_vol_down_button, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_VOL_DOWN);
-
-    s_play_button = lv_btn_create(dial);
-    lv_obj_set_size(s_play_button, 48, 40);
-    lv_obj_align(s_play_button, LV_ALIGN_BOTTOM_MID, 0, -70);
-    s_play_button_label = lv_label_create(s_play_button);
-    lv_label_set_text(s_play_button_label, LV_SYMBOL_PLAY);
-    lv_obj_center(s_play_button_label);
-    lv_obj_add_event_cb(s_play_button, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_PLAY_PAUSE);
-
-    s_vol_up_button = lv_btn_create(dial);
-    lv_obj_set_size(s_vol_up_button, 40, 40);
-    lv_obj_align(s_vol_up_button, LV_ALIGN_BOTTOM_RIGHT, -36, -70);
-    lv_obj_t *up_label = lv_label_create(s_vol_up_button);
-    lv_label_set_text(up_label, "+");
-    lv_obj_center(up_label);
-    lv_obj_add_event_cb(s_vol_up_button, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_VOL_UP);
+    lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x2a2c34), 0);
+    lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x5a8fc7), LV_PART_INDICATOR);
 
     apply_state(&s_pending);
 }
@@ -218,10 +213,16 @@ static void apply_state(const struct ui_state *state) {
     lv_label_set_text(s_label_line1, state->line1);
     lv_label_set_text(s_label_line2, state->line2);
     lv_bar_set_value(s_volume_bar, state->volume, LV_ANIM_OFF);
-    if (s_play_button_label) {
-        const char *icon = state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY;
-        lv_label_set_text(s_play_button_label, icon);
+
+    // Update progress bar
+    if (state->length > 0) {
+        int progress = (int)((state->seek_position * 1000) / state->length);
+        if (progress > 1000) progress = 1000;
+        lv_bar_set_value(s_progress_bar, progress, LV_ANIM_OFF);
+    } else {
+        lv_bar_set_value(s_progress_bar, 0, LV_ANIM_OFF);
     }
+
     set_status_dot(state->online);
 }
 
@@ -260,6 +261,7 @@ static void keyboard_event_cb(lv_event_t *e) {
                 break;
             case LV_KEY_ENTER:
             case ' ':
+                show_play_overlay(!s_pending.playing);
                 s_input_cb(UI_INPUT_PLAY_PAUSE);
                 break;
             case 'z':
@@ -273,6 +275,9 @@ static void keyboard_event_cb(lv_event_t *e) {
     }
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         ui_input_event_t action = (ui_input_event_t)(intptr_t)lv_event_get_user_data(e);
+        if (action == UI_INPUT_PLAY_PAUSE) {
+            show_play_overlay(!s_pending.playing);
+        }
         s_input_cb(action);
     }
 }
@@ -372,4 +377,46 @@ void ui_zone_picker_scroll(int delta) {
             lv_obj_scroll_to_view(new_btn, LV_ANIM_ON);
         }
     }
+}
+
+static void show_play_overlay(bool playing) {
+    // Clean up existing overlay
+    if (s_play_overlay) {
+        lv_obj_del(s_play_overlay);
+        s_play_overlay = NULL;
+        s_play_overlay_label = NULL;
+    }
+    if (s_overlay_timer) {
+        lv_timer_del(s_overlay_timer);
+        s_overlay_timer = NULL;
+    }
+
+    // Create overlay
+    s_play_overlay = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_play_overlay);
+    lv_obj_set_size(s_play_overlay, 80, 80);
+    lv_obj_set_style_bg_color(s_play_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_play_overlay, LV_OPA_80, 0);
+    lv_obj_set_style_radius(s_play_overlay, 12, 0);
+    lv_obj_center(s_play_overlay);
+
+    s_play_overlay_label = lv_label_create(s_play_overlay);
+    lv_obj_set_style_text_font(s_play_overlay_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(s_play_overlay_label, lv_color_hex(0xffffff), 0);
+    lv_label_set_text(s_play_overlay_label, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    lv_obj_center(s_play_overlay_label);
+
+    // Auto-hide after 1 second
+    s_overlay_timer = lv_timer_create(hide_play_overlay, 1000, NULL);
+    lv_timer_set_repeat_count(s_overlay_timer, 1);
+}
+
+static void hide_play_overlay(lv_timer_t *timer) {
+    (void)timer;
+    if (s_play_overlay) {
+        lv_obj_del(s_play_overlay);
+        s_play_overlay = NULL;
+        s_play_overlay_label = NULL;
+    }
+    s_overlay_timer = NULL;
 }

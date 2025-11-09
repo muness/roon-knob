@@ -39,6 +39,8 @@ struct now_playing {
     bool is_playing;
     int volume;
     int volume_step;
+    int seek_position;
+    int length;
 };
 
 static void default_now_playing(struct now_playing *state) {
@@ -47,6 +49,8 @@ static void default_now_playing(struct now_playing *state) {
     state->is_playing = false;
     state->volume = 0;
     state->volume_step = net_volume_step;
+    state->seek_position = 0;
+    state->length = 0;
 }
 
 static void curl_string_copy(const char *data, const char *key, char *out, size_t len) {
@@ -133,6 +137,24 @@ static bool fetch_now_playing(struct now_playing *state) {
         }
     }
     net_volume_step = state->volume_step;
+
+    // Parse seek_position and length
+    state->seek_position = 0;
+    state->length = 0;
+    const char *seek_key = strstr(resp, "\"seek_position\"");
+    if (seek_key) {
+        const char *colon = strchr(seek_key, ':');
+        if (colon) {
+            state->seek_position = atoi(colon + 1);
+        }
+    }
+    const char *len_key = strstr(resp, "\"length\"");
+    if (len_key) {
+        const char *colon = strchr(len_key, ':');
+        if (colon) {
+            state->length = atoi(colon + 1);
+        }
+    }
 
     parse_zones_from_response(resp);
 
@@ -256,7 +278,7 @@ static void *poll_thread(void *arg) {
     while (run_threads) {
         bool ok = fetch_now_playing(&state);
         if (ok) {
-            ui_update(state.line1, state.line2, state.is_playing, state.volume);
+            ui_update(state.line1, state.line2, state.is_playing, state.volume, state.seek_position, state.length);
             ui_set_status(true);
             ui_set_message("Connected");
         } else {

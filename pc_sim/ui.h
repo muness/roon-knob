@@ -15,7 +15,7 @@ typedef enum {
 typedef void (*ui_input_cb_t)(ui_input_event_t event);
 
 void ui_init(void);
-void ui_update(const char *line1, const char *line2, bool playing, int volume);
+void ui_update(const char *line1, const char *line2, bool playing, int volume, int seek_position, int length);
 void ui_set_status(bool online);
 void ui_set_input_handler(ui_input_cb_t handler);
 void ui_loop_iter(void);
