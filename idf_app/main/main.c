@@ -1,7 +1,7 @@
 #include "config_store.h"
 #include "mdns_client.h"
 #include "ui.h"
-#include "roon_http.h"
+#include "http_client.h"
 #include "encoder_input.h"
 
 #include <freertos/FreeRTOS.h>
