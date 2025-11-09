@@ -34,6 +34,9 @@ static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_play_icon;
 static lv_obj_t *s_zone_label;
 static lv_obj_t *s_message_label;
+static lv_obj_t *s_play_button;
+static lv_obj_t *s_vol_down_button;
+static lv_obj_t *s_vol_up_button;
 
 static pthread_mutex_t s_state_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct ui_state s_pending = {
@@ -142,18 +145,18 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(0x5b5f73), 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -16, 16);
 
-    s_zone_label = lv_label_create(screen);
+    s_zone_label = lv_label_create(dial);
     lv_obj_remove_style_all(s_zone_label);
     lv_label_set_text(s_zone_label, s_zone_name);
     lv_obj_set_style_text_font(s_zone_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xaeb6d5), 0);
-    lv_obj_align(s_zone_label, LV_ALIGN_TOP_LEFT, 16, 16);
+    lv_obj_align(s_zone_label, LV_ALIGN_TOP_MID, 0, 12);
 
-    s_message_label = lv_label_create(screen);
+    s_message_label = lv_label_create(dial);
     lv_obj_remove_style_all(s_message_label);
     lv_obj_set_style_text_color(s_message_label, lv_color_hex(0xaeb6d5), 0);
     lv_obj_set_style_text_font(s_message_label, &lv_font_montserrat_12, 0);
-    lv_obj_align(s_message_label, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_align(s_message_label, LV_ALIGN_TOP_MID, 0, 36);
     lv_label_set_text(s_message_label, "Starting...");
 
     s_label_line1 = lv_label_create(dial);
@@ -181,6 +184,30 @@ static void build_layout(void) {
     lv_obj_set_style_text_color(s_play_icon, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(s_play_icon, &lv_font_montserrat_28, 0);
     lv_obj_align(s_play_icon, LV_ALIGN_BOTTOM_LEFT, 24, -28);
+
+    s_vol_down_button = lv_btn_create(dial);
+    lv_obj_set_size(s_vol_down_button, 40, 40);
+    lv_obj_align(s_vol_down_button, LV_ALIGN_BOTTOM_LEFT, 36, -70);
+    lv_obj_t *down_label = lv_label_create(s_vol_down_button);
+    lv_label_set_text(down_label, "-");
+    lv_obj_center(down_label);
+    lv_obj_add_event_cb(s_vol_down_button, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_VOL_DOWN);
+
+    s_play_button = lv_btn_create(dial);
+    lv_obj_set_size(s_play_button, 48, 40);
+    lv_obj_align(s_play_button, LV_ALIGN_BOTTOM_MID, 0, -70);
+    lv_obj_t *play_lbl = lv_label_create(s_play_button);
+    lv_label_set_text(play_lbl, LV_SYMBOL_PLAY);
+    lv_obj_center(play_lbl);
+    lv_obj_add_event_cb(s_play_button, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_PLAY_PAUSE);
+
+    s_vol_up_button = lv_btn_create(dial);
+    lv_obj_set_size(s_vol_up_button, 40, 40);
+    lv_obj_align(s_vol_up_button, LV_ALIGN_BOTTOM_RIGHT, -36, -70);
+    lv_obj_t *up_label = lv_label_create(s_vol_up_button);
+    lv_label_set_text(up_label, "+");
+    lv_obj_center(up_label);
+    lv_obj_add_event_cb(s_vol_up_button, keyboard_event_cb, LV_EVENT_CLICKED, (void *)UI_INPUT_VOL_UP);
 
     apply_state(&s_pending);
 }
@@ -214,21 +241,28 @@ void ui_set_message(const char *msg) {
 }
 
 static void keyboard_event_cb(lv_event_t *e) {
-    if(!s_input_cb) return;
-    uint32_t key = lv_event_get_key(e);
-    switch(key) {
-        case LV_KEY_LEFT:
-            s_input_cb(UI_INPUT_VOL_DOWN);
-            break;
-        case LV_KEY_RIGHT:
-            s_input_cb(UI_INPUT_VOL_UP);
-            break;
-        case LV_KEY_ENTER:
-        case ' ':
-            s_input_cb(UI_INPUT_PLAY_PAUSE);
-            break;
-        default:
-            break;
+    if (!s_input_cb) return;
+    if (lv_event_get_code(e) == LV_EVENT_KEY) {
+        uint32_t key = lv_event_get_key(e);
+        switch(key) {
+            case LV_KEY_LEFT:
+                s_input_cb(UI_INPUT_VOL_DOWN);
+                break;
+            case LV_KEY_RIGHT:
+                s_input_cb(UI_INPUT_VOL_UP);
+                break;
+            case LV_KEY_ENTER:
+            case ' ':
+                s_input_cb(UI_INPUT_PLAY_PAUSE);
+                break;
+            default:
+                break;
+        }
+        return;
+    }
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        ui_input_event_t action = (ui_input_event_t)(intptr_t)lv_event_get_user_data(e);
+        s_input_cb(action);
     }
 }
 

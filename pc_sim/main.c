@@ -44,7 +44,9 @@ static void default_now_playing(struct now_playing *state) {
 static void curl_string_copy(const char *data, const char *key, char *out, size_t len) {
     const char *pos = strstr(data, key);
     if (!pos) return;
-    const char *start = strchr(pos, '"');
+    const char *colon = strchr(pos, ':');
+    if (!colon) return;
+    const char *start = strchr(colon, '"');
     if (!start) return;
     start++;
     const char *end = strchr(start, '"');
@@ -129,15 +131,23 @@ static bool fetch_now_playing(struct now_playing *state) {
     return true;
 }
 
-static void send_control_json(const char *json) {
+static bool send_control_json(const char *json) {
     char url[512];
     snprintf(url, sizeof(url), "%s/control", bridge_base);
     char *resp = NULL;
     size_t resp_len = 0;
     if (http_post_json(url, json, &resp, &resp_len) != 0) {
         log_msg("control failed payload=%s", json);
+        http_free(resp);
+        return false;
+    }
+    if (resp && strstr(resp, "\"error\"")) {
+        log_msg("control replied error: %.*s", (int)resp_len, resp);
+        http_free(resp);
+        return false;
     }
     http_free(resp);
+    return true;
 }
 
 static void handle_input(ui_input_event_t ev) {
@@ -146,20 +156,26 @@ static void handle_input(ui_input_event_t ev) {
             int step = net_volume_step > 0 ? net_volume_step : 2;
             char body[256];
             snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}", zone_id, -step);
-            send_control_json(body);
+            if (!send_control_json(body)) {
+                ui_set_message("Volume change failed");
+            }
             break;
         }
         case UI_INPUT_VOL_UP: {
             int step = net_volume_step > 0 ? net_volume_step : 2;
             char body[256];
             snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}", zone_id, step);
-            send_control_json(body);
+            if (!send_control_json(body)) {
+                ui_set_message("Volume change failed");
+            }
             break;
         }
         case UI_INPUT_PLAY_PAUSE: {
             char body[256];
             snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"play_pause\"}", zone_id);
-            send_control_json(body);
+            if (!send_control_json(body)) {
+                ui_set_message("Play/pause failed");
+            }
             break;
         }
         default:
