@@ -31,6 +31,7 @@ struct ui_state {
 static lv_display_t *s_display;
 static lv_obj_t *s_label_line1;
 static lv_obj_t *s_label_line2;
+static lv_obj_t *s_paused_label;
 static lv_obj_t *s_status_dot;
 static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_progress_bar;
@@ -202,21 +203,43 @@ static void build_layout(void) {
     lv_obj_set_style_text_align(s_label_line2, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align_to(s_label_line2, s_label_line1, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
 
-    // Progress bar (for track position)
+    // Progress bar (for track position) - horizontal at bottom
     s_progress_bar = lv_bar_create(dial);
-    lv_obj_set_size(s_progress_bar, SAFE_SIZE - 40, 4);
-    lv_obj_align(s_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -50);
+    lv_obj_set_size(s_progress_bar, SAFE_SIZE - 60, 3);
+    lv_obj_align(s_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_bar_set_range(s_progress_bar, 0, 1000);
-    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x2a2c34), 0);
-    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x4a7ba7), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x1a1c24), 0);
+    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x4a9d5f), LV_PART_INDICATOR); // Green
+    lv_obj_set_style_pad_all(s_progress_bar, 0, 0);
+    lv_obj_set_style_radius(s_progress_bar, 2, 0);
 
-    // Volume bar
+    // Volume icon (speaker)
+    lv_obj_t *vol_icon = lv_label_create(dial);
+    lv_obj_remove_style_all(vol_icon);
+    lv_label_set_text(vol_icon, LV_SYMBOL_VOLUME_MAX);
+    lv_obj_set_style_text_color(vol_icon, lv_color_hex(0x7a8fc7), 0);
+    lv_obj_set_style_text_font(vol_icon, &lv_font_montserrat_16, 0);
+    lv_obj_align(vol_icon, LV_ALIGN_LEFT_MID, 15, 15);
+
+    // Volume bar - vertical on left side
     s_volume_bar = lv_bar_create(dial);
-    lv_obj_set_size(s_volume_bar, SAFE_SIZE - 40, 8);
-    lv_obj_align(s_volume_bar, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_size(s_volume_bar, 8, 80);  // Vertical: width, height
+    lv_obj_align(s_volume_bar, LV_ALIGN_LEFT_MID, 18, -15);
     lv_bar_set_range(s_volume_bar, 0, 100);
-    lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x2a2c34), 0);
-    lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x5a8fc7), LV_PART_INDICATOR);
+    lv_bar_set_mode(s_volume_bar, LV_BAR_MODE_RANGE);  // For vertical fill from bottom
+    lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x1a1c24), 0);
+    lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x5a8fc7), LV_PART_INDICATOR); // Blue
+    lv_obj_set_style_pad_all(s_volume_bar, 0, 0);
+    lv_obj_set_style_radius(s_volume_bar, 3, 0);
+
+    // Paused indicator
+    s_paused_label = lv_label_create(dial);
+    lv_obj_remove_style_all(s_paused_label);
+    lv_label_set_text(s_paused_label, "PAUSED");
+    lv_obj_set_style_text_color(s_paused_label, lv_color_hex(0x7a8fc7), 0);
+    lv_obj_set_style_text_font(s_paused_label, &lv_font_montserrat_12, 0);
+    lv_obj_align(s_paused_label, LV_ALIGN_BOTTOM_MID, 0, -25);
+    lv_obj_add_flag(s_paused_label, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
 
     apply_state(&s_pending);
 }
@@ -233,6 +256,13 @@ static void apply_state(const struct ui_state *state) {
         lv_bar_set_value(s_progress_bar, progress, LV_ANIM_OFF);
     } else {
         lv_bar_set_value(s_progress_bar, 0, LV_ANIM_OFF);
+    }
+
+    // Show/hide paused indicator
+    if (state->playing) {
+        lv_obj_add_flag(s_paused_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(s_paused_label, LV_OBJ_FLAG_HIDDEN);
     }
 
     set_status_dot(state->online);
