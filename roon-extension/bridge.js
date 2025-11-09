@@ -6,6 +6,7 @@ const RATE_LIMIT_INTERVAL_MS = 100;
 const MAX_RELATIVE_STEP_PER_CALL = 25;
 const MAX_VOLUME = 100;
 const MIN_VOLUME = 0;
+const CORE_LOSS_TIMEOUT_MS = 5 * 60 * 1000;
 
 const fallbackSummary = (zone) => ({
   line1: 'Idle',
@@ -26,6 +27,8 @@ function createRoonBridge(opts = {}) {
     nowPlayingByZone: new Map(),
     lastVolumeTick: new Map(),
     pendingRelative: new Map(),
+    lastCoreSeen: 0,
+    coreLossTimer: null,
   };
 
   const roon = new RoonApi({
@@ -44,17 +47,29 @@ function createRoonBridge(opts = {}) {
         name: core.display_name,
         version: core.display_version,
       };
+      state.lastCoreSeen = Date.now();
+      if (state.coreLossTimer) {
+        clearTimeout(state.coreLossTimer);
+        state.coreLossTimer = null;
+      }
       subscribe(core);
     },
     core_unpaired() {
       log.warn('Roon core disconnected');
       state.core = null;
       state.transport = null;
-      state.zones = [];
-      state.nowPlayingByZone.clear();
-      state.pendingRelative.clear();
       state.coreInfo = null;
       svc_status.set_status('Waiting for Roon core', true);
+      if (state.coreLossTimer) {
+        clearTimeout(state.coreLossTimer);
+      }
+      state.coreLossTimer = setTimeout(() => {
+        if (state.core) return;
+        log.warn('Core offline for prolonged period, clearing zone cache');
+        state.zones = [];
+        state.nowPlayingByZone.clear();
+        state.pendingRelative.clear();
+      }, CORE_LOSS_TIMEOUT_MS);
     },
   });
 
@@ -133,7 +148,9 @@ function createRoonBridge(opts = {}) {
   }
 
   async function control(zone_id, action, value) {
-    if (!state.transport) throw new Error('Transport unavailable');
+    if (!state.transport) {
+      throw new Error('Roon core unavailable');
+    }
     const zone = state.zones.find((z) => z.zone_id === zone_id);
     if (!zone) throw new Error('Zone not found');
     const output = zone.outputs?.[0];
