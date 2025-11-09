@@ -45,6 +45,10 @@ static void apply_wifi_defaults(rk_cfg_t *cfg) {
     }
     copy_str(cfg->ssid, sizeof(cfg->ssid), CONFIG_RK_DEFAULT_SSID);
     copy_str(cfg->pass, sizeof(cfg->pass), CONFIG_RK_DEFAULT_PASS);
+    if (cfg->bridge_base[0] == '\0' || strcmp(cfg->bridge_base, "http://127.0.0.1:8088") == 0) {
+        copy_str(cfg->bridge_base, sizeof(cfg->bridge_base), CONFIG_RK_DEFAULT_BRIDGE_BASE);
+        ESP_LOGI(TAG, "Applied bridge_base from config: %s", CONFIG_RK_DEFAULT_BRIDGE_BASE);
+    }
 }
 
 static void apply_full_defaults(rk_cfg_t *cfg) {
@@ -53,7 +57,8 @@ static void apply_full_defaults(rk_cfg_t *cfg) {
     }
     apply_wifi_defaults(cfg);
     copy_str(cfg->bridge_base, sizeof(cfg->bridge_base), CONFIG_RK_DEFAULT_BRIDGE_BASE);
-    copy_str(cfg->zone_id, sizeof(cfg->zone_id), CONFIG_RK_DEFAULT_ZONE_ID);
+    // zone_id is left empty - user will select from available zones
+    cfg->zone_id[0] = '\0';
 }
 
 static void ensure_cfg_loaded(void) {

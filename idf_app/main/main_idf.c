@@ -1,4 +1,5 @@
 #include "app.h"
+#include "platform/platform_http.h"
 #include "platform/platform_input.h"
 #include "platform/platform_time.h"
 #include "platform_display_idf.h"
@@ -17,6 +18,49 @@
 
 static const char *TAG = "main";
 
+static void test_http_connectivity(void) {
+    ESP_LOGI(TAG, "=== Testing HTTP connectivity ===");
+
+    // Test 1: Public internet endpoint
+    ESP_LOGI(TAG, "Test 1: Trying public endpoint httpbin.org...");
+    char *response = NULL;
+    size_t response_len = 0;
+    int result = platform_http_get("http://httpbin.org/get", &response, &response_len);
+    if (result == 0 && response) {
+        ESP_LOGI(TAG, "✓ Public HTTP works! Got %d bytes from httpbin.org", response_len);
+        platform_http_free(response);
+    } else {
+        ESP_LOGE(TAG, "✗ Public HTTP FAILED - ESP32 HTTP client may be broken");
+    }
+
+    // Test 2: Local bridge endpoint
+    ESP_LOGI(TAG, "Test 2: Trying local bridge http://192.168.1.213:8088/zones");
+    response = NULL;
+    response_len = 0;
+    result = platform_http_get("http://192.168.1.213:8088/zones", &response, &response_len);
+    if (result == 0 && response) {
+        ESP_LOGI(TAG, "✓ Local bridge works! Got %d bytes", response_len);
+        platform_http_free(response);
+    } else {
+        ESP_LOGE(TAG, "✗ Local bridge FAILED - network routing issue between ESP32 and local LAN");
+    }
+
+
+    // Test 3: Local bridge endpoint
+    ESP_LOGI(TAG, "Test 3: Trying local audiolinux: http://192.168.1.12:5001/index.html");
+    response = NULL;
+    response_len = 0;
+    result = platform_http_get("http://192.168.1.12:5001/index.html", &response, &response_len);
+    if (result == 0 && response) {
+        ESP_LOGI(TAG, "✓ Local audiolinux works! Got %d bytes", response_len);
+        platform_http_free(response);
+    } else {
+        ESP_LOGE(TAG, "✗ Local audiolinux FAILED - network routing issue between ESP32 and local LAN");
+    }
+
+    ESP_LOGI(TAG, "=== HTTP connectivity test complete ===");
+}
+
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     // Notify UI about network events
     ui_network_on_event(evt, ip_opt);
@@ -24,6 +68,10 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     // Notify roon_client when network is ready
     if (evt == RK_NET_EVT_GOT_IP) {
         ESP_LOGI(TAG, "WiFi connected with IP: %s - enabling HTTP", ip_opt ? ip_opt : "unknown");
+
+        // Run connectivity test to diagnose network issues
+        test_http_connectivity();
+
         roon_client_set_network_ready(true);
     } else if (evt == RK_NET_EVT_FAIL) {
         roon_client_set_network_ready(false);

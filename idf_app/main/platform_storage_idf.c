@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sdkconfig.h"
+
 static const char *TAG = "platform_storage";
 static const char *NAMESPACE = "rk_cfg";
 static const char *KEY = "cfg";
@@ -48,6 +50,11 @@ bool platform_storage_load(rk_cfg_t *out) {
         return false;
     }
     ensure_version(out);
+    strncpy(out->bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE, sizeof(out->bridge_base) - 1);
+    out->bridge_base[sizeof(out->bridge_base) - 1] = '\0';
+    ESP_LOGI(TAG, "Loaded config: bridge=%s zone=%s (bridge from Kconfig, zone from NVS)",
+             out->bridge_base, out->zone_id[0] ? out->zone_id : "(empty)");
+
     return true;
 }
 
@@ -81,15 +88,12 @@ void platform_storage_defaults(rk_cfg_t *out) {
         return;
     }
     memset(out, 0, sizeof(*out));
-    // Leave SSID/pass empty; wifi_manager will fill defaults via Kconfig
-    const char *env_bridge = getenv("ROON_BRIDGE_BASE");
-    const char *env_zone = getenv("ZONE_ID");
-    if (env_bridge) {
-        strncpy(out->bridge_base, env_bridge, sizeof(out->bridge_base) - 1);
-    }
-    if (env_zone) {
-        strncpy(out->zone_id, env_zone, sizeof(out->zone_id) - 1);
-    }
+    // Use Kconfig default for bridge_base
+    strncpy(out->bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE, sizeof(out->bridge_base) - 1);
+    // zone_id is left empty - user will select from available zones
+    // Leave SSID/pass empty; wifi_manager will fill these from Kconfig
+    ESP_LOGI(TAG, "Applied defaults from Kconfig: bridge=%s (zone will be selected from available zones)",
+             CONFIG_RK_DEFAULT_BRIDGE_BASE);
     out->cfg_ver = RK_CFG_CURRENT_VER;
 }
 

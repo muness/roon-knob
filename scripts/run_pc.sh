@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-ROON_BRIDGE_BASE=${ROON_BRIDGE_BASE:-http://127.0.0.1:8088}
+ROON_BRIDGE_BASE=${ROON_BRIDGE_BASE:-http://192.168.1.213:8088}
 export ROON_BRIDGE_BASE
 
 mkdir -p build/pc_sim

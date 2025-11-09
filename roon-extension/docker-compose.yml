@@ -1,0 +1,18 @@
+services:
+  roon-knob-bridge:
+    build: .
+    container_name: roon-knob-bridge
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+      - PORT=8088
+      - ROON_SERVICE_PORT=9330
+    ports:
+      - "8088:8088/tcp"
+      - "9330:9330/tcp"
+      - "9330:9330/udp"
+    volumes:
+      - roon-knob-bridge-data:/home/node/app/data
+
+volumes:
+  roon-knob-bridge-data:
