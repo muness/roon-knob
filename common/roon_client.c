@@ -532,11 +532,11 @@ void roon_client_start(const rk_cfg_t *cfg) {
 void roon_client_handle_input(ui_input_event_t event) {
     if (ui_is_zone_picker_visible()) {
         if (event == UI_INPUT_VOL_UP) {
-            ui_zone_picker_scroll(-1);
+            ui_zone_picker_scroll(1);  // Swap sign to match volume direction
             return;
         }
         if (event == UI_INPUT_VOL_DOWN) {
-            ui_zone_picker_scroll(1);
+            ui_zone_picker_scroll(-1);  // Swap sign to match volume direction
             return;
         }
         if (event == UI_INPUT_PLAY_PAUSE) {

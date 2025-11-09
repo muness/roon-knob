@@ -78,6 +78,7 @@ static void poll_pending(lv_timer_t *timer);
 static void set_status_dot(bool online);
 static void zone_label_event_cb(lv_event_t *e);
 static void zone_button_event_cb(lv_event_t *e);
+static void dial_touch_event_cb(lv_event_t *e);
 static void show_message_overlay(const char *msg);
 static void hide_message_overlay(lv_timer_t *timer);
 
@@ -185,6 +186,10 @@ static void build_layout(void) {
     lv_obj_set_style_bg_opa(dial, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(dial, SAFE_SIZE / 2, 0);
     lv_obj_center(dial);
+
+    // Make dial touchable for play/pause (use PRESSED for single tap)
+    lv_obj_add_flag(dial, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(dial, dial_touch_event_cb, LV_EVENT_PRESSED, NULL);
 
     s_status_dot = lv_obj_create(screen);
     lv_obj_remove_style_all(s_status_dot);
@@ -432,6 +437,12 @@ static void zone_button_event_cb(lv_event_t *e) {
     }
 
     // Dispatch play/pause to trigger zone selection
+    ui_dispatch_input(UI_INPUT_PLAY_PAUSE);
+}
+
+static void dial_touch_event_cb(lv_event_t *e) {
+    (void)e;
+    // Single tap on dial triggers play/pause
     ui_dispatch_input(UI_INPUT_PLAY_PAUSE);
 }
 
