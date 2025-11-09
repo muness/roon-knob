@@ -209,28 +209,28 @@ static void build_layout(void) {
     lv_obj_align(s_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_bar_set_range(s_progress_bar, 0, 1000);
     lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x1a1c24), 0);
-    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x4a9d5f), LV_PART_INDICATOR); // Green
+    lv_obj_set_style_bg_color(s_progress_bar, lv_color_hex(0x8a6fb0), LV_PART_INDICATOR); // Purple
     lv_obj_set_style_pad_all(s_progress_bar, 0, 0);
     lv_obj_set_style_radius(s_progress_bar, 2, 0);
 
-    // Volume icon (speaker)
-    lv_obj_t *vol_icon = lv_label_create(dial);
-    lv_obj_remove_style_all(vol_icon);
-    lv_label_set_text(vol_icon, LV_SYMBOL_VOLUME_MAX);
-    lv_obj_set_style_text_color(vol_icon, lv_color_hex(0x7a8fc7), 0);
-    lv_obj_set_style_text_font(vol_icon, &lv_font_montserrat_16, 0);
-    lv_obj_align(vol_icon, LV_ALIGN_LEFT_MID, 15, 15);
-
-    // Volume bar - vertical on left side
+    // Volume bar - vertical on right side, lower
     s_volume_bar = lv_bar_create(dial);
-    lv_obj_set_size(s_volume_bar, 8, 80);  // Vertical: width, height
-    lv_obj_align(s_volume_bar, LV_ALIGN_LEFT_MID, 18, -15);
+    lv_obj_set_size(s_volume_bar, 5, 60);  // Thinner and shorter
+    lv_obj_align(s_volume_bar, LV_ALIGN_RIGHT_MID, -18, 25);  // Right side, lower position
     lv_bar_set_range(s_volume_bar, 0, 100);
     lv_bar_set_mode(s_volume_bar, LV_BAR_MODE_RANGE);  // For vertical fill from bottom
     lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x1a1c24), 0);
     lv_obj_set_style_bg_color(s_volume_bar, lv_color_hex(0x5a8fc7), LV_PART_INDICATOR); // Blue
     lv_obj_set_style_pad_all(s_volume_bar, 0, 0);
-    lv_obj_set_style_radius(s_volume_bar, 3, 0);
+    lv_obj_set_style_radius(s_volume_bar, 2, 0);
+
+    // Volume icon (speaker) - below and left of volume bar
+    lv_obj_t *vol_icon = lv_label_create(dial);
+    lv_obj_remove_style_all(vol_icon);
+    lv_label_set_text(vol_icon, LV_SYMBOL_VOLUME_MAX);
+    lv_obj_set_style_text_color(vol_icon, lv_color_hex(0x7a8fc7), 0);
+    lv_obj_set_style_text_font(vol_icon, &lv_font_montserrat_14, 0);
+    lv_obj_align(vol_icon, LV_ALIGN_RIGHT_MID, -38, 50);  // Below and left of bar
 
     // Paused indicator
     s_paused_label = lv_label_create(dial);
