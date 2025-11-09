@@ -159,7 +159,7 @@ function createRoonBridge(opts = {}) {
     switch (action) {
       case 'play_pause':
         log.debug('control play_pause', { zone_id });
-        await callTransport('play_pause', { control: 'toggle', zone_or_output_id: zone_id });
+        await callTransport('control', zone_id, 'playpause');
         break;
       case 'vol_rel':
         log.debug('control vol_rel', { zone_id, value: deltaValue(value) });
@@ -167,11 +167,7 @@ function createRoonBridge(opts = {}) {
         break;
       case 'vol_abs':
         log.debug('control vol_abs', { zone_id, value });
-        await callTransport('change_volume', {
-          volume_type: 'absolute',
-          volume: clampVolume(Number(value)),
-          zone_or_output_id: output.output_id,
-        });
+        await callTransport('change_volume', output.output_id, 'absolute', clampVolume(Number(value)));
         break;
       default:
         log.warn('Unknown control action', { action });
@@ -206,11 +202,7 @@ function createRoonBridge(opts = {}) {
     state.pendingRelative.set(output_id, pending - step);
     state.lastVolumeTick.set(output_id, now);
 
-    await callTransport('change_volume', {
-      zone_or_output_id: output_id,
-      volume_type: 'relative_step',
-      volume: step,
-    });
+    await callTransport('change_volume', output_id, 'relative_step', step);
 
     if (state.pendingRelative.get(output_id)) {
       setTimeout(() => flushRelativeQueue(output_id), RATE_LIMIT_INTERVAL_MS);
@@ -232,12 +224,13 @@ function createRoonBridge(opts = {}) {
     return value;
   }
 
-  function callTransport(method, payload) {
+  function callTransport(method, ...args) {
     return new Promise((resolve, reject) => {
-      state.transport[method](payload, (err, response) => {
-        if (err) return reject(err);
-        resolve(response);
-      });
+      const callback = (err) => {
+        if (err) return reject(new Error(err));
+        resolve();
+      };
+      state.transport[method](...args, callback);
     });
   }
 
