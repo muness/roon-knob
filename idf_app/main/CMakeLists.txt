@@ -2,6 +2,7 @@ set(SRC_FILES
     "main_idf.c"
     "wifi_manager.c"
     "ui_network.c"
+    "platform_display_idf.c"
     "platform_storage_idf.c"
     "platform_http_idf.c"
     "platform_mdns_idf.c"
@@ -27,9 +28,13 @@ idf_component_register(
         esp_netif
         esp_timer
         esp_wifi
+        esp_lcd
+        lvgl__lvgl
+        espressif__esp_lcd_sh8601
     PRIV_REQUIRES
         nvs_flash
         esp_http_client
+        driver
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

@@ -1,0 +1,11 @@
+version: 1.0.0
+
+dependencies:
+
+  esp_lcd_sh8601:
+    version: '*'
+    public: true
+
+  lvgl/lvgl:
+    version: "8.4.0"
+    public: true

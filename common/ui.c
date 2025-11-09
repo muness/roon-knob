@@ -8,8 +8,23 @@
 #include "lvgl.h"
 #include "ui.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define UI_TAG "ui"
+#else
+#define UI_TAG "ui"
+#define ESP_LOGI(tag, fmt, ...) printf("[I] " tag ": " fmt "\n", ##__VA_ARGS__)
+#define ESP_LOGW(tag, fmt, ...) printf("[W] " tag ": " fmt "\n", ##__VA_ARGS__)
+#define ESP_LOGE(tag, fmt, ...) printf("[E] " tag ": " fmt "\n", ##__VA_ARGS__)
+#endif
+
+#ifdef ESP_PLATFORM
+#define SCREEN_SIZE 360
+#define SAFE_SIZE 340
+#else
 #define SCREEN_SIZE 240
 #define SAFE_SIZE 220
+#endif
 
 struct ui_state {
     char line1[128];
@@ -66,7 +81,12 @@ static void show_message_overlay(const char *msg);
 static void hide_message_overlay(lv_timer_t *timer);
 
 void ui_init(void) {
+    ESP_LOGI(UI_TAG, "ui_init: start");
+
     build_layout();
+
+    ESP_LOGI(UI_TAG, "build_layout done");
+
     lv_timer_create(poll_pending, 60, NULL);
 
     lv_label_set_text(s_zone_label, s_zone_name);
@@ -74,6 +94,8 @@ void ui_init(void) {
 
     // Set initial message via the safe mechanism
     ui_set_message("Starting...");
+
+    ESP_LOGI(UI_TAG, "ui_init: done");
 }
 
 void ui_update(const char *line1, const char *line2, bool playing, int volume, int seek_position, int length) {
@@ -130,7 +152,14 @@ static void poll_pending(lv_timer_t *timer) {
 }
 
 static void build_layout(void) {
+    ESP_LOGI(UI_TAG, "build_layout: getting active screen");
     lv_obj_t *screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(UI_TAG, "lv_screen_active returned NULL - display driver not registered!");
+        return;
+    }
+
+    ESP_LOGI(UI_TAG, "build_layout: setting up screen styles");
     lv_obj_remove_style_all(screen);
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x04050a), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);

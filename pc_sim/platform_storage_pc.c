@@ -40,7 +40,7 @@ static void parse_field(const char *data, const char *key, char *out, size_t len
         copy_len = len - 1;
     }
     memcpy(out, quote_start, copy_len);
-    out[copy_len] = '\\0';
+    out[copy_len] = '\0';
 }
 
 static bool parse_cfg_ver(const char *data, uint8_t *out) {
