@@ -36,6 +36,7 @@ add_executable(roon_knob_pc
   platform_storage_pc.c
   platform_mdns_pc.c
   platform_input_pc.c
+  platform_power_pc.c
   components/net_client/curl_client.c
 )
 

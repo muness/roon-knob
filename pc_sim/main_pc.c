@@ -1,5 +1,6 @@
 #include "app.h"
 #include "platform/platform_input.h"
+#include "platform/platform_power.h"
 #include "platform/platform_time.h"
 #include "ui.h"
 
@@ -20,6 +21,15 @@ int main(int argc, char **argv) {
 
     ui_init();
     platform_input_init();
+    platform_power_init();
+
+    struct platform_power_status status;
+    if (platform_power_get_status(&status)) {
+        ui_set_battery_status(status.present, status.percentage, status.voltage_mv, status.charging);
+    } else {
+        ui_set_battery_status(false, -1, 0, false);
+    }
+
     app_entry();
 
     while (true) {

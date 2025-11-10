@@ -12,4 +12,78 @@ config RK_DEFAULT_BRIDGE_BASE
     string "Default Bridge Base URL"
     default "http://192.168.1.213:8088"
 
+menu "Power Monitoring"
+
+config RK_BATTERY_ADC_GPIO
+    int "Battery sense GPIO"
+    range 1 10
+    default 4
+    help
+        ESP32-S3 GPIO connected to the battery voltage divider.
+        Valid options are ADC1 GPIOs 1-10.
+
+choice RK_BATTERY_ADC_ATTEN
+    prompt "Battery ADC attenuation"
+    default RK_BATTERY_ADC_ATTEN_11DB
+    help
+        ADC attenuation to use when sampling the battery voltage.
+
+config RK_BATTERY_ADC_ATTEN_0DB
+    bool "0 dB"
+config RK_BATTERY_ADC_ATTEN_2_5DB
+    bool "2.5 dB"
+config RK_BATTERY_ADC_ATTEN_6DB
+    bool "6 dB"
+config RK_BATTERY_ADC_ATTEN_11DB
+    bool "11 dB"
+
+endchoice
+
+config RK_BATTERY_VDIV_NUM
+    int "Battery voltage divider numerator"
+    range 1 100
+    default 2
+    help
+        Ratio numerator for the resistor divider that scales the battery voltage
+        down to the ADC pin. For a 2:1 divider use 2.
+
+config RK_BATTERY_VDIV_DEN
+    int "Battery voltage divider denominator"
+    range 1 100
+    default 1
+    help
+        Ratio denominator for the resistor divider that scales the battery voltage
+        down to the ADC pin. For a 2:1 divider use 1.
+
+config RK_BATTERY_VOLTAGE_MIN_MV
+    int "Battery empty voltage (mV)"
+    range 2500 4000
+    default 3300
+
+config RK_BATTERY_VOLTAGE_MAX_MV
+    int "Battery full voltage (mV)"
+    range 3600 4500
+    default 4200
+
+config RK_BATTERY_PRESENT_MIN_MV
+    int "Battery present threshold (mV)"
+    range 500 3500
+    default 2600
+
+config RK_BATTERY_SAMPLE_PERIOD_MS
+    int "Battery polling interval (ms)"
+    range 100 60000
+    default 5000
+
+config RK_BATTERY_CHARGE_GPIO
+    int "Charger status GPIO (-1 to disable)"
+    range -1 48
+    default -1
+
+config RK_BATTERY_CHARGE_ACTIVE_LOW
+    bool "Charger status is active low"
+    default y
+
+endmenu
+
 endmenu
