@@ -8,6 +8,7 @@ set(SRC_FILES
     "platform_mdns_idf.c"
     "platform_log_idf.c"
     "platform_input_idf.c"
+    "platform_power_idf.c"
     "cst816.c"
     "../../common/app_main.c"
     "../../common/roon_client.c"

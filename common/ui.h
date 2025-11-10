@@ -29,6 +29,7 @@ void ui_hide_zone_picker(void);
 bool ui_is_zone_picker_visible(void);
 int ui_zone_picker_get_selected(void);
 void ui_zone_picker_scroll(int delta);
+void ui_set_battery_status(bool present, int percentage, int voltage_mv, bool charging);
 
 #ifdef __cplusplus
 }

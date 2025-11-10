@@ -34,12 +34,17 @@ struct ui_state {
     bool online;
     int seek_position;
     int length;
+    bool battery_present;
+    bool battery_charging;
+    int battery_percent;
+    int battery_voltage_mv;
 };
 
 static lv_obj_t *s_label_line1;
 static lv_obj_t *s_label_line2;
 static lv_obj_t *s_paused_label;
 static lv_obj_t *s_status_dot;
+static lv_obj_t *s_battery_label;
 static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_progress_bar;
 static lv_obj_t *s_zone_label;
@@ -61,6 +66,10 @@ static struct ui_state s_pending = {
     .online = false,
     .seek_position = 0,
     .length = 0,
+    .battery_present = false,
+    .battery_charging = false,
+    .battery_percent = -1,
+    .battery_voltage_mv = 0,
 };
 static bool s_dirty = true;
 static char s_pending_message[128] = "";
@@ -76,6 +85,8 @@ static void apply_state(const struct ui_state *state);
 static void build_layout(void);
 static void poll_pending(lv_timer_t *timer);
 static void set_status_dot(bool online);
+static void update_battery_indicator(const struct ui_state *state);
+static const char *battery_icon_for_percent(int percent);
 static void zone_label_event_cb(lv_event_t *e);
 static void zone_button_event_cb(lv_event_t *e);
 static void dial_touch_event_cb(lv_event_t *e);
@@ -198,6 +209,13 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(0x808080), 0);  // Gray offline, will change when online
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -16, 16);
 
+    s_battery_label = lv_label_create(screen);
+    lv_obj_remove_style_all(s_battery_label);
+    lv_obj_set_style_text_color(s_battery_label, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(s_battery_label, font_small(), 0);
+    lv_obj_align(s_battery_label, LV_ALIGN_TOP_LEFT, 16, 16);
+    lv_label_set_text(s_battery_label, LV_SYMBOL_BATTERY_EMPTY " --");
+
     s_zone_label = lv_label_create(dial);
     lv_obj_remove_style_all(s_zone_label);
     lv_label_set_text(s_zone_label, s_zone_name);
@@ -280,7 +298,55 @@ static void apply_state(const struct ui_state *state) {
     // Update play/pause indicator icon
     lv_label_set_text(s_paused_label, state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 
+    update_battery_indicator(state);
     set_status_dot(state->online);
+}
+
+static const char *battery_icon_for_percent(int percent) {
+    if (percent >= 95) return LV_SYMBOL_BATTERY_FULL;
+    if (percent >= 75) return LV_SYMBOL_BATTERY_3;
+    if (percent >= 50) return LV_SYMBOL_BATTERY_2;
+    if (percent >= 25) return LV_SYMBOL_BATTERY_1;
+    return LV_SYMBOL_BATTERY_EMPTY;
+}
+
+static void update_battery_indicator(const struct ui_state *state) {
+    if (!s_battery_label) {
+        return;
+    }
+
+    if (!state->battery_present) {
+        lv_label_set_text(s_battery_label, LV_SYMBOL_BATTERY_EMPTY " --");
+        return;
+    }
+
+    int percent_for_icon = state->battery_percent;
+    if (percent_for_icon < 0) percent_for_icon = 0;
+    if (percent_for_icon > 100) percent_for_icon = 100;
+    const char *icon = battery_icon_for_percent(percent_for_icon);
+
+    char percent_text[8];
+    if (state->battery_percent < 0) {
+        snprintf(percent_text, sizeof(percent_text), "??");
+    } else {
+        snprintf(percent_text, sizeof(percent_text), "%d%%", state->battery_percent);
+    }
+
+    char charge_suffix[8] = "";
+    if (state->battery_charging) {
+        snprintf(charge_suffix, sizeof(charge_suffix), " %s", LV_SYMBOL_CHARGE);
+    }
+
+    char buffer[48];
+    if (state->battery_voltage_mv > 0) {
+        int whole = state->battery_voltage_mv / 1000;
+        int frac = (state->battery_voltage_mv % 1000) / 10;
+        snprintf(buffer, sizeof(buffer), "%s %s %d.%02dV%s", icon, percent_text, whole, frac, charge_suffix);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%s %s%s", icon, percent_text, charge_suffix);
+    }
+
+    lv_label_set_text(s_battery_label, buffer);
 }
 
 static void set_status_dot(bool online) {
@@ -309,6 +375,24 @@ void ui_set_message(const char *msg) {
     os_mutex_lock(&s_state_lock);
     snprintf(s_pending_message, sizeof(s_pending_message), "%s", msg);
     s_message_dirty = true;
+    os_mutex_unlock(&s_state_lock);
+}
+
+void ui_set_battery_status(bool present, int percentage, int voltage_mv, bool charging) {
+    if (!present) {
+        percentage = -1;
+        voltage_mv = 0;
+    }
+    if (percentage > 100) percentage = 100;
+    if (percentage < -1) percentage = -1;
+    if (voltage_mv < 0) voltage_mv = 0;
+
+    os_mutex_lock(&s_state_lock);
+    s_pending.battery_present = present;
+    s_pending.battery_percent = percentage;
+    s_pending.battery_voltage_mv = voltage_mv;
+    s_pending.battery_charging = charging && present;
+    s_dirty = true;
     os_mutex_unlock(&s_state_lock);
 }
 
