@@ -1,5 +1,6 @@
 #include "roon_client.h"
 
+#include "platform/platform_display.h"
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
@@ -19,7 +20,8 @@
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
 #define MAX_ZONES 32
-#define POLL_DELAY_MS 1000
+#define POLL_DELAY_AWAKE_MS 1000     // 1 second when display is on
+#define POLL_DELAY_SLEEPING_MS 30000  // 30 seconds when display is sleeping
 
 struct now_playing_state {
     char line1[MAX_LINE];
@@ -83,6 +85,7 @@ static void post_ui_zone_name_copy(char *name_copy);
 static void ui_update_cb(void *arg) {
     struct now_playing_state *state = arg;
     if (!state) {
+        LOGI("ui_update_cb: state is NULL!");
         return;
     }
     ui_update(state->line1, state->line2, state->is_playing, state->volume, state->seek_position, state->length);
@@ -222,13 +225,15 @@ static void post_ui_zone_name(const char *name) {
 }
 
 static void wait_for_poll_interval(void) {
+    // Use longer delay when display is sleeping to save power
+    uint32_t delay_ms = platform_display_is_sleeping() ? POLL_DELAY_SLEEPING_MS : POLL_DELAY_AWAKE_MS;
     uint64_t start = platform_millis();
     while (s_running) {
         if (s_trigger_poll) {
             s_trigger_poll = false;
             break;
         }
-        if (platform_millis() - start >= POLL_DELAY_MS) {
+        if (platform_millis() - start >= delay_ms) {
             break;
         }
         platform_sleep_ms(50);
@@ -272,6 +277,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     unlock_state();
 
     if (bridge_base[0] == '\0' || zone_id[0] == '\0') {
+        LOGI("fetch_now_playing: bridge_base or zone_id empty (bridge_base='%s', zone_id='%s')", bridge_base, zone_id);
         return false;
     }
 
@@ -350,30 +356,36 @@ static bool fetch_now_playing(struct now_playing_state *state) {
 }
 
 static bool refresh_zone_label(bool prefer_zone_id) {
+    LOGI("refresh_zone_label: Called (prefer_zone_id=%s)", prefer_zone_id ? "true" : "false");
     lock_state();
     char bridge_base[sizeof(s_state.cfg.bridge_base)];
     strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
     unlock_state();
     if (bridge_base[0] == '\0') {
+        LOGI("refresh_zone_label: bridge_base is empty, returning false");
         return false;
     }
 
     char url[256];
     snprintf(url, sizeof(url), "%s/zones", bridge_base);
+    LOGI("refresh_zone_label: Requesting %s", url);
 
     char *resp = NULL;
     size_t resp_len = 0;
     bool success = false;
 
     if (platform_http_get(url, &resp, &resp_len) != 0 || !resp) {
+        LOGI("refresh_zone_label: HTTP request failed");
         platform_http_free(resp);
         return false;
     }
 
+    LOGI("refresh_zone_label: Received %zu bytes", resp_len);
     parse_zones_from_response(resp);
 
     char zone_label_copy[MAX_ZONE_NAME] = {0};
     lock_state();
+    LOGI("refresh_zone_label: Parsed %d zones", s_state.zone_count);
     if (s_state.zone_count > 0) {
         bool found = false;
         bool should_sync = false;
@@ -414,8 +426,11 @@ static bool refresh_zone_label(bool prefer_zone_id) {
 
     platform_http_free(resp);
     if (success) {
+        LOGI("refresh_zone_label: Selected zone '%s', posting to UI", zone_label_copy);
         platform_storage_save(&s_state.cfg);
         post_ui_zone_name(zone_label_copy);
+    } else {
+        LOGI("refresh_zone_label: No zone selected (success=false)");
     }
     return success;
 }
@@ -508,11 +523,13 @@ static bool send_control_json(const char *json) {
 
 static void roon_poll_thread(void *arg) {
     (void)arg;
+    LOGI("Roon polling thread started");
     struct now_playing_state state;
     default_now_playing(&state);
     while (s_running) {
         // Skip HTTP requests if network is not ready yet
         if (!s_network_ready) {
+            LOGI("Polling: Network not ready, waiting...");
             wait_for_poll_interval();
             continue;
         }
@@ -524,9 +541,9 @@ static void roon_poll_thread(void *arg) {
         bool ok = fetch_now_playing(&state);
         post_ui_update(&state);
         post_ui_status(ok);
-        if (ok && !s_last_net_ok) {
-            post_ui_message("Connected");
-        } else if (!ok && s_last_net_ok) {
+        // Don't show "Connected" message - it's just noise that blocks UI
+        // Only show error messages
+        if (!ok && s_last_net_ok) {
             post_ui_message("Waiting for data...");
         }
         s_last_net_ok = ok;
@@ -551,11 +568,11 @@ void roon_client_start(const rk_cfg_t *cfg) {
 void roon_client_handle_input(ui_input_event_t event) {
     if (ui_is_zone_picker_visible()) {
         if (event == UI_INPUT_VOL_UP) {
-            ui_zone_picker_scroll(1);  // Swap sign to match volume direction
+            ui_zone_picker_scroll(1);
             return;
         }
         if (event == UI_INPUT_VOL_DOWN) {
-            ui_zone_picker_scroll(-1);  // Swap sign to match volume direction
+            ui_zone_picker_scroll(-1);
             return;
         }
         if (event == UI_INPUT_PLAY_PAUSE) {
@@ -670,4 +687,26 @@ void roon_client_set_network_ready(bool ready) {
     } else {
         LOGI("Network not ready - HTTP requests disabled");
     }
+}
+
+const char* roon_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height) {
+    if (!url_buf || buf_len < 256) {
+        return NULL;
+    }
+
+    lock_state();
+    const char *bridge_base = s_state.cfg.bridge_base;
+    const char *zone_id = s_state.cfg.zone_id;
+
+    if (!bridge_base || !bridge_base[0] || !zone_id || !zone_id[0]) {
+        unlock_state();
+        return NULL;
+    }
+
+    snprintf(url_buf, buf_len,
+             "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d",
+             bridge_base, zone_id, width, height);
+    unlock_state();
+
+    return url_buf;
 }

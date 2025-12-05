@@ -23,9 +23,11 @@ function startServer() {
   const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
   const SERVICE_PORT = parseInt(process.env.ROON_SERVICE_PORT || '9330', 10);
   const MDNS_BASE = process.env.MDNS_BASE || `http://${require('os').hostname()}:${PORT}`;
+  const GIT_SHA = getGitSha();
 
   const metrics = createMetricsTracker();
   const log = createLogger('Sidecar');
+  log.info('Starting server', { version: '0.1.0', git_sha: GIT_SHA });
   const app = express();
   app.use(express.json());
   app.use(cors());
@@ -37,7 +39,7 @@ function startServer() {
   app.use(createRoutes({ bridge, metrics, log: createLogger('HTTP') }));
 
   app.get('/status', (_req, res) => {
-    res.json({ status: 'ok', version: '0.1.0' });
+    res.json({ status: 'ok', version: '0.1.0', git_sha: GIT_SHA });
   });
 
   app.use(express.static(path.join(__dirname, 'public')));
@@ -68,6 +70,8 @@ function startServer() {
       base: MDNS_BASE,
       advertisedAt: Date.now(),
     };
+    metrics.git_sha = GIT_SHA;
+    metrics.version = '0.1.0';
   });
 
   server.on('error', (err) => {

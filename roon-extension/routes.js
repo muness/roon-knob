@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const sharp = require('sharp');
 const { recordEvent, snapshot } = require('./metrics');
 
 function extractKnob(req) {
@@ -52,9 +53,78 @@ function createRoutes({ bridge, metrics, logger }) {
     const { scale, width, height, format } = req.query || {};
     try {
       if (data.image_key && bridge.getImage) {
-        const { contentType, body } = await bridge.getImage(data.image_key, { scale, width, height, format });
-        res.set('Content-Type', contentType || 'application/octet-stream');
-        return res.send(body);
+        // Check if RGB565 format is requested
+        if (format === 'rgb565') {
+          // Fetch JPEG from Roon API
+          const { contentType, body } = await bridge.getImage(data.image_key, { scale, width, height, format: 'image/jpeg' });
+
+          // Convert JPEG to RGB565
+          const targetWidth = parseInt(width) || 360;
+          const targetHeight = parseInt(height) || 360;
+
+          // Use sharp to decode and convert to raw RGB565
+          const rgb565Buffer = await sharp(body)
+            .resize(targetWidth, targetHeight, { fit: 'cover' })
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+          // Convert RGB (24-bit) to RGB565 (16-bit)
+          const rgb888 = rgb565Buffer.data;
+          const rgb565 = Buffer.alloc((targetWidth * targetHeight * 2));
+
+          for (let i = 0; i < rgb888.length; i += 3) {
+            const r = rgb888[i] >> 3;       // 8-bit to 5-bit
+            const g = rgb888[i + 1] >> 2;   // 8-bit to 6-bit
+            const b = rgb888[i + 2] >> 3;   // 8-bit to 5-bit
+
+            // Pack into 16-bit RGB565 format
+            const rgb565Pixel = (r << 11) | (g << 5) | b;
+            const pixelIndex = (i / 3) * 2;
+
+            // Write as little-endian (ESP32 expects little-endian)
+            rgb565[pixelIndex] = rgb565Pixel & 0xFF;
+            rgb565[pixelIndex + 1] = (rgb565Pixel >> 8) & 0xFF;
+          }
+
+          logger?.info('Converted image to RGB565', {
+            width: targetWidth,
+            height: targetHeight,
+            size: rgb565.length
+          });
+
+          res.set('Content-Type', 'application/octet-stream');
+          res.set('X-Image-Width', targetWidth.toString());
+          res.set('X-Image-Height', targetHeight.toString());
+          res.set('X-Image-Format', 'rgb565');
+          return res.send(rgb565);
+        } else {
+          // Return original format (JPEG or other) - resize if width/height specified
+          const { contentType, body } = await bridge.getImage(data.image_key, { scale, width, height, format });
+
+          // If width/height specified and it's an image, resize it using Sharp
+          if ((width || height) && contentType && contentType.startsWith('image/')) {
+            const targetWidth = parseInt(width) || parseInt(height) || 360;
+            const targetHeight = parseInt(height) || parseInt(width) || 360;
+
+            const resizedBody = await sharp(body)
+              .resize(targetWidth, targetHeight, { fit: 'cover' })
+              .jpeg({ quality: 80, progressive: false, mozjpeg: false })  // Force baseline JPEG for ESP32
+              .toBuffer();
+
+            logger?.info('Resized JPEG image', {
+              originalSize: body.length,
+              resizedSize: resizedBody.length,
+              width: targetWidth,
+              height: targetHeight
+            });
+
+            res.set('Content-Type', 'image/jpeg');
+            return res.send(resizedBody);
+          }
+
+          res.set('Content-Type', contentType || 'application/octet-stream');
+          return res.send(body);
+        }
       }
     } catch (error) {
       logger?.warn('now_playing image proxy failed; falling back to placeholder', { zoneId, error });

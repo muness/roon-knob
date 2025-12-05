@@ -49,16 +49,20 @@ roon-knob/
    - Status dot shows connection health
    Use `ROON_BRIDGE_BASE` env vars to target specific bridges/zones.
 3. Install ESP-IDF
-   - TBD...
+   - Follow the [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/index.html)
+   - Typical installation: `~/esp/esp-idf`
 4. Flash the ESP32-S3 target:
+   - Setup environment and build:
    - Plug the knob into your Mac/Linux workstation with a USB-C cable. If the board enumerates as a non-ESP device (no `/dev/cu.*esp*` entry, or the USB-C socket feels loose), flip the cable or try the other USB-C port — the board can revert to a USB-to-serial bootloader mode that looks like a generic `wchusbserial` device.
    - Identify the serial port:
-     - **macOS**: run `ls /dev/cu.*` and look for the `wchusbserial*` entry (e.g., `/dev/cu.wchusbserial10`).
+     - **macOS**: run `ls /dev/cu.*` and look for the `wchusbserial*` or `usbmodem*` entry (e.g., `/dev/cu.usbmodem101`).
      - **Linux**: run `ls /dev/ttyUSB*` or `ls /dev/ttyACM*`.
-   - Ensure ESP-IDF is initialized (`source $IDF_PATH/export.sh`) and then run:
+   - Setup ESP-IDF environment and build:
 
      ```bash
-    ./scripts/build_flash_idf.sh /dev/cu.usbmodem101
+     export IDF_PATH=~/esp/esp-idf
+     source "$IDF_PATH/export.sh"
+     ./scripts/build_flash_idf.sh /dev/tty.usbmodem101
      ```
 
     The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If the chip you are actually flashing identifies as plain ESP32 (and the host reports `ESP32, not ESP32-S3`), rerun `idf.py set-target esp32` (or edit `sdkconfig`/`sdkconfig.overrides` to the esp32 target) and flash again with `idf.py` directly so the build/flash toolchain matches the silicon. If the knob is still in bootloader mode and keeps logging "ESP32" despite using the S3 target, unplug/replug while holding/resetting the board to force the S3 USB controller to enumerate correctly.

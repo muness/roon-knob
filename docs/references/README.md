@@ -1,10 +1,47 @@
-# Reference Notes
+# Reference Documentation
 
-This folder caches upstream examples/snippets we can mine for patterns without dragging in entire third-party repos.
+Hardware and implementation guides for the Waveshare ESP32-S3 Touch AMOLED 1.8" knob device.
 
-## Pulled into `docs/references/`
+## Hardware Documentation
 
-- `lvgl_pc/` – Extracted from LVGL's `lv_port_pc_vscode` repo (`src/main.c`, `src/hal/hal.{c,h}` and the README) to guide the SDL2 simulator wiring.
-- `esp_box_snippets/` – Pieces of Espressif's ESP-BOX demos (`examples/lv_demos/main/*`) for LVGL init and menu handling on ESP32-S3.
-- `tft_snippets/` – GC9A01 init tables plus notes from Bodmer’s TFT_eSPI library for the 240×240 round display glue.
-- `lvgl_weather/` – The `lv_esp_idf` weather demo entrypoint (`display_lvgl_demos_main.c`) that initializes LVGL on an ESP32, starts the display backend, and runs `lv_demo_music()`/`lv_demo_widgets()`, providing a reference for the kind of LVGL polling/layout we need.
+### Core Hardware
+- [Board Overview](hardware/board.md) - Device specs and capabilities
+- [Pin Configuration](HARDWARE_PINS.md) - GPIO assignments for all peripherals
+- [Display Colors](COLORTEST_HELLOWORLD.md) - SH8601 QSPI color format and byte order
+
+### Peripherals
+- [Touch Controller](hardware/cst816d.md) - CST816D integration with LVGL
+- [Rotary Encoder](hardware/encoder.md) - Quadrature encoder implementation
+- [Battery Monitoring](hardware/battery.md) - ADC-based battery level detection
+
+## Implementation Guides
+
+### Display & Graphics
+- [Image Rendering](esp32-s3/image_render.md) - JPEG decoding and artwork display
+
+### UI
+- [Now Playing Image](ui/now_playing_image.md) - Artwork fetch and display flow
+- [Touch Integration](ui/touch.md) - Touch input handling
+
+## Analysis Documents
+
+Historical analysis of similar projects (kept for reference):
+- [Smart Knob Analysis](smart-knob-analysis.md) - Scott Bezek's smart-knob project
+- [BlueKnob Analysis](blueknob-analysis.md) - BlueKnob project analysis
+
+## Key Implementation Notes
+
+### Display (SH8601 QSPI AMOLED)
+- Resolution: 360×360
+- Interface: QSPI (4-wire SPI with quad data)
+- **Color format**: RGB565 with byte swap in flush callback
+- See [COLORTEST_HELLOWORLD.md](COLORTEST_HELLOWORLD.md) for details
+
+### Input
+- **Rotary encoder**: Software quadrature decoding (GPIO 7/8)
+- **Touch**: CST816D via I2C (GPIO 11/12), integrated with LVGL
+- **No physical buttons** on this device
+
+### Memory
+- 16 MB Flash, 8 MB PSRAM
+- PSRAM used for LVGL buffers, artwork cache, network buffers

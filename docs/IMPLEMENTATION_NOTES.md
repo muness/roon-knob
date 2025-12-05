@@ -1,15 +1,15 @@
 # Implementation Notes
 
-Technical documentation for the Roon Knob implementation.
+Technical documentation for ESP32-S3 knob-style applications.
 
 ## Architecture Overview
 
-The Roon Knob firmware uses a layered architecture:
+The firmware uses a layered architecture with platform abstraction:
 
 ```
 ┌─────────────────────────────────────────┐
 │         Application Layer               │
-│  (roon_client.c, app_main.c)            │
+│  (app logic, state management)          │
 └──────────────┬──────────────────────────┘
                │
 ┌──────────────▼──────────────────────────┐
@@ -30,98 +30,78 @@ The Roon Knob firmware uses a layered architecture:
 └─────────────┘  └─────────────┘
 ```
 
-## Input System Architecture
+## Input System
 
-### Overview
+### Hardware Inputs
 
-The input system handles user interactions through:
-1. **Rotary encoder** - Volume control via hardware PCNT
-2. **Buttons** - Play/pause and menu navigation via GPIO
+1. **Rotary encoder** - Volume/scroll control
+2. **Touchscreen** - All button interactions (play/pause, menus, etc.)
 
-### PC Simulator Input
+**Note:** This board has NO physical buttons. The encoder cannot be pressed.
 
-**File:** `pc_sim/platform_input_pc.c`
-
-Uses SDL keyboard events:
-- Arrow keys / Mouse wheel → Volume control
-- Space / Enter → Play/pause
-- Z / M → Menu
-
-### ESP32-S3 Hardware Input
+### Rotary Encoder (ESP32-S3)
 
 **File:** `idf_app/main/platform_input_idf.c`
 
-#### Rotary Encoder Implementation
+**Implementation:** Software quadrature decoding with polling
 
-**Hardware peripheral:** ESP32-S3 PCNT (Pulse Counter)
-
-**Configuration:**
-- Two PCNT channels for quadrature decoding (A and B)
-- 4X mode: 4 pulses per detent
-- Glitch filter: 1µs (1000ns)
-- Polling interval: 50ms
-- Counter limits: ±100
+| Parameter | Value |
+|-----------|-------|
+| GPIO A | 8 |
+| GPIO B | 7 |
+| Poll interval | 3ms |
+| Debounce | 2 consecutive stable reads |
+| Pull-ups | Internal enabled |
 
 **Signal flow:**
 ```
 Encoder rotation
     ↓
-PCNT hardware decode
+Software quadrature decode (polling)
     ↓
-Poll timer (50ms)
+Debounce filter
     ↓
-Calculate delta
-    ↓
-Divide by 4 (detent conversion)
+Calculate direction
     ↓
 ui_dispatch_input(UI_INPUT_VOL_UP/DOWN)
-    ↓
-roon_client_handle_input()
-    ↓
-HTTP POST to bridge /control endpoint
 ```
 
-**Why PCNT instead of GPIO interrupts:**
-- Hardware quadrature decoding (no CPU overhead)
-- Built-in glitch filtering
-- Automatic direction detection
-- Accumulates pulses even if polling is delayed
-- 16-bit counter with overflow compensation
+**Why software polling instead of PCNT:**
+- Simpler implementation
+- Adequate for UI knob speeds
+- Portable to other platforms
+- Lower complexity
 
-#### Button Implementation
+### Touch Input (ESP32-S3)
 
-**Approach:** Polling-based with software debouncing
+**File:** `idf_app/main/platform_display_idf.c`
 
-**Configuration:**
-- GPIO input mode with internal pull-ups
-- Active-low (button press = GPIO LOW)
-- Debounce time: 50ms
-- Polling interval: 50ms (shared with encoder)
+**Implementation:** CST816D via I2C, integrated with LVGL
 
-**Why polling instead of interrupts:**
-- Simpler debouncing logic
-- No ISR overhead
-- Shared timer with encoder (efficient)
-- Sufficient responsiveness for UI (50ms latency)
+| Parameter | Value |
+|-----------|-------|
+| I2C Address | 0x15 |
+| I2C Speed | 300 kHz |
+| GPIO SDA | 11 |
+| GPIO SCL | 12 |
 
-**Signal flow:**
-```
-Button press
-    ↓
-GPIO reads LOW
-    ↓
-Poll timer detects edge
-    ↓
-Check debounce time
-    ↓
-ui_dispatch_input(UI_INPUT_PLAY_PAUSE/MENU)
-    ↓
-roon_client_handle_input()
-```
+Touch is registered as an LVGL `LV_INDEV_TYPE_POINTER` device. LVGL handles:
+- Tap detection
+- Drag/swipe
+- Widget interaction
 
-### Input Event Dispatch
+### PC Simulator Input
 
-**Event types** (defined in `common/ui.h`):
+**File:** `pc_sim/platform_input_pc.c`
+
+Uses SDL keyboard/mouse events:
+- Arrow keys / Mouse wheel → Volume control
+- Space / Enter → Play/pause
+- Mouse click → Touch simulation
+
+### Input Event Types
+
+Defined in `common/ui.h`:
 ```c
 typedef enum {
     UI_INPUT_VOL_DOWN = -1,
@@ -132,199 +112,144 @@ typedef enum {
 } ui_input_event_t;
 ```
 
-**Dispatch flow:**
-```
-Platform layer (keyboard/encoder/buttons)
-    ↓
-ui_dispatch_input(event)
-    ↓
-ui_input_cb_t callback
-    ↓
-roon_client_handle_input(event)
-    ↓
-[Action based on UI state]
-```
-
-**Context-aware handling:**
-- When zone picker is visible:
-  - VOL_UP/DOWN → Scroll zone list
-  - PLAY_PAUSE → Select zone
-  - MENU → Close picker
-- When zone picker is hidden:
-  - VOL_UP/DOWN → Volume control
-  - PLAY_PAUSE → Toggle playback
-  - MENU → Open zone picker
-
 ## Display System
+
+### ESP32-S3 Hardware Display
+
+**File:** `idf_app/main/platform_display_idf.c`
+
+| Parameter | Value |
+|-----------|-------|
+| Controller | SH8601 |
+| Resolution | 360×360 |
+| Interface | QSPI (4-wire) |
+| Color format | RGB565 |
+| SPI Host | SPI2_HOST |
+
+**Critical: Byte Order**
+
+The SH8601 expects big-endian RGB565, but ESP32-S3 is little-endian. The flush callback swaps bytes before sending:
+
+```c
+static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+    // Swap bytes for big-endian display
+    uint16_t *pixels = (uint16_t *)px_map;
+    for (int i = 0; i < pixel_count; i++) {
+        pixels[i] = (pixels[i] >> 8) | (pixels[i] << 8);
+    }
+    esp_lcd_panel_draw_bitmap(...);
+}
+```
+
+See [COLORTEST_HELLOWORLD.md](references/COLORTEST_HELLOWORLD.md) for details.
+
+**Initialization sequence:**
+1. Initialize SPI bus
+2. Configure LCD panel IO (QSPI)
+3. Load SH8601 init commands
+4. Register LVGL display driver with byte-swap flush callback
+5. Register touch input device
+6. Start LVGL tick timer
 
 ### PC Simulator Display
 
 **File:** `pc_sim/main_pc.c`
 
 Uses SDL2 for rendering:
-- Window size: 240×240 (matches hardware)
+- Window size: 360×360
 - LVGL driver: SDL window/renderer
-- Display buffer managed by LVGL
-
-### ESP32-S3 Hardware Display
-
-**File:** `idf_app/main/platform_display_idf.c`
-
-**Hardware:** SH8601 LCD controller, 360×360 resolution
-
-**Interface:** QSPI (4-wire SPI with quad data lines)
-
-**Configuration:**
-- SPI Host: SPI2_HOST
-- Clock speed: Defined by esp_lcd_sh8601 component
-- Display buffer: LVGL manages 360×(360/10) = 12,960 pixels per buffer
-- Double buffering for smooth rendering
-
-**Backlight:** PWM via LEDC peripheral on GPIO 47
-
-**Initialization sequence:**
-1. Initialize SPI bus
-2. Configure LCD panel IO (QSPI)
-3. Load SH8601 init commands
-4. Register LVGL display driver
-5. Start LVGL task
-
-## Network Stack
-
-### mDNS Discovery
-
-**Purpose:** Automatically discover Roon bridge on local network
-
-**Service type:** `_roonknob._tcp`
-
-**Files:**
-- `pc_sim/platform_mdns_pc.c` - Bonjour/Avahi
-- `idf_app/main/platform_mdns_idf.c` - ESP-IDF mDNS component
-
-**Discovery flow:**
-1. Query for `_roonknob._tcp` service
-2. Extract IPv4 address and port
-3. Construct base URL (http://IP:PORT)
-4. Save to NVS storage if IP-based (not hostname)
-
-### HTTP Client
-
-**Files:**
-- `pc_sim/components/net_client/curl_client.c` - libcurl
-- `idf_app/main/platform_http_idf.c` - ESP HTTP client
-
-**Endpoints:**
-- `GET /now_playing?zone_id=X` - Poll current track/state
-- `GET /zones` - List available zones
-- `POST /control` - Send control commands (volume, play/pause)
-
-**Poll interval:** 1 second (configurable in roon_client.c)
-
-## Storage System
-
-**Purpose:** Persist configuration across reboots
-
-**Files:**
-- `pc_sim/platform_storage_pc.c` - JSON file in home directory
-- `idf_app/main/platform_storage_idf.c` - ESP NVS (Non-Volatile Storage)
-
-**Stored configuration:**
-```c
-typedef struct {
-    char bridge_base[128];  // e.g., "http://192.168.1.100:8088"
-    char zone_id[64];       // e.g., "1234567890abcdef"
-} rk_cfg_t;
-```
-
-## Threading Model
-
-### PC Simulator
-- Main thread: SDL event loop + LVGL loop
-- Roon client thread: HTTP polling
-
-### ESP32-S3
-- LVGL task: UI rendering (priority: 5)
-- Roon client task: HTTP polling
-- Input timer: 50ms periodic timer (ISR → poll)
-- IDLE tasks: FreeRTOS housekeeping
-
-**Synchronization:**
-- UI state updates: Mutex-protected
-- Input events: Direct callback (LVGL-safe)
-- Network state: Atomic flags
 
 ## Memory Layout (ESP32-S3)
 
-**Flash (16 MB):**
-- Bootloader: 32 KB
+### Flash (16 MB)
+- Bootloader: ~32 KB
 - Partition table: 4 KB
-- App (factory): ~2 MB
+- Factory app: ~2 MB
 - OTA_0: ~2 MB
 - OTA_1: ~2 MB
 - NVS: 24 KB
-- SPIFFS: 8 MB (unused currently)
+- SPIFFS: ~8 MB (for assets)
 
-**RAM (8 MB PSRAM):**
-- LVGL buffers: ~50 KB (display buffer)
-- Network buffers: ~16 KB (HTTP responses)
-- Stack: 4 KB per task
-- Heap: Remainder for dynamic allocation
+### RAM
+- **Internal SRAM (512 KB):**
+  - DMA buffers (display transfer)
+  - Task stacks
+  - Critical data structures
+
+- **PSRAM (8 MB):**
+  - LVGL draw buffers
+  - Artwork/image cache
+  - Network response buffers
+  - General heap
+
+## Threading Model
+
+### ESP32-S3
+
+| Task | Purpose | Priority |
+|------|---------|----------|
+| Main task | App initialization, UI loop | Normal |
+| Network task | HTTP polling | Normal |
+| LVGL tick timer | Time tracking | Timer (ISR) |
+| Input poll timer | Encoder sampling | Timer (ISR) |
+
+**Synchronization:**
+- UI state: Mutex-protected updates
+- Input events: Direct callback (LVGL-safe)
+- Network state: Atomic flags
+
+### PC Simulator
+- Main thread: SDL event loop + LVGL loop
+- Network thread: HTTP polling
 
 ## Build System
 
-### PC Simulator
-```bash
-cmake -B build/pc_sim
-cmake --build build/pc_sim
-```
-
-**Dependencies:** SDL2, libcurl, LVGL (fetched by CMake)
-
 ### ESP32-S3
 ```bash
+cd idf_app
 idf.py set-target esp32s3
 idf.py build
 idf.py -p PORT flash monitor
 ```
 
-**Dependencies:** ESP-IDF v5.x, LVGL, esp_lcd_sh8601 (managed components)
+**Dependencies:** ESP-IDF v5.x+, LVGL, esp_lcd_sh8601
 
-## Testing Strategy
+### PC Simulator
+```bash
+cmake -B build/pc_sim pc_sim
+cmake --build build/pc_sim
+./build/pc_sim/roon_knob_pc
+```
 
-### Simulator Testing
-1. Start bridge: `cd roon-extension && npm start`
-2. Run simulator: `./scripts/run_pc.sh`
-3. Test keyboard inputs
-4. Verify HTTP traffic in bridge logs
+**Dependencies:** SDL2, libcurl, LVGL (fetched by CMake)
 
-### Hardware Testing
-1. Flash firmware: `./scripts/build_flash_idf.sh /dev/cu.usbmodem101`
-2. Monitor serial output: `idf.py monitor`
-3. Test encoder rotation → Volume changes
-4. Test button presses → Play/pause, menu
-5. Verify display updates
+## Platform Abstraction
 
-### Integration Testing
-- WiFi connection stability
-- mDNS discovery reliability
-- HTTP retry logic
-- Zone switching
-- Volume control accuracy
+The `platform_*.h` headers define interfaces implemented differently per platform:
 
-## Known Limitations
+| Interface | ESP32-S3 | PC Sim |
+|-----------|----------|--------|
+| `platform_display` | SH8601/QSPI | SDL2 |
+| `platform_input` | Encoder + Touch | Keyboard/Mouse |
+| `platform_http` | esp_http_client | libcurl |
+| `platform_storage` | NVS | JSON file |
+| `platform_wifi` | ESP WiFi | N/A (uses host) |
 
-1. **Single zone focus:** Only one zone can be controlled at a time
-2. **No track seeking:** Cannot skip forward/backward in track
-3. **No playlist navigation:** Cannot skip tracks
-4. **WiFi only:** No Ethernet support
-5. **No OTA updates:** Requires USB flashing for firmware updates
+## Implementation Files
 
-## Future Enhancements
+### Core
+- `common/ui.c` - LVGL UI layout and state
+- `common/ui.h` - UI interface and event types
 
-Tracked in Beads (.beads/issues.jsonl):
-- WiFi setup screen (AP mode configuration)
-- OTA update mechanism
-- Long-press actions (e.g., skip track)
-- Display brightness control
-- Sleep mode / power saving
-- Multi-zone switching UI
+### ESP32-S3 Platform
+- `idf_app/main/platform_display_idf.c` - Display + touch
+- `idf_app/main/platform_input_idf.c` - Rotary encoder
+- `idf_app/main/platform_battery_idf.c` - Battery ADC
+- `idf_app/main/platform_http_idf.c` - HTTP client
+- `idf_app/main/platform_storage_idf.c` - NVS storage
+- `idf_app/main/platform_wifi_idf.c` - WiFi management
+
+### PC Simulator
+- `pc_sim/main_pc.c` - SDL setup and main loop
+- `pc_sim/platform_input_pc.c` - Keyboard input
+- `pc_sim/platform_display_pc.c` - SDL display

@@ -32,6 +32,7 @@ bool ui_is_zone_picker_visible(void);
 int ui_zone_picker_get_selected(void);
 void ui_zone_picker_scroll(int delta);
 void ui_set_artwork(const char *image_key);  // Set album artwork (placeholder for now)
+void ui_test_pattern(void);  // Debug: Show RGB test pattern to verify color format
 
 #ifdef __cplusplus
 }

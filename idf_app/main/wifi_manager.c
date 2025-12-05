@@ -104,9 +104,10 @@ static void connect_now(void) {
         ensure_cfg_loaded();
     }
     if (s_cfg.ssid[0] == '\0') {
-        ESP_LOGW(TAG, "SSID empty; skipping connect");
+        ESP_LOGW(TAG, "SSID empty; skipping connect. Configure WiFi via on-device UI or 'idf.py menuconfig'");
         return;
     }
+    ESP_LOGI(TAG, "Connecting to WiFi SSID: '%s'", s_cfg.ssid);
     if (s_retry_timer) {
         esp_timer_stop(s_retry_timer);
     }
@@ -170,6 +171,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
     esp_ip4_addr_t ip = evt->ip_info.ip;
     esp_ip4addr_ntoa(&ip, s_ip, sizeof(s_ip));
 
+    ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s", s_cfg.ssid, s_ip);
     reset_backoff();
     rk_net_evt_cb(RK_NET_EVT_GOT_IP, s_ip);
 }
@@ -199,7 +201,8 @@ void wifi_mgr_start(void) {
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_cfg));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+    // Disable WiFi power save for reliable HTTP polling
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
@@ -211,6 +214,12 @@ void wifi_mgr_start(void) {
     ESP_ERROR_CHECK(esp_timer_create(&retry_args, &s_retry_timer));
 
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Reduce WiFi TX power for battery operation (11 dBm instead of 20 dBm)
+    // This reduces peak current from ~500mA to ~200mA during WiFi transmission
+    // Units are 0.25 dBm, so 44 = 11 dBm
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(44));
+    ESP_LOGI(TAG, "WiFi TX power reduced to 11 dBm for battery compatibility");
 }
 
 void wifi_mgr_reconnect(const rk_cfg_t *cfg) {

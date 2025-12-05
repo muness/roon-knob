@@ -66,6 +66,7 @@
         <h2>Status ${pill}</h2>
         <p>Core: ${coreText}</p>
         <p>Zones tracked: ${bridge.zone_count}</p>
+        <p class="muted">Version: ${metrics.version || '0.1.0'} (${metrics.git_sha || 'unknown'})</p>
         <p class="muted">Uptime: ${ago(Date.now() - metrics.uptimeMs)}</p>
         <p class="muted">mDNS: ${metrics.mdns ? `${metrics.mdns.name} → ${metrics.mdns.base}` : 'not published'}</p>
         <p class="muted">JSON: <a href="/admin/status.json" target="_blank">/admin/status.json</a></p>

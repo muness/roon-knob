@@ -3,7 +3,7 @@ set -euo pipefail
 PORT="${PORT:-/dev/cu.usbmodem101}"
 SSID="${SSID:-YourWiFi}"
 PASS="${PASS:-YourPass}"
-BRIDGE_BASE="${BRIDGE_BASE:-http://192.168.1.10:8088}"
+BRIDGE_BASE="${BRIDGE_BASE:-http://192.168.1.2:8088}"
 
 cd "$(dirname "$0")/../idf_app"
 

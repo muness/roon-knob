@@ -8,7 +8,7 @@
 static const char *TAG = "platform_http";
 
 static int http_perform(const char *url, const char *body, const char *content_type, char **out, size_t *out_len) {
-    ESP_LOGI(TAG, "HTTP %s: %s", body ? "POST" : "GET", url);
+    ESP_LOGD(TAG, "HTTP %s: %s", body ? "POST" : "GET", url);
 
     // Use native request pattern (more reliable than perform() with event handler)
     esp_http_client_config_t config = {
@@ -58,7 +58,7 @@ static int http_perform(const char *url, const char *body, const char *content_t
     }
 
     int status_code = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "HTTP Status=%d, content_length=%d", status_code, content_length);
+    ESP_LOGD(TAG, "HTTP Status=%d, content_length=%d", status_code, content_length);
 
     // Allocate buffer for response
     char *buffer = calloc(1, content_length + 1);

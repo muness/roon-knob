@@ -2,10 +2,33 @@ function timestamp() {
   return new Date().toISOString();
 }
 
+function serializeError(err) {
+  if (!err) return err;
+  if (err instanceof Error) {
+    return {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+      ...err,
+    };
+  }
+  return err;
+}
+
+function serializeMeta(meta) {
+  if (!meta || typeof meta !== 'object') return meta;
+  const result = {};
+  for (const [key, value] of Object.entries(meta)) {
+    result[key] = value instanceof Error ? serializeError(value) : value;
+  }
+  return result;
+}
+
 function log(scope, level, message, meta) {
   const parts = [`[${timestamp()}][${scope}][${level.toUpperCase()}]`, message];
   if (meta && Object.keys(meta).length) {
-    parts.push(JSON.stringify(meta));
+    const serialized = serializeMeta(meta);
+    parts.push(JSON.stringify(serialized));
   }
   console.log(parts.join(' '));
 }

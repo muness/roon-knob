@@ -13,3 +13,39 @@ config RK_DEFAULT_BRIDGE_BASE
     default "http://192.168.1.213:8088"
 
 endmenu
+
+menu "Display Sleep Settings"
+
+config RK_DISPLAY_DIM_TIMEOUT_SEC
+    int "Display dim timeout (seconds)"
+    default 30
+    range 5 300
+    help
+        Time in seconds before dimming the display backlight.
+        Set to 0 to disable dimming.
+
+config RK_DISPLAY_SLEEP_TIMEOUT_SEC
+    int "Display sleep timeout (seconds)"
+    default 60
+    range 10 600
+    help
+        Time in seconds before turning off the display completely.
+        Set to 0 to disable sleep.
+
+config RK_BACKLIGHT_NORMAL
+    int "Normal backlight brightness (0-255)"
+    default 100
+    range 0 255
+    help
+        Backlight brightness level during normal operation (0-255).
+        Default 100 is approximately 40% brightness.
+
+config RK_BACKLIGHT_DIM
+    int "Dimmed backlight brightness (0-255)"
+    default 25
+    range 0 255
+    help
+        Backlight brightness level when dimmed (0-255).
+        Default 25 is approximately 10% brightness.
+
+endmenu

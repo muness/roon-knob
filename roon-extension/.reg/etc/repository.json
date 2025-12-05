@@ -5,7 +5,7 @@
         "display_name": "Roon Knob Bridge",
         "description": "Local bridge that exposes the HTTP API the Roon Knob firmware and simulator poll.",
         "image": {
-            "repo": "muness/roon-extension-bridge",
+            "repo": "muness/roon-extension-knob",
             "tags": {
                 "amd64": "latest",
                 "arm": "latest",

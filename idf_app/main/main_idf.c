@@ -1,4 +1,5 @@
 #include "app.h"
+#include "battery.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
 #include "platform/platform_time.h"
@@ -17,6 +18,9 @@
 #include <freertos/task.h>
 
 static const char *TAG = "main";
+
+// UI task handle for display sleep management
+static TaskHandle_t g_ui_task_handle = NULL;
 
 static void report_http_result(const char *label, int result, const char *url, size_t len) {
     if (result == 0) {
@@ -112,6 +116,12 @@ void app_main(void) {
         return;
     }
 
+    // Initialize battery monitoring
+    ESP_LOGI(TAG, "Initializing battery monitoring...");
+    if (!battery_init()) {
+        ESP_LOGW(TAG, "Battery monitoring init failed, continuing without it");
+    }
+
     // Initialize LVGL library
     ESP_LOGI(TAG, "Initializing LVGL...");
     lv_init();
@@ -127,20 +137,24 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing UI...");
     ui_init();
 
-    // Start WiFi (will use defaults from Kconfig or saved config)
-    ESP_LOGI(TAG, "Starting WiFi...");
-    wifi_mgr_start();
-
     // Initialize input (rotary encoder)
     platform_input_init();
+
+    // Create UI loop task BEFORE starting WiFi (WiFi events need LVGL task running)
+    ESP_LOGI(TAG, "Creating UI loop task");
+    xTaskCreate(ui_loop_task, "ui_loop", 8192, NULL, 2, &g_ui_task_handle);  // 8KB stack (LVGL theme needs more)
+
+    // Initialize display sleep management now that UI task is created
+    ESP_LOGI(TAG, "Initializing display sleep management");
+    platform_display_init_sleep(g_ui_task_handle);
 
     // Start application logic
     ESP_LOGI(TAG, "Starting app...");
     app_entry();
 
-    // Create UI loop task LAST - with lower priority so it doesn't block
-    ESP_LOGI(TAG, "Creating UI loop task");
-    xTaskCreate(ui_loop_task, "ui_loop", 8192, NULL, 2, NULL);  // 8KB stack (LVGL theme needs more)
+    // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
+    ESP_LOGI(TAG, "Starting WiFi...");
+    wifi_mgr_start();
 
     ESP_LOGI(TAG, "Initialization complete");
 }

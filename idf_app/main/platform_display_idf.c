@@ -1,5 +1,8 @@
 #include "platform_display_idf.h"
-#include "cst816.h"
+#include "platform/platform_display.h"
+#include "display_sleep.h"
+#include "i2c_bsp.h"
+#include "lcd_touch_bsp.h"
 
 #include <stdint.h>
 #include "freertos/FreeRTOS.h"
@@ -17,6 +20,10 @@
 #include "esp_lcd_sh8601.h"
 
 static const char *TAG = "display";
+
+// LVGL tick timer (critical for LVGL to know time is passing)
+static esp_timer_handle_t s_lvgl_tick_timer = NULL;
+#define LVGL_TICK_PERIOD_MS 2
 
 // Display configuration - matches hardware pinout
 #define LCD_HOST SPI2_HOST
@@ -215,10 +222,10 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0xD9, (uint8_t[]){0xAA}, 1, 0},
     {0xF3, (uint8_t[]){0x01}, 1, 0},
     {0xF0, (uint8_t[]){0x00}, 1, 0},
-    {0x21, (uint8_t[]){0x00}, 1, 0},  // 0x21 = inversion OFF (matches reference)
+    {0x21, (uint8_t[]){0x00}, 1, 0},
     {0x11, (uint8_t[]){0x00}, 1, 120},
     {0x29, (uint8_t[]){0x00}, 1, 0},
-    {0x36, (uint8_t[]){0x00}, 1, 0},  // No rotation
+    {0x36, (uint8_t[]){0x00}, 1, 0},
 };
 
 static lv_display_t *s_display = NULL;
@@ -258,11 +265,26 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
     const int offsety1 = area->y1;
     const int offsety2 = area->y2;
 
-    // For RGB565 (16-bit), no conversion needed - just draw directly
+    // Swap bytes for big-endian QSPI display (SH8601 expects big-endian RGB565)
+    // ESP32 is little-endian, so we need to swap each 16-bit pixel
+    const int width = offsetx2 - offsetx1 + 1;
+    const int height = offsety2 - offsety1 + 1;
+    const int pixel_count = width * height;
+    uint16_t *pixels = (uint16_t *)px_map;
+    for (int i = 0; i < pixel_count; i++) {
+        pixels[i] = (pixels[i] >> 8) | (pixels[i] << 8);
+    }
+
     esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
 
     // MUST call flush_ready here - the notify callback doesn't work properly with LVGL 9.x
     lv_display_flush_ready(disp);
+}
+
+// LVGL tick timer callback - critical for LVGL to track time
+static void lvgl_tick_timer_cb(void *arg) {
+    (void)arg;
+    lv_tick_inc(LVGL_TICK_PERIOD_MS);
 }
 
 // LVGL touch read callback
@@ -270,7 +292,8 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
     uint16_t x, y;
 
-    if (cst816_get_touch(&x, &y)) {
+    if (tpGetCoordinates(&x, &y)) {
+        display_activity_detected();  // Wake display and reset sleep timers
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
@@ -336,7 +359,7 @@ bool platform_display_init(void) {
     ESP_LOGI(TAG, "Install SH8601 panel driver");
     const esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_NUM_LCD_RST,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,  // Match smart-knob reference
         .bits_per_pixel = 16,  // RGB565
         .vendor_config = &vendor_config,
     };
@@ -344,12 +367,13 @@ bool platform_display_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel_handle));
 
-    // Initialize CST816 touch controller
+    // Initialize I2C bus and touch controller
+    ESP_LOGI(TAG, "Initializing I2C bus");
+    i2c_master_Init();
+
     ESP_LOGI(TAG, "Initializing CST816 touch controller");
-    if (!cst816_init()) {
-        ESP_LOGW(TAG, "Failed to initialize CST816 touch - continuing without touch support");
-        // Don't fail the entire display init just because touch failed
-    }
+    lcd_touch_init();
+    ESP_LOGI(TAG, "Touch controller initialized successfully");
 
     s_hardware_ready = true;
     ESP_LOGI(TAG, "Display hardware initialized successfully");
@@ -398,7 +422,25 @@ bool platform_display_register_lvgl_driver(void) {
     lv_indev_set_type(s_touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(s_touch_indev, lvgl_touch_read_cb);
 
-    // Note: LVGL tick and timer_handler will be called by ui_loop_iter()
+    // Create LVGL tick timer - CRITICAL for LVGL to know time is passing
+    ESP_LOGI(TAG, "Creating LVGL tick timer (%dms period)", LVGL_TICK_PERIOD_MS);
+    const esp_timer_create_args_t lvgl_tick_timer_args = {
+        .callback = lvgl_tick_timer_cb,
+        .name = "lvgl_tick"
+    };
+    esp_err_t timer_err = esp_timer_create(&lvgl_tick_timer_args, &s_lvgl_tick_timer);
+    if (timer_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create LVGL tick timer: %s", esp_err_to_name(timer_err));
+        return false;
+    }
+    timer_err = esp_timer_start_periodic(s_lvgl_tick_timer, LVGL_TICK_PERIOD_MS * 1000ULL);
+    if (timer_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start LVGL tick timer: %s", esp_err_to_name(timer_err));
+        return false;
+    }
+    ESP_LOGI(TAG, "LVGL tick timer started successfully");
+
+    // Note: LVGL timer_handler will be called by ui_loop_iter()
     // No separate LVGL task needed since ui_loop handles it
 
     s_lvgl_ready = true;
@@ -408,4 +450,16 @@ bool platform_display_register_lvgl_driver(void) {
 
 bool platform_display_is_ready(void) {
     return s_hardware_ready && s_lvgl_ready;
+}
+
+void platform_display_init_sleep(TaskHandle_t lvgl_task_handle) {
+    if (s_panel_handle == NULL) {
+        ESP_LOGW(TAG, "Cannot init display sleep - panel not initialized");
+        return;
+    }
+    display_sleep_init(s_panel_handle, lvgl_task_handle);
+}
+
+bool platform_display_is_sleeping(void) {
+    return display_is_sleeping();
 }

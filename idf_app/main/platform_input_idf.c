@@ -1,5 +1,6 @@
 #include "platform/platform_input.h"
 #include "ui.h"
+#include "display_sleep.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -204,6 +205,7 @@ void platform_input_process_events(void) {
     ui_input_event_t input;
     // Process all queued events (non-blocking)
     while (xQueueReceive(s_input_queue, &input, 0) == pdTRUE) {
+        display_activity_detected();  // Wake display and reset sleep timers
         ui_dispatch_input(input);
     }
 }

@@ -5,7 +5,7 @@ AUTHOR="Muness"
 EXTENSION_ID=com.muness.roon.knob.bridge
 
 # Set the NAME variable to the name of your extension
-NAME=roon-extension-bridge
+NAME=roon-extension-knob
 
 # Set the FRIENDLY_NAME variable to a more readable name for your extension
 FRIENDLY_NAME="Roon Knob Bridge"
