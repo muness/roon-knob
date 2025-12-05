@@ -110,13 +110,19 @@ static void wifi_form_submit(lv_event_t *e) {
     platform_storage_load(&cfg);
     copy_str(cfg.ssid, sizeof(cfg.ssid), lv_textarea_get_text(s_widgets.wifi_ssid));
     copy_str(cfg.pass, sizeof(cfg.pass), lv_textarea_get_text(s_widgets.wifi_pass));
+
+    // Show feedback and close panel
+    set_status_text("Connecting...");
+    hide_form(s_widgets.wifi_form);
+    if (s_widgets.panel) {
+        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
     if (platform_storage_save(&cfg)) {
         wifi_mgr_reconnect(&cfg);
-        refresh_labels();
     } else {
         ESP_LOGW(TAG, "failed to save Wi-Fi config");
     }
-    hide_form(s_widgets.wifi_form);
 }
 
 static void bridge_form_submit(lv_event_t *e) {

@@ -60,21 +60,12 @@ static bool test_bridge_connectivity(void) {
 }
 
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
-    // Notify UI about network events
+    // Notify UI about network events (uses lv_async_call internally)
     ui_network_on_event(evt, ip_opt);
-
-    // Get configured SSID for display
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
 
     switch (evt) {
     case RK_NET_EVT_CONNECTING:
-        ESP_LOGI(TAG, "WiFi: Connecting to %s...", cfg.ssid);
-        if (cfg.ssid[0]) {
-            ui_update(cfg.ssid, "Connecting...", false, 0, 0, 0);
-        } else {
-            ui_update("No WiFi configured", "Starting setup...", false, 0, 0, 0);
-        }
+        ESP_LOGI(TAG, "WiFi: Connecting...");
         ui_set_message("WiFi: Connecting...");
         break;
 
@@ -93,18 +84,13 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
     case RK_NET_EVT_FAIL:
         ESP_LOGW(TAG, "WiFi: Connection failed, retrying...");
-        if (cfg.ssid[0]) {
-            // Show which network and hint for manual reset (auto-resets after 5 failures)
-            ui_update(cfg.ssid, "Can't connect (long-press for settings)", false, 0, 0, 0);
-        }
         ui_set_message("WiFi: Retrying...");
         roon_client_set_network_ready(false);
         break;
 
     case RK_NET_EVT_AP_STARTED:
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
-        ui_update("Join WiFi network:", "roon-knob-setup", false, 0, 0, 0);
-        ui_set_message("WiFi: Setup Mode");
+        ui_set_message("Setup: roon-knob-setup");
         roon_client_set_network_ready(false);
         break;
 
