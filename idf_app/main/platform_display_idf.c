@@ -28,7 +28,8 @@ static int16_t s_touch_start_x = 0;
 static int16_t s_touch_start_y = 0;
 static int64_t s_touch_start_time = 0;
 static bool s_touch_tracking = false;
-static volatile bool s_pending_art_mode = false;  // Deferred art mode activation
+static volatile bool s_pending_art_mode = false;   // Deferred art mode activation
+static volatile bool s_pending_exit_art_mode = false;  // Deferred art mode exit
 
 // LVGL tick timer (critical for LVGL to know time is passing)
 static esp_timer_handle_t s_lvgl_tick_timer = NULL;
@@ -325,10 +326,15 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
                 int16_t dx = data->point.x - s_touch_start_x;
                 int16_t dy = data->point.y - s_touch_start_y;
 
-                // Check for swipe up (negative Y direction)
+                // Check for swipe up (negative Y direction) - enter art mode
                 if (dy < -SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
                     ESP_LOGI(TAG, "Swipe up detected - queueing art mode");
                     s_pending_art_mode = true;  // Defer to avoid LVGL threading issues
+                }
+                // Check for swipe down (positive Y direction) - exit art mode
+                else if (dy > SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
+                    ESP_LOGI(TAG, "Swipe down detected - queueing exit art mode");
+                    s_pending_exit_art_mode = true;  // Defer to avoid LVGL threading issues
                 }
             }
             s_touch_tracking = false;
@@ -503,6 +509,14 @@ void platform_display_process_pending(void) {
     if (s_pending_art_mode) {
         s_pending_art_mode = false;
         display_art_mode();
+    }
+    // Process deferred exit art mode (swipe down)
+    if (s_pending_exit_art_mode) {
+        s_pending_exit_art_mode = false;
+        // Only exit if in art mode - use display_wake which handles state properly
+        if (display_get_state() == DISPLAY_STATE_ART_MODE) {
+            display_wake();  // Returns to normal state with controls visible
+        }
     }
     // Process deferred timer-triggered state changes
     display_process_pending();

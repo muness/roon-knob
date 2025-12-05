@@ -67,6 +67,7 @@ The knob finds the extension automatically via mDNS.
 | **Press the knob** | Open zone picker |
 | **Tap the screen** | Play/pause |
 | **Swipe up** | Art mode (hide controls, show album art) |
+| **Swipe down** | Exit art mode |
 | **Long-press zone name** | Settings |
 
 ## Features
