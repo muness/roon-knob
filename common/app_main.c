@@ -17,7 +17,7 @@ void app_entry(void) {
         platform_storage_defaults(&cfg);
         platform_storage_save(&cfg);
     }
-    platform_mdns_init(NULL);
+    // Note: mDNS init moved to after WiFi connects (in main_idf.c)
     ui_set_input_handler(roon_client_handle_input);
     ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "Press knob to select zone");
     roon_client_start(&cfg);

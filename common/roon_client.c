@@ -54,6 +54,7 @@ static bool s_running;
 static bool s_trigger_poll;
 static bool s_last_net_ok;
 static bool s_network_ready;
+static bool s_force_artwork_refresh;  // Force artwork reload on zone change
 
 static void lock_state(void) {
     os_mutex_lock(&s_state_lock);
@@ -90,9 +91,14 @@ static void ui_update_cb(void *arg) {
     }
     ui_update(state->line1, state->line2, state->is_playing, state->volume, state->seek_position, state->length);
 
-    // Update artwork if image_key changed
+    // Update artwork if image_key changed or forced refresh
     static char last_image_key[128] = "";
-    if (strcmp(state->image_key, last_image_key) != 0) {
+    bool force_refresh = s_force_artwork_refresh;
+    if (force_refresh) {
+        s_force_artwork_refresh = false;
+        last_image_key[0] = '\0';  // Clear cache to force reload
+    }
+    if (force_refresh || strcmp(state->image_key, last_image_key) != 0) {
         ui_set_artwork(state->image_key);
         strncpy(last_image_key, state->image_key, sizeof(last_image_key) - 1);
         last_image_key[sizeof(last_image_key) - 1] = '\0';
@@ -371,7 +377,8 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         state->image_key[0] = '\0';  // No artwork available
     }
 
-    parse_zones_from_response(resp);
+    // Note: Don't parse zones from now_playing response - it doesn't have zone_name
+    // Zones are parsed from /zones endpoint in refresh_zone_label()
     platform_http_free(resp);
     return true;
 }
@@ -610,20 +617,32 @@ void roon_client_handle_input(ui_input_event_t event) {
             return;
         }
         if (event == UI_INPUT_PLAY_PAUSE) {
-            int selected = ui_zone_picker_get_selected();
+            // Get the selected zone ID directly from the picker
+            char selected_id[MAX_ZONE_NAME] = {0};
+            ui_zone_picker_get_selected_id(selected_id, sizeof(selected_id));
+            LOGI("Zone picker: selected zone id '%s'", selected_id);
             char label_copy[MAX_ZONE_NAME] = {0};
             bool updated = false;
             lock_state();
-            if (selected >= 0 && selected < s_state.zone_count) {
-                struct zone_entry *entry = &s_state.zones[selected];
-                strncpy(s_state.cfg.zone_id, entry->id, sizeof(s_state.cfg.zone_id) - 1);
-                s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
-                strncpy(s_state.zone_label, entry->name, sizeof(s_state.zone_label) - 1);
-                s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
-                strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
-                s_state.zone_resolved = true;
-                s_trigger_poll = true;
-                updated = true;
+            // Find the zone by ID to get its name
+            for (int i = 0; i < s_state.zone_count; ++i) {
+                struct zone_entry *entry = &s_state.zones[i];
+                if (strcmp(entry->id, selected_id) == 0) {
+                    LOGI("Zone picker: switching to zone '%s' (id=%s)", entry->name, entry->id);
+                    strncpy(s_state.cfg.zone_id, entry->id, sizeof(s_state.cfg.zone_id) - 1);
+                    s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
+                    strncpy(s_state.zone_label, entry->name, sizeof(s_state.zone_label) - 1);
+                    s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
+                    strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
+                    s_state.zone_resolved = true;
+                    s_trigger_poll = true;
+                    s_force_artwork_refresh = true;  // Force artwork reload for new zone
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                LOGW("Zone picker: zone id '%s' not found in zone list", selected_id);
             }
             unlock_state();
             if (updated) {
@@ -643,6 +662,7 @@ void roon_client_handle_input(ui_input_event_t event) {
 
     if (event == UI_INPUT_MENU) {
         const char *names[MAX_ZONES];
+        const char *ids[MAX_ZONES];
         int selected = 0;
         int count = 0;
         lock_state();
@@ -650,6 +670,7 @@ void roon_client_handle_input(ui_input_event_t event) {
             count = s_state.zone_count;
             for (int i = 0; i < s_state.zone_count; ++i) {
                 names[i] = s_state.zones[i].name;
+                ids[i] = s_state.zones[i].id;
                 if (strcmp(s_state.zones[i].id, s_state.cfg.zone_id) == 0) {
                     selected = i;
                 }
@@ -657,7 +678,7 @@ void roon_client_handle_input(ui_input_event_t event) {
         }
         unlock_state();
         if (count > 0) {
-            ui_show_zone_picker(names, count, selected);
+            ui_show_zone_picker(names, ids, count, selected);
         } else {
             post_ui_message("No zones available");
         }

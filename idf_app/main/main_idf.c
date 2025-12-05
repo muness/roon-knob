@@ -1,8 +1,10 @@
 #include "app.h"
 #include "battery.h"
+#include "config_server.h"
 #include "ota_update.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
+#include "platform/platform_mdns.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_time.h"
 #include "platform_display_idf.h"
@@ -24,6 +26,12 @@ static const char *TAG = "main";
 
 // UI task handle for display sleep management
 static TaskHandle_t g_ui_task_handle = NULL;
+
+// Deferred operations flags (set in event handler, processed in UI task)
+static volatile bool s_ota_check_pending = false;
+static volatile bool s_config_server_start_pending = false;
+static volatile bool s_config_server_stop_pending = false;
+static volatile bool s_mdns_init_pending = false;
 
 // Test bridge connectivity and show result to user
 static bool test_bridge_connectivity(void) {
@@ -71,15 +79,12 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
     case RK_NET_EVT_GOT_IP:
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
-
-        // Test bridge connectivity and show result
-        test_bridge_connectivity();
-
+        ui_set_message("WiFi: Connected");
         roon_client_set_network_ready(true);
-
-        // Check for firmware updates
-        ESP_LOGI(TAG, "Checking for firmware updates...");
-        ota_check_for_update();
+        // Defer heavy operations to UI task (sys_evt has limited stack)
+        s_mdns_init_pending = true;  // mDNS needs network up first
+        s_ota_check_pending = true;
+        s_config_server_start_pending = true;
         break;
 
     case RK_NET_EVT_FAIL:
@@ -92,6 +97,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
         ui_set_message("Setup: roon-knob-setup");
         roon_client_set_network_ready(false);
+        s_config_server_stop_pending = true;  // Stop config server in AP mode
         break;
 
     case RK_NET_EVT_AP_STOPPED:
@@ -164,6 +170,26 @@ static void ui_loop_task(void *arg) {
         if (++ota_check_counter >= 50) {
             ota_check_counter = 0;
             check_ota_status();
+        }
+
+        // Process deferred operations (from WiFi event callback)
+        if (s_mdns_init_pending) {
+            s_mdns_init_pending = false;
+            ESP_LOGI(TAG, "Initializing mDNS (network is up)...");
+            platform_mdns_init(NULL);
+        }
+        if (s_ota_check_pending) {
+            s_ota_check_pending = false;
+            ESP_LOGI(TAG, "Checking for firmware updates...");
+            ota_check_for_update();
+        }
+        if (s_config_server_start_pending) {
+            s_config_server_start_pending = false;
+            config_server_start();
+        }
+        if (s_config_server_stop_pending) {
+            s_config_server_stop_pending = false;
+            config_server_stop();
         }
 
         // Yield to lower priority tasks including IDLE

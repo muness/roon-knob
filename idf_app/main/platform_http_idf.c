@@ -2,10 +2,27 @@
 
 #include <esp_http_client.h>
 #include <esp_log.h>
+#include <esp_mac.h>
+#include <esp_app_desc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "platform_http";
+
+// Get unique device ID based on MAC address
+static void get_knob_id(char *out, size_t len) {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(out, len, "%02x%02x%02x%02x%02x%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+// Get firmware version
+static const char* get_knob_version(void) {
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    return app_desc->version;
+}
 
 static int http_perform(const char *url, const char *body, const char *content_type, char **out, size_t *out_len) {
     ESP_LOGD(TAG, "HTTP %s: %s", body ? "POST" : "GET", url);
@@ -28,6 +45,12 @@ static int http_perform(const char *url, const char *body, const char *content_t
     if (body) {
         esp_http_client_set_header(client, "Content-Type", content_type ? content_type : "application/json");
     }
+
+    // Set knob identification headers
+    char knob_id[16];
+    get_knob_id(knob_id, sizeof(knob_id));
+    esp_http_client_set_header(client, "X-Knob-Id", knob_id);
+    esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
 
     // Open connection
     esp_err_t err = esp_http_client_open(client, body ? strlen(body) : 0);

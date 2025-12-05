@@ -186,6 +186,20 @@ static void hide_panel_cb(lv_event_t *e) {
     }
 }
 
+static void clear_bridge_cb(lv_event_t *e) {
+    (void)e;
+    rk_cfg_t cfg = {0};
+    platform_storage_load(&cfg);
+    cfg.bridge_base[0] = '\0';  // Clear stored bridge URL
+    if (platform_storage_save(&cfg)) {
+        set_status_text("Bridge cleared (mDNS)");
+        ESP_LOGI(TAG, "Bridge URL cleared, will use mDNS discovery");
+    } else {
+        set_status_text("Clear failed");
+        ESP_LOGW(TAG, "Failed to clear bridge URL");
+    }
+}
+
 static void show_wifi_form(lv_event_t *e) {
     (void)e;
     if (!s_widgets.wifi_form) {
@@ -307,14 +321,10 @@ static void ensure_panel(void) {
     s_widgets.status_label = lv_label_create(s_widgets.panel);
     lv_label_set_text(s_widgets.status_label, "Wi-Fi idle");
 
-    create_button(s_widgets.panel, "Change Wi-Fi", show_wifi_form);
-    create_button(s_widgets.panel, "Set Bridge", show_bridge_form);
     create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
+    create_button(s_widgets.panel, "Clear Bridge", clear_bridge_cb);
     create_button(s_widgets.panel, "Forget Wi-Fi", forget_wifi_cb);
     create_button(s_widgets.panel, "Back", hide_panel_cb);
-
-    build_wifi_form(s_widgets.panel);
-    build_bridge_form(s_widgets.panel);
 }
 
 typedef struct {

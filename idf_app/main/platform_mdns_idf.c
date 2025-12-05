@@ -62,27 +62,35 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
     if (!out || len == 0) {
         return false;
     }
+    ESP_LOGI(TAG, "Querying mDNS for %s.%s...", SERVICE_TYPE, SERVICE_PROTO);
     mdns_result_t *results = NULL;
-    esp_err_t err = mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 2000, 4, &results);
-    if (err != ESP_OK || !results) {
-        if (results) {
-            mdns_query_results_free(results);
-        }
+    esp_err_t err = mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 3000, 4, &results);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS query failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    if (!results) {
+        ESP_LOGW(TAG, "mDNS query returned no results");
         return false;
     }
     bool found = false;
     char url[128] = {0};
-    for (mdns_result_t *r = results; r && !found; r = r->next) {
-        if (txt_find_base(r, url, sizeof(url))) {
+    int count = 0;
+    for (mdns_result_t *r = results; r; r = r->next) {
+        count++;
+        ESP_LOGI(TAG, "mDNS result %d: hostname=%s port=%d txt_count=%zu",
+                 count, r->hostname ? r->hostname : "(null)", r->port, r->txt_count);
+        if (!found && txt_find_base(r, url, sizeof(url))) {
+            ESP_LOGI(TAG, "  Found base TXT: %s", url);
             found = true;
-            break;
         }
-        if (r->hostname && r->port) {
+        if (!found && r->hostname && r->port) {
             snprintf(url, sizeof(url), "http://%s:%u", r->hostname, r->port);
+            ESP_LOGI(TAG, "  Using hostname:port: %s", url);
             found = true;
-            break;
         }
     }
+    ESP_LOGI(TAG, "mDNS: found %d results, selected: %s", count, found ? url : "(none)");
     mdns_query_results_free(results);
     if (found && url[0]) {
         copy_str(out, len, url);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,10 +27,11 @@ void ui_set_message(const char *msg);
 void ui_set_input_handler(ui_input_cb_t handler);
 void ui_dispatch_input(ui_input_event_t ev);
 void ui_set_zone_name(const char *zone_name);
-void ui_show_zone_picker(const char **zone_names, int zone_count, int selected_idx);
+void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int zone_count, int selected_idx);
 void ui_hide_zone_picker(void);
 bool ui_is_zone_picker_visible(void);
 int ui_zone_picker_get_selected(void);
+void ui_zone_picker_get_selected_id(char *out, size_t len);
 void ui_zone_picker_scroll(int delta);
 void ui_set_artwork(const char *image_key);  // Set album artwork (placeholder for now)
 void ui_test_pattern(void);  // Debug: Show RGB test pattern to verify color format

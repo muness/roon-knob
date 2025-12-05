@@ -81,6 +81,10 @@ static lv_timer_t *s_status_timer;     // Timer to clear status messages
 static lv_obj_t *s_zone_picker_overlay;    // Dark background overlay
 static lv_obj_t *s_zone_roller;            // Roller widget for zone selection
 static bool s_zone_picker_visible = false;
+#define MAX_ZONE_PICKER_ZONES 16
+#define MAX_ZONE_ID_LEN 48
+static char s_zone_picker_ids[MAX_ZONE_PICKER_ZONES][MAX_ZONE_ID_LEN];  // Store zone IDs
+static int s_zone_picker_count = 0;
 
 // OTA update notification
 static lv_obj_t *s_update_btn;             // Update notification button
@@ -592,9 +596,16 @@ static void clear_status_message_timer_cb(lv_timer_t *timer) {
 // Zone Picker - LVGL Roller Widget
 // ============================================================================
 
-void ui_show_zone_picker(const char *zones[], int count, int selected) {
+void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int count, int selected) {
     if (s_zone_picker_visible) {
         return;
+    }
+
+    // Store zone IDs for later retrieval
+    s_zone_picker_count = (count > MAX_ZONE_PICKER_ZONES) ? MAX_ZONE_PICKER_ZONES : count;
+    for (int i = 0; i < s_zone_picker_count; i++) {
+        strncpy(s_zone_picker_ids[i], zone_ids[i], MAX_ZONE_ID_LEN - 1);
+        s_zone_picker_ids[i][MAX_ZONE_ID_LEN - 1] = '\0';
     }
 
     // Create fullscreen dark overlay
@@ -618,9 +629,9 @@ void ui_show_zone_picker(const char *zones[], int count, int selected) {
 
     // Build options string (newline-separated)
     char options[1024] = "";
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < s_zone_picker_count; i++) {
         if (i > 0) strcat(options, "\n");
-        strncat(options, zones[i], sizeof(options) - strlen(options) - 1);
+        strncat(options, zone_names[i], sizeof(options) - strlen(options) - 1);
     }
     lv_roller_set_options(s_zone_roller, options, LV_ROLLER_MODE_INFINITE);
 
@@ -675,9 +686,26 @@ void ui_hide_zone_picker(void) {
 
 int ui_get_zone_picker_selected(void) {
     if (!s_zone_picker_visible || !s_zone_roller) {
-        return 0;
+        return -1;  // Invalid state - picker not visible
     }
-    return lv_roller_get_selected(s_zone_roller);
+    return (int)lv_roller_get_selected(s_zone_roller);
+}
+
+void ui_zone_picker_get_selected_id(char *out, size_t len) {
+    if (!out || len == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (!s_zone_picker_visible || !s_zone_roller) {
+        return;
+    }
+    int selected = (int)lv_roller_get_selected(s_zone_roller);
+    // Normalize index for infinite mode (modulo actual count)
+    if (s_zone_picker_count > 0) {
+        selected = selected % s_zone_picker_count;
+        strncpy(out, s_zone_picker_ids[selected], len - 1);
+        out[len - 1] = '\0';
+    }
 }
 
 // ============================================================================
