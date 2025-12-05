@@ -57,6 +57,7 @@ static bool s_trigger_poll;
 static bool s_last_net_ok;
 static bool s_network_ready;
 static bool s_force_artwork_refresh;  // Force artwork reload on zone change
+static int s_last_known_volume = 0;   // Cached volume for optimistic UI updates
 
 static void lock_state(void) {
     os_mutex_lock(&s_state_lock);
@@ -91,6 +92,8 @@ static void ui_update_cb(void *arg) {
         LOGI("ui_update_cb: state is NULL!");
         return;
     }
+    // Cache volume for optimistic UI updates
+    s_last_known_volume = state->volume;
     ui_update(state->line1, state->line2, state->is_playing, state->volume, state->volume_min, state->volume_max, state->seek_position, state->length);
 
     // Update artwork if image_key changed or forced refresh
@@ -712,6 +715,8 @@ void roon_client_handle_input(ui_input_event_t event) {
         snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}",
             s_state.cfg.zone_id, -2);
         unlock_state();
+        // Show volume overlay immediately with predicted value (optimistic UI)
+        ui_show_volume_change(s_last_known_volume - 2);
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
@@ -721,6 +726,8 @@ void roon_client_handle_input(ui_input_event_t event) {
         snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}",
             s_state.cfg.zone_id, 2);
         unlock_state();
+        // Show volume overlay immediately with predicted value (optimistic UI)
+        ui_show_volume_change(s_last_known_volume + 2);
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }

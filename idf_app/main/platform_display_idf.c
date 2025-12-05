@@ -499,9 +499,11 @@ bool platform_display_is_sleeping(void) {
 }
 
 void platform_display_process_pending(void) {
-    // Process deferred art mode activation (safe to call LVGL here)
+    // Process deferred swipe gesture art mode
     if (s_pending_art_mode) {
         s_pending_art_mode = false;
         display_art_mode();
     }
+    // Process deferred timer-triggered state changes
+    display_process_pending();
 }

@@ -15,7 +15,6 @@ static const char *TAG = "display_sleep";
 #define LEDC_SPEED_MODE     LEDC_LOW_SPEED_MODE
 
 // Display timeout configuration (from Kconfig)
-#define DISPLAY_ART_MODE_TIMEOUT_MS (CONFIG_RK_DISPLAY_DIM_TIMEOUT_SEC * 1000 / 2)  // Half of dim timeout
 #define DISPLAY_DIM_TIMEOUT_MS (CONFIG_RK_DISPLAY_DIM_TIMEOUT_SEC * 1000)
 #define DISPLAY_SLEEP_TIMEOUT_MS (CONFIG_RK_DISPLAY_SLEEP_TIMEOUT_SEC * 1000)
 
@@ -34,7 +33,6 @@ static const char *TAG = "display_sleep";
 // Global state
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static TaskHandle_t s_lvgl_task_handle = NULL;
-static esp_timer_handle_t s_art_mode_timer = NULL;
 static esp_timer_handle_t s_dim_timer = NULL;
 static esp_timer_handle_t s_sleep_timer = NULL;
 static SemaphoreHandle_t s_display_state_mutex = NULL;
@@ -129,10 +127,6 @@ void display_wake(void) {
 
     // Reset timers outside of mutex to avoid deadlock
     if (prev_state != DISPLAY_STATE_NORMAL) {
-        if (s_art_mode_timer != NULL) {
-            esp_timer_stop(s_art_mode_timer);
-            esp_timer_start_once(s_art_mode_timer, DISPLAY_ART_MODE_TIMEOUT_MS * 1000ULL);
-        }
         if (s_dim_timer != NULL) {
             esp_timer_stop(s_dim_timer);
             esp_timer_start_once(s_dim_timer, DISPLAY_DIM_TIMEOUT_MS * 1000ULL);
@@ -144,19 +138,30 @@ void display_wake(void) {
     }
 }
 
-// Timer callback for art mode
-static void art_mode_timer_callback(void *arg) {
-    display_art_mode();
-}
+// Pending state changes (set by timer callbacks, processed in UI loop)
+static volatile bool s_pending_dim = false;
+static volatile bool s_pending_sleep = false;
 
 // Timer callback for dimming
 static void dim_timer_callback(void *arg) {
-    display_dim();
+    s_pending_dim = true;  // Defer to UI loop
 }
 
 // Timer callback for sleep
 static void sleep_timer_callback(void *arg) {
-    display_sleep();
+    s_pending_sleep = true;  // Defer to UI loop
+}
+
+// Process pending display state changes (call from UI loop)
+void display_process_pending(void) {
+    if (s_pending_dim) {
+        s_pending_dim = false;
+        display_dim();
+    }
+    if (s_pending_sleep) {
+        s_pending_sleep = false;
+        display_sleep();
+    }
 }
 
 // Initialize sleep timer
@@ -172,14 +177,6 @@ void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_t
 
     s_panel_handle = panel_handle;
     s_lvgl_task_handle = lvgl_task_handle;
-
-    // Create art mode timer
-    const esp_timer_create_args_t art_mode_timer_args = {
-        .callback = &art_mode_timer_callback,
-        .name = "display_art_mode"
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&art_mode_timer_args, &s_art_mode_timer));
-    ESP_ERROR_CHECK(esp_timer_start_once(s_art_mode_timer, DISPLAY_ART_MODE_TIMEOUT_MS * 1000ULL));
 
     // Create dim timer
     const esp_timer_create_args_t dim_timer_args = {
@@ -197,8 +194,8 @@ void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_t
     ESP_ERROR_CHECK(esp_timer_create(&sleep_timer_args, &s_sleep_timer));
     ESP_ERROR_CHECK(esp_timer_start_once(s_sleep_timer, DISPLAY_SLEEP_TIMEOUT_MS * 1000ULL));
 
-    ESP_LOGI(TAG, "Display sleep initialized (art: %ds, dim: %ds, sleep: %ds)",
-             DISPLAY_ART_MODE_TIMEOUT_MS / 1000, DISPLAY_DIM_TIMEOUT_MS / 1000, DISPLAY_SLEEP_TIMEOUT_MS / 1000);
+    ESP_LOGI(TAG, "Display sleep initialized (dim: %ds, sleep: %ds)",
+             DISPLAY_DIM_TIMEOUT_MS / 1000, DISPLAY_SLEEP_TIMEOUT_MS / 1000);
 }
 
 // Activity detected - reset timers and wake if needed
@@ -206,22 +203,18 @@ void display_activity_detected(void) {
     display_state_t current_state = display_get_state();
 
     // Wake display if not in normal state
-    if (current_state != DISPLAY_STATE_NORMAL) {
+    if (current_state != DISPLAY_STATE_NORMAL && current_state != DISPLAY_STATE_ART_MODE) {
         display_wake();
-    } else {
-        // Just reset the timers if already awake in normal state
-        if (s_art_mode_timer != NULL) {
-            esp_timer_stop(s_art_mode_timer);
-            esp_timer_start_once(s_art_mode_timer, DISPLAY_ART_MODE_TIMEOUT_MS * 1000ULL);
-        }
-        if (s_dim_timer != NULL) {
-            esp_timer_stop(s_dim_timer);
-            esp_timer_start_once(s_dim_timer, DISPLAY_DIM_TIMEOUT_MS * 1000ULL);
-        }
-        if (s_sleep_timer != NULL) {
-            esp_timer_stop(s_sleep_timer);
-            esp_timer_start_once(s_sleep_timer, DISPLAY_SLEEP_TIMEOUT_MS * 1000ULL);
-        }
+    }
+
+    // Reset timers (always, to extend timeout on activity)
+    if (s_dim_timer != NULL) {
+        esp_timer_stop(s_dim_timer);
+        esp_timer_start_once(s_dim_timer, DISPLAY_DIM_TIMEOUT_MS * 1000ULL);
+    }
+    if (s_sleep_timer != NULL) {
+        esp_timer_stop(s_sleep_timer);
+        esp_timer_start_once(s_sleep_timer, DISPLAY_SLEEP_TIMEOUT_MS * 1000ULL);
     }
 }
 

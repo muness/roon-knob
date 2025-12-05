@@ -72,6 +72,12 @@ bool display_is_sleeping(void);
  */
 display_state_t display_get_state(void);
 
+/**
+ * @brief Process pending display state changes
+ * Call this from the UI loop to safely handle timer-triggered state changes
+ */
+void display_process_pending(void);
+
 #ifdef __cplusplus
 }
 #endif
