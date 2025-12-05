@@ -147,7 +147,7 @@ bool ui_jpeg_decode_to_lvgl(const uint8_t *jpeg_data,
     free(io);
     free(info);
 
-    ESP_LOGI(TAG, "Decoded JPEG to %dx%d RGB565 (%zu bytes)", w, h, out_img->dsc.data_size);
+    ESP_LOGI(TAG, "Decoded JPEG to %dx%d RGB565 (%lu bytes)", w, h, (unsigned long)out_img->dsc.data_size);
     return true;
 }
 
