@@ -34,48 +34,131 @@ roon-knob/
 └── .beads/            # Task tracker database (Beads)
 ```
 
-## Getting Started
+## User Setup Guide
 
-1. Install the simulator dependencies (`cmake`, `ninja`, `sdl2`, `curl`) with `./scripts/setup_mac.sh`.
-2. Build and run the PC simulator: `./scripts/run_pc.sh` (expects a bridge at `http://127.0.0.1:8088` by default). The simulator uses LVGL 9 to render a 240×240 round UI (SDL2):
-   - **Main screen:**
-     - ↑/↓ or ←/→: Volume control (rotary knob)
-     - Space/Enter: Play/pause (touch)
-     - Z or M: Open zone picker
-   - **Zone picker:**
-     - ↑/↓: Scroll through zones
-     - Space/Enter: Select zone
-     - Z or M: Close without selecting
-   - Status dot shows connection health
-   Use `ROON_BRIDGE_BASE` env vars to target specific bridges/zones.
-3. Install ESP-IDF
-   - Follow the [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/index.html)
-   - Typical installation: `~/esp/esp-idf`
-4. Flash the ESP32-S3 target:
-   - Setup environment and build:
-   - Plug the knob into your Mac/Linux workstation with a USB-C cable. If the board enumerates as a non-ESP device (no `/dev/cu.*esp*` entry, or the USB-C socket feels loose), flip the cable or try the other USB-C port — the board can revert to a USB-to-serial bootloader mode that looks like a generic `wchusbserial` device.
-   - Identify the serial port:
-     - **macOS**: run `ls /dev/cu.*` and look for the `wchusbserial*` or `usbmodem*` entry (e.g., `/dev/cu.usbmodem101`).
-     - **Linux**: run `ls /dev/ttyUSB*` or `ls /dev/ttyACM*`.
-   - Setup ESP-IDF environment and build:
+> **Note:** This guide assumes comfort with command line and Docker. The bridge requires an always-on computer on your network.
 
-     ```bash
-     export IDF_PATH=~/esp/esp-idf
-     source "$IDF_PATH/export.sh"
-     ./scripts/build_flash_idf.sh /dev/tty.usbmodem101
-     ```
+### Prerequisites
 
-    The script forces `idf.py set-target esp32s3`, builds, flashes, and drops you into the monitor. If the chip you are actually flashing identifies as plain ESP32 (and the host reports `ESP32, not ESP32-S3`), rerun `idf.py set-target esp32` (or edit `sdkconfig`/`sdkconfig.overrides` to the esp32 target) and flash again with `idf.py` directly so the build/flash toolchain matches the silicon. If the knob is still in bootloader mode and keeps logging "ESP32" despite using the S3 target, unplug/replug while holding/resetting the board to force the S3 USB controller to enumerate correctly.
-     If `idf.py` complains about `No module named 'click'` or similar, rerun `source $IDF_PATH/export.sh` in that shell and reinstall the ESP-IDF Python requirements (`python -m pip install -r "$IDF_PATH/requirements.txt"` while the export script is active) so the helper script can find `click`.
+- **Roon Core** running on your network
+- **Roon Knob hardware** (Waveshare ESP32-S3-Knob-Touch-LCD-1.8)
+- **Docker** installed on a computer that stays on (NAS, Raspberry Pi, server, etc.)
 
-   - To monitor serial output after flashing:
+### Step 1: Start the Bridge
 
-     ```bash
-     idf.py monitor -p /dev/cu.usbmodem101
-     ```
+Create a `docker-compose.yml` file (or use the one in `roon-extension/`):
 
-     **Note:** To exit the monitor, press `Ctrl+]` (not Ctrl+C). This is easy to forget!
-5. Launch the bridge: `cd roon-extension && npm install && npm start` (or `npm run dev` for hot reload).
+```yaml
+services:
+  roon-knob-bridge:
+    image: docker.io/muness/roon-extension-knob:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - roon-knob-bridge-data:/home/node/app/data
+
+volumes:
+  roon-knob-bridge-data:
+```
+
+Then start it:
+
+```bash
+docker compose up -d
+docker compose logs -f  # Watch logs (Ctrl+C to exit)
+```
+
+You'll see: `Waiting for Roon Core...`
+
+### Step 2: Authorize in Roon
+
+1. Open **Roon** → **Settings** → **Extensions**
+2. Find **"Roon Knob Bridge"** and click **Enable**
+3. The bridge will log: `Roon Core paired!`
+
+With `restart: unless-stopped`, Docker will keep the bridge running across reboots.
+
+### Step 3: Power On the Knob
+
+1. Connect the knob via USB-C (or battery)
+2. It will show **"WiFi: Setup Mode"** and create a network called **"roon-knob-setup"**
+3. Connect your phone/laptop to that network
+4. A setup page should auto-popup (or go to `http://192.168.4.1`)
+5. Enter your WiFi credentials and click **Connect**
+
+### Step 4: Select a Zone
+
+After connecting to WiFi:
+1. The knob will show **"Press knob to select zone"**
+2. Press the rotary encoder to open the zone picker
+3. Turn the knob to scroll through zones, press to select
+
+### Using the Knob
+
+| Control | Action |
+|---------|--------|
+| **Turn knob** | Adjust volume |
+| **Press knob** | Open zone picker |
+| **Tap screen** | Play/pause |
+
+### Troubleshooting
+
+| Status | Meaning |
+|--------|---------|
+| "WiFi: Connecting..." | Connecting to your network |
+| "WiFi: Retrying..." | Wrong credentials or network issue |
+| "WiFi: Setup Mode" | Enter WiFi credentials via captive portal |
+| "Bridge: Searching..." | Looking for bridge via mDNS |
+| "Bridge: Unreachable" | Bridge not running or wrong URL |
+| "Bridge: Connected" | Ready to use! |
+
+If mDNS discovery fails, you can manually enter the bridge URL (e.g., `http://192.168.1.100:8088`) in the WiFi setup page or in Settings.
+
+---
+
+## Development
+
+### PC Simulator
+
+Build and run the simulator for rapid UI development:
+
+```bash
+./scripts/setup_mac.sh  # Install dependencies (cmake, ninja, sdl2, curl)
+./scripts/run_pc.sh     # Run simulator (expects bridge at http://127.0.0.1:8088)
+```
+
+Controls:
+- **↑/↓ or ←/→**: Volume
+- **Space/Enter**: Play/pause
+- **Z or M**: Zone picker
+
+### Flashing the Firmware
+
+1. Install [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/index.html) (typically to `~/esp/esp-idf`)
+
+2. Connect the knob via USB-C and identify the port:
+   - **macOS**: `ls /dev/cu.*` → look for `usbmodem*` or `wchusbserial*`
+   - **Linux**: `ls /dev/ttyUSB*` or `ls /dev/ttyACM*`
+
+3. Build and flash:
+   ```bash
+   export IDF_PATH=~/esp/esp-idf
+   source "$IDF_PATH/export.sh"
+   ./scripts/build_flash_idf.sh /dev/cu.usbmodem101
+   ```
+
+4. Monitor serial output:
+   ```bash
+   idf.py monitor -p /dev/cu.usbmodem101  # Exit with Ctrl+]
+   ```
+
+### Bridge Development
+
+```bash
+cd roon-extension
+npm install
+npm run dev  # Hot reload mode
+```
 
 ## Roadmap
 
