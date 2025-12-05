@@ -19,6 +19,7 @@ jobs:
           cmake --build build/pc_sim
       - name: JSON unit test
         run: python tests/test_json_parse.py
+
   build-idf:
     name: Build ESP-IDF Firmware
     runs-on: ubuntu-latest
@@ -32,3 +33,9 @@ jobs:
         run: |
           cd idf_app
           idf.py build
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: idf_app/build/roon_knob.bin
+          retention-days: 30
