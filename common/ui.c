@@ -54,6 +54,9 @@ static lv_obj_t *s_artist_label;       // Artist/album
 static lv_obj_t *s_volume_arc;         // Outer arc for volume
 static lv_obj_t *s_progress_arc;       // Inner arc for track progress
 static lv_obj_t *s_volume_label;       // Volume percentage (small, top)
+static lv_obj_t *s_volume_overlay;     // Large volume popup when adjusting
+static lv_obj_t *s_volume_overlay_label;  // Volume text in overlay
+static lv_timer_t *s_volume_overlay_timer;  // Timer to hide volume overlay
 static lv_obj_t *s_status_dot;         // Online/offline indicator
 static lv_obj_t *s_battery_label;      // Battery status
 static lv_obj_t *s_zone_label;         // Zone name
@@ -134,6 +137,7 @@ static void zone_roller_event_cb(lv_event_t *e);
 static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
+static void show_volume_overlay(int volume);
 
 // ============================================================================
 // UI Initialization
@@ -234,42 +238,64 @@ static void build_layout(void) {
     // Update background pointer to ui_container for widget creation
     s_background = s_ui_container;
 
-    // Outer volume arc - explicit colors for better visual appeal
+    // Outer volume arc - full circle ring around the display edge
     s_volume_arc = lv_arc_create(s_ui_container);
-    lv_obj_set_size(s_volume_arc, SCREEN_SIZE - 20, SCREEN_SIZE - 20);
+    lv_obj_set_size(s_volume_arc, SCREEN_SIZE - 10, SCREEN_SIZE - 10);
     lv_obj_center(s_volume_arc);
     lv_arc_set_range(s_volume_arc, 0, 100);
     lv_arc_set_value(s_volume_arc, 0);
-    lv_arc_set_bg_angles(s_volume_arc, 0, 360);
-    lv_obj_set_style_arc_width(s_volume_arc, 12, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_volume_arc, 12, LV_PART_INDICATOR);
+    lv_arc_set_bg_angles(s_volume_arc, 0, 360);  // Full circle
+    lv_arc_set_rotation(s_volume_arc, 270);  // Start at top (12 o'clock)
+    lv_arc_set_mode(s_volume_arc, LV_ARC_MODE_NORMAL);
+    lv_obj_set_style_arc_width(s_volume_arc, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_volume_arc, 8, LV_PART_INDICATOR);
+    lv_obj_remove_flag(s_volume_arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_volume_arc, LV_OPA_TRANSP, LV_PART_KNOB);
     lv_obj_set_style_pad_all(s_volume_arc, 0, LV_PART_KNOB);
 
-    // Set arc colors explicitly - black background
-    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x000000), LV_PART_MAIN);
+    // Arc colors - dark grey background track, blue indicator
+    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x2a2a2a), LV_PART_MAIN);
     lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x5a9fd4), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
-    // Inner progress arc - explicit colors for better visual appeal
+    // Inner progress arc - full circle for track playback progress
     s_progress_arc = lv_arc_create(s_ui_container);
-    lv_obj_set_size(s_progress_arc, SCREEN_SIZE - 50, SCREEN_SIZE - 50);
+    lv_obj_set_size(s_progress_arc, SCREEN_SIZE - 30, SCREEN_SIZE - 30);
     lv_obj_center(s_progress_arc);
     lv_arc_set_range(s_progress_arc, 0, 100);
     lv_arc_set_value(s_progress_arc, 0);
-    lv_arc_set_bg_angles(s_progress_arc, 0, 360);
-    lv_arc_set_rotation(s_progress_arc, 270);  // Start at bottom
-    lv_obj_set_style_arc_width(s_progress_arc, 6, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_progress_arc, 6, LV_PART_INDICATOR);
+    lv_arc_set_bg_angles(s_progress_arc, 0, 360);  // Full circle
+    lv_arc_set_rotation(s_progress_arc, 270);  // Start at top (12 o'clock)
+    lv_arc_set_mode(s_progress_arc, LV_ARC_MODE_NORMAL);
+    lv_obj_set_style_arc_width(s_progress_arc, 4, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_progress_arc, 4, LV_PART_INDICATOR);
+    lv_obj_remove_flag(s_progress_arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_progress_arc, LV_OPA_TRANSP, LV_PART_KNOB);
     lv_obj_set_style_pad_all(s_progress_arc, 0, LV_PART_KNOB);
 
-    // Set progress arc colors - darker/subtler
+    // Progress arc colors - subtle grey track, lighter blue indicator
     lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x1a1a1a), LV_PART_MAIN);
     lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x7bb9e8), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_INDICATOR);
+
+    // Volume overlay - large centered popup that appears when adjusting volume
+    s_volume_overlay = lv_obj_create(s_ui_container);
+    lv_obj_set_size(s_volume_overlay, 160, 160);
+    lv_obj_center(s_volume_overlay);
+    lv_obj_set_style_bg_color(s_volume_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_volume_overlay, LV_OPA_80, 0);
+    lv_obj_set_style_radius(s_volume_overlay, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(s_volume_overlay, 2, 0);
+    lv_obj_set_style_border_color(s_volume_overlay, lv_color_hex(0x5a9fd4), 0);
+    lv_obj_add_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
+
+    s_volume_overlay_label = lv_label_create(s_volume_overlay);
+    lv_obj_set_style_text_font(s_volume_overlay_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(s_volume_overlay_label, lv_color_hex(0xfafafa), 0);
+    lv_label_set_text(s_volume_overlay_label, "50%");
+    lv_obj_center(s_volume_overlay_label);
 
     // Volume label - small text at top
     s_volume_label = lv_label_create(s_ui_container);
@@ -291,12 +317,15 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_battery_label, &lv_font_montserrat_14, 0);
     lv_obj_align(s_battery_label, LV_ALIGN_TOP_LEFT, 15, 12);
 
-    // Zone label - small, clickable, top center
+    // Zone label - clickable zone name, positioned below the arc edge
     s_zone_label = lv_label_create(s_ui_container);
     lv_label_set_text(s_zone_label, s_pending.zone_name);
-    lv_obj_set_style_text_font(s_zone_label, font_small(), 0);  // Smaller font
-    lv_obj_set_style_text_color(s_zone_label, COLOR_GREY, 0);  // Grey, less prominent
-    lv_obj_align(s_zone_label, LV_ALIGN_TOP_MID, 0, 35);
+    lv_obj_set_style_text_font(s_zone_label, font_normal(), 0);  // Normal font for readability
+    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xbbbbbb), 0);  // Light grey, visible
+    lv_obj_set_width(s_zone_label, SCREEN_SIZE - 120);  // Limit width for circular display
+    lv_obj_set_style_text_align(s_zone_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_zone_label, LV_LABEL_LONG_DOT);  // Truncate with ... if too long
+    lv_obj_align(s_zone_label, LV_ALIGN_TOP_MID, 0, 50);  // Move down to avoid arc edge
     lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_zone_label, zone_label_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_zone_label, zone_label_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
@@ -460,7 +489,12 @@ static void apply_state(const struct ui_state *state) {
         ESP_LOGE(UI_TAG, "Label pointers are NULL! track=%p artist=%p", s_track_label, s_artist_label);
     }
 
-    // Update volume arc and label
+    // Update volume arc and label, show overlay if volume changed
+    static int last_volume = -1;
+    if (last_volume != state->volume && last_volume >= 0) {
+        show_volume_overlay(state->volume);
+    }
+    last_volume = state->volume;
     lv_arc_set_value(s_volume_arc, state->volume);
     char vol_text[8];
     snprintf(vol_text, sizeof(vol_text), "%d%%", state->volume);
@@ -593,6 +627,42 @@ static void clear_status_message_timer_cb(lv_timer_t *timer) {
 }
 
 // ============================================================================
+// Volume Overlay - Shows large volume indicator when adjusting
+// ============================================================================
+
+static void hide_volume_overlay_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (s_volume_overlay) {
+        lv_obj_add_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_volume_overlay_timer = NULL;
+}
+
+static void show_volume_overlay(int volume) {
+    if (!s_volume_overlay || !s_volume_overlay_label) {
+        return;
+    }
+
+    // Update the volume text
+    char vol_text[8];
+    snprintf(vol_text, sizeof(vol_text), "%d%%", volume);
+    lv_label_set_text(s_volume_overlay_label, vol_text);
+    lv_obj_center(s_volume_overlay_label);
+
+    // Show the overlay
+    lv_obj_clear_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_volume_overlay);
+
+    // Reset/create the hide timer (1.5 seconds)
+    if (s_volume_overlay_timer) {
+        lv_timer_reset(s_volume_overlay_timer);
+    } else {
+        s_volume_overlay_timer = lv_timer_create(hide_volume_overlay_timer_cb, 1500, NULL);
+        lv_timer_set_repeat_count(s_volume_overlay_timer, 1);
+    }
+}
+
+// ============================================================================
 // Zone Picker - LVGL Roller Widget
 // ============================================================================
 
@@ -644,20 +714,20 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
     // Add click event handler to select zone
     lv_obj_add_event_cb(s_zone_roller, zone_roller_event_cb, LV_EVENT_CLICKED, NULL);
 
-    // Style the roller - smaller fonts for compact look
-    lv_obj_set_style_text_font(s_zone_roller, font_small(), LV_PART_MAIN);
+    // Style the roller - good contrast for readability
+    lv_obj_set_style_text_font(s_zone_roller, font_normal(), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_zone_roller, font_normal(), LV_PART_SELECTED);
+    lv_obj_set_style_text_color(s_zone_roller, lv_color_hex(0xaaaaaa), LV_PART_MAIN);  // Light grey for non-selected
 
     // Style the roller background
-    lv_obj_set_style_bg_color(s_zone_roller, lv_color_hex(0x1a1a1a), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_zone_roller, lv_color_hex(0x0a0a0a), LV_PART_MAIN);  // Very dark background
     lv_obj_set_style_bg_opa(s_zone_roller, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_zone_roller, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_zone_roller, COLOR_GREY, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_zone_roller, 0, LV_PART_MAIN);
 
-    // Style selected item
-    lv_obj_set_style_bg_color(s_zone_roller, lv_color_hex(0x5a9fd4), LV_PART_SELECTED);  // Light blue
-    lv_obj_set_style_bg_opa(s_zone_roller, LV_OPA_30, LV_PART_SELECTED);
-    lv_obj_set_style_text_color(s_zone_roller, lv_color_hex(0xfafafa), LV_PART_SELECTED);
+    // Style selected item - bright white text with blue highlight
+    lv_obj_set_style_bg_color(s_zone_roller, lv_color_hex(0x5a9fd4), LV_PART_SELECTED);
+    lv_obj_set_style_bg_opa(s_zone_roller, LV_OPA_50, LV_PART_SELECTED);
+    lv_obj_set_style_text_color(s_zone_roller, lv_color_hex(0xffffff), LV_PART_SELECTED);
 
     lv_obj_center(s_zone_roller);
 
@@ -737,6 +807,10 @@ void ui_set_volume(int vol) {
     s_pending.volume = vol;
     s_dirty = true;
     os_mutex_unlock(&s_state_lock);
+}
+
+void ui_show_volume_change(int vol) {
+    show_volume_overlay(vol);
 }
 
 void ui_set_playing(bool playing) {
