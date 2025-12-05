@@ -19,6 +19,6 @@ void app_entry(void) {
     }
     platform_mdns_init(NULL);
     ui_set_input_handler(roon_client_handle_input);
-    ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "Loading zone");
+    ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "Press knob to select zone");
     roon_client_start(&cfg);
 }

@@ -592,7 +592,7 @@ void roon_client_start(const rk_cfg_t *cfg) {
     platform_task_init();
     lock_state();
     s_state.cfg = *cfg;
-    strncpy(s_state.zone_label, cfg->zone_id[0] ? cfg->zone_id : "Loading zone", sizeof(s_state.zone_label) - 1);
+    strncpy(s_state.zone_label, cfg->zone_id[0] ? cfg->zone_id : "Press knob to select zone", sizeof(s_state.zone_label) - 1);
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     unlock_state();
     s_running = true;
