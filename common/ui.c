@@ -439,8 +439,15 @@ static void build_layout(void) {
 // Event Handlers
 // ============================================================================
 
+static bool s_zone_long_pressed = false;  // Prevent click after long press
+
 static void zone_label_event_cb(lv_event_t *e) {
     (void)e;
+    // Skip click if it came from a long press release
+    if (s_zone_long_pressed) {
+        s_zone_long_pressed = false;
+        return;
+    }
     if (s_input_cb) {
         s_input_cb(UI_INPUT_MENU);
     }
@@ -448,6 +455,7 @@ static void zone_label_event_cb(lv_event_t *e) {
 
 static void zone_label_long_press_cb(lv_event_t *e) {
     (void)e;
+    s_zone_long_pressed = true;  // Mark that we handled a long press
     ui_show_settings();
 }
 

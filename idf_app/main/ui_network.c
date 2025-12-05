@@ -8,6 +8,7 @@
 #include "platform/platform_http.h"
 #include "platform/platform_storage.h"
 #include "wifi_manager.h"
+#include "ota_update.h"
 
 #if defined(__has_include)
 #  if __has_include("lvgl.h")
@@ -40,6 +41,7 @@ struct ui_net_widgets {
     lv_obj_t *panel;
     lv_obj_t *ssid_value;
     lv_obj_t *ip_value;
+    lv_obj_t *version_label;
     lv_obj_t *status_label;
     lv_obj_t *wifi_form;
     lv_obj_t *wifi_ssid;
@@ -200,6 +202,53 @@ static void clear_bridge_cb(lv_event_t *e) {
     }
 }
 
+static void update_version_label(void) {
+    if (!s_widgets.version_label) return;
+
+    const ota_info_t *info = ota_get_info();
+    switch (info->status) {
+        case OTA_STATUS_CHECKING:
+            lv_label_set_text(s_widgets.version_label, "Checking...");
+            break;
+        case OTA_STATUS_AVAILABLE:
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s -> v%s",
+                info->current_version, info->available_version);
+            break;
+        case OTA_STATUS_DOWNLOADING:
+            lv_label_set_text_fmt(s_widgets.version_label, "Updating %d%%",
+                info->progress_percent);
+            break;
+        case OTA_STATUS_UP_TO_DATE:
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s (latest)",
+                info->current_version);
+            break;
+        case OTA_STATUS_ERROR:
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s (error)",
+                info->current_version);
+            break;
+        default:
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s",
+                info->current_version);
+            break;
+    }
+}
+
+static void check_update_cb(lv_event_t *e) {
+    (void)e;
+    const ota_info_t *info = ota_get_info();
+
+    if (info->status == OTA_STATUS_AVAILABLE) {
+        // Update is available - start it
+        set_status_text("Starting update...");
+        ota_start_update();
+    } else {
+        // Check for updates
+        set_status_text("Checking...");
+        ota_check_for_update();
+    }
+    update_version_label();
+}
+
 static void show_wifi_form(lv_event_t *e) {
     (void)e;
     if (!s_widgets.wifi_form) {
@@ -300,7 +349,17 @@ static void ensure_panel(void) {
     lv_obj_set_style_pad_all(s_widgets.panel, 10, 0);
 
     lv_obj_t *title = lv_label_create(s_widgets.panel);
-    lv_label_set_text(title, "Settings > Network");
+    lv_label_set_text(title, "Settings");
+
+    // Version row
+    lv_obj_t *ver_row = lv_obj_create(s_widgets.panel);
+    lv_obj_set_size(ver_row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(ver_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all(ver_row, 4, 0);
+    lv_obj_clear_flag(ver_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_label_set_text(lv_label_create(ver_row), "Version:");
+    s_widgets.version_label = lv_label_create(ver_row);
+    lv_label_set_text_fmt(s_widgets.version_label, "v%s", ota_get_current_version());
 
     lv_obj_t *ssid_row = lv_obj_create(s_widgets.panel);
     lv_obj_set_size(ssid_row, lv_pct(100), LV_SIZE_CONTENT);
@@ -321,6 +380,7 @@ static void ensure_panel(void) {
     s_widgets.status_label = lv_label_create(s_widgets.panel);
     lv_label_set_text(s_widgets.status_label, "Wi-Fi idle");
 
+    create_button(s_widgets.panel, "Check for Update", check_update_cb);
     create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
     create_button(s_widgets.panel, "Clear Bridge", clear_bridge_cb);
     create_button(s_widgets.panel, "Forget Wi-Fi", forget_wifi_cb);
@@ -386,6 +446,7 @@ void ui_network_on_event(rk_net_evt_t evt, const char *ip_opt) {
 void ui_show_settings(void) {
     ensure_panel();
     refresh_labels();
+    update_version_label();
     char ip[16] = {0};
     if (wifi_mgr_get_ip(ip, sizeof(ip))) {
         set_ip_text(ip);
