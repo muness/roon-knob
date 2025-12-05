@@ -307,7 +307,16 @@ void wifi_mgr_reconnect(const rk_cfg_t *cfg) {
         ESP_LOGW(TAG, "failed to persist cfg");
     }
     reset_backoff();
-    connect_now();
+    s_sta_fail_count = 0;  // Reset failure count for new credentials
+
+    // If in AP mode, stop it first before connecting
+    if (s_ap_mode) {
+        ESP_LOGI(TAG, "Stopping AP mode to connect with new credentials");
+        wifi_mgr_stop_ap();
+        // wifi_mgr_stop_ap switches to STA and triggers connect via event
+    } else {
+        connect_now();
+    }
 }
 
 void wifi_mgr_forget_wifi(void) {

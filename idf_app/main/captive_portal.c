@@ -5,6 +5,8 @@
 #include <string.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static const char *TAG = "captive_portal";
 
@@ -43,17 +45,25 @@ static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>Roon Knob - Connected</title>"
+    "<title>Roon Knob - Saved</title>"
     "<style>"
     "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;text-align:center;}"
     "h1{color:#4fc3f7;}"
     ".status{padding:20px;margin:20px auto;border-radius:10px;max-width:300px;background:#2e7d32;}"
+    ".next{padding:15px;margin:20px auto;border-radius:10px;max-width:300px;background:#16213e;text-align:left;}"
+    ".next li{margin:8px 0;}"
     "</style></head><body>"
     "<h1>Roon Knob</h1>"
     "<div class='status'>"
-    "<p>WiFi credentials saved!</p>"
-    "<p>The device will now connect to your network.</p>"
-    "<p>This setup network will disappear.</p>"
+    "<p><strong>WiFi credentials saved!</strong></p>"
+    "</div>"
+    "<div class='next'>"
+    "<p>Next steps:</p>"
+    "<ol>"
+    "<li>This setup network will disappear in a few seconds</li>"
+    "<li>Reconnect your phone to your home WiFi</li>"
+    "<li>The Roon Knob will connect and start working</li>"
+    "</ol>"
     "</div></body></html>";
 
 // URL decode a string in place
@@ -152,10 +162,12 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, HTML_SUCCESS, strlen(HTML_SUCCESS));
 
-    // Stop AP mode and try connecting with new credentials (after response is sent)
-    ESP_LOGI(TAG, "Credentials saved, will switch to STA mode");
+    ESP_LOGI(TAG, "Credentials saved, switching to STA mode in 2 seconds...");
 
-    // Use wifi_mgr_reconnect to apply new config
+    // Delay to let HTTP response complete before stopping AP
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Now switch to STA mode with new credentials
     wifi_mgr_reconnect(&cfg);
 
     return ESP_OK;
