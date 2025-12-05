@@ -28,6 +28,8 @@ struct now_playing_state {
     char line2[MAX_LINE];
     bool is_playing;
     int volume;
+    int volume_min;
+    int volume_max;
     int volume_step;
     int seek_position;
     int length;
@@ -89,7 +91,7 @@ static void ui_update_cb(void *arg) {
         LOGI("ui_update_cb: state is NULL!");
         return;
     }
-    ui_update(state->line1, state->line2, state->is_playing, state->volume, state->seek_position, state->length);
+    ui_update(state->line1, state->line2, state->is_playing, state->volume, state->volume_min, state->volume_max, state->seek_position, state->length);
 
     // Update artwork if image_key changed or forced refresh
     static char last_image_key[128] = "";
@@ -171,6 +173,8 @@ static void default_now_playing(struct now_playing_state *state) {
     state->line2[0] = '\0';
     state->is_playing = false;
     state->volume = 0;
+    state->volume_min = -80;
+    state->volume_max = 0;
     state->volume_step = 0;
     state->seek_position = 0;
     state->length = 0;
@@ -339,6 +343,22 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         const char *colon = strchr(vol_key, ':');
         if (colon) {
             state->volume = atoi(colon + 1);
+        }
+    }
+
+    const char *vol_min_key = strstr(resp, "\"volume_min\"");
+    if (vol_min_key) {
+        const char *colon = strchr(vol_min_key, ':');
+        if (colon) {
+            state->volume_min = atoi(colon + 1);
+        }
+    }
+
+    const char *vol_max_key = strstr(resp, "\"volume_max\"");
+    if (vol_max_key) {
+        const char *colon = strchr(vol_max_key, ':');
+        if (colon) {
+            state->volume_max = atoi(colon + 1);
         }
     }
 

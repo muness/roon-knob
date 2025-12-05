@@ -43,6 +43,8 @@ struct ui_state {
     char zone_name[64];
     bool playing;
     int volume;
+    int volume_min;
+    int volume_max;
     bool online;
     int seek_position;
     int length;
@@ -102,6 +104,8 @@ static struct ui_state s_pending = {
     .zone_name = "",
     .playing = false,
     .volume = 0,
+    .volume_min = -80,
+    .volume_max = 0,
     .online = false,
     .seek_position = 0,
     .length = 0,
@@ -341,7 +345,8 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
     lv_obj_set_style_text_align(s_track_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_track_label, lv_color_hex(0xfafafa), 0);  // Off-white for primary text
-    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_DOT);  // Truncate with ...
+    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Slow scroll for long text
+    lv_obj_set_style_anim_duration(s_track_label, 8000, LV_PART_MAIN);  // 8 second scroll cycle
     lv_obj_set_style_max_height(s_track_label, 30, 0);  // Limit height to prevent overflow
     lv_obj_align(s_track_label, LV_ALIGN_CENTER, 0, -20);  // Just above media controls
     lv_label_set_text(s_track_label, s_pending.line1);
@@ -353,7 +358,8 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_artist_label, font_small(), 0);
     lv_obj_set_style_text_align(s_artist_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_artist_label, COLOR_GREY, 0);  // Grey for secondary text
-    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_DOT);  // Truncate with ...
+    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Slow scroll for long text
+    lv_obj_set_style_anim_duration(s_artist_label, 8000, LV_PART_MAIN);  // 8 second scroll cycle
     lv_obj_set_style_max_height(s_artist_label, 25, 0);  // Limit height to prevent overflow
     lv_obj_align(s_artist_label, LV_ALIGN_CENTER, 0, -55);  // Above track name
     lv_label_set_text(s_artist_label, s_pending.line2);
@@ -490,7 +496,7 @@ static void apply_state(const struct ui_state *state) {
     }
 
     // Update volume arc and label, show overlay if volume changed
-    // Volume is in dB (typically -80 to 0, or sometimes positive for gain)
+    // Volume is in dB with zone-specific min/max range
     static int last_volume = -9999;  // Sentinel value (unlikely real volume)
     static bool volume_initialized = false;
     if (volume_initialized && last_volume != state->volume) {
@@ -499,8 +505,12 @@ static void apply_state(const struct ui_state *state) {
     volume_initialized = true;
     last_volume = state->volume;
 
-    // Convert dB to 0-100 scale for arc display (assume -80dB to 0dB range)
-    int vol_pct = ((state->volume + 80) * 100) / 80;
+    // Convert dB to 0-100 scale for arc display using zone's actual min/max
+    int vol_range = state->volume_max - state->volume_min;
+    int vol_pct = 0;
+    if (vol_range > 0) {
+        vol_pct = ((state->volume - state->volume_min) * 100) / vol_range;
+    }
     if (vol_pct < 0) vol_pct = 0;
     if (vol_pct > 100) vol_pct = 100;
     lv_arc_set_value(s_volume_arc, vol_pct);
@@ -819,6 +829,15 @@ void ui_set_volume(int vol) {
     os_mutex_unlock(&s_state_lock);
 }
 
+void ui_set_volume_with_range(int vol, int vol_min, int vol_max) {
+    os_mutex_lock(&s_state_lock);
+    s_pending.volume = vol;
+    s_pending.volume_min = vol_min;
+    s_pending.volume_max = vol_max;
+    s_dirty = true;
+    os_mutex_unlock(&s_state_lock);
+}
+
 void ui_show_volume_change(int vol) {
     show_volume_overlay(vol);
 }
@@ -881,10 +900,10 @@ void ui_set_input_handler(ui_input_cb_t handler) {
     ui_set_input_callback(handler);
 }
 
-void ui_update(const char *line1, const char *line2, bool playing, int volume, int seek_position, int length) {
+void ui_update(const char *line1, const char *line2, bool playing, int volume, int volume_min, int volume_max, int seek_position, int length) {
     ui_set_track(line1, line2);
     ui_set_playing(playing);
-    ui_set_volume(volume);
+    ui_set_volume_with_range(volume, volume_min, volume_max);
     ui_set_progress(seek_position, length);
 }
 

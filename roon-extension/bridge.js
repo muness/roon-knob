@@ -10,16 +10,21 @@ const MIN_VOLUME = 0;
 const CORE_LOSS_TIMEOUT_MS = 5 * 60 * 1000;
 const TRANSPORT_GRACE_PERIOD_MS = 5 * 1000; // Keep serving cached data for 5s during reconnect
 
-const fallbackSummary = (zone) => ({
-  line1: 'Idle',
-  line2: zone?.now_playing?.three_line?.line2 || zone?.display_name || '',
-  is_playing: false,
-  volume: zone?.outputs?.[0]?.volume?.value ?? null,
-  volume_step: zone?.outputs?.[0]?.volume?.step ?? 2,
-  seek_position: zone?.now_playing?.seek_position ?? null,
-  length: zone?.now_playing?.length ?? null,
-  zone_id: zone?.zone_id,
-});
+const fallbackSummary = (zone) => {
+  const vol = zone?.outputs?.[0]?.volume;
+  return {
+    line1: 'Idle',
+    line2: zone?.now_playing?.three_line?.line2 || zone?.display_name || '',
+    is_playing: false,
+    volume: vol?.value ?? null,
+    volume_min: vol?.min ?? -80,
+    volume_max: vol?.max ?? 0,
+    volume_step: vol?.step ?? 2,
+    seek_position: zone?.now_playing?.seek_position ?? null,
+    length: zone?.now_playing?.length ?? null,
+    zone_id: zone?.zone_id,
+  };
+};
 
 function createRoonBridge(opts = {}) {
   const log = opts.logger || console;
@@ -130,12 +135,15 @@ function createRoonBridge(opts = {}) {
   function updateZone(zone) {
     if (!zone || !zone.zone_id) return;
     log.debug('update zone', { zone: zone.zone_id, state: zone.state });
+    const vol = zone.outputs?.[0]?.volume;
     const summary = {
       line1: zone.now_playing?.three_line?.line1 || zone.display_name || 'Unknown zone',
       line2: zone.now_playing?.three_line?.line2 || '',
       is_playing: zone.state === 'playing',
-      volume: zone.outputs?.[0]?.volume?.value ?? null,
-      volume_step: zone.outputs?.[0]?.volume?.step ?? 2,
+      volume: vol?.value ?? null,
+      volume_min: vol?.min ?? -80,
+      volume_max: vol?.max ?? 0,
+      volume_step: vol?.step ?? 2,
       seek_position: zone.now_playing?.seek_position ?? null,
       length: zone.now_playing?.length ?? null,
       zone_id: zone.zone_id,
