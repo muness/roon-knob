@@ -90,9 +90,9 @@ static int s_update_progress = -1;         // Update download progress (-1 = not
 // State management
 static os_mutex_t s_state_lock = OS_MUTEX_INITIALIZER;
 static struct ui_state s_pending = {
-    .line1 = "Waiting for bridge",
+    .line1 = "Starting...",
     .line2 = "",
-    .zone_name = "Zone",
+    .zone_name = "",
     .playing = false,
     .volume = 0,
     .online = false,

@@ -135,8 +135,13 @@ static void bridge_form_submit(lv_event_t *e) {
 
 static void forget_wifi_cb(lv_event_t *e) {
     (void)e;
+    // Show feedback and hide settings panel
+    set_status_text("Resetting WiFi...");
+    if (s_widgets.panel) {
+        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Clear WiFi and trigger AP mode
     wifi_mgr_forget_wifi();
-    refresh_labels();
 }
 
 static void test_bridge_cb(lv_event_t *e) {
