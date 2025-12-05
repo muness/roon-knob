@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
+# App version (semver) - update this for releases
+set(PROJECT_VER "1.0.0")
+
 # Suppress component validation warnings (ESP-IDF internal issues)
 # Multiple methods to ensure validation is disabled
 set(IDF_COMPONENT_VALIDATION OFF CACHE BOOL "Disable component validation" FORCE)

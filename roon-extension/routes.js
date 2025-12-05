@@ -1,7 +1,11 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const sharp = require('sharp');
 const { recordEvent, snapshot } = require('./metrics');
+
+// Firmware directory for OTA updates
+const FIRMWARE_DIR = path.join(__dirname, 'firmware');
 
 function extractKnob(req) {
   const headerId = req.get('x-knob-id') || req.get('x-device-id');
@@ -181,6 +185,114 @@ function createRoutes({ bridge, metrics, logger }) {
 
   router.get(['/admin', '/dashboard'], (_req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  });
+
+  // OTA Firmware endpoints
+  router.get('/firmware/version', (req, res) => {
+    const knob = extractKnob(req);
+    logger?.info('Firmware version check', { knob, ip: req.ip });
+
+    // Look for firmware file: firmware/roon_knob.bin or firmware/roon_knob_<version>.bin
+    if (!fs.existsSync(FIRMWARE_DIR)) {
+      logger?.debug('Firmware directory not found', { dir: FIRMWARE_DIR });
+      return res.status(404).json({ error: 'No firmware available' });
+    }
+
+    const files = fs.readdirSync(FIRMWARE_DIR).filter(f => f.endsWith('.bin'));
+    if (files.length === 0) {
+      logger?.debug('No firmware files found');
+      return res.status(404).json({ error: 'No firmware available' });
+    }
+
+    // Look for version.json or extract from filename
+    const versionFile = path.join(FIRMWARE_DIR, 'version.json');
+    let version = null;
+    let firmwareFile = null;
+
+    if (fs.existsSync(versionFile)) {
+      try {
+        const versionData = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+        version = versionData.version;
+        firmwareFile = versionData.file || 'roon_knob.bin';
+      } catch (e) {
+        logger?.warn('Failed to parse version.json', { error: e.message });
+      }
+    }
+
+    // Fallback: use first .bin file and try to extract version from filename
+    if (!firmwareFile) {
+      firmwareFile = files[0];
+      // Try to extract version from filename like roon_knob_1.2.0.bin
+      const match = firmwareFile.match(/roon_knob[_-]?v?(\d+\.\d+\.\d+)\.bin/i);
+      if (match) {
+        version = match[1];
+      }
+    }
+
+    if (!version) {
+      logger?.warn('Could not determine firmware version');
+      return res.status(404).json({ error: 'No firmware version available' });
+    }
+
+    const firmwarePath = path.join(FIRMWARE_DIR, firmwareFile);
+    if (!fs.existsSync(firmwarePath)) {
+      logger?.warn('Firmware file not found', { file: firmwarePath });
+      return res.status(404).json({ error: 'Firmware file not found' });
+    }
+
+    const stats = fs.statSync(firmwarePath);
+    logger?.info('Firmware available', { version, size: stats.size, file: firmwareFile });
+
+    res.json({
+      version,
+      size: stats.size,
+      file: firmwareFile
+    });
+  });
+
+  router.get('/firmware/download', (req, res) => {
+    const knob = extractKnob(req);
+    logger?.info('Firmware download requested', { knob, ip: req.ip });
+
+    if (!fs.existsSync(FIRMWARE_DIR)) {
+      return res.status(404).json({ error: 'No firmware available' });
+    }
+
+    // Determine which file to serve
+    let firmwareFile = 'roon_knob.bin';
+    const versionFile = path.join(FIRMWARE_DIR, 'version.json');
+
+    if (fs.existsSync(versionFile)) {
+      try {
+        const versionData = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+        firmwareFile = versionData.file || firmwareFile;
+      } catch (e) {
+        logger?.warn('Failed to parse version.json', { error: e.message });
+      }
+    }
+
+    const firmwarePath = path.join(FIRMWARE_DIR, firmwareFile);
+    if (!fs.existsSync(firmwarePath)) {
+      // Fallback to first .bin file
+      const files = fs.readdirSync(FIRMWARE_DIR).filter(f => f.endsWith('.bin'));
+      if (files.length > 0) {
+        firmwareFile = files[0];
+      } else {
+        return res.status(404).json({ error: 'Firmware file not found' });
+      }
+    }
+
+    const finalPath = path.join(FIRMWARE_DIR, firmwareFile);
+    const stats = fs.statSync(finalPath);
+
+    logger?.info('Serving firmware', { file: firmwareFile, size: stats.size });
+
+    res.set('Content-Type', 'application/octet-stream');
+    res.set('Content-Length', stats.size);
+    res.set('Content-Disposition', `attachment; filename="${firmwareFile}"`);
+
+    const stream = fs.createReadStream(finalPath);
+    stream.pipe(res);
   });
 
   return router;

@@ -82,6 +82,11 @@ static lv_obj_t *s_zone_picker_overlay;    // Dark background overlay
 static lv_obj_t *s_zone_roller;            // Roller widget for zone selection
 static bool s_zone_picker_visible = false;
 
+// OTA update notification
+static lv_obj_t *s_update_btn;             // Update notification button
+static char s_update_version[32] = "";     // Available update version
+static int s_update_progress = -1;         // Update download progress (-1 = not updating)
+
 // State management
 static os_mutex_t s_state_lock = OS_MUTEX_INITIALIZER;
 static struct ui_state s_pending = {
@@ -954,4 +959,87 @@ void ui_zone_picker_scroll(int delta) {
     int new_pos = ((int)current + delta + option_cnt) % option_cnt;
 
     lv_roller_set_selected(s_zone_roller, new_pos, LV_ANIM_ON);
+}
+
+// ============================================================================
+// OTA Update UI
+// ============================================================================
+
+#ifdef ESP_PLATFORM
+#include "ota_update.h"
+#endif
+
+static void update_btn_clicked(lv_event_t *e) {
+    (void)e;
+    ESP_LOGI(UI_TAG, "Update button clicked");
+    ui_trigger_update();
+}
+
+void ui_set_update_available(const char *version) {
+    if (version && version[0]) {
+        strncpy(s_update_version, version, sizeof(s_update_version) - 1);
+        s_update_version[sizeof(s_update_version) - 1] = '\0';
+        ESP_LOGI(UI_TAG, "Update available: %s", s_update_version);
+
+        // Create update button if it doesn't exist
+        if (!s_update_btn && s_ui_container) {
+            s_update_btn = lv_btn_create(s_ui_container);
+            lv_obj_set_size(s_update_btn, 200, 40);
+            lv_obj_align(s_update_btn, LV_ALIGN_TOP_MID, 0, 60);
+            lv_obj_set_style_bg_color(s_update_btn, lv_color_hex(0x4CAF50), 0);  // Green
+            lv_obj_set_style_radius(s_update_btn, 20, 0);
+
+            lv_obj_t *label = lv_label_create(s_update_btn);
+            lv_obj_set_style_text_font(label, font_small(), 0);
+            lv_obj_center(label);
+            lv_obj_set_user_data(s_update_btn, label);  // Store label reference
+
+            lv_obj_add_event_cb(s_update_btn, update_btn_clicked, LV_EVENT_CLICKED, NULL);
+        }
+
+        if (s_update_btn) {
+            lv_obj_t *label = lv_obj_get_user_data(s_update_btn);
+            if (label) {
+                char text[64];
+                snprintf(text, sizeof(text), LV_SYMBOL_DOWNLOAD " Update to %s", s_update_version);
+                lv_label_set_text(label, text);
+            }
+            lv_obj_clear_flag(s_update_btn, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        s_update_version[0] = '\0';
+        if (s_update_btn) {
+            lv_obj_add_flag(s_update_btn, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void ui_set_update_progress(int percent) {
+    s_update_progress = percent;
+
+    if (s_update_btn) {
+        lv_obj_t *label = lv_obj_get_user_data(s_update_btn);
+        if (label) {
+            if (percent >= 0 && percent <= 100) {
+                char text[64];
+                snprintf(text, sizeof(text), "Updating... %d%%", percent);
+                lv_label_set_text(label, text);
+                lv_obj_set_style_bg_color(s_update_btn, lv_color_hex(0x2196F3), 0);  // Blue during update
+                lv_obj_clear_flag(s_update_btn, LV_OBJ_FLAG_CLICKABLE);  // Disable clicking during update
+            } else if (percent < 0) {
+                // Hide or reset
+                lv_obj_add_flag(s_update_btn, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(s_update_btn, LV_OBJ_FLAG_CLICKABLE);
+            }
+        }
+    }
+}
+
+void ui_trigger_update(void) {
+#ifdef ESP_PLATFORM
+    ESP_LOGI(UI_TAG, "Triggering OTA update");
+    ota_start_update();
+#else
+    ESP_LOGI(UI_TAG, "OTA update not available on PC simulator");
+#endif
 }

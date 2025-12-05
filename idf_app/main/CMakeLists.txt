@@ -10,6 +10,7 @@ set(SRC_FILES
     "platform_log_idf.c"
     "platform_input_idf.c"
     "battery.c"
+    "ota_update.c"
     "../../common/app_main.c"
     "../../common/roon_client.c"
     "../../common/ui.c"
@@ -47,6 +48,7 @@ idf_component_register(
         esp_driver_ledc
         esp_adc
         espressif__esp_new_jpeg
+        app_update
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

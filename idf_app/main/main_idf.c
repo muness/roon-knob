@@ -1,5 +1,6 @@
 #include "app.h"
 #include "battery.h"
+#include "ota_update.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
 #include "platform/platform_time.h"
@@ -74,21 +75,77 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ui_set_message("Bridge is ready");
 
         roon_client_set_network_ready(true);
+
+        // Check for firmware updates
+        ESP_LOGI(TAG, "Checking for firmware updates...");
+        ota_check_for_update();
     } else if (evt == RK_NET_EVT_FAIL) {
         ui_set_message("Network unavailable");
         roon_client_set_network_ready(false);
     }
 }
 
+static void check_ota_status(void) {
+    static ota_status_t last_status = OTA_STATUS_IDLE;
+    static int last_progress = -1;
+
+    const ota_info_t *info = ota_get_info();
+
+    // Update UI when status changes
+    if (info->status != last_status) {
+        last_status = info->status;
+
+        switch (info->status) {
+            case OTA_STATUS_AVAILABLE:
+                ESP_LOGI(TAG, "OTA: Update available: %s", info->available_version);
+                ui_set_update_available(info->available_version);
+                break;
+            case OTA_STATUS_UP_TO_DATE:
+                ESP_LOGI(TAG, "OTA: Firmware is up to date");
+                ui_set_update_available(NULL);
+                break;
+            case OTA_STATUS_DOWNLOADING:
+                ESP_LOGI(TAG, "OTA: Downloading update...");
+                break;
+            case OTA_STATUS_COMPLETE:
+                ESP_LOGI(TAG, "OTA: Update complete, rebooting...");
+                ui_set_message("Update complete! Rebooting...");
+                break;
+            case OTA_STATUS_ERROR:
+                ESP_LOGE(TAG, "OTA: Error: %s", info->error_msg);
+                ui_set_message(info->error_msg);
+                ui_set_update_available(NULL);
+                break;
+            default:
+                break;
+        }
+    }
+
+    // Update progress during download
+    if (info->status == OTA_STATUS_DOWNLOADING && info->progress_percent != last_progress) {
+        last_progress = info->progress_percent;
+        ui_set_update_progress(info->progress_percent);
+    }
+}
+
 static void ui_loop_task(void *arg) {
     (void)arg;
     ESP_LOGI(TAG, "UI loop task started");
+
+    uint32_t ota_check_counter = 0;
+
     while (true) {
         // Process queued input events from ISR context
         platform_input_process_events();
 
         // Run LVGL task handler
         ui_loop_iter();
+
+        // Check OTA status periodically (every 500ms = 50 iterations at 10ms)
+        if (++ota_check_counter >= 50) {
+            ota_check_counter = 0;
+            check_ota_status();
+        }
 
         // Yield to lower priority tasks including IDLE
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -121,6 +178,10 @@ void app_main(void) {
     if (!battery_init()) {
         ESP_LOGW(TAG, "Battery monitoring init failed, continuing without it");
     }
+
+    // Initialize OTA update module
+    ESP_LOGI(TAG, "Initializing OTA update module...");
+    ota_init();
 
     // Initialize LVGL library
     ESP_LOGI(TAG, "Initializing LVGL...");

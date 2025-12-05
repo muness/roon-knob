@@ -34,6 +34,11 @@ void ui_zone_picker_scroll(int delta);
 void ui_set_artwork(const char *image_key);  // Set album artwork (placeholder for now)
 void ui_test_pattern(void);  // Debug: Show RGB test pattern to verify color format
 
+// OTA update UI
+void ui_set_update_available(const char *version);  // Show update notification (NULL to hide)
+void ui_set_update_progress(int percent);  // Show update progress (-1 to hide)
+void ui_trigger_update(void);  // Called when user taps update notification
+
 #ifdef __cplusplus
 }
 #endif
