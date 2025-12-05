@@ -45,6 +45,8 @@ volumes:
   roon-knob-bridge-data:
 ```
 
+> **Image tags:** Use `latest` for stable releases, or `edge` for bleeding-edge builds from master.
+
 ```bash
 docker compose up -d
 ```
