@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Release firmware for OTA updates
-# Usage: ./scripts/release_firmware.sh <version>
-# Example: ./scripts/release_firmware.sh 1.1.0
+# Usage: ./scripts/release_firmware.sh <version> "<release notes>"
+# Example: ./scripts/release_firmware.sh 1.1.0 "- Fix bug X\n- Add feature Y"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -11,18 +11,27 @@ IDF_APP_DIR="$ROOT_DIR/idf_app"
 FIRMWARE_DIR="$ROOT_DIR/roon-extension/firmware"
 CMAKE_FILE="$IDF_APP_DIR/CMakeLists.txt"
 VERSION_JSON="$FIRMWARE_DIR/version.json"
-RELEASE_NOTES_FILE="$ROOT_DIR/.release_notes.tmp"
 
-if [ $# -lt 1 ]; then
-    # Show current version and prompt
+show_usage() {
     CURRENT=$(grep 'set(PROJECT_VER' "$CMAKE_FILE" | sed 's/.*"\(.*\)".*/\1/')
     echo "Current version: $CURRENT"
-    echo "Usage: $0 <new_version>"
-    echo "Example: $0 1.1.0"
+    echo ""
+    echo "Usage: $0 <version> \"<release notes>\""
+    echo ""
+    echo "Examples:"
+    echo "  $0 1.2.0 \"- Fix volume overlay delay\""
+    echo "  $0 1.2.0 \"- Fix bug X"
+    echo "- Add feature Y"
+    echo "- Improve Z\""
     exit 1
+}
+
+if [ $# -lt 2 ]; then
+    show_usage
 fi
 
 NEW_VERSION="$1"
+RELEASE_NOTES="$2"
 
 # Validate version format
 if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -30,34 +39,17 @@ if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     exit 1
 fi
 
-echo "=== Firmware Release: v$NEW_VERSION ==="
-
-# Step 0: Collect release notes
-echo ""
-echo "[0/6] Enter release notes (end with Ctrl-D on empty line):"
-echo "---"
-cat > "$RELEASE_NOTES_FILE"
-echo "---"
-
 # Validate release notes aren't empty
-if [ ! -s "$RELEASE_NOTES_FILE" ]; then
+if [ -z "$RELEASE_NOTES" ]; then
     echo "Error: Release notes cannot be empty"
-    rm -f "$RELEASE_NOTES_FILE"
     exit 1
 fi
 
-# Show what was entered
+echo "=== Firmware Release: v$NEW_VERSION ==="
 echo ""
 echo "Release notes:"
-cat "$RELEASE_NOTES_FILE"
+echo "$RELEASE_NOTES"
 echo ""
-read -p "Continue with release? [y/N] " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Release cancelled"
-    rm -f "$RELEASE_NOTES_FILE"
-    exit 1
-fi
 
 # Step 1: Update version in CMakeLists.txt
 echo "[1/6] Updating version in CMakeLists.txt..."
@@ -73,7 +65,6 @@ if [ -f ~/esp/esp-idf/export.sh ]; then
     source ~/esp/esp-idf/export.sh >/dev/null 2>&1
 else
     echo "Error: ESP-IDF not found at ~/esp/esp-idf"
-    rm -f "$RELEASE_NOTES_FILE"
     exit 1
 fi
 
@@ -106,9 +97,6 @@ echo "      Created tag v$NEW_VERSION"
 
 # Step 6: Create GitHub release
 echo "[6/6] Creating GitHub release..."
-RELEASE_NOTES=$(cat "$RELEASE_NOTES_FILE")
-rm -f "$RELEASE_NOTES_FILE"
-
 gh release create "v$NEW_VERSION" \
     --title "v$NEW_VERSION" \
     --notes "$RELEASE_NOTES" \
