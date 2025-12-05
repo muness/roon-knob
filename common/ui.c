@@ -244,7 +244,7 @@ static void build_layout(void) {
     lv_obj_center(s_volume_arc);
     lv_arc_set_range(s_volume_arc, 0, 100);
     lv_arc_set_value(s_volume_arc, 0);
-    lv_arc_set_bg_angles(s_volume_arc, 0, 360);  // Full circle
+    lv_arc_set_bg_angles(s_volume_arc, 0, 359);  // Nearly full circle (360 causes rendering issues)
     lv_arc_set_rotation(s_volume_arc, 270);  // Start at top (12 o'clock)
     lv_arc_set_mode(s_volume_arc, LV_ARC_MODE_NORMAL);
     lv_obj_set_style_arc_width(s_volume_arc, 8, LV_PART_MAIN);
@@ -254,7 +254,7 @@ static void build_layout(void) {
     lv_obj_set_style_pad_all(s_volume_arc, 0, LV_PART_KNOB);
 
     // Arc colors - dark grey background track, blue indicator
-    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x2a2a2a), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x3a3a3a), LV_PART_MAIN);  // Lighter grey for visibility
     lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x5a9fd4), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_INDICATOR);
@@ -265,7 +265,7 @@ static void build_layout(void) {
     lv_obj_center(s_progress_arc);
     lv_arc_set_range(s_progress_arc, 0, 100);
     lv_arc_set_value(s_progress_arc, 0);
-    lv_arc_set_bg_angles(s_progress_arc, 0, 360);  // Full circle
+    lv_arc_set_bg_angles(s_progress_arc, 0, 359);  // Nearly full circle
     lv_arc_set_rotation(s_progress_arc, 270);  // Start at top (12 o'clock)
     lv_arc_set_mode(s_progress_arc, LV_ARC_MODE_NORMAL);
     lv_obj_set_style_arc_width(s_progress_arc, 4, LV_PART_MAIN);
@@ -275,7 +275,7 @@ static void build_layout(void) {
     lv_obj_set_style_pad_all(s_progress_arc, 0, LV_PART_KNOB);
 
     // Progress arc colors - subtle grey track, lighter blue indicator
-    lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x1a1a1a), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x2a2a2a), LV_PART_MAIN);  // Slightly lighter
     lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x7bb9e8), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_INDICATOR);
@@ -294,12 +294,12 @@ static void build_layout(void) {
     s_volume_overlay_label = lv_label_create(s_volume_overlay);
     lv_obj_set_style_text_font(s_volume_overlay_label, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_volume_overlay_label, lv_color_hex(0xfafafa), 0);
-    lv_label_set_text(s_volume_overlay_label, "50%");
+    lv_label_set_text(s_volume_overlay_label, "0 dB");
     lv_obj_center(s_volume_overlay_label);
 
     // Volume label - small text at top
     s_volume_label = lv_label_create(s_ui_container);
-    lv_label_set_text(s_volume_label, "0%");
+    lv_label_set_text(s_volume_label, "-- dB");
     lv_obj_set_style_text_font(s_volume_label, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_volume_label, lv_color_hex(0xfafafa), 0);  // Off-white
     lv_obj_align(s_volume_label, LV_ALIGN_TOP_MID, 0, 12);
@@ -490,14 +490,24 @@ static void apply_state(const struct ui_state *state) {
     }
 
     // Update volume arc and label, show overlay if volume changed
-    static int last_volume = -1;
-    if (last_volume != state->volume && last_volume >= 0) {
+    // Volume is in dB (typically -80 to 0, or sometimes positive for gain)
+    static int last_volume = -9999;  // Sentinel value (unlikely real volume)
+    static bool volume_initialized = false;
+    if (volume_initialized && last_volume != state->volume) {
         show_volume_overlay(state->volume);
     }
+    volume_initialized = true;
     last_volume = state->volume;
-    lv_arc_set_value(s_volume_arc, state->volume);
-    char vol_text[8];
-    snprintf(vol_text, sizeof(vol_text), "%d%%", state->volume);
+
+    // Convert dB to 0-100 scale for arc display (assume -80dB to 0dB range)
+    int vol_pct = ((state->volume + 80) * 100) / 80;
+    if (vol_pct < 0) vol_pct = 0;
+    if (vol_pct > 100) vol_pct = 100;
+    lv_arc_set_value(s_volume_arc, vol_pct);
+
+    // Display volume in dB
+    char vol_text[16];
+    snprintf(vol_text, sizeof(vol_text), "%d dB", state->volume);
     lv_label_set_text(s_volume_label, vol_text);
 
     // Update progress arc based on seek position and track length
@@ -643,9 +653,9 @@ static void show_volume_overlay(int volume) {
         return;
     }
 
-    // Update the volume text
-    char vol_text[8];
-    snprintf(vol_text, sizeof(vol_text), "%d%%", volume);
+    // Update the volume text (display in dB)
+    char vol_text[16];
+    snprintf(vol_text, sizeof(vol_text), "%d dB", volume);
     lv_label_set_text(s_volume_overlay_label, vol_text);
     lv_obj_center(s_volume_overlay_label);
 
