@@ -77,12 +77,45 @@ roon-knob/
      **Note:** To exit the monitor, press `Ctrl+]` (not Ctrl+C). This is easy to forget!
 5. Launch the bridge: `cd roon-extension && npm install && npm start` (or `npm run dev` for hot reload).
 
+## Roadmap
+
+### Release Blockers
+
+These must be completed before the device can be used by non-developers:
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **WiFi Provisioning (SoftAP)** | Not started | If WiFi fails for 2+ minutes, device should spawn AP "roon-knob-setup" with captive portal for credential entry. Currently requires manual menu navigation or compile-time defaults. |
+| **mDNS-first Bridge Discovery** | Not started | Remove hardcoded bridge URL (`192.168.1.213`). Use mDNS `_roonknob._tcp` discovery as primary method. Code exists as fallback but should be default. |
+| **First-Boot Status UI** | Not started | Show meaningful status: "WiFi: Connecting...", "WiFi: Needs Setup", "Bridge: Searching...", "Bridge: Found". Currently shows generic "Waiting for bridge" for all failure modes. |
+| **Bridge Connectivity Test** | Not started | Validate bridge URL before saving. Test GET to `/zones` and show user if bridge is reachable. Prevents saving invalid URLs. |
+
+### Post-Release Improvements
+
+Nice to have but not blocking initial release:
+
+| Feature | Priority | Description |
+|---------|----------|-------------|
+| Persistent Error Log | Medium | Store last 100 errors in SPIFFS, accessible via serial or diagnostic menu |
+| Manual Refresh Button | Medium | Force re-discovery of zones and bridge without restart |
+| Watchdog Timer | Low | Auto-reboot if polling thread deadlocks |
+| OTA Rollback | Low | Revert to previous firmware if new version fails to boot |
+| QR Code Setup | Low | Display QR code during setup pointing to docs or config |
+| BLE Provisioning | Low | Alternative to SoftAP for WiFi credential entry |
+
+### Current Limitations
+
+- Bridge URL is compile-time default (`CONFIG_RK_DEFAULT_BRIDGE_BASE`)
+- WiFi credentials require manual entry via Settings menu or menuconfig
+- No onboarding wizard on first boot
+- Error messages don't distinguish WiFi vs bridge vs zone issues
+
 ## Task Management
 
-All work is tracked through Beads (see `AGENTS.md`).
+All work is tracked through Beads (see `AGENTS.md`). Roadmap items above are tracked as beads tasks.
 
 ```bash
-bd ready
+bd ready              # list unblocked tasks
 bd update bd-XX --status in_progress
 bd close bd-XX --reason "done"
 bd sync
