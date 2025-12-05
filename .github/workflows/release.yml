@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build Firmware and Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ESP-IDF
+        uses: espressif/actions/setup-esp-idf@v2
+        with:
+          esp_idf_version: release/v5.2
+
+      - name: Build firmware
+        run: |
+          cd idf_app
+          idf.py build
+
+      - name: Copy firmware to extension directory
+        run: |
+          cp idf_app/build/roon_knob.bin roon-extension/firmware/roon_knob.bin
+
+      - name: Update version.json
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          cat > roon-extension/firmware/version.json << EOF
+          {
+            "version": "$VERSION",
+            "file": "roon_knob.bin"
+          }
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: roon-extension/firmware/roon_knob.bin
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
