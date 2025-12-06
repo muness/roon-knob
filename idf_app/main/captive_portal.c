@@ -215,6 +215,7 @@ void captive_portal_start(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 8;
+    config.max_req_hdr_len = 2048;  // Default 1024 is too small for modern browsers
 
     ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);
 

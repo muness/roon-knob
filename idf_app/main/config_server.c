@@ -209,6 +209,7 @@ void config_server_start(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 4;
+    config.max_req_hdr_len = 2048;  // Default 1024 is too small for modern browsers
 
     ESP_LOGI(TAG, "Starting config server on port %d", config.server_port);
 
