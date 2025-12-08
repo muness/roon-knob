@@ -125,7 +125,7 @@ cd ../roon-extension-generator
 The [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8) includes:
 
 - ESP32-S3 with 16MB Flash + 8MB PSRAM
-- 1.8" 360×360 IPS LCD (ST77916 via QSPI)
+- 1.8" 360×360 IPS LCD (SH8601 via QSPI)
 - CST816 capacitive touch (I2C)
 - Rotary encoder with push button
 - Battery management (charging + voltage monitoring)

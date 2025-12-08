@@ -6,11 +6,11 @@ This document covers capacitive touch input using the CST816S controller.
 
 | Component | Model | Interface | Address |
 |-----------|-------|-----------|---------|
-| Touch controller | CST816S | I2C | 0x15 |
+| Touch controller | CST816 | I2C | 0x15 |
 | I2C SDA | GPIO 11 | - | - |
 | I2C SCL | GPIO 12 | - | - |
 
-The CST816S is a single-point capacitive touch controller commonly found in smartwatch displays. It reports touch coordinates over I2C when the user touches the screen.
+The CST816 is a single-point capacitive touch controller commonly found in smartwatch displays. It reports touch coordinates over I2C when the user touches the screen.
 
 ## Architecture
 
@@ -58,7 +58,7 @@ i2c_new_master_bus(&i2c_bus_config, &bus_handle);
 
 Devices on this bus:
 
-- **CST816S** (0x15) - Touch controller
+- **CST816** (0x15) - Touch controller
 - **DRV2605** (0x5A) - Haptic motor driver
 
 The bus runs at 300kHz, which is within spec for both devices.
@@ -202,6 +202,6 @@ Touch input starts working after step 4. Before that, `tpGetCoordinates()` can b
 
 **Coordinates inverted**: Some displays need X/Y swapped or axis inversion. Modify the coordinate assembly in `tpGetCoordinates()`.
 
-**Touch drift/noise**: The CST816S has internal filtering, but if you see phantom touches, check for electrical noise on I2C lines.
+**Touch drift/noise**: The CST816 has internal filtering, but if you see phantom touches, check for electrical noise on I2C lines.
 
 **Touch works but buttons don't respond**: LVGL buttons need proper hit areas. Check that `lv_obj_set_size()` and positions are correct.

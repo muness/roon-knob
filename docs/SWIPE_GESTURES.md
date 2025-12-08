@@ -4,7 +4,7 @@ This document covers how the firmware detects swipe gestures from touch input.
 
 ## Overview
 
-Swipe gestures are implemented in software on top of the raw touch coordinates. The touch controller (CST816S) reports X/Y positions; the firmware tracks touch start/end points and timing to detect swipes.
+Swipe gestures are implemented in software on top of the raw touch coordinates. The touch controller (CST816) reports X/Y positions; the firmware tracks touch start/end points and timing to detect swipes.
 
 ## Gesture Parameters
 
@@ -155,7 +155,7 @@ So:
 
 ## Why Software Implementation?
 
-The CST816S has a hardware gesture detection register, but the firmware uses software detection because:
+The CST816 has a hardware gesture detection register, but the firmware uses software detection because:
 
 1. **Reliability** - Hardware gesture detection requires proper configuration and can be finicky
 2. **Flexibility** - Software allows tuning thresholds without reflashing touch IC firmware
@@ -177,7 +177,7 @@ else if (dx > SWIPE_MIN_DISTANCE && abs(dx) > abs(dy)) {
 }
 ```
 
-For multi-finger gestures (pinch, rotate), you'd need a touch controller that reports multiple touch points. The CST816S only reports single touch.
+For multi-finger gestures (pinch, rotate), you'd need a touch controller that reports multiple touch points. The CST816 only reports single touch.
 
 ## Interaction with LVGL Widgets
 

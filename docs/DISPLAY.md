@@ -6,11 +6,11 @@ This document covers how the Roon Knob drives its 360×360 pixel AMOLED display 
 
 | Component | Model | Interface | Notes |
 |-----------|-------|-----------|-------|
-| Display controller | SH8601 | QSPI (4-wire) | AMOLED, 16-bit RGB565 |
+| Display controller | SH8601 | QSPI (4-wire) | IPS LCD, 16-bit RGB565 |
 | Resolution | 360×360 | - | Round display |
 | Backlight | PWM-controlled | GPIO 47 | 8-bit brightness (0-255) |
 
-The SH8601 is an AMOLED driver IC that accepts pixel data over Quad SPI, allowing faster transfers than standard SPI by using 4 data lines simultaneously.
+The SH8601 is an LCD driver IC that accepts pixel data over Quad SPI, allowing faster transfers than standard SPI by using 4 data lines simultaneously.
 
 ## Architecture
 
