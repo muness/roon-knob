@@ -57,6 +57,7 @@ i2c_new_master_bus(&i2c_bus_config, &bus_handle);
 ```
 
 Devices on this bus:
+
 - **CST816S** (0x15) - Touch controller
 - **DRV2605** (0x5A) - Haptic motor driver
 
@@ -125,6 +126,7 @@ lv_indev_set_read_cb(s_touch_indev, lvgl_touch_read_cb);
 ```
 
 LVGL calls this callback on every frame (~30Hz). The callback must:
+
 1. Check if a touch is active
 2. Report coordinates if touched
 3. Report PRESSED or RELEASED state
@@ -139,6 +141,7 @@ LVGL handles touch input like a mouse. When you tap a button:
 4. `LV_EVENT_CLICKED` - Full tap completed (pressed + released)
 
 Or if the user drags off:
+
 1. `LV_EVENT_PRESSED`
 2. `LV_EVENT_PRESS_LOST` - Finger dragged outside button bounds
 
