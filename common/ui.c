@@ -1227,3 +1227,100 @@ void ui_set_controls_visible(bool visible) {
         ESP_LOGI(UI_TAG, "Controls hidden (art mode)");
     }
 }
+
+// ============================================================================
+// BLE Mode UI
+// ============================================================================
+
+static bool s_ble_mode = false;
+static ui_ble_state_t s_ble_state = UI_BLE_STATE_DISABLED;
+static char s_ble_device_name[32] = "";
+
+void ui_set_ble_mode(bool enabled) {
+    if (s_ble_mode == enabled) return;
+    s_ble_mode = enabled;
+
+    if (enabled) {
+        ESP_LOGI(UI_TAG, "Switching to BLE mode UI");
+        // Update zone label to show "Bluetooth"
+        if (s_zone_label) {
+            lv_label_set_text(s_zone_label, LV_SYMBOL_BLUETOOTH " Bluetooth");
+        }
+        // Clear track info - show status instead
+        if (s_track_label) {
+            lv_label_set_text(s_track_label, "");
+        }
+        if (s_artist_label) {
+            lv_label_set_text(s_artist_label, "Advertising...");
+        }
+        // Hide artwork - show gradient background
+        if (s_artwork_image) {
+            lv_obj_add_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
+        }
+        // Hide progress arc (no track progress in BLE mode)
+        if (s_progress_arc) {
+            lv_arc_set_value(s_progress_arc, 0);
+        }
+        // Set a nice blue tint to background
+        if (s_background) {
+            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x1a2a3a), 0);
+        }
+        // Hide status dot (no Roon connection)
+        if (s_status_dot) {
+            lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        ESP_LOGI(UI_TAG, "Switching to Roon mode UI");
+        // Restore artwork visibility
+        if (s_artwork_image) {
+            lv_obj_clear_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
+        }
+        // Restore background color
+        if (s_background) {
+            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x1a1a1a), 0);
+        }
+        // Show status dot
+        if (s_status_dot) {
+            lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void ui_set_ble_status(ui_ble_state_t state, const char *device_name) {
+    s_ble_state = state;
+    if (device_name) {
+        strncpy(s_ble_device_name, device_name, sizeof(s_ble_device_name) - 1);
+        s_ble_device_name[sizeof(s_ble_device_name) - 1] = '\0';
+    } else {
+        s_ble_device_name[0] = '\0';
+    }
+
+    if (!s_ble_mode) return;  // Only update if in BLE mode
+
+    const char *status_text = "Disabled";
+    switch (state) {
+        case UI_BLE_STATE_DISABLED:
+            status_text = "BLE Disabled";
+            break;
+        case UI_BLE_STATE_ADVERTISING:
+            status_text = "Pairing...";
+            break;
+        case UI_BLE_STATE_CONNECTED:
+            status_text = device_name ? device_name : "Connected";
+            break;
+    }
+
+    // Update artist label with connection status
+    if (s_artist_label) {
+        lv_label_set_text(s_artist_label, status_text);
+    }
+
+    // Update track label with hint
+    if (s_track_label) {
+        if (state == UI_BLE_STATE_CONNECTED) {
+            lv_label_set_text(s_track_label, "Media Control");
+        } else {
+            lv_label_set_text(s_track_label, "");
+        }
+    }
+}

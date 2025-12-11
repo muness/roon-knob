@@ -1,6 +1,8 @@
 #include "app.h"
 #include "battery.h"
+#include "ble_hid_client.h"
 #include "config_server.h"
+#include "controller_mode.h"
 #include "display_sleep.h"
 #include "ota_update.h"
 #include "platform/platform_http.h"
@@ -33,6 +35,58 @@ static volatile bool s_ota_check_pending = false;
 static volatile bool s_config_server_start_pending = false;
 static volatile bool s_config_server_stop_pending = false;
 static volatile bool s_mdns_init_pending = false;
+static volatile bool s_ble_start_pending = false;
+static volatile bool s_ble_stop_pending = false;
+
+// BLE HID state change callback
+static void ble_state_callback(ble_hid_state_t state, const char *device_name) {
+    ESP_LOGI(TAG, "BLE state changed: %d, device: %s", state, device_name ? device_name : "none");
+
+    // Map BLE state to UI state
+    ui_ble_state_t ui_state;
+    switch (state) {
+        case BLE_HID_STATE_ADVERTISING:
+            ui_state = UI_BLE_STATE_ADVERTISING;
+            break;
+        case BLE_HID_STATE_CONNECTED:
+            ui_state = UI_BLE_STATE_CONNECTED;
+            break;
+        default:
+            ui_state = UI_BLE_STATE_DISABLED;
+            break;
+    }
+    ui_set_ble_status(ui_state, device_name);
+}
+
+// Input handler wrapper for BLE mode
+static void ble_input_handler(ui_input_event_t event) {
+    ble_hid_client_handle_input(event);
+}
+
+// Controller mode change callback
+static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
+    (void)user_data;
+    ESP_LOGI(TAG, "Controller mode changed to: %s", controller_mode_name(new_mode));
+
+    if (new_mode == CONTROLLER_MODE_BLUETOOTH) {
+        // Switch to BLE mode
+        ui_set_ble_mode(true);
+        ui_set_input_handler(ble_input_handler);
+        s_ble_start_pending = true;
+        // Stop Roon client when in BLE mode
+        roon_client_set_network_ready(false);
+    } else {
+        // Switch to Roon mode
+        ui_set_ble_mode(false);
+        ui_set_input_handler(roon_client_handle_input);
+        s_ble_stop_pending = true;
+        // Re-enable Roon client if network is available
+        char ip[16];
+        if (wifi_mgr_get_ip(ip, sizeof(ip))) {
+            roon_client_set_network_ready(true);
+        }
+    }
+}
 
 // Test bridge connectivity and show result to user
 static bool test_bridge_connectivity(void) {
@@ -99,6 +153,11 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ui_set_message("Setup: roon-knob-setup");
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
+        // Start BLE as fallback if available - device is useful out-of-box
+        if (ble_hid_client_available() && controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
+            ESP_LOGI(TAG, "Starting BLE HID as fallback (no WiFi)");
+            controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
+        }
         break;
 
     case RK_NET_EVT_AP_STOPPED:
@@ -208,6 +267,22 @@ static void ui_loop_task(void *arg) {
             s_config_server_stop_pending = false;
             config_server_stop();
         }
+        if (s_ble_start_pending) {
+            s_ble_start_pending = false;
+            ESP_LOGI(TAG, "Starting BLE HID...");
+            if (ble_hid_client_start()) {
+                ble_hid_client_set_state_callback(ble_state_callback);
+                ESP_LOGI(TAG, "BLE HID started successfully");
+            } else {
+                ESP_LOGE(TAG, "BLE HID start failed");
+                ui_set_message("BLE: Start failed");
+            }
+        }
+        if (s_ble_stop_pending) {
+            s_ble_stop_pending = false;
+            ESP_LOGI(TAG, "Stopping BLE HID...");
+            ble_hid_client_stop();
+        }
 
         // Yield to lower priority tasks including IDLE
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -270,6 +345,11 @@ void app_main(void) {
     // Initialize display sleep management now that UI task is created
     ESP_LOGI(TAG, "Initializing display sleep management");
     platform_display_init_sleep(g_ui_task_handle);
+
+    // Initialize controller mode and register callback for mode changes
+    ESP_LOGI(TAG, "Initializing controller mode...");
+    controller_mode_init();
+    controller_mode_register_callback(mode_change_callback, NULL);
 
     // Start application logic
     ESP_LOGI(TAG, "Starting app...");
