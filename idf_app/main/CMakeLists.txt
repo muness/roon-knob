@@ -55,14 +55,11 @@ idf_component_register(
         esp_adc
         espressif__esp_new_jpeg
         app_update
+        bt
+        ble_hid
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 
-# Conditionally link BLE HID when enabled
-if(CONFIG_ROON_KNOB_BLE_HID_ENABLED)
-    idf_component_get_property(ble_hid_lib ble_hid COMPONENT_LIB)
-    target_link_libraries(${COMPONENT_LIB} PRIVATE ${ble_hid_lib})
-endif()

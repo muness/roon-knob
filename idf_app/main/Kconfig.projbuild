@@ -49,3 +49,22 @@ config RK_BACKLIGHT_DIM
         Default 25 is approximately 10% brightness.
 
 endmenu
+
+menu "Roon Knob BLE Settings"
+
+config ROON_KNOB_BLE_HID_ENABLED
+    bool "Enable BLE HID mode (Bluetooth media controller)"
+    default n
+    help
+        Enable Bluetooth Low Energy HID mode as an alternative/fallback
+        to WiFi Roon control. When enabled, the device can act as a
+        universal Bluetooth media remote for phones, laptops, and TVs.
+
+config ROON_KNOB_BLE_DEVICE_NAME
+    string "BLE device name"
+    default "Roon Knob"
+    depends on ROON_KNOB_BLE_HID_ENABLED
+    help
+        The name advertised when in BLE HID mode.
+
+endmenu

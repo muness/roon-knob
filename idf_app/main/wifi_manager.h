@@ -14,6 +14,7 @@ typedef enum {
 } rk_net_evt_t;
 
 void wifi_mgr_start(void);                   // call once at boot
+void wifi_mgr_stop(void);                    // full stop (for BLE mode switch)
 void wifi_mgr_reconnect(const rk_cfg_t *cfg);   // apply new cfg and reconnect
 void wifi_mgr_forget_wifi(void);             // clears ssid/pass, reconnects using defaults
 bool wifi_mgr_get_ip(char *buf, size_t n);   // "a.b.c.d"

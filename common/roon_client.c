@@ -579,9 +579,9 @@ static void roon_poll_thread(void *arg) {
     struct now_playing_state state;
     default_now_playing(&state);
     while (s_running) {
-        // Skip HTTP requests if network is not ready yet
+        // Skip HTTP requests if network is not ready yet (or in BLE mode)
+        // In BLE mode, s_network_ready is false, so we just sleep without logging
         if (!s_network_ready) {
-            LOGI("Polling: Network not ready, waiting...");
             wait_for_poll_interval();
             continue;
         }

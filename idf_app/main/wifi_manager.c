@@ -281,8 +281,13 @@ void wifi_mgr_start(void) {
     // Reduce WiFi TX power for battery operation (11 dBm instead of 20 dBm)
     // This reduces peak current from ~500mA to ~200mA during WiFi transmission
     // Units are 0.25 dBm, so 44 = 11 dBm
-    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(44));
-    ESP_LOGI(TAG, "WiFi TX power reduced to 11 dBm for battery compatibility");
+    // Note: May fail if WiFi not fully started (AP mode), so don't use ESP_ERROR_CHECK
+    esp_err_t tx_err = esp_wifi_set_max_tx_power(44);
+    if (tx_err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi TX power reduced to 11 dBm for battery compatibility");
+    } else {
+        ESP_LOGW(TAG, "Could not set WiFi TX power: %s (will use default)", esp_err_to_name(tx_err));
+    }
 }
 
 void wifi_mgr_reconnect(const rk_cfg_t *cfg) {
@@ -350,6 +355,35 @@ void wifi_mgr_get_ssid(char *buf, size_t n) {
 
 bool wifi_mgr_is_ap_mode(void) {
     return s_ap_mode;
+}
+
+void wifi_mgr_stop(void) {
+    if (!s_started) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Stopping WiFi completely (for BLE mode)");
+
+    // Stop retry timer
+    if (s_retry_timer) {
+        esp_timer_stop(s_retry_timer);
+    }
+
+    // Stop captive portal if running
+    captive_portal_stop();
+
+    // Stop WiFi
+    esp_wifi_stop();
+    esp_wifi_deinit();
+
+    // Deinit netif and event loop - but keep them as they're shared
+    // Just mark as stopped so we can restart later
+    s_started = false;
+    s_ap_mode = false;
+    s_sta_fail_count = 0;
+    s_ip[0] = '\0';
+
+    ESP_LOGI(TAG, "WiFi stopped");
 }
 
 void wifi_mgr_stop_ap(void) {

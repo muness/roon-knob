@@ -461,6 +461,7 @@ static void zone_label_long_press_cb(lv_event_t *e) {
 
 static void btn_prev_event_cb(lv_event_t *e) {
     (void)e;
+    ESP_LOGI(UI_TAG, "btn_prev_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
     if (s_input_cb) {
         s_input_cb(UI_INPUT_PREV_TRACK);
     }
@@ -468,6 +469,7 @@ static void btn_prev_event_cb(lv_event_t *e) {
 
 static void btn_play_event_cb(lv_event_t *e) {
     (void)e;
+    ESP_LOGI(UI_TAG, "btn_play_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
     if (s_input_cb) {
         s_input_cb(UI_INPUT_PLAY_PAUSE);
     }
@@ -475,6 +477,7 @@ static void btn_play_event_cb(lv_event_t *e) {
 
 static void btn_next_event_cb(lv_event_t *e) {
     (void)e;
+    ESP_LOGI(UI_TAG, "btn_next_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
     if (s_input_cb) {
         s_input_cb(UI_INPUT_NEXT_TRACK);
     }
@@ -731,7 +734,9 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
         if (i > 0) strcat(options, "\n");
         strncat(options, zone_names[i], sizeof(options) - strlen(options) - 1);
     }
-    lv_roller_set_options(s_zone_roller, options, LV_ROLLER_MODE_INFINITE);
+    // Only use infinite mode if we have enough options (3+), otherwise it repeats weirdly
+    lv_roller_mode_t mode = (s_zone_picker_count >= 3) ? LV_ROLLER_MODE_INFINITE : LV_ROLLER_MODE_NORMAL;
+    lv_roller_set_options(s_zone_roller, options, mode);
 
     // Set selected zone
     lv_roller_set_selected(s_zone_roller, selected, LV_ANIM_OFF);

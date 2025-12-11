@@ -153,11 +153,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ui_set_message("Setup: roon-knob-setup");
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
-        // Start BLE as fallback if available - device is useful out-of-box
-        if (ble_hid_client_available() && controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
-            ESP_LOGI(TAG, "Starting BLE HID as fallback (no WiFi)");
-            controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
-        }
+        // Note: BLE fallback removed - WiFi and BLE can't coexist well on boot
+        // User can manually switch to Bluetooth mode via zone picker
         break;
 
     case RK_NET_EVT_AP_STOPPED:
@@ -269,6 +266,10 @@ static void ui_loop_task(void *arg) {
         }
         if (s_ble_start_pending) {
             s_ble_start_pending = false;
+            // Must stop WiFi before starting BLE - they share the radio
+            ESP_LOGI(TAG, "Stopping WiFi for BLE mode...");
+            wifi_mgr_stop();
+            vTaskDelay(pdMS_TO_TICKS(100));  // Give WiFi time to clean up
             ESP_LOGI(TAG, "Starting BLE HID...");
             if (ble_hid_client_start()) {
                 ble_hid_client_set_state_callback(ble_state_callback);
@@ -356,8 +357,13 @@ void app_main(void) {
     app_entry();
 
     // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
-    ESP_LOGI(TAG, "Starting WiFi...");
-    wifi_mgr_start();
+    // Skip WiFi if starting in Bluetooth mode (BLE and WiFi coexist poorly on boot)
+    if (controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
+        ESP_LOGI(TAG, "Starting WiFi...");
+        wifi_mgr_start();
+    } else {
+        ESP_LOGI(TAG, "Skipping WiFi - Bluetooth mode active");
+    }
 
     ESP_LOGI(TAG, "Initialization complete");
 }
