@@ -115,6 +115,7 @@ static char s_pending_message[128] = "";
 static bool s_message_dirty = false;
 static bool s_zone_name_dirty = false;
 static ui_input_cb_t s_input_cb;
+static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
 #ifdef ESP_PLATFORM
 static ui_jpeg_image_t s_artwork_img;  // Decoded RGB565 image for artwork (ESP32)
@@ -456,7 +457,15 @@ static void zone_label_event_cb(lv_event_t *e) {
 static void zone_label_long_press_cb(lv_event_t *e) {
     (void)e;
     s_zone_long_pressed = true;  // Mark that we handled a long press
-    ui_show_settings();
+    // In BLE mode, long-press opens zone picker (to allow switching back to WiFi/Roon)
+    // In Roon mode, long-press opens settings panel
+    if (s_ble_mode) {
+        if (s_input_cb) {
+            s_input_cb(UI_INPUT_MENU);
+        }
+    } else {
+        ui_show_settings();
+    }
 }
 
 static void btn_prev_event_cb(lv_event_t *e) {
@@ -1237,7 +1246,6 @@ void ui_set_controls_visible(bool visible) {
 // BLE Mode UI
 // ============================================================================
 
-static bool s_ble_mode = false;
 static ui_ble_state_t s_ble_state = UI_BLE_STATE_DISABLED;
 static char s_ble_device_name[32] = "";
 

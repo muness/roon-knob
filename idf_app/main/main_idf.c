@@ -60,6 +60,12 @@ static void ble_state_callback(ble_hid_state_t state, const char *device_name) {
 
 // Input handler wrapper for BLE mode
 static void ble_input_handler(ui_input_event_t event) {
+    // Menu events still need to work (for zone picker to switch modes)
+    if (event == UI_INPUT_MENU) {
+        // Trigger zone picker via roon_client handler
+        roon_client_handle_input(event);
+        return;
+    }
     ble_hid_client_handle_input(event);
 }
 
