@@ -137,6 +137,16 @@ Uses custom partition layout for dual-OTA support. See [OTA_UPDATES.md](OTA_UPDA
 
 ## Changing Options
 
+**IMPORTANT:** The `sdkconfig` file (generated) takes precedence over `sdkconfig.defaults`. If you add new options to `sdkconfig.defaults`, you MUST delete sdkconfig to apply them:
+
+```bash
+# After editing sdkconfig.defaults:
+rm sdkconfig
+idf.py build
+```
+
+Simply running `idf.py reconfigure` or `idf.py fullclean` is NOT sufficient—the sdkconfig file must be deleted.
+
 ### Via menuconfig (Interactive)
 
 ```bash
