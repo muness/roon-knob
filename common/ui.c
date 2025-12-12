@@ -115,6 +115,7 @@ static char s_pending_message[128] = "";
 static bool s_message_dirty = false;
 static bool s_zone_name_dirty = false;
 static ui_input_cb_t s_input_cb;
+static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
 #ifdef ESP_PLATFORM
 static ui_jpeg_image_t s_artwork_img;  // Decoded RGB565 image for artwork (ESP32)
@@ -456,11 +457,20 @@ static void zone_label_event_cb(lv_event_t *e) {
 static void zone_label_long_press_cb(lv_event_t *e) {
     (void)e;
     s_zone_long_pressed = true;  // Mark that we handled a long press
-    ui_show_settings();
+    // In BLE mode, long-press opens zone picker (to allow switching back to WiFi/Roon)
+    // In Roon mode, long-press opens settings panel
+    if (s_ble_mode) {
+        if (s_input_cb) {
+            s_input_cb(UI_INPUT_MENU);
+        }
+    } else {
+        ui_show_settings();
+    }
 }
 
 static void btn_prev_event_cb(lv_event_t *e) {
     (void)e;
+    ESP_LOGI(UI_TAG, "btn_prev_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
     if (s_input_cb) {
         s_input_cb(UI_INPUT_PREV_TRACK);
     }
@@ -468,6 +478,7 @@ static void btn_prev_event_cb(lv_event_t *e) {
 
 static void btn_play_event_cb(lv_event_t *e) {
     (void)e;
+    ESP_LOGI(UI_TAG, "btn_play_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
     if (s_input_cb) {
         s_input_cb(UI_INPUT_PLAY_PAUSE);
     }
@@ -475,6 +486,7 @@ static void btn_play_event_cb(lv_event_t *e) {
 
 static void btn_next_event_cb(lv_event_t *e) {
     (void)e;
+    ESP_LOGI(UI_TAG, "btn_next_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
     if (s_input_cb) {
         s_input_cb(UI_INPUT_NEXT_TRACK);
     }
@@ -731,7 +743,9 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
         if (i > 0) strcat(options, "\n");
         strncat(options, zone_names[i], sizeof(options) - strlen(options) - 1);
     }
-    lv_roller_set_options(s_zone_roller, options, LV_ROLLER_MODE_INFINITE);
+    // Only use infinite mode if we have enough options (3+), otherwise it repeats weirdly
+    lv_roller_mode_t mode = (s_zone_picker_count >= 3) ? LV_ROLLER_MODE_INFINITE : LV_ROLLER_MODE_NORMAL;
+    lv_roller_set_options(s_zone_roller, options, mode);
 
     // Set selected zone
     lv_roller_set_selected(s_zone_roller, selected, LV_ANIM_OFF);
@@ -1225,5 +1239,101 @@ void ui_set_controls_visible(bool visible) {
         // Make artwork fully visible in art mode
         if (s_artwork_image) lv_obj_set_style_img_opa(s_artwork_image, LV_OPA_COVER, 0);
         ESP_LOGI(UI_TAG, "Controls hidden (art mode)");
+    }
+}
+
+// ============================================================================
+// BLE Mode UI
+// ============================================================================
+
+static ui_ble_state_t s_ble_state = UI_BLE_STATE_DISABLED;
+static char s_ble_device_name[32] = "";
+
+void ui_set_ble_mode(bool enabled) {
+    if (s_ble_mode == enabled) return;
+    s_ble_mode = enabled;
+
+    if (enabled) {
+        ESP_LOGI(UI_TAG, "Switching to Bluetooth mode UI");
+        // Update zone label to show "Bluetooth"
+        if (s_zone_label) {
+            lv_label_set_text(s_zone_label, LV_SYMBOL_BLUETOOTH " Bluetooth");
+        }
+        // Show waiting message until ESP32 sends track info
+        if (s_track_label) {
+            lv_label_set_text(s_track_label, "Roon Knob BT");
+        }
+        if (s_artist_label) {
+            lv_label_set_text(s_artist_label, "Waiting for track...");
+        }
+        // Hide artwork - show gradient background
+        if (s_artwork_image) {
+            lv_obj_add_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
+        }
+        // Hide progress arc (no track progress in BLE mode)
+        if (s_progress_arc) {
+            lv_arc_set_value(s_progress_arc, 0);
+        }
+        // Set a nice blue tint to background
+        if (s_background) {
+            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x1a2a3a), 0);
+        }
+        // Hide status dot (no Roon connection)
+        if (s_status_dot) {
+            lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        ESP_LOGI(UI_TAG, "Switching to Roon mode UI");
+        // Restore artwork visibility
+        if (s_artwork_image) {
+            lv_obj_clear_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
+        }
+        // Restore background color
+        if (s_background) {
+            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x1a1a1a), 0);
+        }
+        // Show status dot
+        if (s_status_dot) {
+            lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void ui_set_ble_status(ui_ble_state_t state, const char *device_name) {
+    s_ble_state = state;
+    if (device_name) {
+        strncpy(s_ble_device_name, device_name, sizeof(s_ble_device_name) - 1);
+        s_ble_device_name[sizeof(s_ble_device_name) - 1] = '\0';
+    } else {
+        s_ble_device_name[0] = '\0';
+    }
+
+    if (!s_ble_mode) return;  // Only update if in BLE mode
+
+    const char *status_text = "Disabled";
+    switch (state) {
+        case UI_BLE_STATE_DISABLED:
+            status_text = "BLE Disabled";
+            break;
+        case UI_BLE_STATE_ADVERTISING:
+            status_text = "Pairing...";
+            break;
+        case UI_BLE_STATE_CONNECTED:
+            status_text = device_name ? device_name : "Connected";
+            break;
+    }
+
+    // Update artist label with connection status
+    if (s_artist_label) {
+        lv_label_set_text(s_artist_label, status_text);
+    }
+
+    // Update track label with hint
+    if (s_track_label) {
+        if (state == UI_BLE_STATE_CONNECTED) {
+            lv_label_set_text(s_track_label, "Media Control");
+        } else {
+            lv_label_set_text(s_track_label, "");
+        }
     }
 }

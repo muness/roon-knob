@@ -1,7 +1,9 @@
 #include "app.h"
 #include "battery.h"
 #include "config_server.h"
+#include "controller_mode.h"
 #include "display_sleep.h"
+#include "esp32_comm.h"
 #include "ota_update.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
@@ -33,6 +35,112 @@ static volatile bool s_ota_check_pending = false;
 static volatile bool s_config_server_start_pending = false;
 static volatile bool s_config_server_stop_pending = false;
 static volatile bool s_mdns_init_pending = false;
+
+// Helper to update UI with current ESP32 Bluetooth state
+static void update_bt_ui(void) {
+    const char *title = esp32_comm_get_title();
+    const char *artist = esp32_comm_get_artist();
+    uint8_t vol_avrcp = esp32_comm_get_volume();  // 0-127
+    int vol_percent = (vol_avrcp * 100) / 127;    // Convert to 0-100
+    uint32_t duration_ms = esp32_comm_get_duration();
+    uint32_t position_ms = esp32_comm_get_position();
+
+    ui_update(
+        title[0] ? title : "Bluetooth",
+        artist[0] ? artist : "Waiting for track...",
+        esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING,
+        vol_percent, 0, 100,
+        (int)(position_ms / 1000), (int)(duration_ms / 1000)
+    );
+}
+
+// ESP32 Bluetooth metadata callback - updates UI when track info arrives
+static void esp32_metadata_callback(esp32_meta_type_t type, const char *text) {
+    (void)type;
+    (void)text;
+    update_bt_ui();
+}
+
+// ESP32 volume callback - updates UI when volume changes
+static void esp32_volume_callback(uint8_t volume) {
+    (void)volume;
+    update_bt_ui();
+}
+
+// ESP32 position callback - updates UI with playback position
+static void esp32_position_callback(uint32_t position_ms) {
+    (void)position_ms;
+    update_bt_ui();
+}
+
+// ESP32 play state callback - updates UI when play state changes
+static void esp32_play_state_callback(esp32_play_state_t state) {
+    (void)state;
+    update_bt_ui();
+}
+
+// Input handler for Bluetooth mode (forwards to ESP32 via UART)
+static void bt_input_handler(ui_input_event_t event) {
+    // Menu events still need to work (for zone picker to switch modes)
+    if (event == UI_INPUT_MENU) {
+        // Trigger zone picker via roon_client handler
+        roon_client_handle_input(event);
+        return;
+    }
+
+    // Forward other events to ESP32 for BLE HID / AVRCP control
+    switch (event) {
+        case UI_INPUT_PLAY_PAUSE:
+            ESP_LOGI(TAG, "BT: play/pause");
+            // Toggle based on current play state
+            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
+                esp32_comm_send_pause();
+            } else {
+                esp32_comm_send_play();
+            }
+            break;
+        case UI_INPUT_NEXT_TRACK:
+            ESP_LOGI(TAG, "BT: next track");
+            esp32_comm_send_next();
+            break;
+        case UI_INPUT_PREV_TRACK:
+            ESP_LOGI(TAG, "BT: prev track");
+            esp32_comm_send_prev();
+            break;
+        case UI_INPUT_VOL_UP:
+            ESP_LOGI(TAG, "BT: vol up");
+            esp32_comm_send_vol_up();
+            break;
+        case UI_INPUT_VOL_DOWN:
+            ESP_LOGI(TAG, "BT: vol down");
+            esp32_comm_send_vol_down();
+            break;
+        default:
+            break;
+    }
+}
+
+// Controller mode change callback
+static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
+    (void)user_data;
+    ESP_LOGI(TAG, "Controller mode changed to: %s", controller_mode_name(new_mode));
+
+    if (new_mode == CONTROLLER_MODE_BLUETOOTH) {
+        // Bluetooth mode uses ESP32 chip (BLE HID + AVRCP via UART)
+        ui_set_ble_mode(true);
+        ui_set_input_handler(bt_input_handler);
+        roon_client_set_network_ready(false);
+    } else {
+        // Switch to Roon mode
+        ui_set_ble_mode(false);
+        ui_set_input_handler(roon_client_handle_input);
+        // Re-enable Roon client if network is available
+        char ip[16];
+        if (wifi_mgr_get_ip(ip, sizeof(ip))) {
+            roon_client_set_network_ready(true);
+        }
+    }
+}
 
 // Test bridge connectivity and show result to user
 static bool test_bridge_connectivity(void) {
@@ -250,6 +358,7 @@ void app_main(void) {
     lv_init();
 
     // Register LVGL display driver and start LVGL task
+    // NOTE: Must happen BEFORE esp32_comm_init() - LVGL needs DMA-capable RAM for draw buffers
     ESP_LOGI(TAG, "Registering LVGL display driver...");
     if (!platform_display_register_lvgl_driver()) {
         ESP_LOGE(TAG, "Display driver registration failed!");
@@ -259,6 +368,15 @@ void app_main(void) {
     // Now safe to initialize UI (depends on LVGL display being registered)
     ESP_LOGI(TAG, "Initializing UI...");
     ui_init();
+
+    // Initialize ESP32 communication (UART to Bluetooth chip)
+    // Uses GPIO38 (TX) and GPIO48 (RX) - verified from schematic
+    ESP_LOGI(TAG, "Initializing ESP32 communication...");
+    esp32_comm_init();
+    esp32_comm_set_metadata_cb(esp32_metadata_callback);
+    esp32_comm_set_volume_cb(esp32_volume_callback);
+    esp32_comm_set_position_cb(esp32_position_callback);
+    esp32_comm_set_play_state_cb(esp32_play_state_callback);
 
     // Initialize input (rotary encoder)
     platform_input_init();
@@ -271,13 +389,23 @@ void app_main(void) {
     ESP_LOGI(TAG, "Initializing display sleep management");
     platform_display_init_sleep(g_ui_task_handle);
 
+    // Initialize controller mode and register callback for mode changes
+    ESP_LOGI(TAG, "Initializing controller mode...");
+    controller_mode_init();
+    controller_mode_register_callback(mode_change_callback, NULL);
+
     // Start application logic
     ESP_LOGI(TAG, "Starting app...");
     app_entry();
 
     // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
-    ESP_LOGI(TAG, "Starting WiFi...");
-    wifi_mgr_start();
+    // Skip WiFi if starting in Bluetooth mode
+    if (controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
+        ESP_LOGI(TAG, "Starting WiFi...");
+        wifi_mgr_start();
+    } else {
+        ESP_LOGI(TAG, "Skipping WiFi - Bluetooth mode active");
+    }
 
     ESP_LOGI(TAG, "Initialization complete");
 }

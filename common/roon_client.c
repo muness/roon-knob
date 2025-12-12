@@ -1,5 +1,6 @@
 #include "roon_client.h"
 
+#include "controller_mode.h"
 #include "platform/platform_display.h"
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
@@ -578,9 +579,9 @@ static void roon_poll_thread(void *arg) {
     struct now_playing_state state;
     default_now_playing(&state);
     while (s_running) {
-        // Skip HTTP requests if network is not ready yet
+        // Skip HTTP requests if network is not ready yet (or in BLE mode)
+        // In BLE mode, s_network_ready is false, so we just sleep without logging
         if (!s_network_ready) {
-            LOGI("Polling: Network not ready, waiting...");
             wait_for_poll_interval();
             continue;
         }
@@ -644,6 +645,21 @@ void roon_client_handle_input(ui_input_event_t event) {
             char selected_id[MAX_ZONE_NAME] = {0};
             ui_zone_picker_get_selected_id(selected_id, sizeof(selected_id));
             LOGI("Zone picker: selected zone id '%s'", selected_id);
+
+            // Check if Bluetooth was selected
+            if (controller_mode_is_bluetooth_zone(selected_id)) {
+                LOGI("Zone picker: switching to Bluetooth mode");
+                lock_state();
+                strncpy(s_state.cfg.zone_id, ZONE_ID_BLUETOOTH, sizeof(s_state.cfg.zone_id) - 1);
+                s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
+                unlock_state();
+                platform_storage_save(&s_state.cfg);
+                controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
+                ui_hide_zone_picker();
+                return;
+            }
+
+            // Regular Roon zone selection
             char label_copy[MAX_ZONE_NAME] = {0};
             bool updated = false;
             lock_state();
@@ -661,6 +677,10 @@ void roon_client_handle_input(ui_input_event_t event) {
                     s_trigger_poll = true;
                     s_force_artwork_refresh = true;  // Force artwork reload for new zone
                     updated = true;
+                    // Switch back to Roon mode if we were in BT mode
+                    if (controller_mode_get() == CONTROLLER_MODE_BLUETOOTH) {
+                        controller_mode_set(CONTROLLER_MODE_ROON);
+                    }
                     break;
                 }
             }
@@ -684,8 +704,10 @@ void roon_client_handle_input(ui_input_event_t event) {
     }
 
     if (event == UI_INPUT_MENU) {
-        const char *names[MAX_ZONES];
-        const char *ids[MAX_ZONES];
+        const char *names[MAX_ZONES + 1];  /* +1 for Bluetooth */
+        const char *ids[MAX_ZONES + 1];
+        static const char *bt_name = "Bluetooth";
+        static const char *bt_id = ZONE_ID_BLUETOOTH;
         int selected = 0;
         int count = 0;
         lock_state();
@@ -698,6 +720,16 @@ void roon_client_handle_input(ui_input_event_t event) {
                     selected = i;
                 }
             }
+        }
+        /* Add Bluetooth as last option if available */
+        if (controller_mode_bluetooth_available() && count < MAX_ZONES) {
+            names[count] = bt_name;
+            ids[count] = bt_id;
+            /* Select Bluetooth if currently in BT mode */
+            if (controller_mode_is_bluetooth_zone(s_state.cfg.zone_id)) {
+                selected = count;
+            }
+            count++;
         }
         unlock_state();
         if (count > 0) {

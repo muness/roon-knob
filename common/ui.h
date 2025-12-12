@@ -50,6 +50,16 @@ void ui_trigger_update(void);  // Called when user taps update notification
 // Display state control
 void ui_set_controls_visible(bool visible);  // Show/hide UI controls for art mode
 
+// BLE mode UI
+typedef enum {
+    UI_BLE_STATE_DISABLED,
+    UI_BLE_STATE_ADVERTISING,
+    UI_BLE_STATE_CONNECTED
+} ui_ble_state_t;
+
+void ui_set_ble_mode(bool enabled);  // Switch UI to BLE mode visuals
+void ui_set_ble_status(ui_ble_state_t state, const char *device_name);  // Update BLE connection status
+
 #ifdef __cplusplus
 }
 #endif
