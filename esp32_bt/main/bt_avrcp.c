@@ -223,56 +223,37 @@ void bt_avrcp_connect(void)
 
 void bt_avrcp_play(void)
 {
-    // Always use BLE HID for controls - works consistently on phones and DAPs
-    // AVRCP passthrough is unreliable (DAPs accept but ignore commands)
-    if (ble_hid_vol_is_connected()) {
-        ESP_LOGI(TAG, "Play via BLE HID");
-        ble_hid_play();
-    } else {
-        ESP_LOGW(TAG, "Play: BLE HID not connected");
-    }
+    // Use BLE HID for controls - works consistently on phones and DAPs
+    ESP_LOGI(TAG, "Play via BLE HID");
+    ble_hid_play();
 }
 
 void bt_avrcp_pause(void)
 {
-    if (ble_hid_vol_is_connected()) {
-        ESP_LOGI(TAG, "Pause via BLE HID");
-        ble_hid_pause();
-    } else {
-        ESP_LOGW(TAG, "Pause: BLE HID not connected");
-    }
+    ESP_LOGI(TAG, "Pause via BLE HID");
+    ble_hid_pause();
 }
 
 void bt_avrcp_next(void)
 {
-    if (ble_hid_vol_is_connected()) {
-        ESP_LOGI(TAG, "Next via BLE HID");
-        ble_hid_next_track();
-    } else {
-        ESP_LOGW(TAG, "Next: BLE HID not connected");
-    }
+    ESP_LOGI(TAG, "Next via BLE HID");
+    ble_hid_next_track();
 }
 
 void bt_avrcp_prev(void)
 {
-    if (ble_hid_vol_is_connected()) {
-        ESP_LOGI(TAG, "Prev via BLE HID");
-        ble_hid_prev_track();
-    } else {
-        ESP_LOGW(TAG, "Prev: BLE HID not connected");
-    }
+    ESP_LOGI(TAG, "Prev via BLE HID");
+    ble_hid_prev_track();
 }
 
 void bt_avrcp_vol_up(void)
 {
-    // Use BLE HID for volume - works on phones and DAPs
     ESP_LOGI(TAG, "Volume Up via BLE HID");
     ble_hid_vol_up();
 }
 
 void bt_avrcp_vol_down(void)
 {
-    // Use BLE HID for volume - works on phones and DAPs
     ESP_LOGI(TAG, "Volume Down via BLE HID");
     ble_hid_vol_down();
 }

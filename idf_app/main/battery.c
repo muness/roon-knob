@@ -119,7 +119,7 @@ bool battery_init(void) {
     }
     ESP_LOGI(TAG, "ADC channel configured");
 
-    // Configure calibration
+    // Configure calibration (ESP32-S3 uses curve fitting scheme)
     adc_cali_curve_fitting_config_t cali_config = {
         .unit_id = BATTERY_ADC_UNIT,
         .atten = BATTERY_ADC_ATTEN,

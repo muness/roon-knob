@@ -17,3 +17,4 @@ roon-extension/config.json
 .beads/
 idf_app/managed_components/*
 idf_app/sdkconfig.override
+.agneto/

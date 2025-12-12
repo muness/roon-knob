@@ -24,6 +24,7 @@ set(COMMON_SOURCES
   ../common/app_main.c
   ../common/roon_client.c
   ../common/ui.c
+  ../common/controller_mode.c
   ../common/platform/platform_log.c
   ../common/platform/platform_time.c
   ../common/platform/platform_task.c
