@@ -100,4 +100,4 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for building firmware, running the PC 
 
 ## Support
 
-Questions or issues? [Open an issue](https://github.com/muness/roon-knob/issues) or [buy me a coffee](https://www.buymeacoffee.com/muness).
+Questions or issues? [Open an issue](https://github.com/muness/roon-knob/issues), join the [Roon Community discussion](https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363), or [buy me a coffee](https://www.buymeacoffee.com/muness).
