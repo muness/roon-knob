@@ -79,12 +79,28 @@ static void esp32_play_state_callback(esp32_play_state_t state) {
     update_bt_ui();
 }
 
+// Callback for exit Bluetooth confirmation dialog
+static void exit_bt_dialog_callback(bool confirmed) {
+    if (confirmed) {
+        ESP_LOGI(TAG, "User confirmed exit from Bluetooth mode");
+        // Switch back to Roon mode (this will start WiFi)
+        controller_mode_set(CONTROLLER_MODE_ROON);
+    } else {
+        ESP_LOGI(TAG, "User cancelled exit from Bluetooth mode");
+    }
+}
+
 // Input handler for Bluetooth mode (forwards to ESP32 via UART)
 static void bt_input_handler(ui_input_event_t event) {
-    // Menu events still need to work (for zone picker to switch modes)
+    // Handle exit BT dialog if visible
+    if (ui_is_exit_bt_dialog_visible()) {
+        // Dialog handles its own button events, ignore other inputs
+        return;
+    }
+
+    // Menu event shows exit confirmation dialog (not zone picker)
     if (event == UI_INPUT_MENU) {
-        // Trigger zone picker via roon_client handler
-        roon_client_handle_input(event);
+        ui_show_exit_bt_dialog(exit_bt_dialog_callback);
         return;
     }
 
@@ -127,18 +143,26 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
 
     if (new_mode == CONTROLLER_MODE_BLUETOOTH) {
         // Bluetooth mode uses ESP32 chip (BLE HID + AVRCP via UART)
+        // Stop WiFi to free radio for ESP32 Bluetooth communication
+        ESP_LOGI(TAG, "Stopping WiFi for Bluetooth mode");
+        roon_client_set_network_ready(false);
+        wifi_mgr_stop();
+        // Activate Bluetooth on ESP32 (on-demand activation)
+        ESP_LOGI(TAG, "Activating Bluetooth on ESP32");
+        esp32_comm_send_bt_activate();
         ui_set_ble_mode(true);
         ui_set_input_handler(bt_input_handler);
-        roon_client_set_network_ready(false);
     } else {
         // Switch to Roon mode
+        // Deactivate Bluetooth on ESP32 to save power
+        ESP_LOGI(TAG, "Deactivating Bluetooth on ESP32");
+        esp32_comm_send_bt_deactivate();
         ui_set_ble_mode(false);
         ui_set_input_handler(roon_client_handle_input);
-        // Re-enable Roon client if network is available
-        char ip[16];
-        if (wifi_mgr_get_ip(ip, sizeof(ip))) {
-            roon_client_set_network_ready(true);
-        }
+        // Start WiFi if it was stopped
+        ESP_LOGI(TAG, "Starting WiFi for Roon mode");
+        wifi_mgr_start();
+        // Network ready will be set when WiFi connects (via RK_NET_EVT_GOT_IP)
     }
 }
 
@@ -400,11 +424,14 @@ void app_main(void) {
 
     // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
     // Skip WiFi if starting in Bluetooth mode
+    // NOTE: BT mode setup is handled via mode_change_callback triggered by app_entry()
+    // calling controller_mode_set(). Don't duplicate BT activation here.
     if (controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
         ESP_LOGI(TAG, "Starting WiFi...");
         wifi_mgr_start();
     } else {
-        ESP_LOGI(TAG, "Skipping WiFi - Bluetooth mode active");
+        ESP_LOGI(TAG, "Starting in Bluetooth mode (setup via callback)");
+        // BT activation already sent via mode_change_callback from app_entry()
     }
 
     ESP_LOGI(TAG, "Initialization complete");

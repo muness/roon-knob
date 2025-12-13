@@ -35,11 +35,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing UART protocol...");
     uart_protocol_init();
 
-    // Initialize Bluetooth AVRCP
-    ESP_LOGI(TAG, "Initializing Bluetooth AVRCP...");
-    bt_avrcp_init();
+    // NOTE: Bluetooth is NOT started here - it will be activated on-demand
+    // when the S3 sends CMD_BT_ACTIVATE (when user enters Bluetooth mode).
+    // This saves power and allows clean WiFi/BT switching on the S3.
 
-    ESP_LOGI(TAG, "Initialization complete. Waiting for commands...");
+    ESP_LOGI(TAG, "Initialization complete. Waiting for BT activation command...");
 
     // Main loop - most work happens in callbacks and tasks
     while (1) {

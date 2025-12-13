@@ -41,6 +41,8 @@ static const char *TAG = "esp32_comm";
 #define CMD_BT_CONNECT  0x10
 #define CMD_BT_DISCONNECT 0x11
 #define CMD_BT_PAIR_MODE 0x12
+#define CMD_BT_ACTIVATE 0x13
+#define CMD_BT_DEACTIVATE 0x14
 #define CMD_PING        0xF0
 
 /* Events (ESP32 -> S3) */
@@ -584,6 +586,18 @@ void esp32_comm_send_bt_pair_mode(void)
 {
     ESP_LOGI(TAG, "Sending BT_PAIR_MODE command");
     send_frame(CMD_BT_PAIR_MODE, NULL, 0);
+}
+
+void esp32_comm_send_bt_activate(void)
+{
+    ESP_LOGI(TAG, "Sending BT_ACTIVATE command");
+    send_frame(CMD_BT_ACTIVATE, NULL, 0);
+}
+
+void esp32_comm_send_bt_deactivate(void)
+{
+    ESP_LOGI(TAG, "Sending BT_DEACTIVATE command");
+    send_frame(CMD_BT_DEACTIVATE, NULL, 0);
 }
 
 /* Callback registration */

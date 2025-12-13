@@ -6,6 +6,7 @@
 #include <string.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -187,15 +188,16 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, HTML_SUCCESS, strlen(HTML_SUCCESS));
 
-    ESP_LOGI(TAG, "Credentials saved, switching to STA mode in 2 seconds...");
+    ESP_LOGI(TAG, "Credentials saved, rebooting in 2 seconds...");
 
-    // Delay to let HTTP response complete before stopping AP
+    // Delay to let HTTP response complete before rebooting
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    // Now switch to STA mode with new credentials
-    wifi_mgr_reconnect(&cfg);
+    // Reboot to apply new WiFi credentials cleanly
+    ESP_LOGI(TAG, "Rebooting...");
+    esp_restart();
 
-    return ESP_OK;
+    return ESP_OK;  // Never reached
 }
 
 // Captive portal redirect - send all unknown requests to root

@@ -1337,3 +1337,109 @@ void ui_set_ble_status(ui_ble_state_t state, const char *device_name) {
         }
     }
 }
+
+// ============================================================================
+// Exit Bluetooth Confirmation Dialog
+// ============================================================================
+
+static lv_obj_t *s_exit_bt_dialog = NULL;
+static ui_exit_bt_callback_t s_exit_bt_callback = NULL;
+
+static void exit_bt_btn_cb(lv_event_t *e) {
+    lv_obj_t *btn = lv_event_get_target(e);
+    bool confirmed = (bool)(intptr_t)lv_obj_get_user_data(btn);
+
+    ESP_LOGI(UI_TAG, "Exit BT dialog: user selected %s", confirmed ? "Exit" : "Cancel");
+
+    // Store callback before hiding (hide clears it)
+    ui_exit_bt_callback_t cb = s_exit_bt_callback;
+
+    ui_hide_exit_bt_dialog();
+
+    // Invoke callback after hiding dialog
+    if (cb) {
+        cb(confirmed);
+    }
+}
+
+void ui_show_exit_bt_dialog(ui_exit_bt_callback_t callback) {
+    if (s_exit_bt_dialog) {
+        return;  // Already visible
+    }
+
+    s_exit_bt_callback = callback;
+
+    // Create fullscreen dark overlay
+    s_exit_bt_dialog = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(s_exit_bt_dialog, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_center(s_exit_bt_dialog);
+    lv_obj_set_style_bg_color(s_exit_bt_dialog, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_exit_bt_dialog, LV_OPA_90, 0);
+    lv_obj_set_style_border_width(s_exit_bt_dialog, 0, 0);
+    lv_obj_set_style_radius(s_exit_bt_dialog, 0, 0);
+    lv_obj_set_style_pad_all(s_exit_bt_dialog, 0, 0);
+
+    // Title
+    lv_obj_t *title = lv_label_create(s_exit_bt_dialog);
+    lv_label_set_text(title, "Exit Bluetooth?");
+    lv_obj_set_style_text_font(title, font_normal(), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xfafafa), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Subtitle
+    lv_obj_t *subtitle = lv_label_create(s_exit_bt_dialog);
+    lv_label_set_text(subtitle, "Switch back to Roon");
+    lv_obj_set_style_text_font(subtitle, font_small(), 0);
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(0xaaaaaa), 0);
+    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 100);
+
+    // Exit button (left)
+    lv_obj_t *btn_exit = lv_btn_create(s_exit_bt_dialog);
+    lv_obj_set_size(btn_exit, 110, 50);
+    lv_obj_align(btn_exit, LV_ALIGN_CENTER, -60, 30);
+    lv_obj_set_style_bg_color(btn_exit, lv_color_hex(0x5a9fd4), 0);
+    lv_obj_set_style_bg_color(btn_exit, lv_color_hex(0x7bb9e8), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn_exit, 10, 0);
+    lv_obj_set_user_data(btn_exit, (void *)(intptr_t)true);  // confirmed = true
+    lv_obj_add_event_cb(btn_exit, exit_bt_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *exit_label = lv_label_create(btn_exit);
+    lv_label_set_text(exit_label, "Exit");
+    lv_obj_set_style_text_font(exit_label, font_normal(), 0);
+    lv_obj_set_style_text_color(exit_label, lv_color_hex(0xfafafa), 0);
+    lv_obj_center(exit_label);
+
+    // Cancel button (right)
+    lv_obj_t *btn_cancel = lv_btn_create(s_exit_bt_dialog);
+    lv_obj_set_size(btn_cancel, 110, 50);
+    lv_obj_align(btn_cancel, LV_ALIGN_CENTER, 60, 30);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x3c3c3c), 0);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x5a5a5a), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn_cancel, 10, 0);
+    lv_obj_set_user_data(btn_cancel, (void *)(intptr_t)false);  // confirmed = false
+    lv_obj_add_event_cb(btn_cancel, exit_bt_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *cancel_label = lv_label_create(btn_cancel);
+    lv_label_set_text(cancel_label, "Cancel");
+    lv_obj_set_style_text_font(cancel_label, font_normal(), 0);
+    lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xaaaaaa), 0);
+    lv_obj_center(cancel_label);
+
+    ESP_LOGI(UI_TAG, "Exit BT dialog shown");
+}
+
+void ui_hide_exit_bt_dialog(void) {
+    if (!s_exit_bt_dialog) {
+        return;
+    }
+
+    lv_obj_delete(s_exit_bt_dialog);
+    s_exit_bt_dialog = NULL;
+    s_exit_bt_callback = NULL;
+
+    ESP_LOGI(UI_TAG, "Exit BT dialog hidden");
+}
+
+bool ui_is_exit_bt_dialog_visible(void) {
+    return s_exit_bt_dialog != NULL;
+}

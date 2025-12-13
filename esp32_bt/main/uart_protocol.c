@@ -178,6 +178,18 @@ static void process_message(uint8_t type, const uint8_t *payload, uint16_t len)
             uart_protocol_send_ack(CMD_BT_PAIR_MODE);
             break;
 
+        case CMD_BT_ACTIVATE:
+            ESP_LOGI(TAG, "Activating Bluetooth...");
+            bt_avrcp_init();
+            uart_protocol_send_ack(CMD_BT_ACTIVATE);
+            break;
+
+        case CMD_BT_DEACTIVATE:
+            ESP_LOGI(TAG, "Deactivating Bluetooth...");
+            bt_avrcp_deinit();
+            uart_protocol_send_ack(CMD_BT_DEACTIVATE);
+            break;
+
         case CMD_PING:
             uart_protocol_send_pong();
             break;

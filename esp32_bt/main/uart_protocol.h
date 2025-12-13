@@ -32,6 +32,8 @@ extern "C" {
 #define CMD_BT_CONNECT  0x10
 #define CMD_BT_DISCONNECT 0x11
 #define CMD_BT_PAIR_MODE 0x12
+#define CMD_BT_ACTIVATE 0x13    // Activate Bluetooth (start BLE + AVRCP)
+#define CMD_BT_DEACTIVATE 0x14  // Deactivate Bluetooth (stop radio)
 #define CMD_PING        0xF0
 
 // Events (ESP32 -> S3)

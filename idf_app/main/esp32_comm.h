@@ -167,6 +167,8 @@ void esp32_comm_send_set_volume(uint8_t volume);
 void esp32_comm_send_bt_connect(void);
 void esp32_comm_send_bt_disconnect(void);
 void esp32_comm_send_bt_pair_mode(void);
+void esp32_comm_send_bt_activate(void);    // Activate BT on ESP32
+void esp32_comm_send_bt_deactivate(void);  // Deactivate BT on ESP32
 
 /* Callback registration */
 

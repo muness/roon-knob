@@ -60,6 +60,12 @@ typedef enum {
 void ui_set_ble_mode(bool enabled);  // Switch UI to BLE mode visuals
 void ui_set_ble_status(ui_ble_state_t state, const char *device_name);  // Update BLE connection status
 
+// Exit Bluetooth confirmation dialog
+typedef void (*ui_exit_bt_callback_t)(bool confirmed);  // Called with true if user confirms exit
+void ui_show_exit_bt_dialog(ui_exit_bt_callback_t callback);  // Show "Exit Bluetooth?" dialog
+void ui_hide_exit_bt_dialog(void);
+bool ui_is_exit_bt_dialog_visible(void);
+
 #ifdef __cplusplus
 }
 #endif
