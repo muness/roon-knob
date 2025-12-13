@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # App version (semver) - update this for releases
-set(PROJECT_VER "1.2.12")
+set(PROJECT_VER "1.3.1-beta.1")
 
 # Suppress CMake warnings (ESP-IDF internal component validation issues)
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
