@@ -90,7 +90,8 @@ function createRoonBridge(opts = {}) {
   roon.service_port = opts.service_port || 9330;
 
   const svc_status = new RoonApiStatus(roon);
-  svc_status.set_status('Starting Roon discovery...', false);
+  svc_status.set_status('Waiting for authorization in Roon → Settings → Extensions', false);
+  log.info('Waiting for Roon Core. Authorize in Roon → Settings → Extensions');
 
   function subscribe(core) {
     const transport = core.services.RoonApiTransport;
@@ -175,7 +176,7 @@ function createRoonBridge(opts = {}) {
       (Date.now() - state.transportDisconnectedAt) < TRANSPORT_GRACE_PERIOD_MS;
 
     if (transportUnavailable && !withinGracePeriod) {
-      log.warn('getNowPlaying: transport unavailable beyond grace period', { zone_id });
+      log.warn('Roon not connected. Authorize "Roon Knob Bridge" in Roon → Settings → Extensions', { zone_id });
       return null;
     }
 

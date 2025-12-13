@@ -11,7 +11,7 @@ const { createLogger } = require('./logger');
 
 function getGitSha() {
   try {
-    return execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: __dirname }).trim();
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).trim();
   } catch {
     return 'unknown';
   }
