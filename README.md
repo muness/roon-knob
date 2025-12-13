@@ -42,13 +42,15 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - roon-knob-bridge-data:/home/node/app/data
+      - roon-knob-bridge-data:/home/node/app/data  # Persists Roon pairing token
 
 volumes:
   roon-knob-bridge-data:
 ```
 
 > **Image tags:** Use `latest` for stable releases, or `edge` for bleeding-edge builds from master.
+>
+> **Volume:** The `data` volume stores your Roon pairing token. Without it, you'd need to re-authorize in Roon after every container restart.
 
 ```bash
 docker compose up -d

@@ -2,6 +2,17 @@ const RoonApi = require('node-roon-api');
 const RoonApiStatus = require('node-roon-api-status');
 const RoonApiTransport = require('node-roon-api-transport');
 const RoonApiImage = require('node-roon-api-image');
+const fs = require('fs');
+const path = require('path');
+
+// Config file path - use data directory for persistence in Docker
+const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, 'data');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+
+// Ensure config directory exists
+if (!fs.existsSync(CONFIG_DIR)) {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
 
 const RATE_LIMIT_INTERVAL_MS = 100;
 const MAX_RELATIVE_STEP_PER_CALL = 25;
@@ -86,6 +97,38 @@ function createRoonBridge(opts = {}) {
       }, CORE_LOSS_TIMEOUT_MS);
     },
   });
+
+  // Override config storage to use data directory for Docker persistence
+  roon.save_config = function(k, v) {
+    try {
+      let config = {};
+      try {
+        const content = fs.readFileSync(CONFIG_FILE, { encoding: 'utf8' });
+        config = JSON.parse(content) || {};
+      } catch (e) {
+        // File doesn't exist yet, start fresh
+      }
+      if (v === undefined || v === null) {
+        delete config[k];
+      } else {
+        config[k] = v;
+      }
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, '    '));
+      log.debug('Config saved', { key: k, path: CONFIG_FILE });
+    } catch (e) {
+      log.error('Failed to save config', { error: e.message, path: CONFIG_FILE });
+    }
+  };
+
+  roon.load_config = function(k) {
+    try {
+      const content = fs.readFileSync(CONFIG_FILE, { encoding: 'utf8' });
+      const config = JSON.parse(content) || {};
+      return config[k];
+    } catch (e) {
+      return undefined;
+    }
+  };
 
   roon.service_port = opts.service_port || 9330;
 
