@@ -1,9 +1,9 @@
 #include "app.h"
 #include "battery.h"
-#include "ble_hid_client.h"
 #include "config_server.h"
 #include "controller_mode.h"
 #include "display_sleep.h"
+#include "esp32_comm.h"
 #include "ota_update.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
@@ -35,32 +35,105 @@ static volatile bool s_ota_check_pending = false;
 static volatile bool s_config_server_start_pending = false;
 static volatile bool s_config_server_stop_pending = false;
 static volatile bool s_mdns_init_pending = false;
-static volatile bool s_ble_start_pending = false;
-static volatile bool s_ble_stop_pending = false;
 
-// BLE HID state change callback
-static void ble_state_callback(ble_hid_state_t state, const char *device_name) {
-    ESP_LOGI(TAG, "BLE state changed: %d, device: %s", state, device_name ? device_name : "none");
+// Helper to update UI with current ESP32 Bluetooth state
+static void update_bt_ui(void) {
+    const char *title = esp32_comm_get_title();
+    const char *artist = esp32_comm_get_artist();
+    uint8_t vol_avrcp = esp32_comm_get_volume();  // 0-127
+    int vol_percent = (vol_avrcp * 100) / 127;    // Convert to 0-100
+    uint32_t duration_ms = esp32_comm_get_duration();
+    uint32_t position_ms = esp32_comm_get_position();
 
-    // Map BLE state to UI state
-    ui_ble_state_t ui_state;
-    switch (state) {
-        case BLE_HID_STATE_ADVERTISING:
-            ui_state = UI_BLE_STATE_ADVERTISING;
-            break;
-        case BLE_HID_STATE_CONNECTED:
-            ui_state = UI_BLE_STATE_CONNECTED;
-            break;
-        default:
-            ui_state = UI_BLE_STATE_DISABLED;
-            break;
-    }
-    ui_set_ble_status(ui_state, device_name);
+    ui_update(
+        title[0] ? title : "Bluetooth",
+        artist[0] ? artist : "Waiting for track...",
+        esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING,
+        vol_percent, 0, 100,
+        (int)(position_ms / 1000), (int)(duration_ms / 1000)
+    );
 }
 
-// Input handler wrapper for BLE mode
-static void ble_input_handler(ui_input_event_t event) {
-    ble_hid_client_handle_input(event);
+// ESP32 Bluetooth metadata callback - updates UI when track info arrives
+static void esp32_metadata_callback(esp32_meta_type_t type, const char *text) {
+    (void)type;
+    (void)text;
+    update_bt_ui();
+}
+
+// ESP32 volume callback - updates UI when volume changes
+static void esp32_volume_callback(uint8_t volume) {
+    (void)volume;
+    update_bt_ui();
+}
+
+// ESP32 position callback - updates UI with playback position
+static void esp32_position_callback(uint32_t position_ms) {
+    (void)position_ms;
+    update_bt_ui();
+}
+
+// ESP32 play state callback - updates UI when play state changes
+static void esp32_play_state_callback(esp32_play_state_t state) {
+    (void)state;
+    update_bt_ui();
+}
+
+// Callback for exit Bluetooth confirmation dialog
+static void exit_bt_dialog_callback(bool confirmed) {
+    if (confirmed) {
+        ESP_LOGI(TAG, "User confirmed exit from Bluetooth mode");
+        // Switch back to Roon mode (this will start WiFi)
+        controller_mode_set(CONTROLLER_MODE_ROON);
+    } else {
+        ESP_LOGI(TAG, "User cancelled exit from Bluetooth mode");
+    }
+}
+
+// Input handler for Bluetooth mode (forwards to ESP32 via UART)
+static void bt_input_handler(ui_input_event_t event) {
+    // Handle exit BT dialog if visible
+    if (ui_is_exit_bt_dialog_visible()) {
+        // Dialog handles its own button events, ignore other inputs
+        return;
+    }
+
+    // Menu event shows exit confirmation dialog (not zone picker)
+    if (event == UI_INPUT_MENU) {
+        ui_show_exit_bt_dialog(exit_bt_dialog_callback);
+        return;
+    }
+
+    // Forward other events to ESP32 for BLE HID / AVRCP control
+    switch (event) {
+        case UI_INPUT_PLAY_PAUSE:
+            ESP_LOGI(TAG, "BT: play/pause");
+            // Toggle based on current play state
+            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
+                esp32_comm_send_pause();
+            } else {
+                esp32_comm_send_play();
+            }
+            break;
+        case UI_INPUT_NEXT_TRACK:
+            ESP_LOGI(TAG, "BT: next track");
+            esp32_comm_send_next();
+            break;
+        case UI_INPUT_PREV_TRACK:
+            ESP_LOGI(TAG, "BT: prev track");
+            esp32_comm_send_prev();
+            break;
+        case UI_INPUT_VOL_UP:
+            ESP_LOGI(TAG, "BT: vol up");
+            esp32_comm_send_vol_up();
+            break;
+        case UI_INPUT_VOL_DOWN:
+            ESP_LOGI(TAG, "BT: vol down");
+            esp32_comm_send_vol_down();
+            break;
+        default:
+            break;
+    }
 }
 
 // Controller mode change callback
@@ -69,22 +142,27 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
     ESP_LOGI(TAG, "Controller mode changed to: %s", controller_mode_name(new_mode));
 
     if (new_mode == CONTROLLER_MODE_BLUETOOTH) {
-        // Switch to BLE mode
-        ui_set_ble_mode(true);
-        ui_set_input_handler(ble_input_handler);
-        s_ble_start_pending = true;
-        // Stop Roon client when in BLE mode
+        // Bluetooth mode uses ESP32 chip (BLE HID + AVRCP via UART)
+        // Stop WiFi to free radio for ESP32 Bluetooth communication
+        ESP_LOGI(TAG, "Stopping WiFi for Bluetooth mode");
         roon_client_set_network_ready(false);
+        wifi_mgr_stop();
+        // Activate Bluetooth on ESP32 (on-demand activation)
+        ESP_LOGI(TAG, "Activating Bluetooth on ESP32");
+        esp32_comm_send_bt_activate();
+        ui_set_ble_mode(true);
+        ui_set_input_handler(bt_input_handler);
     } else {
         // Switch to Roon mode
+        // Deactivate Bluetooth on ESP32 to save power
+        ESP_LOGI(TAG, "Deactivating Bluetooth on ESP32");
+        esp32_comm_send_bt_deactivate();
         ui_set_ble_mode(false);
         ui_set_input_handler(roon_client_handle_input);
-        s_ble_stop_pending = true;
-        // Re-enable Roon client if network is available
-        char ip[16];
-        if (wifi_mgr_get_ip(ip, sizeof(ip))) {
-            roon_client_set_network_ready(true);
-        }
+        // Start WiFi if it was stopped
+        ESP_LOGI(TAG, "Starting WiFi for Roon mode");
+        wifi_mgr_start();
+        // Network ready will be set when WiFi connects (via RK_NET_EVT_GOT_IP)
     }
 }
 
@@ -153,11 +231,6 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ui_set_message("Setup: roon-knob-setup");
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
-        // Start BLE as fallback if available - device is useful out-of-box
-        if (ble_hid_client_available() && controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
-            ESP_LOGI(TAG, "Starting BLE HID as fallback (no WiFi)");
-            controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
-        }
         break;
 
     case RK_NET_EVT_AP_STOPPED:
@@ -267,22 +340,6 @@ static void ui_loop_task(void *arg) {
             s_config_server_stop_pending = false;
             config_server_stop();
         }
-        if (s_ble_start_pending) {
-            s_ble_start_pending = false;
-            ESP_LOGI(TAG, "Starting BLE HID...");
-            if (ble_hid_client_start()) {
-                ble_hid_client_set_state_callback(ble_state_callback);
-                ESP_LOGI(TAG, "BLE HID started successfully");
-            } else {
-                ESP_LOGE(TAG, "BLE HID start failed");
-                ui_set_message("BLE: Start failed");
-            }
-        }
-        if (s_ble_stop_pending) {
-            s_ble_stop_pending = false;
-            ESP_LOGI(TAG, "Stopping BLE HID...");
-            ble_hid_client_stop();
-        }
 
         // Yield to lower priority tasks including IDLE
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -325,6 +382,7 @@ void app_main(void) {
     lv_init();
 
     // Register LVGL display driver and start LVGL task
+    // NOTE: Must happen BEFORE esp32_comm_init() - LVGL needs DMA-capable RAM for draw buffers
     ESP_LOGI(TAG, "Registering LVGL display driver...");
     if (!platform_display_register_lvgl_driver()) {
         ESP_LOGE(TAG, "Display driver registration failed!");
@@ -334,6 +392,15 @@ void app_main(void) {
     // Now safe to initialize UI (depends on LVGL display being registered)
     ESP_LOGI(TAG, "Initializing UI...");
     ui_init();
+
+    // Initialize ESP32 communication (UART to Bluetooth chip)
+    // Uses GPIO38 (TX) and GPIO48 (RX) - verified from schematic
+    ESP_LOGI(TAG, "Initializing ESP32 communication...");
+    esp32_comm_init();
+    esp32_comm_set_metadata_cb(esp32_metadata_callback);
+    esp32_comm_set_volume_cb(esp32_volume_callback);
+    esp32_comm_set_position_cb(esp32_position_callback);
+    esp32_comm_set_play_state_cb(esp32_play_state_callback);
 
     // Initialize input (rotary encoder)
     platform_input_init();
@@ -356,8 +423,16 @@ void app_main(void) {
     app_entry();
 
     // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
-    ESP_LOGI(TAG, "Starting WiFi...");
-    wifi_mgr_start();
+    // Skip WiFi if starting in Bluetooth mode
+    // NOTE: BT mode setup is handled via mode_change_callback triggered by app_entry()
+    // calling controller_mode_set(). Don't duplicate BT activation here.
+    if (controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
+        ESP_LOGI(TAG, "Starting WiFi...");
+        wifi_mgr_start();
+    } else {
+        ESP_LOGI(TAG, "Starting in Bluetooth mode (setup via callback)");
+        // BT activation already sent via mode_change_callback from app_entry()
+    }
 
     ESP_LOGI(TAG, "Initialization complete");
 }

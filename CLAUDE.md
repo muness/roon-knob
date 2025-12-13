@@ -47,3 +47,25 @@ bd sync
 - When a roadmap feature is **fully complete**, update its status in README.md from "Not started" to "Complete"
 - When work is **in progress**, update to "In progress"
 - Beads is the source of truth for task details; README roadmap is the high-level view
+
+## Common Pitfalls (READ THIS FIRST)
+
+**Before struggling with build/config issues, READ THE PROJECT DOCS:**
+
+### sdkconfig Changes Don't Apply
+When adding options to `sdkconfig.defaults`, you MUST delete `sdkconfig`:
+```bash
+rm sdkconfig
+idf.py build
+```
+`idf.py reconfigure` and `idf.py fullclean` do NOT regenerate sdkconfig from defaults.
+See [docs/KCONFIG.md](docs/KCONFIG.md) for details.
+
+### ESP-IDF Version
+This project uses ESP-IDF v5.4.3. The local install is symlinked at `~/esp/esp-idf`.
+
+### Target Chip
+The target is ESP32-S3, not ESP32. If you get weird errors, check:
+```bash
+idf.py set-target esp32s3
+```

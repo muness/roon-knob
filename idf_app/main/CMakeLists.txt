@@ -14,7 +14,7 @@ set(SRC_FILES
     "platform_input_idf.c"
     "battery.c"
     "ota_update.c"
-    "ble_hid_client.c"
+    "esp32_comm.c"
     "../../common/app_main.c"
     "../../common/roon_client.c"
     "../../common/ui.c"
@@ -52,6 +52,7 @@ idf_component_register(
         esp_http_server
         driver
         esp_driver_ledc
+        esp_driver_uart
         esp_adc
         espressif__esp_new_jpeg
         app_update
@@ -61,8 +62,3 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 
-# Conditionally link BLE HID when enabled
-if(CONFIG_ROON_KNOB_BLE_HID_ENABLED)
-    idf_component_get_property(ble_hid_lib ble_hid COMPONENT_LIB)
-    target_link_libraries(${COMPONENT_LIB} PRIVATE ${ble_hid_lib})
-endif()

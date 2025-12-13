@@ -51,7 +51,7 @@ bool controller_mode_set(controller_mode_t mode) {
 }
 
 bool controller_mode_bluetooth_available(void) {
-#ifdef CONFIG_ROON_KNOB_BLE_HID_ENABLED
+#ifdef CONFIG_ROON_KNOB_BLUETOOTH_MODE
     return true;
 #else
     return false;

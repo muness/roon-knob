@@ -1,0 +1,27 @@
+menu "ESP32 Bluetooth Configuration"
+
+    config ESP32_BT_DEVICE_NAME
+        string "Bluetooth device name"
+        default "Roon Knob BT"
+        help
+            Name shown when pairing with phones/devices.
+
+    config ESP32_UART_TX_PIN
+        int "UART TX GPIO (to S3)"
+        default 13
+        help
+            GPIO pin for UART TX to ESP32-S3.
+
+    config ESP32_UART_RX_PIN
+        int "UART RX GPIO (from S3)"
+        default 23
+        help
+            GPIO pin for UART RX from ESP32-S3.
+
+    config ESP32_UART_BAUD
+        int "UART baud rate"
+        default 1000000
+        help
+            Baud rate for inter-chip communication.
+
+endmenu

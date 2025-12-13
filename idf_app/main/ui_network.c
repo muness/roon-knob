@@ -9,6 +9,7 @@
 #include "platform/platform_storage.h"
 #include "wifi_manager.h"
 #include "ota_update.h"
+#include "controller_mode.h"
 
 #if defined(__has_include)
 #  if __has_include("lvgl.h")
@@ -186,6 +187,26 @@ static void hide_panel_cb(lv_event_t *e) {
     if (s_widgets.panel) {
         lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static void bluetooth_mode_cb(lv_event_t *e) {
+    (void)e;
+    ESP_LOGI(TAG, "Switching to Bluetooth mode");
+
+    // Hide settings panel
+    if (s_widgets.panel) {
+        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // Save Bluetooth as the selected zone
+    rk_cfg_t cfg = {0};
+    platform_storage_load(&cfg);
+    strncpy(cfg.zone_id, "__bluetooth__", sizeof(cfg.zone_id) - 1);
+    platform_storage_save(&cfg);
+
+    // Switch to Bluetooth mode
+    controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
+    ui_set_zone_name("Bluetooth");
 }
 
 static void clear_bridge_cb(lv_event_t *e) {
@@ -384,6 +405,7 @@ static void ensure_panel(void) {
     create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
     create_button(s_widgets.panel, "Clear Bridge", clear_bridge_cb);
     create_button(s_widgets.panel, "Forget Wi-Fi", forget_wifi_cb);
+    create_button(s_widgets.panel, "Bluetooth Mode", bluetooth_mode_cb);
     create_button(s_widgets.panel, "Back", hide_panel_cb);
 }
 

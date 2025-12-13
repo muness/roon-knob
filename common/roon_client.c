@@ -579,9 +579,9 @@ static void roon_poll_thread(void *arg) {
     struct now_playing_state state;
     default_now_playing(&state);
     while (s_running) {
-        // Skip HTTP requests if network is not ready yet
+        // Skip HTTP requests if network is not ready yet (or in BLE mode)
+        // In BLE mode, s_network_ready is false, so we just sleep without logging
         if (!s_network_ready) {
-            LOGI("Polling: Network not ready, waiting...");
             wait_for_poll_interval();
             continue;
         }
@@ -649,13 +649,14 @@ void roon_client_handle_input(ui_input_event_t event) {
             // Check if Bluetooth was selected
             if (controller_mode_is_bluetooth_zone(selected_id)) {
                 LOGI("Zone picker: switching to Bluetooth mode");
+                // Hide picker FIRST to ensure it closes before mode change callbacks
+                ui_hide_zone_picker();
                 lock_state();
                 strncpy(s_state.cfg.zone_id, ZONE_ID_BLUETOOTH, sizeof(s_state.cfg.zone_id) - 1);
                 s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
                 unlock_state();
                 platform_storage_save(&s_state.cfg);
                 controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
-                ui_hide_zone_picker();
                 return;
             }
 
@@ -688,12 +689,13 @@ void roon_client_handle_input(ui_input_event_t event) {
                 LOGW("Zone picker: zone id '%s' not found in zone list", selected_id);
             }
             unlock_state();
+            // Hide picker FIRST to ensure it closes before any async operations
+            ui_hide_zone_picker();
             if (updated) {
                 platform_storage_save(&s_state.cfg);
                 post_ui_zone_name(label_copy);
                 post_ui_message("Loading zone...");
             }
-            ui_hide_zone_picker();
             return;
         }
         if (event == UI_INPUT_MENU) {
