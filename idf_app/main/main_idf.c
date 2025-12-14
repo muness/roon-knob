@@ -254,11 +254,16 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     ui_network_on_event(evt, ip_opt);
 
     switch (evt) {
-    case RK_NET_EVT_CONNECTING:
-        ESP_LOGI(TAG, "WiFi: Connecting...");
-        stop_wifi_msg_alternation();
-        ui_update("WiFi: Connecting...", "", false, 0, 0, 100, 0, 0);
+    case RK_NET_EVT_CONNECTING: {
+        int retry = wifi_mgr_get_retry_count();
+        ESP_LOGI(TAG, "WiFi: Connecting... (retry %d)", retry);
+        // Only show "Connecting..." on first attempt; during retries, keep showing error/retry
+        if (retry == 0) {
+            stop_wifi_msg_alternation();
+            ui_update("WiFi: Connecting...", "", false, 0, 0, 100, 0, 0);
+        }
         break;
+    }
 
     case RK_NET_EVT_GOT_IP:
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
