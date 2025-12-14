@@ -112,12 +112,20 @@ jobs:
           DRAFT_BODY=$(gh api repos/${{ github.repository }}/releases \
             --jq '.[] | select(.draft == true) | .body' 2>/dev/null | head -1 || echo "")
 
-          if [ -n "$DRAFT_BODY" ]; then
+          # Check if draft has actual PR content (not just empty template)
+          if [ -n "$DRAFT_BODY" ] && echo "$DRAFT_BODY" | grep -q "github.com.*pull"; then
             echo "$DRAFT_BODY" > release_notes.md
             echo "Using draft release notes from release-drafter"
           else
             # Fallback: generate notes via GitHub API
+            echo "Draft empty or no PRs, generating from GitHub API..."
             PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -z "$PREV_TAG" ]; then
+              # Fetch tags if shallow clone
+              git fetch --tags --depth=50 2>/dev/null || true
+              PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            fi
+            echo "Previous tag: $PREV_TAG"
             if [ -n "$PREV_TAG" ]; then
               gh api repos/${{ github.repository }}/releases/generate-notes \
                 -f tag_name="${{ github.ref_name }}" \
@@ -126,8 +134,10 @@ jobs:
             else
               echo "## What's Changed" > release_notes.md
             fi
-            echo "Generated release notes (no draft found)"
+            echo "Generated release notes"
           fi
+          echo "--- Release notes content ---"
+          cat release_notes.md
 
       - name: Prepare release assets
         run: |
