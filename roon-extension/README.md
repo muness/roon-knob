@@ -23,23 +23,74 @@ The process will auto-discover your Roon Core on the LAN. Keep the Core’s “E
 
 | Variable | Description |
 | --- | --- |
-| `PORT` | HTTP listen port (default `8088`). |
+| `PORT` | **HTTP API listen port** (default `8088`). This is what the knob connects to. Set to `80` if you want to use the standard HTTP port. |
 | `LOG_LEVEL` | `debug` for verbose HTTP logs, otherwise `info` (default `info`). |
 | `MDNS_NAME` | Friendly service name advertised over `_roonknob._tcp`. |
-| `ROON_SERVICE_PORT` | TCP port used for the Roon discovery socket (defaults to `9330`). This is NOT the HTTP port. |
+| `ROON_SERVICE_PORT` | Internal Roon discovery protocol port (default `9330`). **Not the HTTP port.** Only change if you have port conflicts with another Roon extension. |
 | `MDNS_BASE` | Optional base URL to advertise via mDNS (default `http://<hostname>:PORT`). |
-| `CONFIG_DIR` | Directory for persistent config storage (default `./data`). Used for Roon pairing tokens. |
+| `CONFIG_DIR` | Directory for persistent config storage (default `./data`). Stores Roon pairing tokens after authorization. |
 
-By default the knob ignores discovered bridges whose hostname isn’t a numeric IP (to avoid unresolvable names). If your mDNS advert uses a DNS name, set `MDNS_BASE` to the numeric IP that the knob can reach instead.
+### Common Port Confusion
 
-If you need to run another extension on the same host then remap the host side of `ports:` while leaving the container side at `8088`/`9330`. The entries are `HOST:CONTAINER`, so a host mapping of `9002:8088` (TCP) and `9392:9330` (TCP/UDP) keeps the internal sockets unchanged while exposing different host ports. After changing the ports, keep the container ports in sync by leaving the env overrides at:
+- **`PORT`** = HTTP API port (what the knob talks to). Change this to `80` if desired.
+- **`ROON_SERVICE_PORT`** = Internal Roon discovery socket. Rarely needs changing.
 
+Example to run on port 80:
+```bash
+PORT=80 npm start
 ```
-PORT=8088
-ROON_SERVICE_PORT=9330
+
+### Config Persistence
+
+The `CONFIG_DIR` stores `config.json` containing Roon pairing tokens. This file is **only created after you authorize the extension** in Roon:
+
+1. Start the bridge
+2. Open Roon → Settings → Extensions
+3. Find "Roon Knob Bridge" and click Enable/Authorize
+4. The pairing token is saved to `CONFIG_DIR/config.json`
+
+Without this authorization step, the data directory will remain empty.
+
+### mDNS Notes
+
+By default the knob ignores discovered bridges whose hostname isn't a numeric IP (to avoid unresolvable names). If your mDNS advert uses a DNS name, set `MDNS_BASE` to the numeric IP that the knob can reach instead.
+
+## Docker Setup
+
+Example `docker-compose.yml`:
+
+```yaml
+services:
+  roon-knob-bridge:
+    build: ./roon-extension
+    network_mode: host
+    environment:
+      PORT: "8088"           # HTTP API port (change to 80 if desired)
+      CONFIG_DIR: /app/data  # Must match volume mount path
+    volumes:
+      - ./data:/app/data     # Persist Roon pairing tokens
+    restart: unless-stopped
 ```
 
-This ensures the bridge still listens on `8088`/`9330` inside the container while everything on the host hits the new ports. The default compose snippet now uses `network_mode: host` so no explicit port mappings are required, but if you switch back to bridge networking for any reason, uncomment the `ports:` block above and apply those host remaps before `docker compose up`. If the local DNS name advertised by mDNS isn’t reachable from the knob, set `MDNS_BASE` to `http://<ip>:<port>` so the discovery TXT record points at a resolvable address.
+**Important**: The `CONFIG_DIR` environment variable must match the container-side path of your volume mount. If you mount `./data:/app/data`, set `CONFIG_DIR=/app/data`.
+
+### Running Multiple Extensions
+
+If you need to run another Roon extension on the same host, remap the host side of `ports:` while leaving the container side unchanged. The entries are `HOST:CONTAINER`, so `9002:8088` exposes the bridge on host port 9002.
+
+When using bridge networking (not `network_mode: host`):
+
+```yaml
+ports:
+  - "9002:8088"    # HTTP API
+  - "9392:9330"    # Roon discovery (TCP)
+  - "9392:9330/udp"  # Roon discovery (UDP)
+environment:
+  PORT: "8088"              # Keep internal port unchanged
+  ROON_SERVICE_PORT: "9330" # Keep internal port unchanged
+```
+
+If the DNS name advertised by mDNS isn't reachable from the knob, set `MDNS_BASE` to `http://<ip>:<port>` so the discovery TXT record points at a resolvable address.
 
 ## HTTP Contract
 
