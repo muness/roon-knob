@@ -180,6 +180,18 @@ static void bt_input_handler(ui_input_event_t event) {
     }
 }
 
+// Validator to block mode changes during OTA
+static bool mode_change_validator(controller_mode_t new_mode) {
+    (void)new_mode;
+    const ota_info_t *ota = ota_get_info();
+    if (ota && (ota->status == OTA_STATUS_DOWNLOADING || ota->status == OTA_STATUS_CHECKING)) {
+        ESP_LOGW(TAG, "Mode change blocked: OTA in progress");
+        ui_set_message("Update in progress");
+        return false;
+    }
+    return true;
+}
+
 // Controller mode change callback
 static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
     (void)user_data;
@@ -492,6 +504,7 @@ void app_main(void) {
     // Initialize controller mode and register callback for mode changes
     ESP_LOGI(TAG, "Initializing controller mode...");
     controller_mode_init();
+    controller_mode_set_validator(mode_change_validator);
     controller_mode_register_callback(mode_change_callback, NULL);
 
     // Start application logic

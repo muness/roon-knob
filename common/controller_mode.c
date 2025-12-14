@@ -19,6 +19,7 @@
 static controller_mode_t s_current_mode = CONTROLLER_MODE_ROON;
 static controller_mode_change_cb_t s_callback = NULL;
 static void *s_callback_user_data = NULL;
+static controller_mode_validator_cb_t s_validator = NULL;
 
 void controller_mode_init(void) {
     /* Mode is determined by zone_id, which is loaded by the caller.
@@ -33,6 +34,12 @@ controller_mode_t controller_mode_get(void) {
 bool controller_mode_set(controller_mode_t mode) {
     if (mode == s_current_mode) {
         return false;  /* Already in this mode */
+    }
+
+    /* Check validator if registered */
+    if (s_validator && !s_validator(mode)) {
+        LOGW("[ctrl_mode] Mode change to %s blocked by validator", controller_mode_name(mode));
+        return false;
     }
 
     controller_mode_t old_mode = s_current_mode;
@@ -79,4 +86,8 @@ bool controller_mode_is_bluetooth_zone(const char *zone_id) {
         return false;
     }
     return strcmp(zone_id, ZONE_ID_BLUETOOTH) == 0;
+}
+
+void controller_mode_set_validator(controller_mode_validator_cb_t validator) {
+    s_validator = validator;
 }
