@@ -2,6 +2,7 @@ const RoonApi = require('node-roon-api');
 const RoonApiStatus = require('node-roon-api-status');
 const RoonApiTransport = require('node-roon-api-transport');
 const RoonApiImage = require('node-roon-api-image');
+const { version: VERSION } = require('./package.json');
 
 const RATE_LIMIT_INTERVAL_MS = 100;
 const MAX_RELATIVE_STEP_PER_CALL = 25;
@@ -45,7 +46,7 @@ function createRoonBridge(opts = {}) {
   const roon = new RoonApi({
     extension_id: opts.extension_id || 'roon.knob.sidecar',
     display_name: opts.display_name || 'Roon Knob Bridge',
-    display_version: opts.display_version || '0.1.0',
+    display_version: opts.display_version || VERSION,
     publisher: 'Roon Knob',
     email: 'support@example.com',
     website: 'https://github.com/muness/roon-knob',

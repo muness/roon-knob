@@ -8,6 +8,7 @@ const { createRoutes } = require('./routes');
 const { createRoonBridge } = require('./bridge');
 const { createMetricsTracker } = require('./metrics');
 const { createLogger } = require('./logger');
+const { version: VERSION } = require('./package.json');
 
 function getGitSha() {
   try {
@@ -27,7 +28,7 @@ function startServer() {
 
   const metrics = createMetricsTracker();
   const log = createLogger('Sidecar');
-  log.info('Starting server', { version: '0.1.0', git_sha: GIT_SHA });
+  log.info('Starting server', { version: VERSION, git_sha: GIT_SHA });
   const app = express();
   app.use(express.json());
   app.use(cors());
@@ -39,7 +40,7 @@ function startServer() {
   app.use(createRoutes({ bridge, metrics, log: createLogger('HTTP') }));
 
   app.get('/status', (_req, res) => {
-    res.json({ status: 'ok', version: '0.1.0', git_sha: GIT_SHA });
+    res.json({ status: 'ok', version: VERSION, git_sha: GIT_SHA });
   });
 
   app.use(express.static(path.join(__dirname, 'public')));
@@ -71,7 +72,7 @@ function startServer() {
       advertisedAt: Date.now(),
     };
     metrics.git_sha = GIT_SHA;
-    metrics.version = '0.1.0';
+    metrics.version = VERSION;
   });
 
   server.on('error', (err) => {
