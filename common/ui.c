@@ -1328,6 +1328,12 @@ void ui_set_ble_mode(bool enabled) {
         }
     } else {
         ESP_LOGI(UI_TAG, "Switching to Roon mode UI");
+        // Restore zone label (remove BT symbol, show saved zone name)
+        if (s_zone_label && s_pending.zone_name[0]) {
+            lv_label_set_text(s_zone_label, s_pending.zone_name);
+        } else if (s_zone_label) {
+            lv_label_set_text(s_zone_label, "Connecting...");
+        }
         // Restore artwork visibility
         if (s_artwork_image) {
             lv_obj_clear_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
