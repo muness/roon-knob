@@ -17,13 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build with ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: release-v5.4
-          target: esp32s3
-          path: idf_app
-
       - name: Get version from tag or CMakeLists
         id: version
         run: |
@@ -33,6 +26,19 @@ jobs:
             VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building firmware version: $VERSION"
+
+      - name: Inject version into CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.version.outputs.version }}")/' idf_app/CMakeLists.txt
+          grep PROJECT_VER idf_app/CMakeLists.txt
+
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: release-v5.4
+          target: esp32s3
+          path: idf_app
 
       - name: Prepare firmware for Docker
         run: |
