@@ -1,8 +1,12 @@
 name: CI
 
+# Quick checks for feature branches (not master/main)
+# Full builds are handled by docker.yml for master/tags/PRs
 on:
-  push: {}
-  pull_request: {}
+  push:
+    branches-ignore: [master, main]
+  pull_request:
+    branches-ignore: [master, main]
 
 jobs:
   build-pc:
@@ -19,29 +23,3 @@ jobs:
           cmake --build build/pc_sim
       - name: JSON unit test
         run: python tests/test_json_parse.py
-
-  build-esp32s3:
-    name: Build ESP32-S3 Firmware
-    runs-on: ubuntu-latest
-    container: espressif/idf:v5.4.1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build ESP32-S3 firmware
-        working-directory: idf_app
-        run: |
-          . $IDF_PATH/export.sh
-          idf.py set-target esp32s3
-          idf.py build
-
-  build-esp32bt:
-    name: Build ESP32 Bluetooth Firmware
-    runs-on: ubuntu-latest
-    container: espressif/idf:v5.4.1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build ESP32 BT firmware
-        working-directory: esp32_bt
-        run: |
-          . $IDF_PATH/export.sh
-          idf.py set-target esp32
-          idf.py build
