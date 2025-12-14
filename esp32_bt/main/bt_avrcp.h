@@ -92,6 +92,11 @@ void bt_avrcp_play(void);
 void bt_avrcp_pause(void);
 
 /**
+ * @brief Toggle play/pause via BLE HID (for devices without AVRCP)
+ */
+void bt_avrcp_play_pause(void);
+
+/**
  * @brief Send AVRCP next track command
  */
 void bt_avrcp_next(void);

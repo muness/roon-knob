@@ -235,6 +235,18 @@ void ble_hid_pause(void)
     esp_hidd_send_consumer_value(s_conn_id, HID_CONSUMER_PAUSE, false);
 }
 
+void ble_hid_play_pause(void)
+{
+    if (!s_connected) {
+        ESP_LOGW(TAG, "BLE HID not connected - play/pause ignored");
+        return;
+    }
+    // Send PLAY_PAUSE toggle - more universally supported than separate PLAY/PAUSE
+    ESP_LOGI(TAG, "Sending BLE HID play/pause toggle");
+    esp_hidd_send_consumer_value(s_conn_id, HID_CONSUMER_PLAY_PAUSE, true);
+    esp_hidd_send_consumer_value(s_conn_id, HID_CONSUMER_PLAY_PAUSE, false);
+}
+
 void ble_hid_next_track(void)
 {
     if (!s_connected) {

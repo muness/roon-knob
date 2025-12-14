@@ -234,6 +234,12 @@ void bt_avrcp_pause(void)
     ble_hid_pause();
 }
 
+void bt_avrcp_play_pause(void)
+{
+    ESP_LOGI(TAG, "Play/Pause toggle via BLE HID");
+    ble_hid_play_pause();
+}
+
 void bt_avrcp_next(void)
 {
     ESP_LOGI(TAG, "Next via BLE HID");

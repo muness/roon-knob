@@ -153,7 +153,10 @@ static void bt_input_handler(ui_input_event_t event) {
         case UI_INPUT_PLAY_PAUSE:
             ESP_LOGI(TAG, "BT: play/pause");
             // Toggle based on current play state
-            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
+            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_UNKNOWN) {
+                // HID-only mode (no AVRCP) - send toggle command
+                esp32_comm_send_play_pause();
+            } else if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
                 esp32_comm_send_pause();
             } else {
                 esp32_comm_send_play();
