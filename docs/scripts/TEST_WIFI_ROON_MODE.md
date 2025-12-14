@@ -75,7 +75,7 @@ Happy path test script for WiFi setup and Roon control functionality.
 ### Steps
 
 1. **After bridge connects, tap the zone label**
-   - Zone label initially shows "Press knob to select zone"
+   - Zone label initially shows "Tap here to select zone"
    - Or shows last selected zone name
 
 2. **Zone picker appears**

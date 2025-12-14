@@ -26,6 +26,8 @@ void wifi_mgr_get_ssid(char *buf, size_t n);
 bool wifi_mgr_is_ap_mode(void);              // true if in AP provisioning mode
 void wifi_mgr_stop_ap(void);                 // stop AP mode, attempt STA connection
 const char *wifi_mgr_get_last_error(void);   // get last disconnect reason string
+int wifi_mgr_get_retry_count(void);          // get current retry attempt count (0 = connected)
+int wifi_mgr_get_retry_max(void);            // get max retries before AP mode
 
 // weak callback the UI can override (or register separately)
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);

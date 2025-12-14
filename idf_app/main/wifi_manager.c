@@ -440,6 +440,14 @@ const char *wifi_mgr_get_last_error(void) {
     return s_last_error;
 }
 
+int wifi_mgr_get_retry_count(void) {
+    return s_sta_fail_count;
+}
+
+int wifi_mgr_get_retry_max(void) {
+    return STA_FAIL_THRESHOLD;
+}
+
 void wifi_mgr_stop(void) {
     if (!s_started) {
         return;

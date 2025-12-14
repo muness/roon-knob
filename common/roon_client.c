@@ -63,6 +63,9 @@ static bool s_last_net_ok;
 static bool s_network_ready;
 static bool s_force_artwork_refresh;  // Force artwork reload on zone change
 static int s_last_known_volume = 0;   // Cached volume for optimistic UI updates
+static bool s_bridge_verified = false;  // True after bridge found AND responded successfully
+static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
+#define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
 static void lock_state(void) {
     os_mutex_lock(&s_state_lock);
@@ -596,7 +599,17 @@ static void roon_poll_thread(void *arg) {
             continue;
         }
 
-        maybe_update_bridge_base();
+        // Only run mDNS discovery if:
+        // 1. We haven't verified a working bridge yet, OR
+        // 2. It's been over an hour since last check (in case bridge IP changed)
+        uint32_t now_ms = (uint32_t)platform_millis();
+        bool should_check_mdns = !s_bridge_verified ||
+            (now_ms - s_last_mdns_check_ms > MDNS_RECHECK_INTERVAL_MS);
+        if (should_check_mdns) {
+            maybe_update_bridge_base();
+            s_last_mdns_check_ms = now_ms;
+        }
+
         if (!s_state.zone_resolved) {
             refresh_zone_label(true);
         }
@@ -606,13 +619,15 @@ static void roon_poll_thread(void *arg) {
 
         // Show meaningful status messages for state transitions
         if (ok && !s_last_net_ok) {
-            // Just connected to bridge - clear network status
+            // Just connected to bridge - clear network status and mark as verified
             post_ui_message("Bridge: Connected");
             ui_set_network_status(NULL);  // Clear persistent status on success
+            s_bridge_verified = true;  // Stop frequent mDNS queries
         } else if (!ok && s_last_net_ok) {
-            // Lost connection to bridge
+            // Lost connection to bridge - resume mDNS checks
             post_ui_message("Bridge: Offline");
             ui_set_network_status("Bridge: Offline - check connection");
+            s_bridge_verified = false;  // Resume mDNS discovery
         } else if (!ok && !s_last_net_ok) {
             // Still trying to connect - check if we have a bridge URL
             lock_state();
@@ -654,7 +669,7 @@ void roon_client_start(const rk_cfg_t *cfg) {
     platform_task_init();
     lock_state();
     s_state.cfg = *cfg;
-    strncpy(s_state.zone_label, cfg->zone_id[0] ? cfg->zone_id : "Press knob to select zone", sizeof(s_state.zone_label) - 1);
+    strncpy(s_state.zone_label, cfg->zone_id[0] ? cfg->zone_id : "Tap here to select zone", sizeof(s_state.zone_label) - 1);
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     unlock_state();
     s_running = true;

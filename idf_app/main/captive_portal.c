@@ -34,6 +34,8 @@ static const char *HTML_FORM =
     ".success{background:#2e7d32;}"
     ".error{background:#c62828;}"
     ".hint{font-size:12px;color:#666;margin-top:4px;}"
+    ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;margin-top:20px;font-size:13px;}"
+    ".note a{color:#4fc3f7;}"
     "</style></head><body>"
     "<h1>Roon Knob</h1>"
     "<p>WiFi Setup</p>"
@@ -43,7 +45,12 @@ static const char *HTML_FORM =
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<input type='submit' value='Connect'>"
-    "</form></body></html>";
+    "</form>"
+    "<div class='note'>"
+    "<strong>Note:</strong> To use this with Roon, you'll need to set up the Roon Bridge. "
+    "See <a href='https://github.com/muness/roon-knob' target='_blank'>github.com/muness/roon-knob</a> for details."
+    "</div>"
+    "</body></html>";
 
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"

@@ -225,11 +225,16 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         s_config_server_start_pending = true;
         break;
 
-    case RK_NET_EVT_FAIL:
-        ESP_LOGW(TAG, "WiFi: Connection failed, retrying...");
-        ui_set_message("WiFi: Retrying...");
+    case RK_NET_EVT_FAIL: {
+        int attempt = wifi_mgr_get_retry_count();
+        int max = wifi_mgr_get_retry_max();
+        ESP_LOGW(TAG, "WiFi: Connection failed, attempt %d/%d", attempt, max);
+        char msg[32];
+        snprintf(msg, sizeof(msg), "WiFi: Retry %d/%d", attempt, max);
+        ui_set_message(msg);
         roon_client_set_network_ready(false);
         break;
+    }
 
     case RK_NET_EVT_AP_STARTED:
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
