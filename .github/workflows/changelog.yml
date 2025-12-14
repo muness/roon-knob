@@ -1,0 +1,61 @@
+name: Update Changelog
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-changelog:
+    name: Update CHANGELOG.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Update CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          DATE=$(date +%Y-%m-%d)
+          BODY="${{ github.event.release.body }}"
+
+          # Create new changelog entry
+          cat > new_entry.md << EOF
+          ## [$VERSION] - $DATE
+
+          $BODY
+
+          EOF
+
+          # Prepend to CHANGELOG.md (after header)
+          if [ -f CHANGELOG.md ]; then
+            # Insert after the first two lines (title + blank line)
+            head -2 CHANGELOG.md > temp_changelog.md
+            cat new_entry.md >> temp_changelog.md
+            tail -n +3 CHANGELOG.md >> temp_changelog.md
+            mv temp_changelog.md CHANGELOG.md
+          else
+            # Create new CHANGELOG
+            cat > CHANGELOG.md << 'HEADER'
+          # Changelog
+
+          All notable changes to this project will be documented in this file.
+
+          HEADER
+            cat new_entry.md >> CHANGELOG.md
+          fi
+
+          rm new_entry.md
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --staged --quiet || git commit -m "docs: Update CHANGELOG for ${{ github.event.release.tag_name }}"
+          git push

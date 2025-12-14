@@ -99,6 +99,36 @@ jobs:
           name: esp32bt-firmware
           path: esp32bt-artifacts
 
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Get release notes from draft
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Try to get draft release body (maintained by release-drafter)
+          DRAFT_BODY=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[] | select(.draft == true) | .body' 2>/dev/null | head -1 || echo "")
+
+          if [ -n "$DRAFT_BODY" ]; then
+            echo "$DRAFT_BODY" > release_notes.md
+            echo "Using draft release notes from release-drafter"
+          else
+            # Fallback: generate notes via GitHub API
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              gh api repos/${{ github.repository }}/releases/generate-notes \
+                -f tag_name="${{ github.ref_name }}" \
+                -f previous_tag_name="$PREV_TAG" \
+                --jq '.body' > release_notes.md 2>/dev/null || echo "## What's Changed" > release_notes.md
+            else
+              echo "## What's Changed" > release_notes.md
+            fi
+            echo "Generated release notes (no draft found)"
+          fi
+
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
@@ -106,58 +136,25 @@ jobs:
           cp esp32bt-artifacts/esp32_bt.bin release-assets/
           ls -la release-assets/
 
+      - name: Build release body
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Start with auto-generated "What's Changed"
+          cat release_notes.md > final_body.md
+
+          # Append template with version substituted
+          sed "s/{{VERSION}}/$VERSION/g" .github/RELEASE_TEMPLATE.md >> final_body.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
-          generate_release_notes: true
           files: |
             release-assets/roon_knob.bin
             release-assets/esp32_bt.bin
-          body: |
-            ## Flashing Instructions
-
-            This release includes **two firmware files** for the dual-chip board:
-
-            | File | Chip | USB Orientation | Port (macOS) |
-            |------|------|-----------------|--------------|
-            | `roon_knob.bin` | ESP32-S3 (main) | Normal | `/dev/cu.usbmodem*` |
-            | `esp32_bt.bin` | ESP32 (Bluetooth) | Flipped 180° | `/dev/cu.usbserial-*` |
-
-            ### Identifying the correct port
-
-            The two chips appear as **different USB devices**:
-            - **ESP32-S3**: Shows as `usbmodem` (native USB)
-            - **ESP32**: Shows as `usbserial` (USB-UART bridge)
-
-            ```bash
-            # List ports (macOS)
-            ls /dev/cu.usb*
-
-            # List ports (Linux)
-            ls /dev/ttyUSB* /dev/ttyACM*
-            ```
-
-            ### First-time setup (both chips required)
-
-            1. **Flash ESP32-S3** (USB-C in normal orientation):
-               ```bash
-               esptool.py --chip esp32s3 -p /dev/cu.usbmodem2101 write_flash 0x0 roon_knob.bin
-               ```
-
-            2. **Flip USB-C connector 180°** (physically rotate the cable)
-
-            3. **Flash ESP32** (USB-C now flipped):
-               ```bash
-               esptool.py --chip esp32 -p /dev/cu.usbserial-210 write_flash 0x0 esp32_bt.bin
-               ```
-
-            ### Routine updates (ESP32-S3 only)
-
-            For most updates, only the ESP32-S3 firmware changes. The Bluetooth firmware rarely needs updating.
-
-            ---
+          body_path: final_body.md
 
   docker:
     name: Build and Push Docker Image
@@ -181,7 +178,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: esp32s3-firmware
-          path: roon-extension/firmware/
+          path: firmware-artifact/
+
+      - name: Prepare firmware for Docker
+        run: |
+          mkdir -p roon-extension/firmware
+          # Flatten artifact structure to expected locations
+          cp firmware-artifact/idf_app/build/roon_knob.bin roon-extension/firmware/
+          cp firmware-artifact/roon-extension/firmware/version.json roon-extension/firmware/
+          echo "Firmware prepared:"
+          ls -la roon-extension/firmware/
+          cat roon-extension/firmware/version.json
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
