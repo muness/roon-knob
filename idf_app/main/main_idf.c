@@ -150,18 +150,31 @@ static void bt_input_handler(ui_input_event_t event) {
 
     // Forward other events to ESP32 for BLE HID / AVRCP control
     switch (event) {
-        case UI_INPUT_PLAY_PAUSE:
+        case UI_INPUT_PLAY_PAUSE: {
             ESP_LOGI(TAG, "BT: play/pause");
             // Toggle based on current play state
-            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_UNKNOWN) {
-                // HID-only mode (no AVRCP) - send toggle command
-                esp32_comm_send_play_pause();
-            } else if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
+            esp32_play_state_t state = esp32_comm_get_play_state();
+            if (state == ESP32_PLAY_STATE_UNKNOWN) {
+                // HID-only mode (no AVRCP) - track state locally
+                // PLAY_PAUSE toggle only acts as PLAY on some DAPs,
+                // so use explicit PAUSE command when we think it's playing
+                static bool s_assumed_playing = false;
+                if (s_assumed_playing) {
+                    ESP_LOGI(TAG, "HID-only: sending PAUSE (assumed playing)");
+                    esp32_comm_send_pause();
+                    s_assumed_playing = false;
+                } else {
+                    ESP_LOGI(TAG, "HID-only: sending PLAY (assumed paused)");
+                    esp32_comm_send_play_pause();
+                    s_assumed_playing = true;
+                }
+            } else if (state == ESP32_PLAY_STATE_PLAYING) {
                 esp32_comm_send_pause();
             } else {
                 esp32_comm_send_play();
             }
             break;
+        }
         case UI_INPUT_NEXT_TRACK:
             ESP_LOGI(TAG, "BT: next track");
             esp32_comm_send_next();
