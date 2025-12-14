@@ -35,7 +35,8 @@ const char* ota_get_current_version(void) {
 }
 
 int ota_compare_versions(const char* v1, const char* v2) {
-    // Parse semver: major.minor.patch
+    // Parse semver: major.minor.patch[-prerelease]
+    // Per semver spec: 1.0.0-alpha < 1.0.0 (pre-release is lower than release)
     int maj1 = 0, min1 = 0, pat1 = 0;
     int maj2 = 0, min2 = 0, pat2 = 0;
 
@@ -48,7 +49,18 @@ int ota_compare_versions(const char* v1, const char* v2) {
 
     if (maj1 != maj2) return maj1 - maj2;
     if (min1 != min2) return min1 - min2;
-    return pat1 - pat2;
+    if (pat1 != pat2) return pat1 - pat2;
+
+    // Same major.minor.patch - check pre-release suffix
+    // A version with pre-release (-dev, -beta, -alpha, -rc) is LESS than one without
+    const char *pre1 = strchr(v1, '-');
+    const char *pre2 = strchr(v2, '-');
+
+    if (pre1 && !pre2) return -1;  // v1 has pre-release, v2 doesn't: v1 < v2
+    if (!pre1 && pre2) return 1;   // v1 doesn't have pre-release, v2 does: v1 > v2
+    if (pre1 && pre2) return strcmp(pre1, pre2);  // Both have pre-release: compare lexically
+
+    return 0;  // Identical
 }
 
 static void check_update_task(void *arg) {
