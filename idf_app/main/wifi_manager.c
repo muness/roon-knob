@@ -466,6 +466,10 @@ void wifi_mgr_stop(void) {
 
     ESP_LOGI(TAG, "Stopping WiFi completely (for BLE mode)");
 
+    // Unregister event handlers FIRST to prevent reconnect attempts
+    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler);
+
     // Stop retry timer
     if (s_retry_timer) {
         esp_timer_stop(s_retry_timer);

@@ -187,11 +187,14 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
 
     if (new_mode == CONTROLLER_MODE_BLUETOOTH) {
         // === ENTERING BLUETOOTH MODE ===
-        // Stop all WiFi-related activity
+        // Stop all WiFi-related activity first
         ESP_LOGI(TAG, "Stopping WiFi for Bluetooth mode");
         stop_wifi_msg_alternation();  // Stop WiFi error display timer
         roon_client_set_network_ready(false);
         wifi_mgr_stop();
+
+        // Let WiFi fully stop before activating BT
+        vTaskDelay(pdMS_TO_TICKS(100));
 
         // Activate Bluetooth on ESP32 (on-demand activation)
         ESP_LOGI(TAG, "Activating Bluetooth on ESP32");
@@ -200,11 +203,14 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
         ui_set_input_handler(bt_input_handler);
     } else {
         // === ENTERING ROON/WIFI MODE ===
-        // Deactivate Bluetooth on ESP32 to save power
+        // Deactivate Bluetooth on ESP32 first
         ESP_LOGI(TAG, "Deactivating Bluetooth on ESP32");
         esp32_comm_send_bt_deactivate();
         ui_set_ble_mode(false);
         ui_set_input_handler(roon_client_handle_input);
+
+        // Let BT fully stop before starting WiFi
+        vTaskDelay(pdMS_TO_TICKS(100));
 
         // Start WiFi
         ESP_LOGI(TAG, "Starting WiFi for Roon mode");
