@@ -100,8 +100,8 @@ When you're away from your Roon setup, the knob can control any Bluetooth audio 
 
 **Controls in Bluetooth mode:**
 - Turn knob: Volume up/down
-- Tap screen: Play/pause
-- Swipe left/right: Previous/next track
+- Tap play/pause button: Play/pause
+- Tap prev/next buttons: Previous/next track
 
 **What you'll see:**
 - With both connections: Full control + track info (title, artist, album, progress)
