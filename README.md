@@ -85,6 +85,26 @@ The knob finds the extension automatically via mDNS.
 - Automatic display dimming and sleep
 - Over-the-air firmware updates
 - WiFi setup via captive portal
+- Bluetooth mode for non-Roon devices
+
+## Bluetooth Mode
+
+When you're away from your Roon setup, the knob can control any Bluetooth audio device (phone, DAP, etc.) via BLE HID.
+
+**To enter Bluetooth mode:**
+1. Press the knob to open the zone picker
+2. Select "Bluetooth" from the zone list
+3. Pair your phone/DAP with "Roon Knob" (appears as a Bluetooth keyboard)
+
+**Controls in Bluetooth mode:**
+- Turn knob: Volume up/down
+- Tap screen: Play/pause
+- Swipe left/right: Previous/next track
+
+**To exit Bluetooth mode:**
+- Press the knob and confirm "Exit Bluetooth"
+
+**Note:** The knob uses a separate ESP32 chip for Bluetooth. When switching to Bluetooth mode, WiFi is disabled to save power.
 
 ## Troubleshooting
 
