@@ -240,6 +240,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
         // Show setup instructions in main display area (line2 is top, line1 is bottom)
         ui_update("roon-knob-setup", "Connect to WiFi:", false, 0, 0, 100, 0, 0);
+        ui_set_zone_name("Tap for Bluetooth");  // Offer Bluetooth as alternative to WiFi setup
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
         break;
