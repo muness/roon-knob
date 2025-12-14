@@ -28,7 +28,8 @@ typedef struct {
 void ota_init(void);
 
 // Check for updates (non-blocking, runs in background)
-void ota_check_for_update(void);
+// force=true bypasses the dev/beta/alpha version skip
+void ota_check_for_update(bool force);
 
 // Start firmware update (non-blocking, runs in background)
 void ota_start_update(void);
