@@ -19,18 +19,18 @@ jobs:
       - name: Update CHANGELOG.md
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_BODY: ${{ github.event.release.body }}
         run: |
           VERSION="${{ github.event.release.tag_name }}"
           DATE=$(date +%Y-%m-%d)
-          BODY="${{ github.event.release.body }}"
 
-          # Create new changelog entry
-          cat > new_entry.md << EOF
-          ## [$VERSION] - $DATE
-
-          $BODY
-
-          EOF
+          # Create new changelog entry (use env var to avoid shell interpretation)
+          {
+            echo "## [$VERSION] - $DATE"
+            echo ""
+            echo "$RELEASE_BODY"
+            echo ""
+          } > new_entry.md
 
           # Prepend to CHANGELOG.md (after header)
           if [ -f CHANGELOG.md ]; then
@@ -41,12 +41,12 @@ jobs:
             mv temp_changelog.md CHANGELOG.md
           else
             # Create new CHANGELOG
-            cat > CHANGELOG.md << 'HEADER'
-          # Changelog
-
-          All notable changes to this project will be documented in this file.
-
-          HEADER
+            {
+              echo "# Changelog"
+              echo ""
+              echo "All notable changes to this project will be documented in this file."
+              echo ""
+            } > CHANGELOG.md
             cat new_entry.md >> CHANGELOG.md
           fi
 
