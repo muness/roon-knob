@@ -9,3 +9,4 @@ void roon_client_start(const rk_cfg_t *cfg);
 void roon_client_handle_input(ui_input_event_t event);
 void roon_client_set_network_ready(bool ready);
 const char* roon_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height);
+bool roon_client_is_ready_for_art_mode(void);

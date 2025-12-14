@@ -84,6 +84,8 @@ Or use the helper script:
 ./scripts/build_flash_idf.sh /dev/cu.usbmodem101
 ```
 
+**Troubleshooting:** If you get "No serial data received", retry a few times or try another cable.
+
 ### Releasing Firmware
 
 ```bash

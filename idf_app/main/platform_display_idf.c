@@ -1,6 +1,7 @@
 #include "platform_display_idf.h"
 #include "platform/platform_display.h"
 #include "display_sleep.h"
+#include "roon_client.h"
 #include "i2c_bsp.h"
 #include "lcd_touch_bsp.h"
 
@@ -328,8 +329,13 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 
                 // Check for swipe up (negative Y direction) - enter art mode
                 if (dy < -SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
-                    ESP_LOGI(TAG, "Swipe up detected - queueing art mode");
-                    s_pending_art_mode = true;  // Defer to avoid LVGL threading issues
+                    // Only allow art mode when WiFi is configured and bridge is responding with zones
+                    if (roon_client_is_ready_for_art_mode()) {
+                        ESP_LOGI(TAG, "Swipe up detected - queueing art mode");
+                        s_pending_art_mode = true;  // Defer to avoid LVGL threading issues
+                    } else {
+                        ESP_LOGI(TAG, "Swipe up ignored - not ready for art mode (no zones)");
+                    }
                 }
                 // Check for swipe down (positive Y direction) - exit art mode
                 else if (dy > SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
@@ -360,7 +366,7 @@ bool platform_display_init(void) {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .channel = LEDC_CHANNEL_0,
         .timer_sel = LEDC_TIMER_0,
-        .duty = 16,  // 6.25% brightness (0-255) - very dim
+        .duty = CONFIG_RK_BACKLIGHT_NORMAL,  // Normal brightness from Kconfig
         .hpoint = 0
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));

@@ -174,6 +174,8 @@ static bool test_bridge_connectivity(void) {
     if (cfg.bridge_base[0] == '\0') {
         ESP_LOGI(TAG, "No bridge configured, will discover via mDNS");
         ui_set_message("Bridge: Searching...");
+        // Show guidance in case mDNS fails
+        ui_set_network_status("Tap zone for Settings");
         return false;  // No bridge to test yet
     }
 
@@ -192,10 +194,13 @@ static bool test_bridge_connectivity(void) {
     if (result == 0 && response_len > 0) {
         ESP_LOGI(TAG, "✓ Bridge reachable: %s (%zu bytes)", cfg.bridge_base, response_len);
         ui_set_message("Bridge: Connected");
+        ui_set_network_status(NULL);  // Clear any persistent error
         return true;
     } else {
         ESP_LOGW(TAG, "✗ Bridge unreachable: %s (error %d)", cfg.bridge_base, result);
         ui_set_message("Bridge: Unreachable");
+        // Show persistent guidance - tap zone opens picker with Settings option
+        ui_set_network_status("Tap zone for Settings");
         return false;
     }
 }

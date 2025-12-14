@@ -62,7 +62,7 @@ function startServer() {
         name: MDNS_NAME,
         base: MDNS_BASE,
         txt: { api: '1' },
-      });
+      }, log);
     } catch (error) {
       log.error('mDNS advertise failed', { error });
     }

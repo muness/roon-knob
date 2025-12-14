@@ -52,6 +52,102 @@ struct ui_net_widgets {
 };
 
 static struct ui_net_widgets s_widgets;
+static lv_obj_t *s_reset_confirm_dialog = NULL;
+
+// Forward declarations
+static void set_status_text(const char *msg);
+
+static void do_factory_reset(void) {
+    set_status_text("Factory Reset...");
+    if (s_widgets.panel) {
+        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
+    }
+    wifi_mgr_forget_wifi();
+}
+
+static void reset_confirm_btn_cb(lv_event_t *e) {
+    lv_obj_t *btn = lv_event_get_target(e);
+    bool confirmed = (bool)(intptr_t)lv_obj_get_user_data(btn);
+
+    // Hide dialog
+    if (s_reset_confirm_dialog) {
+        lv_obj_delete(s_reset_confirm_dialog);
+        s_reset_confirm_dialog = NULL;
+    }
+
+    if (confirmed) {
+        do_factory_reset();
+    }
+}
+
+static void show_reset_confirm_dialog(void) {
+    if (s_reset_confirm_dialog) {
+        return;  // Already visible
+    }
+
+    // Hide settings panel temporarily
+    if (s_widgets.panel) {
+        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // Create fullscreen dark overlay
+    s_reset_confirm_dialog = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(s_reset_confirm_dialog, 360, 360);
+    lv_obj_center(s_reset_confirm_dialog);
+    lv_obj_set_style_bg_color(s_reset_confirm_dialog, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_reset_confirm_dialog, LV_OPA_90, 0);
+    lv_obj_set_style_border_width(s_reset_confirm_dialog, 0, 0);
+    lv_obj_set_style_radius(s_reset_confirm_dialog, 0, 0);
+    lv_obj_set_style_pad_all(s_reset_confirm_dialog, 0, 0);
+
+    // Title
+    lv_obj_t *title = lv_label_create(s_reset_confirm_dialog);
+    lv_label_set_text(title, "Factory Reset?");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xfafafa), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Subtitle
+    lv_obj_t *subtitle = lv_label_create(s_reset_confirm_dialog);
+    lv_label_set_text(subtitle, "Erases all settings");
+    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(0xaaaaaa), 0);
+    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 100);
+
+    // Reset button (left, red)
+    lv_obj_t *btn_reset = lv_btn_create(s_reset_confirm_dialog);
+    lv_obj_set_size(btn_reset, 110, 50);
+    lv_obj_align(btn_reset, LV_ALIGN_CENTER, -60, 30);
+    lv_obj_set_style_bg_color(btn_reset, lv_color_hex(0xc62828), 0);  // Red
+    lv_obj_set_style_bg_color(btn_reset, lv_color_hex(0xe53935), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn_reset, 10, 0);
+    lv_obj_set_user_data(btn_reset, (void *)(intptr_t)true);
+    lv_obj_add_event_cb(btn_reset, reset_confirm_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *reset_label = lv_label_create(btn_reset);
+    lv_label_set_text(reset_label, "Reset");
+    lv_obj_set_style_text_font(reset_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(reset_label, lv_color_hex(0xfafafa), 0);
+    lv_obj_center(reset_label);
+
+    // Cancel button (right, gray)
+    lv_obj_t *btn_cancel = lv_btn_create(s_reset_confirm_dialog);
+    lv_obj_set_size(btn_cancel, 110, 50);
+    lv_obj_align(btn_cancel, LV_ALIGN_CENTER, 60, 30);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x3c3c3c), 0);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x5a5a5a), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn_cancel, 10, 0);
+    lv_obj_set_user_data(btn_cancel, (void *)(intptr_t)false);
+    lv_obj_add_event_cb(btn_cancel, reset_confirm_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *cancel_label = lv_label_create(btn_cancel);
+    lv_label_set_text(cancel_label, "Cancel");
+    lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xaaaaaa), 0);
+    lv_obj_center(cancel_label);
+
+    ESP_LOGI(TAG, "Factory reset confirmation dialog shown");
+}
 
 static void refresh_labels(void) {
     rk_cfg_t cfg = {0};
@@ -142,15 +238,9 @@ static void bridge_form_submit(lv_event_t *e) {
     hide_form(s_widgets.bridge_form);
 }
 
-static void forget_wifi_cb(lv_event_t *e) {
+static void factory_reset_cb(lv_event_t *e) {
     (void)e;
-    // Show feedback and hide settings panel
-    set_status_text("Factory Reset...");
-    if (s_widgets.panel) {
-        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
-    }
-    // Erase NVS and reboot - device will start fresh
-    wifi_mgr_forget_wifi();
+    show_reset_confirm_dialog();
 }
 
 static void test_bridge_cb(lv_event_t *e) {
@@ -403,7 +493,7 @@ static void ensure_panel(void) {
 
     create_button(s_widgets.panel, "Check for Update", check_update_cb);
     create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
-    create_button(s_widgets.panel, "Factory Reset", forget_wifi_cb);
+    create_button(s_widgets.panel, "Factory Reset", factory_reset_cb);
     create_button(s_widgets.panel, "Bluetooth Mode", bluetooth_mode_cb);
     create_button(s_widgets.panel, "Back", hide_panel_cb);
 }

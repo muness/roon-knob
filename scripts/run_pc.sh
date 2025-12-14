@@ -1,7 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-ROON_BRIDGE_BASE=${ROON_BRIDGE_BASE:-http://192.168.1.213:8088}
+if [[ -z "${ROON_BRIDGE_BASE:-}" ]]; then
+    echo "Error: ROON_BRIDGE_BASE environment variable not set"
+    echo "Usage: ROON_BRIDGE_BASE=http://your-bridge-ip:8088 $0"
+    exit 1
+fi
 export ROON_BRIDGE_BASE
 
 mkdir -p build/pc_sim

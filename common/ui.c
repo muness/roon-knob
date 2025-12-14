@@ -794,7 +794,7 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
 
     // Hint text at bottom
     lv_obj_t *hint = lv_label_create(s_zone_picker_overlay);
-    lv_label_set_text(hint, "Turn knob or swipe\nTap to select");
+    lv_label_set_text(hint, "Scroll to select, tap to confirm");
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);

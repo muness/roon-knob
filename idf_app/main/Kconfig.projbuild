@@ -9,8 +9,8 @@ config RK_DEFAULT_PASS
     default ""
 
 config RK_DEFAULT_BRIDGE_BASE
-    string "Default Bridge Base URL"
-    default "http://192.168.1.213:8088"
+    string "Default Bridge Base URL (leave empty to require mDNS or manual config)"
+    default ""
 
 endmenu
 

@@ -37,14 +37,11 @@ static const char *HTML_FORM =
     "</style></head><body>"
     "<h1>Roon Knob</h1>"
     "<p>WiFi Setup</p>"
-    "<form method='POST' action='/configure'>"
+    "<form method='GET' action='/configure'>"
     "<label>WiFi Network (SSID)</label>"
     "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
-    "<label>Bridge URL (optional)</label>"
-    "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088'>"
-    "<p class='hint'>Leave empty to auto-discover via mDNS</p>"
     "<input type='submit' value='Connect'>"
     "</form></body></html>";
 
@@ -124,22 +121,24 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Handler for POST /configure - save credentials
-static esp_err_t configure_post_handler(httpd_req_t *req) {
-    char buf[384] = {0};  // Increased for bridge URL
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-
-    if (received <= 0) {
-        ESP_LOGE(TAG, "Failed to receive POST data");
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
+// Handler for GET /configure - save credentials (GET works better in mobile captive portals)
+static esp_err_t configure_get_handler(httpd_req_t *req) {
+    // Extract query string from URI (after the '?')
+    const char *query = strchr(req->uri, '?');
+    if (!query || !query[1]) {
+        ESP_LOGE(TAG, "No query parameters in: %s", req->uri);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No parameters provided");
         return ESP_FAIL;
     }
-    buf[received] = '\0';
+    query++;  // Skip the '?'
+
+    // Copy query string to mutable buffer for parsing
+    char buf[384] = {0};
+    strncpy(buf, query, sizeof(buf) - 1);
     ESP_LOGI(TAG, "Received config: %s", buf);
 
     char ssid[33] = {0};
     char pass[65] = {0};
-    char bridge[129] = {0};
 
     if (!get_form_field(buf, "ssid", ssid, sizeof(ssid))) {
         ESP_LOGE(TAG, "Missing SSID");
@@ -150,22 +149,7 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
     // Password is optional (for open networks)
     get_form_field(buf, "pass", pass, sizeof(pass));
 
-    // Bridge URL is optional (mDNS will be used if not provided)
-    get_form_field(buf, "bridge", bridge, sizeof(bridge));
-
-    // Validate bridge URL format if provided
-    if (bridge[0]) {
-        // Must start with http:// and have something after
-        if (strncmp(bridge, "http://", 7) != 0 || strlen(bridge) < 10) {
-            ESP_LOGE(TAG, "Invalid bridge URL format: %s", bridge);
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                "Invalid bridge URL. Must be like http://192.168.1.x:8088");
-            return ESP_FAIL;
-        }
-    }
-
-    ESP_LOGI(TAG, "Configuring WiFi: SSID='%s', bridge='%s'", ssid,
-             bridge[0] ? bridge : "(auto-discover)");
+    ESP_LOGI(TAG, "Configuring WiFi: SSID='%s'", ssid);
 
     // Show "Saving..." on display
     ui_update("Saving...", "", false, 0, 0, 100, 0, 0);
@@ -177,10 +161,7 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 
     strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
     strncpy(cfg.pass, pass, sizeof(cfg.pass) - 1);
-    if (bridge[0]) {
-        strncpy(cfg.bridge_base, bridge, sizeof(cfg.bridge_base) - 1);
-    }
-    // If bridge is empty, leave cfg.bridge_base as-is (mDNS will discover)
+    // Bridge URL will be discovered via mDNS or configured in Settings
     cfg.cfg_ver = 1;  // Mark as configured
 
     bool save_ok = platform_storage_save(&cfg);
@@ -200,26 +181,16 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 
     ESP_LOGI(TAG, "Credentials saved, showing countdown...");
 
-    // Build status strings
+    // Countdown display
     char ssid_status[48];
-    char bridge_status[48];
-    snprintf(ssid_status, sizeof(ssid_status), "SSID: %s", ssid);
-    if (bridge[0]) {
-        snprintf(bridge_status, sizeof(bridge_status), "Bridge: %.20s...", bridge);
-    } else {
-        snprintf(bridge_status, sizeof(bridge_status), "Bridge: auto-discover");
-    }
+    snprintf(ssid_status, sizeof(ssid_status), "WiFi: %s", ssid);
 
-    // Countdown with alternating status display
     for (int i = 5; i >= 1; i--) {
         char countdown[32];
         snprintf(countdown, sizeof(countdown), "Rebooting in %d...", i);
 
-        // Alternate between showing SSID and bridge status
-        const char *status = (i % 2 == 1) ? ssid_status : bridge_status;
-
-        ui_update(status, countdown, false, 0, 0, 100, 0, 0);
-        ESP_LOGI(TAG, "%s | %s", countdown, status);
+        ui_update(ssid_status, countdown, false, 0, 0, 100, 0, 0);
+        ESP_LOGI(TAG, "%s | %s", countdown, ssid_status);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
@@ -271,6 +242,7 @@ void captive_portal_start(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 12;  // root, configure, 4 captive detection, wildcard
+    config.stack_size = 8192;  // Increased from default 4096 for NVS + UI operations
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
     ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);
@@ -290,8 +262,8 @@ void captive_portal_start(void) {
 
     httpd_uri_t configure = {
         .uri = "/configure",
-        .method = HTTP_POST,
-        .handler = configure_post_handler,
+        .method = HTTP_GET,
+        .handler = configure_get_handler,
     };
     httpd_register_uri_handler(s_server, &configure);
 

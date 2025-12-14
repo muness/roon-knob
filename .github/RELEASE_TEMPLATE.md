@@ -40,4 +40,6 @@ esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x0 roon_knob.bin
 esptool.py --chip esp32 -p /dev/cu.usbserial-* write_flash 0x0 esp32_bt.bin
 ```
 
+**Troubleshooting:** If you get "No serial data received", retry a few times or try another cable.
+
 </details>

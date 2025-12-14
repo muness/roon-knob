@@ -1,4 +1,6 @@
 #include "display_sleep.h"
+#include "captive_portal.h"
+#include "roon_client.h"
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
@@ -154,6 +156,13 @@ static void sleep_timer_callback(void *arg) {
 
 // Process pending display state changes (call from UI loop)
 void display_process_pending(void) {
+    // Don't dim/sleep during setup: captive portal active or bridge unreachable
+    if (captive_portal_is_running() || !roon_client_is_ready_for_art_mode()) {
+        s_pending_dim = false;
+        s_pending_sleep = false;
+        return;
+    }
+
     if (s_pending_dim) {
         s_pending_dim = false;
         display_dim();

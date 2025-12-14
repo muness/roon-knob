@@ -84,12 +84,19 @@ gh pr merge --squash --delete-branch
 - Branch protection prevents accidental force-pushes to master
 - PR history provides clear audit trail of changes
 
-### Releasing
+### Merging and Releasing
+
+**ALWAYS ASK the user before:**
+- Merging a PR (`gh pr merge`)
+- Tagging a release (`git tag`)
+- Pushing tags (`git push origin v*`)
+
+The user needs to test locally first. Never assume a fix works - wait for explicit confirmation.
 
 To cut a release, just create and push a tag. **Do NOT manually edit version numbers** - the CI handles everything:
 
 ```bash
-# Tag the release (from master)
+# Tag the release (from master, AFTER user confirms testing)
 git tag -a v1.X.Y -m "Release description"
 git push origin v1.X.Y
 ```
