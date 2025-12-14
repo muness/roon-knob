@@ -12,7 +12,7 @@ execute_process(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 if(NOT_ON_TAG)
-    set(PROJECT_VER "${PROJECT_VER}-dev")
+    string(APPEND PROJECT_VER "-dev")
 endif()
 
 # Suppress CMake warnings (ESP-IDF internal component validation issues)
