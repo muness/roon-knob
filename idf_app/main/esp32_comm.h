@@ -159,6 +159,7 @@ uint32_t esp32_comm_get_position(void);
 
 void esp32_comm_send_play(void);
 void esp32_comm_send_pause(void);
+void esp32_comm_send_play_pause(void);  // Toggle (for HID-only mode)
 void esp32_comm_send_next(void);
 void esp32_comm_send_prev(void);
 void esp32_comm_send_vol_up(void);

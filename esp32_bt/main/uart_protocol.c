@@ -136,6 +136,11 @@ static void process_message(uint8_t type, const uint8_t *payload, uint16_t len)
             uart_protocol_send_ack(CMD_PAUSE);
             break;
 
+        case CMD_PLAY_PAUSE:
+            bt_avrcp_play_pause();
+            uart_protocol_send_ack(CMD_PLAY_PAUSE);
+            break;
+
         case CMD_NEXT:
             bt_avrcp_next();
             uart_protocol_send_ack(CMD_NEXT);

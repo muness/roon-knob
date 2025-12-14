@@ -153,7 +153,10 @@ static void bt_input_handler(ui_input_event_t event) {
         case UI_INPUT_PLAY_PAUSE:
             ESP_LOGI(TAG, "BT: play/pause");
             // Toggle based on current play state
-            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
+            if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_UNKNOWN) {
+                // HID-only mode (no AVRCP) - send toggle
+                esp32_comm_send_play_pause();
+            } else if (esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING) {
                 esp32_comm_send_pause();
             } else {
                 esp32_comm_send_play();
@@ -180,6 +183,18 @@ static void bt_input_handler(ui_input_event_t event) {
     }
 }
 
+// Validator to block mode changes during OTA
+static bool mode_change_validator(controller_mode_t new_mode) {
+    (void)new_mode;
+    const ota_info_t *ota = ota_get_info();
+    if (ota && (ota->status == OTA_STATUS_DOWNLOADING || ota->status == OTA_STATUS_CHECKING)) {
+        ESP_LOGW(TAG, "Mode change blocked: OTA in progress");
+        ui_set_message("Update in progress");
+        return false;
+    }
+    return true;
+}
+
 // Controller mode change callback
 static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
     (void)user_data;
@@ -187,11 +202,14 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
 
     if (new_mode == CONTROLLER_MODE_BLUETOOTH) {
         // === ENTERING BLUETOOTH MODE ===
-        // Stop all WiFi-related activity
+        // Stop all WiFi-related activity first
         ESP_LOGI(TAG, "Stopping WiFi for Bluetooth mode");
         stop_wifi_msg_alternation();  // Stop WiFi error display timer
         roon_client_set_network_ready(false);
         wifi_mgr_stop();
+
+        // Let WiFi fully stop before activating BT
+        vTaskDelay(pdMS_TO_TICKS(100));
 
         // Activate Bluetooth on ESP32 (on-demand activation)
         ESP_LOGI(TAG, "Activating Bluetooth on ESP32");
@@ -200,11 +218,14 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
         ui_set_input_handler(bt_input_handler);
     } else {
         // === ENTERING ROON/WIFI MODE ===
-        // Deactivate Bluetooth on ESP32 to save power
+        // Deactivate Bluetooth on ESP32 first
         ESP_LOGI(TAG, "Deactivating Bluetooth on ESP32");
         esp32_comm_send_bt_deactivate();
         ui_set_ble_mode(false);
         ui_set_input_handler(roon_client_handle_input);
+
+        // Let BT fully stop before starting WiFi
+        vTaskDelay(pdMS_TO_TICKS(100));
 
         // Start WiFi
         ESP_LOGI(TAG, "Starting WiFi for Roon mode");
@@ -486,6 +507,7 @@ void app_main(void) {
     // Initialize controller mode and register callback for mode changes
     ESP_LOGI(TAG, "Initializing controller mode...");
     controller_mode_init();
+    controller_mode_set_validator(mode_change_validator);
     controller_mode_register_callback(mode_change_callback, NULL);
 
     // Start application logic

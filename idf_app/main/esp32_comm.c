@@ -38,6 +38,7 @@ static const char *TAG = "esp32_comm";
 #define CMD_VOL_UP      0x05
 #define CMD_VOL_DOWN    0x06
 #define CMD_SET_VOLUME  0x07
+#define CMD_PLAY_PAUSE  0x08    // Toggle play/pause (for HID-only mode)
 #define CMD_BT_CONNECT  0x10
 #define CMD_BT_DISCONNECT 0x11
 #define CMD_BT_PAIR_MODE 0x12
@@ -538,6 +539,12 @@ void esp32_comm_send_pause(void)
 {
     ESP_LOGI(TAG, "Sending PAUSE command");
     send_frame(CMD_PAUSE, NULL, 0);
+}
+
+void esp32_comm_send_play_pause(void)
+{
+    ESP_LOGI(TAG, "Sending PLAY_PAUSE toggle command");
+    send_frame(CMD_PLAY_PAUSE, NULL, 0);
 }
 
 void esp32_comm_send_next(void)

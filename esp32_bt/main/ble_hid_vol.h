@@ -80,6 +80,11 @@ void ble_hid_play(void);
 void ble_hid_pause(void);
 
 /**
+ * @brief Send play/pause toggle HID report
+ */
+void ble_hid_play_pause(void);
+
+/**
  * @brief Send next track HID report
  */
 void ble_hid_next_track(void);

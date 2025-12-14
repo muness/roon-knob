@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
-          brew install cmake ninja sdl2 curl
+          brew install --quiet cmake ninja sdl2 curl || true
       - name: Configure & build
         run: |
           cmake -S pc_sim -B build/pc_sim -G Ninja

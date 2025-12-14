@@ -72,6 +72,23 @@ bool controller_mode_bluetooth_available(void);
 void controller_mode_register_callback(controller_mode_change_cb_t callback, void *user_data);
 
 /**
+ * @brief Mode change validator callback type
+ * @param new_mode The mode being requested
+ * @return true if mode change is allowed, false to block it
+ */
+typedef bool (*controller_mode_validator_cb_t)(controller_mode_t new_mode);
+
+/**
+ * @brief Register validator callback to block mode changes
+ *
+ * The validator is called before any mode change. If it returns false,
+ * the mode change is rejected and controller_mode_set() returns false.
+ *
+ * @param validator Function to validate mode changes (NULL to disable)
+ */
+void controller_mode_set_validator(controller_mode_validator_cb_t validator);
+
+/**
  * @brief Get mode name as string
  * @param mode Mode to get name for
  * @return Human-readable mode name

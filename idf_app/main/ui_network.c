@@ -281,6 +281,15 @@ static void hide_panel_cb(lv_event_t *e) {
 
 static void bluetooth_mode_cb(lv_event_t *e) {
     (void)e;
+
+    // Block mode switch during OTA download
+    const ota_info_t *ota = ota_get_info();
+    if (ota && (ota->status == OTA_STATUS_DOWNLOADING || ota->status == OTA_STATUS_CHECKING)) {
+        ESP_LOGW(TAG, "Cannot switch to Bluetooth mode during OTA update");
+        ui_set_message("Update in progress");
+        return;
+    }
+
     ESP_LOGI(TAG, "Switching to Bluetooth mode");
 
     // Hide settings panel
@@ -510,15 +519,15 @@ static void apply_evt_async(void *data) {
 
     switch (msg->evt) {
         case RK_NET_EVT_CONNECTING:
-            set_status_text("Connecting…");
+            set_status_text("Connecting...");
             set_ip_text("");
             // Show on main screen with SSID
             if (ssid[0]) {
                 char buf[64];
-                snprintf(buf, sizeof(buf), "WiFi: %s…", ssid);
+                snprintf(buf, sizeof(buf), "WiFi: %s...", ssid);
                 ui_set_network_status(buf);
             } else {
-                ui_set_network_status("WiFi: Connecting…");
+                ui_set_network_status("WiFi: Connecting...");
             }
             break;
         case RK_NET_EVT_GOT_IP:
@@ -536,8 +545,8 @@ static void apply_evt_async(void *data) {
                 snprintf(buf, sizeof(buf), "WiFi: %s", msg->ip);
                 ui_set_network_status(buf);
             } else {
-                set_status_text("Retrying…");
-                ui_set_network_status("WiFi: Retrying…");
+                set_status_text("Retrying...");
+                ui_set_network_status("WiFi: Retrying...");
             }
             break;
         case RK_NET_EVT_WRONG_PASSWORD:
@@ -565,9 +574,9 @@ static void apply_evt_async(void *data) {
             ui_set_network_status("Setup: Connect to 'roon-knob-setup'");
             break;
         case RK_NET_EVT_AP_STOPPED:
-            set_status_text("Connecting…");
+            set_status_text("Connecting...");
             set_ip_text("");
-            ui_set_network_status("WiFi: Connecting…");
+            ui_set_network_status("WiFi: Connecting...");
             break;
         default:
             break;

@@ -29,6 +29,7 @@ extern "C" {
 #define CMD_VOL_UP      0x05
 #define CMD_VOL_DOWN    0x06
 #define CMD_SET_VOLUME  0x07    // Set absolute volume (0-127)
+#define CMD_PLAY_PAUSE  0x08    // Toggle play/pause (for HID-only mode)
 #define CMD_BT_CONNECT  0x10
 #define CMD_BT_DISCONNECT 0x11
 #define CMD_BT_PAIR_MODE 0x12
