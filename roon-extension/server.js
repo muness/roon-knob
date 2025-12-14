@@ -22,7 +22,8 @@ function startServer() {
   const PORT = parseInt(process.env.PORT || '8088', 10);
   const MDNS_NAME = process.env.MDNS_NAME || 'Roon Knob Bridge';
   const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-  const SERVICE_PORT = parseInt(process.env.ROON_SERVICE_PORT || '9330', 10);
+  // Roon discovery service port (not the HTTP port)
+  const ROON_SERVICE_PORT = parseInt(process.env.ROON_SERVICE_PORT || '9330', 10);
   const MDNS_BASE = process.env.MDNS_BASE || `http://${require('os').hostname()}:${PORT}`;
   const GIT_SHA = getGitSha();
 
@@ -34,7 +35,7 @@ function startServer() {
   app.use(cors());
   app.use(morgan(LOG_LEVEL === 'debug' ? 'dev' : 'tiny'));
 
-  const bridge = createRoonBridge({ service_port: SERVICE_PORT, display_name: MDNS_NAME, log: createLogger('Bridge') });
+  const bridge = createRoonBridge({ service_port: ROON_SERVICE_PORT, display_name: MDNS_NAME, log: createLogger('Bridge') });
   bridge.start();
 
   app.use(createRoutes({ bridge, metrics, log: createLogger('HTTP') }));
@@ -55,7 +56,7 @@ function startServer() {
   });
 
   const server = app.listen(PORT, () => {
-    log.info(`Listening on ${PORT}`, { service_port: SERVICE_PORT, base: MDNS_BASE });
+    log.info(`Listening on ${PORT}`, { roon_service_port: ROON_SERVICE_PORT, base: MDNS_BASE });
     try {
       advertise(PORT, {
         name: MDNS_NAME,

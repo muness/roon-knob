@@ -26,8 +26,9 @@ The process will auto-discover your Roon Core on the LAN. Keep the Core’s “E
 | `PORT` | HTTP listen port (default `8088`). |
 | `LOG_LEVEL` | `debug` for verbose HTTP logs, otherwise `info` (default `info`). |
 | `MDNS_NAME` | Friendly service name advertised over `_roonknob._tcp`. |
-| `ROON_SERVICE_PORT` | TCP port used for the Roon discovery socket (defaults to `9330`). |
+| `ROON_SERVICE_PORT` | TCP port used for the Roon discovery socket (defaults to `9330`). This is NOT the HTTP port. |
 | `MDNS_BASE` | Optional base URL to advertise via mDNS (default `http://<hostname>:PORT`). |
+| `CONFIG_DIR` | Directory for persistent config storage (default `./data`). Used for Roon pairing tokens. |
 
 By default the knob ignores discovered bridges whose hostname isn’t a numeric IP (to avoid unresolvable names). If your mDNS advert uses a DNS name, set `MDNS_BASE` to the numeric IP that the knob can reach instead.
 
