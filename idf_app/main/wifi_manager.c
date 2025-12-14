@@ -282,21 +282,32 @@ static void start_ap_mode(void) {
         s_ap_netif = esp_netif_create_default_wifi_ap();
     }
 
-    // Configure AP
+    // Configure AP with optimal settings for discoverability
     wifi_config_t ap_config = {
         .ap = {
             .ssid = AP_SSID,
             .ssid_len = strlen(AP_SSID),
-            .channel = 1,
+            .channel = 6,  // Channel 6 is often less congested than 1
             .password = "",  // Open network for easy provisioning
             .max_connection = AP_MAX_CONNECTIONS,
             .authmode = WIFI_AUTH_OPEN,
+            .beacon_interval = 100,  // Minimum beacon interval (100 TUs ≈ 102ms)
         },
     };
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Use maximum TX power in AP mode for better discoverability
+    // (We reduce power in STA mode for battery, but setup needs visibility)
+    // Units are 0.25 dBm, so 80 = 20 dBm (max)
+    esp_err_t tx_err = esp_wifi_set_max_tx_power(80);
+    if (tx_err == ESP_OK) {
+        ESP_LOGI(TAG, "AP mode: TX power set to 20 dBm for better discoverability");
+    } else {
+        ESP_LOGW(TAG, "AP mode: Could not set TX power: %s", esp_err_to_name(tx_err));
+    }
 
     s_ap_mode = true;
     s_sta_fail_count = 0;
