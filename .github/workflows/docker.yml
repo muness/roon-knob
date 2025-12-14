@@ -103,6 +103,32 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Get release notes from draft
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Try to get draft release body (maintained by release-drafter)
+          DRAFT_BODY=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[] | select(.draft == true) | .body' 2>/dev/null | head -1 || echo "")
+
+          if [ -n "$DRAFT_BODY" ]; then
+            echo "$DRAFT_BODY" > release_notes.md
+            echo "Using draft release notes from release-drafter"
+          else
+            # Fallback: generate notes via GitHub API
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              gh api repos/${{ github.repository }}/releases/generate-notes \
+                -f tag_name="${{ github.ref_name }}" \
+                -f previous_tag_name="$PREV_TAG" \
+                --jq '.body' > release_notes.md 2>/dev/null || echo "## What's Changed" > release_notes.md
+            else
+              echo "## What's Changed" > release_notes.md
+            fi
+            echo "Generated release notes (no draft found)"
+          fi
+
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
@@ -110,60 +136,25 @@ jobs:
           cp esp32bt-artifacts/esp32_bt.bin release-assets/
           ls -la release-assets/
 
+      - name: Build release body
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Start with auto-generated "What's Changed"
+          cat release_notes.md > final_body.md
+
+          # Append template with version substituted
+          sed "s/{{VERSION}}/$VERSION/g" .github/RELEASE_TEMPLATE.md >> final_body.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
-          generate_release_notes: true
           files: |
             release-assets/roon_knob.bin
             release-assets/esp32_bt.bin
-          body: |
-            ## Updating
-
-            **OTA (existing users):** Update bridge to `${{ steps.version.outputs.version }}`, restart, knob updates automatically.
-
-            **Docker Compose:**
-            ```yaml
-            services:
-              roon-knob-bridge:
-                image: docker.io/muness/roon-extension-knob:${{ steps.version.outputs.version }}
-                restart: unless-stopped
-                network_mode: host
-                environment:
-                  TZ: America/New_York
-                volumes:
-                  - roon-knob-bridge-data:/home/node/app/data
-            volumes:
-              roon-knob-bridge-data:
-            ```
-
-            Then: `docker compose pull && docker compose up -d`
-
-            ---
-
-            <details>
-            <summary><b>First-time flashing instructions</b></summary>
-
-            This release includes **two firmware files** for the dual-chip board:
-
-            | File | Chip | USB Port |
-            |------|------|----------|
-            | `roon_knob.bin` | ESP32-S3 | `usbmodem` |
-            | `esp32_bt.bin` | ESP32 (BT) | `usbserial` |
-
-            ```bash
-            # Flash ESP32-S3 (USB-C normal orientation)
-            esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x0 roon_knob.bin
-
-            # Flip USB-C 180°, then flash ESP32
-            esptool.py --chip esp32 -p /dev/cu.usbserial-* write_flash 0x0 esp32_bt.bin
-            ```
-
-            For routine updates, only ESP32-S3 needs flashing (or use OTA).
-
-            </details>
+          body_path: final_body.md
 
   docker:
     name: Build and Push Docker Image
