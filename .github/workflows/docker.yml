@@ -178,7 +178,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: esp32s3-firmware
-          path: roon-extension/firmware/
+          path: firmware-artifact/
+
+      - name: Prepare firmware for Docker
+        run: |
+          mkdir -p roon-extension/firmware
+          # Flatten artifact structure to expected locations
+          cp firmware-artifact/idf_app/build/roon_knob.bin roon-extension/firmware/
+          cp firmware-artifact/roon-extension/firmware/version.json roon-extension/firmware/
+          echo "Firmware prepared:"
+          ls -la roon-extension/firmware/
+          cat roon-extension/firmware/version.json
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
