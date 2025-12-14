@@ -362,9 +362,9 @@ static void check_update_cb(lv_event_t *e) {
         set_status_text("Starting update...");
         ota_start_update();
     } else {
-        // Check for updates
+        // Check for updates (force=true to bypass dev version skip)
         set_status_text("Checking...");
-        ota_check_for_update();
+        ota_check_for_update(true);
     }
     update_version_label();
 }

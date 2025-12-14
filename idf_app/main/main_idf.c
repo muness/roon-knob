@@ -421,7 +421,7 @@ static void ui_loop_task(void *arg) {
         if (s_ota_check_pending) {
             s_ota_check_pending = false;
             ESP_LOGI(TAG, "Checking for firmware updates...");
-            ota_check_for_update();
+            ota_check_for_update(false);  // Auto-check: skip for dev versions
         }
         if (s_config_server_start_pending) {
             s_config_server_start_pending = false;

@@ -351,18 +351,20 @@ void ota_init(void) {
     ESP_LOGI(TAG, "OTA initialized, current version: %s", s_ota_info.current_version);
 }
 
-void ota_check_for_update(void) {
+void ota_check_for_update(bool force) {
     if (s_ota_task != NULL) {
         ESP_LOGW(TAG, "OTA task already running");
         return;
     }
 
-    // Skip OTA checks for development/beta versions
-    const char *current = ota_get_current_version();
-    if (strstr(current, "-dev") || strstr(current, "-beta") || strstr(current, "-alpha")) {
-        ESP_LOGI(TAG, "Skipping OTA check for development version: %s", current);
-        s_ota_info.status = OTA_STATUS_UP_TO_DATE;
-        return;
+    // Skip OTA checks for development/beta versions (unless forced by user)
+    if (!force) {
+        const char *current = ota_get_current_version();
+        if (strstr(current, "-dev") || strstr(current, "-beta") || strstr(current, "-alpha")) {
+            ESP_LOGI(TAG, "Skipping OTA check for development version: %s", current);
+            s_ota_info.status = OTA_STATUS_UP_TO_DATE;
+            return;
+        }
     }
 
     xTaskCreate(check_update_task, "ota_check", 8192, NULL, 1, &s_ota_task);  // Low priority to not block UI
