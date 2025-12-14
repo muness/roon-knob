@@ -428,14 +428,21 @@ static void build_layout(void) {
     lv_obj_add_style(next_label, &style_button_label, 0);
     lv_obj_center(next_label);
 
-    // Status bar at bottom - small text for messages like "Bridge is ready"
+    // Status bar at bottom - for transient messages like "Bridge: Connected"
     s_status_bar = lv_label_create(s_ui_container);
     lv_label_set_text(s_status_bar, "");
-    lv_obj_set_width(s_status_bar, SCREEN_SIZE - 40);
-    lv_obj_set_style_text_font(s_status_bar, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(s_status_bar, SCREEN_SIZE - 60);
+    lv_obj_set_style_text_font(s_status_bar, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(s_status_bar, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(s_status_bar, lv_color_hex(0x000000), 0);  // Black text
     lv_label_set_long_mode(s_status_bar, LV_LABEL_LONG_DOT);
-    lv_obj_align(s_status_bar, LV_ALIGN_BOTTOM_MID, 0, -10);
+    // Background styling (hidden by default, shown when message appears)
+    lv_obj_set_style_bg_color(s_status_bar, lv_color_hex(0xfafafa), 0);  // Off-white
+    lv_obj_set_style_bg_opa(s_status_bar, LV_OPA_TRANSP, 0);  // Hidden initially
+    lv_obj_set_style_pad_ver(s_status_bar, 4, 0);
+    lv_obj_set_style_pad_hor(s_status_bar, 12, 0);
+    lv_obj_set_style_radius(s_status_bar, 8, 0);
+    lv_obj_align(s_status_bar, LV_ALIGN_BOTTOM_MID, 0, -25);  // Higher up from edge
 }
 
 // ============================================================================
@@ -621,6 +628,8 @@ static void poll_pending(lv_timer_t *timer) {
     if (network_status_changed && s_status_bar) {
         // Set network status directly without auto-clear timer
         lv_label_set_text(s_status_bar, net_status);
+        // Show/hide background based on content
+        lv_obj_set_style_bg_opa(s_status_bar, net_status[0] ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         // Cancel any pending auto-clear from show_status_message
         if (s_status_timer) {
             lv_timer_del(s_status_timer);
@@ -667,6 +676,8 @@ static void show_status_message(const char *message) {
     }
 
     lv_label_set_text(s_status_bar, message);
+    // Show background when message is visible
+    lv_obj_set_style_bg_opa(s_status_bar, LV_OPA_COVER, 0);
 
     // Auto-clear after 3 seconds
     if (s_status_timer) {
@@ -681,6 +692,8 @@ static void clear_status_message_timer_cb(lv_timer_t *timer) {
     (void)timer;
     if (s_status_bar) {
         lv_label_set_text(s_status_bar, "");
+        // Hide background when empty
+        lv_obj_set_style_bg_opa(s_status_bar, LV_OPA_TRANSP, 0);
     }
     s_status_timer = NULL;
 }
