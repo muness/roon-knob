@@ -100,6 +100,20 @@ static void dns_server_task(void *arg) {
             continue;
         }
 
+        // Log the queried domain name for debugging
+        if (len > 12) {
+            char domain[128] = {0};
+            int dpos = 0, qpos = 12;
+            while (qpos < len && rx_buf[qpos] != 0 && dpos < 126) {
+                int label_len = rx_buf[qpos++];
+                if (dpos > 0) domain[dpos++] = '.';
+                for (int i = 0; i < label_len && qpos < len && dpos < 127; i++) {
+                    domain[dpos++] = rx_buf[qpos++];
+                }
+            }
+            ESP_LOGI(TAG, "DNS query: %s -> 192.168.4.1", domain);
+        }
+
         int resp_len = build_dns_response(rx_buf, len, tx_buf);
         if (resp_len > 0) {
             sendto(s_sock, tx_buf, resp_len, 0,

@@ -235,6 +235,27 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 
 // Captive portal redirect - send all unknown requests to root
 static esp_err_t captive_redirect_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Redirect request: %s", req->uri);
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+// iOS captive portal detection - must NOT return "Success"
+static esp_err_t ios_captive_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "iOS captive portal detection: %s", req->uri);
+    // Return a redirect to trigger captive portal popup
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+// Android captive portal detection - must NOT return 204
+static esp_err_t android_captive_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Android captive portal detection: %s", req->uri);
+    // Return a redirect to trigger captive portal popup
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
     httpd_resp_send(req, NULL, 0);
@@ -249,7 +270,7 @@ void captive_portal_start(void) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 12;  // root, configure, 4 captive detection, wildcard
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
     ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);
@@ -273,6 +294,36 @@ void captive_portal_start(void) {
         .handler = configure_post_handler,
     };
     httpd_register_uri_handler(s_server, &configure);
+
+    // iOS captive portal detection endpoints
+    httpd_uri_t ios_hotspot = {
+        .uri = "/hotspot-detect.html",
+        .method = HTTP_GET,
+        .handler = ios_captive_handler,
+    };
+    httpd_register_uri_handler(s_server, &ios_hotspot);
+
+    httpd_uri_t ios_success = {
+        .uri = "/library/test/success.html",
+        .method = HTTP_GET,
+        .handler = ios_captive_handler,
+    };
+    httpd_register_uri_handler(s_server, &ios_success);
+
+    // Android captive portal detection endpoints
+    httpd_uri_t android_generate = {
+        .uri = "/generate_204",
+        .method = HTTP_GET,
+        .handler = android_captive_handler,
+    };
+    httpd_register_uri_handler(s_server, &android_generate);
+
+    httpd_uri_t android_gen204 = {
+        .uri = "/gen_204",
+        .method = HTTP_GET,
+        .handler = android_captive_handler,
+    };
+    httpd_register_uri_handler(s_server, &android_gen204);
 
     // Redirect all other requests to root (captive portal behavior)
     httpd_uri_t redirect = {
