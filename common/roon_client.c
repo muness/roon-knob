@@ -173,7 +173,7 @@ static void default_now_playing(struct now_playing_state *state) {
     if (!state) {
         return;
     }
-    snprintf(state->line1, sizeof(state->line1), "Waiting for data");
+    snprintf(state->line1, sizeof(state->line1), "Idle");
     state->line2[0] = '\0';
     state->is_playing = false;
     state->volume = 0;
@@ -596,20 +596,41 @@ static void roon_poll_thread(void *arg) {
 
         // Show meaningful status messages for state transitions
         if (ok && !s_last_net_ok) {
-            // Just connected to bridge
+            // Just connected to bridge - clear network status
             post_ui_message("Bridge: Connected");
+            ui_set_network_status(NULL);  // Clear persistent status on success
         } else if (!ok && s_last_net_ok) {
             // Lost connection to bridge
             post_ui_message("Bridge: Offline");
+            ui_set_network_status("Bridge: Offline - check connection");
         } else if (!ok && !s_last_net_ok) {
             // Still trying to connect - check if we have a bridge URL
             lock_state();
             bool has_bridge = (s_state.cfg.bridge_base[0] != '\0');
+            char bridge_url[128];
+            if (has_bridge) {
+                strncpy(bridge_url, s_state.cfg.bridge_base, sizeof(bridge_url) - 1);
+                bridge_url[sizeof(bridge_url) - 1] = '\0';
+            }
             unlock_state();
             if (!has_bridge) {
                 post_ui_message("Bridge: Searching...");
+                ui_set_network_status("Bridge: Searching via mDNS...");
+            } else {
+                // Bridge URL configured but not responding
+                // Show helpful message (truncate bridge URL if needed)
+                static int offline_count = 0;
+                offline_count++;
+                if (offline_count == 5) {  // After ~5 seconds of failures
+                    char msg[128];
+                    // Truncate bridge URL to fit in message
+                    char short_url[64];
+                    strncpy(short_url, bridge_url, sizeof(short_url) - 1);
+                    short_url[sizeof(short_url) - 1] = '\0';
+                    snprintf(msg, sizeof(msg), "Bridge offline: %.60s", short_url);
+                    ui_set_network_status(msg);
+                }
             }
-            // If we have a bridge URL but it's not responding, don't spam messages
         }
         s_last_net_ok = ok;
         wait_for_poll_interval();

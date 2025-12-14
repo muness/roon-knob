@@ -415,25 +415,69 @@ typedef struct {
 
 static void apply_evt_async(void *data) {
     ui_net_evt_msg_t *msg = data;
+    char ssid[33] = {0};
+    wifi_mgr_get_ssid(ssid, sizeof(ssid));
+
     switch (msg->evt) {
         case RK_NET_EVT_CONNECTING:
             set_status_text("Connecting…");
             set_ip_text("");
+            // Show on main screen with SSID
+            if (ssid[0]) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "WiFi: %s…", ssid);
+                ui_set_network_status(buf);
+            } else {
+                ui_set_network_status("WiFi: Connecting…");
+            }
             break;
         case RK_NET_EVT_GOT_IP:
             set_status_text("Online");
             set_ip_text(msg->ip);
+            // Clear main screen status on successful connection
+            ui_set_network_status(NULL);
             break;
         case RK_NET_EVT_FAIL:
-            set_status_text("Retrying…");
+            // Generic failure - show reason if provided
+            if (msg->ip[0]) {
+                set_status_text(msg->ip);  // ip field contains error string
+                // Show on main screen
+                char buf[80];
+                snprintf(buf, sizeof(buf), "WiFi: %s", msg->ip);
+                ui_set_network_status(buf);
+            } else {
+                set_status_text("Retrying…");
+                ui_set_network_status("WiFi: Retrying…");
+            }
+            break;
+        case RK_NET_EVT_WRONG_PASSWORD:
+            set_status_text("Wrong password");
+            ui_set_network_status("WiFi: Wrong password");
+            break;
+        case RK_NET_EVT_NO_AP_FOUND:
+            set_status_text("Network not found");
+            if (ssid[0]) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "WiFi: '%s' not found", ssid);
+                ui_set_network_status(buf);
+            } else {
+                ui_set_network_status("WiFi: Network not found");
+            }
+            break;
+        case RK_NET_EVT_AUTH_TIMEOUT:
+            set_status_text("Auth timeout");
+            ui_set_network_status("WiFi: Auth timeout");
             break;
         case RK_NET_EVT_AP_STARTED:
-            set_status_text("Setup Mode (AP)");
+            set_status_text("Setup: roon-knob-setup");
             set_ip_text("192.168.4.1");
+            // Show setup instructions on main screen
+            ui_set_network_status("Setup: Connect to 'roon-knob-setup'");
             break;
         case RK_NET_EVT_AP_STOPPED:
             set_status_text("Connecting…");
             set_ip_text("");
+            ui_set_network_status("WiFi: Connecting…");
             break;
         default:
             break;

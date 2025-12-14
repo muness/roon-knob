@@ -17,6 +17,55 @@
 
 static const char *TAG = "wifi_mgr";
 static const uint32_t s_backoff_ms[] = {500, 1000, 2000, 4000, 8000, 16000, 30000};
+static const char *s_last_error = NULL;  // Last disconnect reason for UI display
+
+// Map WiFi disconnect reason to human-readable string and event type
+static const char *get_disconnect_reason_str(uint8_t reason, rk_net_evt_t *out_evt) {
+    rk_net_evt_t evt = RK_NET_EVT_FAIL;  // Default
+    const char *str;
+
+    switch (reason) {
+        case WIFI_REASON_NO_AP_FOUND:
+            str = "Network not found";
+            evt = RK_NET_EVT_NO_AP_FOUND;
+            break;
+        case WIFI_REASON_AUTH_FAIL:
+        case WIFI_REASON_MIC_FAILURE:
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+            str = "Wrong password";
+            evt = RK_NET_EVT_WRONG_PASSWORD;
+            break;
+        case WIFI_REASON_AUTH_EXPIRE:
+            str = "Auth expired";
+            evt = RK_NET_EVT_AUTH_TIMEOUT;
+            break;
+        case WIFI_REASON_ASSOC_FAIL:
+        case WIFI_REASON_ASSOC_EXPIRE:
+            str = "Association failed";
+            break;
+        case WIFI_REASON_BEACON_TIMEOUT:
+            str = "Beacon timeout (out of range?)";
+            break;
+        case WIFI_REASON_ASSOC_LEAVE:
+            str = "Disconnected by AP";
+            break;
+        case WIFI_REASON_CONNECTION_FAIL:
+            str = "Connection failed";
+            break;
+        case WIFI_REASON_AP_TSF_RESET:
+            str = "AP reset";
+            break;
+        default:
+            str = "Unknown error";
+            break;
+    }
+
+    if (out_evt) {
+        *out_evt = evt;
+    }
+    return str;
+}
 
 // AP mode configuration
 #define AP_SSID "roon-knob-setup"
@@ -105,6 +154,7 @@ static void reset_backoff(void) {
     s_backoff_idx = 0;
 }
 
+static void schedule_retry_with_reason(uint8_t reason);
 static void schedule_retry(void);
 static void start_ap_mode(void);
 
@@ -146,9 +196,15 @@ static void retry_timer_cb(void *arg) {
     connect_now();
 }
 
-static void schedule_retry(void) {
+static void schedule_retry_with_reason(uint8_t reason) {
     s_sta_fail_count++;
-    ESP_LOGW(TAG, "STA connection failed (attempt %d/%d)", s_sta_fail_count, STA_FAIL_THRESHOLD);
+
+    // Get human-readable reason and specific event type
+    rk_net_evt_t evt = RK_NET_EVT_FAIL;
+    s_last_error = get_disconnect_reason_str(reason, &evt);
+
+    ESP_LOGW(TAG, "WiFi disconnected: %s (reason %d, attempt %d/%d)",
+             s_last_error, reason, s_sta_fail_count, STA_FAIL_THRESHOLD);
 
     // Switch to AP mode after too many failures
     if (s_sta_fail_count >= STA_FAIL_THRESHOLD) {
@@ -171,16 +227,26 @@ static void schedule_retry(void) {
         ESP_LOGW(TAG, "retry timer missing; reconnect immediately");
         connect_now();
     }
-    rk_net_evt_cb(RK_NET_EVT_FAIL, NULL);
+    // Emit specific event for UI (e.g., RK_NET_EVT_WRONG_PASSWORD)
+    rk_net_evt_cb(evt, s_last_error);
+}
+
+static void schedule_retry(void) {
+    // Called when we don't have a specific reason (e.g., config apply failed)
+    schedule_retry_with_reason(0);
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     (void)arg;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         reset_backoff();
+        s_last_error = NULL;  // Clear last error on new connection attempt
         connect_now();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        schedule_retry();
+        // Extract disconnect reason from event data
+        wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
+        uint8_t reason = disconn ? disconn->reason : 0;
+        schedule_retry_with_reason(reason);
     }
 }
 
@@ -197,6 +263,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
     ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s", s_cfg.ssid, s_ip);
     reset_backoff();
     s_sta_fail_count = 0;  // Reset failure count on successful connection
+    s_last_error = NULL;   // Clear last error on success
     rk_net_evt_cb(RK_NET_EVT_GOT_IP, s_ip);
 }
 
@@ -367,6 +434,10 @@ void wifi_mgr_get_ssid(char *buf, size_t n) {
 
 bool wifi_mgr_is_ap_mode(void) {
     return s_ap_mode;
+}
+
+const char *wifi_mgr_get_last_error(void) {
+    return s_last_error;
 }
 
 void wifi_mgr_stop(void) {

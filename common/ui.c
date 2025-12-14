@@ -114,6 +114,8 @@ static bool s_dirty = true;
 static char s_pending_message[128] = "";
 static bool s_message_dirty = false;
 static bool s_zone_name_dirty = false;
+static char s_network_status[128] = "";   // Persistent network status (doesn't auto-clear)
+static bool s_network_status_dirty = false;
 static ui_input_cb_t s_input_cb;
 static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
@@ -597,6 +599,14 @@ static void poll_pending(lv_timer_t *timer) {
         zone_name[sizeof(zone_name) - 1] = '\0';
         s_zone_name_dirty = false;
     }
+
+    bool network_status_changed = s_network_status_dirty;
+    char net_status[128];
+    if (network_status_changed) {
+        strncpy(net_status, s_network_status, sizeof(net_status) - 1);
+        net_status[sizeof(net_status) - 1] = '\0';
+        s_network_status_dirty = false;
+    }
     os_mutex_unlock(&s_state_lock);
 
     if (dirty) {
@@ -607,6 +617,15 @@ static void poll_pending(lv_timer_t *timer) {
     }
     if (zone_name_changed && s_zone_label) {
         lv_label_set_text(s_zone_label, zone_name);
+    }
+    if (network_status_changed && s_status_bar) {
+        // Set network status directly without auto-clear timer
+        lv_label_set_text(s_status_bar, net_status);
+        // Cancel any pending auto-clear from show_status_message
+        if (s_status_timer) {
+            lv_timer_del(s_status_timer);
+            s_status_timer = NULL;
+        }
     }
 }
 
@@ -893,6 +912,18 @@ void ui_set_message(const char *message) {
     strncpy(s_pending_message, message, sizeof(s_pending_message) - 1);
     s_pending_message[sizeof(s_pending_message) - 1] = '\0';
     s_message_dirty = true;
+    os_mutex_unlock(&s_state_lock);
+}
+
+void ui_set_network_status(const char *status) {
+    os_mutex_lock(&s_state_lock);
+    if (status) {
+        strncpy(s_network_status, status, sizeof(s_network_status) - 1);
+        s_network_status[sizeof(s_network_status) - 1] = '\0';
+    } else {
+        s_network_status[0] = '\0';  // Clear status
+    }
+    s_network_status_dirty = true;
     os_mutex_unlock(&s_state_lock);
 }
 

@@ -228,7 +228,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
     case RK_NET_EVT_AP_STARTED:
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
-        ui_set_message("Setup: roon-knob-setup");
+        // Show setup instructions in main display area (line2 is top, line1 is bottom)
+        ui_update("roon-knob-setup", "Connect to WiFi:", false, 0, 0, 100, 0, 0);
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
         break;
