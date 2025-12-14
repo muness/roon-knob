@@ -14,7 +14,8 @@ typedef struct {
 } rk_cfg_t;
 
 static inline bool rk_cfg_is_valid(const rk_cfg_t *cfg) {
-    return cfg && cfg->cfg_ver != 0 && cfg->bridge_base[0] != '\0';
+    // Only check cfg_ver - bridge_base can be empty (mDNS auto-discovery)
+    return cfg && cfg->cfg_ver != 0;
 }
 
 _Static_assert(sizeof(rk_cfg_t) == 291, "rk_cfg_t size changed");
