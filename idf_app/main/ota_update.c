@@ -357,6 +357,14 @@ void ota_check_for_update(void) {
         return;
     }
 
+    // Skip OTA checks for development/beta versions
+    const char *current = ota_get_current_version();
+    if (strstr(current, "-dev") || strstr(current, "-beta") || strstr(current, "-alpha")) {
+        ESP_LOGI(TAG, "Skipping OTA check for development version: %s", current);
+        s_ota_info.status = OTA_STATUS_UP_TO_DATE;
+        return;
+    }
+
     xTaskCreate(check_update_task, "ota_check", 8192, NULL, 1, &s_ota_task);  // Low priority to not block UI
 }
 
