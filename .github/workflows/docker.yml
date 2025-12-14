@@ -99,6 +99,10 @@ jobs:
           name: esp32bt-firmware
           path: esp32bt-artifacts
 
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
@@ -116,48 +120,50 @@ jobs:
             release-assets/roon_knob.bin
             release-assets/esp32_bt.bin
           body: |
-            ## Flashing Instructions
+            ## Updating
+
+            **OTA (existing users):** Update bridge to `${{ steps.version.outputs.version }}`, restart, knob updates automatically.
+
+            **Docker Compose:**
+            ```yaml
+            services:
+              roon-knob-bridge:
+                image: docker.io/muness/roon-extension-knob:${{ steps.version.outputs.version }}
+                restart: unless-stopped
+                network_mode: host
+                environment:
+                  TZ: America/New_York
+                volumes:
+                  - roon-knob-bridge-data:/home/node/app/data
+            volumes:
+              roon-knob-bridge-data:
+            ```
+
+            Then: `docker compose pull && docker compose up -d`
+
+            ---
+
+            <details>
+            <summary><b>First-time flashing instructions</b></summary>
 
             This release includes **two firmware files** for the dual-chip board:
 
-            | File | Chip | USB Orientation | Port (macOS) |
-            |------|------|-----------------|--------------|
-            | `roon_knob.bin` | ESP32-S3 (main) | Normal | `/dev/cu.usbmodem*` |
-            | `esp32_bt.bin` | ESP32 (Bluetooth) | Flipped 180° | `/dev/cu.usbserial-*` |
-
-            ### Identifying the correct port
-
-            The two chips appear as **different USB devices**:
-            - **ESP32-S3**: Shows as `usbmodem` (native USB)
-            - **ESP32**: Shows as `usbserial` (USB-UART bridge)
+            | File | Chip | USB Port |
+            |------|------|----------|
+            | `roon_knob.bin` | ESP32-S3 | `usbmodem` |
+            | `esp32_bt.bin` | ESP32 (BT) | `usbserial` |
 
             ```bash
-            # List ports (macOS)
-            ls /dev/cu.usb*
+            # Flash ESP32-S3 (USB-C normal orientation)
+            esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x0 roon_knob.bin
 
-            # List ports (Linux)
-            ls /dev/ttyUSB* /dev/ttyACM*
+            # Flip USB-C 180°, then flash ESP32
+            esptool.py --chip esp32 -p /dev/cu.usbserial-* write_flash 0x0 esp32_bt.bin
             ```
 
-            ### First-time setup (both chips required)
+            For routine updates, only ESP32-S3 needs flashing (or use OTA).
 
-            1. **Flash ESP32-S3** (USB-C in normal orientation):
-               ```bash
-               esptool.py --chip esp32s3 -p /dev/cu.usbmodem2101 write_flash 0x0 roon_knob.bin
-               ```
-
-            2. **Flip USB-C connector 180°** (physically rotate the cable)
-
-            3. **Flash ESP32** (USB-C now flipped):
-               ```bash
-               esptool.py --chip esp32 -p /dev/cu.usbserial-210 write_flash 0x0 esp32_bt.bin
-               ```
-
-            ### Routine updates (ESP32-S3 only)
-
-            For most updates, only the ESP32-S3 firmware changes. The Bluetooth firmware rarely needs updating.
-
-            ---
+            </details>
 
   docker:
     name: Build and Push Docker Image
