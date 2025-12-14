@@ -20,6 +20,7 @@
 
 #include <esp_err.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <stdio.h>
 #include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
@@ -35,6 +36,49 @@ static volatile bool s_ota_check_pending = false;
 static volatile bool s_config_server_start_pending = false;
 static volatile bool s_config_server_stop_pending = false;
 static volatile bool s_mdns_init_pending = false;
+
+// WiFi retry message alternation
+static esp_timer_handle_t s_wifi_msg_timer = NULL;
+static char s_wifi_error_msg[48] = {0};   // e.g., "Wrong password"
+static char s_wifi_retry_msg[48] = {0};   // e.g., "Retry 2/5"
+static bool s_wifi_show_error = true;     // Toggle between error and retry
+
+static void wifi_msg_toggle_cb(void *arg) {
+    (void)arg;
+    s_wifi_show_error = !s_wifi_show_error;
+    // Update main display (line1), not just the status bar
+    ui_update(s_wifi_show_error ? s_wifi_error_msg : s_wifi_retry_msg,
+              "", false, 0, 0, 100, 0, 0);
+}
+
+static void start_wifi_msg_alternation(const char *error, int attempt, int max) {
+    // Store both messages
+    snprintf(s_wifi_error_msg, sizeof(s_wifi_error_msg), "WiFi: %s", error);
+    snprintf(s_wifi_retry_msg, sizeof(s_wifi_retry_msg), "WiFi: Retry %d/%d", attempt, max);
+    s_wifi_show_error = true;
+
+    // Show error message first in main display
+    ui_update(s_wifi_error_msg, "", false, 0, 0, 100, 0, 0);
+
+    // Create timer if needed
+    if (!s_wifi_msg_timer) {
+        esp_timer_create_args_t args = {
+            .callback = wifi_msg_toggle_cb,
+            .name = "wifi_msg",
+        };
+        esp_timer_create(&args, &s_wifi_msg_timer);
+    }
+
+    // Start periodic timer (600ms)
+    esp_timer_stop(s_wifi_msg_timer);
+    esp_timer_start_periodic(s_wifi_msg_timer, 600 * 1000);  // microseconds
+}
+
+static void stop_wifi_msg_alternation(void) {
+    if (s_wifi_msg_timer) {
+        esp_timer_stop(s_wifi_msg_timer);
+    }
+}
 
 // Helper to update UI with current ESP32 Bluetooth state
 static void update_bt_ui(void) {
@@ -212,12 +256,14 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     switch (evt) {
     case RK_NET_EVT_CONNECTING:
         ESP_LOGI(TAG, "WiFi: Connecting...");
-        ui_set_message("WiFi: Connecting...");
+        stop_wifi_msg_alternation();
+        ui_update("WiFi: Connecting...", "", false, 0, 0, 100, 0, 0);
         break;
 
     case RK_NET_EVT_GOT_IP:
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
-        ui_set_message("WiFi: Connected");
+        stop_wifi_msg_alternation();
+        ui_update("WiFi: Connected", "", false, 0, 0, 100, 0, 0);
         roon_client_set_network_ready(true);
         // Defer heavy operations to UI task (sys_evt has limited stack)
         s_mdns_init_pending = true;  // mDNS needs network up first
@@ -225,23 +271,23 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         s_config_server_start_pending = true;
         break;
 
-    // All failure events show retry counter
+    // All failure events alternate between error reason and retry count
     case RK_NET_EVT_FAIL:
     case RK_NET_EVT_WRONG_PASSWORD:
     case RK_NET_EVT_NO_AP_FOUND:
     case RK_NET_EVT_AUTH_TIMEOUT: {
         int attempt = wifi_mgr_get_retry_count();
         int max = wifi_mgr_get_retry_max();
-        ESP_LOGW(TAG, "WiFi: %s, attempt %d/%d", ip_opt ? ip_opt : "Connection failed", attempt, max);
-        char msg[48];
-        snprintf(msg, sizeof(msg), "WiFi: Retry %d/%d", attempt, max);
-        ui_set_message(msg);
+        const char *error = ip_opt ? ip_opt : "Connection failed";
+        ESP_LOGW(TAG, "WiFi: %s, attempt %d/%d", error, attempt, max);
+        start_wifi_msg_alternation(error, attempt, max);
         roon_client_set_network_ready(false);
         break;
     }
 
     case RK_NET_EVT_AP_STARTED:
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
+        stop_wifi_msg_alternation();
         // Show setup instructions in main display area (line2 is top, line1 is bottom)
         ui_update("roon-knob-setup", "Connect to WiFi:", false, 0, 0, 100, 0, 0);
         ui_set_zone_name("Tap for Bluetooth");  // Offer Bluetooth as alternative to WiFi setup
@@ -251,7 +297,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
     case RK_NET_EVT_AP_STOPPED:
         ESP_LOGI(TAG, "WiFi: AP mode stopped, connecting to network...");
-        ui_set_message("WiFi: Connecting...");
+        ui_update("WiFi: Connecting...", "", false, 0, 0, 100, 0, 0);
         break;
 
     default:
