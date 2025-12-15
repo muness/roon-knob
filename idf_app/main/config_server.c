@@ -3,6 +3,7 @@
 
 #include "config_server.h"
 #include "platform/platform_storage.h"
+#include "roon_client.h"
 #include "wifi_manager.h"
 
 #include <string.h>
@@ -17,6 +18,7 @@ static const char *TAG = "config_server";
 static httpd_handle_t s_server = NULL;
 
 // HTML page for config
+// Format args: current_bridge, status_class, status_text, bridge_value
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
@@ -34,6 +36,10 @@ static const char *HTML_CONFIG =
     ".btn-clear{background:#ff7043;}"
     ".btn-clear:hover{background:#ff5722;}"
     ".current{background:#0f0f1a;padding:10px;border-radius:5px;margin:10px 0;font-family:monospace;}"
+    ".status{padding:10px;border-radius:5px;margin:10px 0;}"
+    ".status-ok{background:#1b5e20;}"
+    ".status-warn{background:#e65100;}"
+    ".status-err{background:#b71c1c;}"
     ".hint{font-size:12px;color:#666;margin-top:4px;}"
     ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
     "</style></head><body>"
@@ -42,10 +48,13 @@ static const char *HTML_CONFIG =
     "<div class='current'>"
     "<strong>Current Bridge:</strong> %s"
     "</div>"
+    "<div class='status %s'>"
+    "<strong>Status:</strong> %s"
+    "</div>"
     "<form method='POST' action='/config'>"
     "<label>Bridge URL</label>"
     "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088' value='%s'>"
-    "<p class='hint'>Leave empty for mDNS auto-discovery</p>"
+    "<p class='hint'>Leave empty for mDNS auto-discovery. Check the Roon Knob display for connection progress.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
     "</form></body></html>";
@@ -118,14 +127,38 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
 
     const char *current = cfg.bridge_base[0] ? cfg.bridge_base : "(mDNS auto-discovery)";
 
-    // Build HTML with current values
-    char *html = malloc(2048);
+    // Get bridge connection status
+    const char *status_class;
+    char status_text[64];
+    bool bridge_connected = roon_client_is_bridge_connected();
+    int retry_count = roon_client_get_bridge_retry_count();
+    int retry_max = roon_client_get_bridge_retry_max();
+
+    if (bridge_connected) {
+        status_class = "status-ok";
+        snprintf(status_text, sizeof(status_text), "Connected");
+    } else if (!cfg.bridge_base[0]) {
+        status_class = "status-warn";
+        snprintf(status_text, sizeof(status_text), "Searching via mDNS...");
+    } else if (retry_count >= retry_max) {
+        status_class = "status-err";
+        snprintf(status_text, sizeof(status_text), "Unreachable - check URL or bridge server");
+    } else if (retry_count > 0) {
+        status_class = "status-warn";
+        snprintf(status_text, sizeof(status_text), "Connecting... (%d/%d)", retry_count, retry_max);
+    } else {
+        status_class = "status-warn";
+        snprintf(status_text, sizeof(status_text), "Connecting...");
+    }
+
+    // Build HTML with current values and status
+    char *html = malloc(2560);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 2048, HTML_CONFIG, current, cfg.bridge_base);
+    snprintf(html, 2560, HTML_CONFIG, current, status_class, status_text, cfg.bridge_base);
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));

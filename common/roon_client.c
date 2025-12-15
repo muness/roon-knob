@@ -23,6 +23,7 @@
 #define MAX_ZONES 32
 #define POLL_DELAY_AWAKE_MS 1000     // 1 second when display is on
 #define POLL_DELAY_SLEEPING_MS 30000  // 30 seconds when display is sleeping
+#define POLL_DELAY_BRIDGE_ERROR_MS 10000  // 10 seconds when bridge unreachable (after max retries)
 
 // Special zone picker options (not actual zones)
 #define ZONE_ID_BACK "__back__"
@@ -67,6 +68,11 @@ static bool s_bridge_verified = false;  // True after bridge found AND responded
 static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 #define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
+// Bridge connection retry tracking (mirrors WiFi retry pattern)
+#define BRIDGE_FAIL_THRESHOLD 5  // Show recovery info after this many consecutive failures
+static int s_bridge_fail_count = 0;
+static char s_device_ip[16] = {0};  // Device IP for recovery messages
+
 static void lock_state(void) {
     os_mutex_lock(&s_state_lock);
 }
@@ -93,6 +99,8 @@ static void post_ui_message(const char *msg);
 static void post_ui_message_copy(char *msg_copy);
 static void post_ui_status_copy(bool *status_copy);
 static void post_ui_zone_name_copy(char *name_copy);
+static void reset_bridge_fail_count(void);
+static void increment_bridge_fail_count(void);
 
 static void ui_update_cb(void *arg) {
     struct now_playing_state *state = arg;
@@ -246,8 +254,15 @@ static void post_ui_zone_name(const char *name) {
 }
 
 static void wait_for_poll_interval(void) {
-    // Use longer delay when display is sleeping to save power
-    uint32_t delay_ms = platform_display_is_sleeping() ? POLL_DELAY_SLEEPING_MS : POLL_DELAY_AWAKE_MS;
+    // Use longer delay when display is sleeping or bridge is unreachable
+    uint32_t delay_ms;
+    if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
+        delay_ms = POLL_DELAY_BRIDGE_ERROR_MS;  // Slow down when bridge unreachable
+    } else if (platform_display_is_sleeping()) {
+        delay_ms = POLL_DELAY_SLEEPING_MS;
+    } else {
+        delay_ms = POLL_DELAY_AWAKE_MS;
+    }
     uint64_t start = platform_millis();
     while (s_running) {
         if (s_trigger_poll) {
@@ -614,46 +629,101 @@ static void roon_poll_thread(void *arg) {
             refresh_zone_label(true);
         }
         bool ok = fetch_now_playing(&state);
-        post_ui_update(&state);
         post_ui_status(ok);
 
-        // Show meaningful status messages for state transitions
-        if (ok && !s_last_net_ok) {
-            // Just connected to bridge - clear network status and mark as verified
-            post_ui_message("Bridge: Connected");
-            ui_set_network_status(NULL);  // Clear persistent status on success
-            s_bridge_verified = true;  // Stop frequent mDNS queries
+        // Skip bridge status tracking in Bluetooth mode - we're not using the bridge
+        bool in_bluetooth_mode = false;
+        lock_state();
+        in_bluetooth_mode = (strcmp(s_state.cfg.zone_id, ZONE_ID_BLUETOOTH) == 0);
+        unlock_state();
+
+        if (in_bluetooth_mode) {
+            // In Bluetooth mode - show default UI, don't track bridge failures
+            post_ui_update(&state);
+            reset_bridge_fail_count();
+            s_last_net_ok = ok;
+            wait_for_poll_interval();
+            continue;
+        }
+
+        // Handle bridge connection status (mirrors WiFi retry pattern)
+        if (ok) {
+            // Bridge connected - show now playing data
+            post_ui_update(&state);
+            if (!s_last_net_ok) {
+                // Just connected - clear status, restore zone name, mark verified
+                reset_bridge_fail_count();
+                post_ui_message("Bridge: Connected");
+                ui_set_network_status(NULL);
+                s_bridge_verified = true;
+                // Restore zone name (was cleared during error display)
+                lock_state();
+                char zone_name_copy[MAX_ZONE_NAME];
+                strncpy(zone_name_copy, s_state.zone_label, sizeof(zone_name_copy) - 1);
+                zone_name_copy[sizeof(zone_name_copy) - 1] = '\0';
+                unlock_state();
+                if (zone_name_copy[0]) {
+                    ui_set_zone_name(zone_name_copy);
+                }
+            }
         } else if (!ok && s_last_net_ok) {
-            // Lost connection to bridge - resume mDNS checks
-            post_ui_message("Bridge: Offline");
-            ui_set_network_status("Bridge: Offline - check connection");
-            s_bridge_verified = false;  // Resume mDNS discovery
+            // Just lost connection to bridge - start retry tracking
+            // line1=main content (bottom), line2=header (top)
+            increment_bridge_fail_count();
+            s_bridge_verified = false;
+            char line1_msg[64];
+            snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+                     s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
+            ui_set_zone_name("");  // Clear zone name to avoid overlay
+            ui_update(line1_msg, "Testing Bridge", false, 0, 0, 100, 0, 0);
+            ui_set_network_status("Bridge: Offline - retrying...");
         } else if (!ok && !s_last_net_ok) {
             // Still trying to connect - check if we have a bridge URL
             lock_state();
             bool has_bridge = (s_state.cfg.bridge_base[0] != '\0');
-            char bridge_url[128];
-            if (has_bridge) {
-                strncpy(bridge_url, s_state.cfg.bridge_base, sizeof(bridge_url) - 1);
-                bridge_url[sizeof(bridge_url) - 1] = '\0';
-            }
             unlock_state();
+
             if (!has_bridge) {
-                post_ui_message("Bridge: Searching...");
+                // No bridge URL - searching via mDNS
+                // line1=main content (bottom), line2=header (top)
+                ui_set_zone_name("");  // Clear zone name to avoid overlay
+                ui_update("via mDNS...", "Searching for Bridge", false, 0, 0, 100, 0, 0);
                 ui_set_network_status("Bridge: Searching via mDNS...");
             } else {
-                // Bridge URL configured but not responding
-                // Show helpful message (truncate bridge URL if needed)
-                static int offline_count = 0;
-                offline_count++;
-                if (offline_count == 5) {  // After ~5 seconds of failures
-                    char msg[128];
-                    // Truncate bridge URL to fit in message
-                    char short_url[64];
-                    strncpy(short_url, bridge_url, sizeof(short_url) - 1);
-                    short_url[sizeof(short_url) - 1] = '\0';
-                    snprintf(msg, sizeof(msg), "Bridge offline: %.60s", short_url);
-                    ui_set_network_status(msg);
+                // Bridge URL configured but not responding - show retry progress
+                increment_bridge_fail_count();
+                char line1_msg[64];
+                char status_msg[96];
+
+                if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
+                    // Max retries reached - show recovery info with device IP
+                    // line1=main content (bottom), line2=header (top)
+                    char line2_msg[64];
+                    if (s_device_ip[0]) {
+                        snprintf(line1_msg, sizeof(line1_msg),
+                                 "http://%s", s_device_ip);
+                        snprintf(line2_msg, sizeof(line2_msg), "Update Bridge at:");
+                        snprintf(status_msg, sizeof(status_msg),
+                                 "Bridge unreachable after %d attempts", BRIDGE_FAIL_THRESHOLD);
+                    } else {
+                        snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
+                        snprintf(line2_msg, sizeof(line2_msg), "Bridge Unreachable");
+                        snprintf(status_msg, sizeof(status_msg),
+                                 "Bridge unreachable. Check Settings.");
+                    }
+                    ui_set_zone_name("");  // Clear zone name to avoid overlay
+                    ui_update(line1_msg, line2_msg, false, 0, 0, 100, 0, 0);
+                    ui_set_network_status(status_msg);
+                } else {
+                    // Still retrying - show progress on main display
+                    // line1=main content (bottom), line2=header (top)
+                    snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+                             s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
+                    ui_set_zone_name("");  // Clear zone name to avoid overlay
+                    ui_update(line1_msg, "Testing Bridge", false, 0, 0, 100, 0, 0);
+                    snprintf(status_msg, sizeof(status_msg), "Bridge: Retry %d/%d",
+                             s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
+                    ui_set_network_status(status_msg);
                 }
             }
         }
@@ -903,4 +973,52 @@ bool roon_client_is_ready_for_art_mode(void) {
     bool ready = s_state.zone_count > 0;
     unlock_state();
     return ready;
+}
+
+// Bridge retry tracking functions
+static void reset_bridge_fail_count(void) {
+    s_bridge_fail_count = 0;
+}
+
+static void increment_bridge_fail_count(void) {
+    if (s_bridge_fail_count < BRIDGE_FAIL_THRESHOLD) {
+        s_bridge_fail_count++;
+    }
+}
+
+void roon_client_set_device_ip(const char *ip) {
+    if (ip && ip[0]) {
+        strncpy(s_device_ip, ip, sizeof(s_device_ip) - 1);
+        s_device_ip[sizeof(s_device_ip) - 1] = '\0';
+    } else {
+        s_device_ip[0] = '\0';
+    }
+}
+
+int roon_client_get_bridge_retry_count(void) {
+    return s_bridge_fail_count;
+}
+
+int roon_client_get_bridge_retry_max(void) {
+    return BRIDGE_FAIL_THRESHOLD;
+}
+
+bool roon_client_get_bridge_url(char *buf, size_t len) {
+    if (!buf || len == 0) {
+        return false;
+    }
+    lock_state();
+    bool has_bridge = (s_state.cfg.bridge_base[0] != '\0');
+    if (has_bridge) {
+        strncpy(buf, s_state.cfg.bridge_base, len - 1);
+        buf[len - 1] = '\0';
+    } else {
+        buf[0] = '\0';
+    }
+    unlock_state();
+    return has_bridge;
+}
+
+bool roon_client_is_bridge_connected(void) {
+    return s_last_net_ok;
 }

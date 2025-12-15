@@ -293,6 +293,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
         stop_wifi_msg_alternation();
         ui_update("WiFi: Connected", "", false, 0, 0, 100, 0, 0);
+        roon_client_set_device_ip(ip_opt);  // Store IP for bridge recovery messages
         roon_client_set_network_ready(true);
         // Defer heavy operations to UI task (sys_evt has limited stack)
         s_mdns_init_pending = true;  // mDNS needs network up first
