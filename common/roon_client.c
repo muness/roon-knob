@@ -64,6 +64,8 @@ static bool s_last_net_ok;
 static bool s_network_ready;
 static bool s_force_artwork_refresh;  // Force artwork reload on zone change
 static int s_last_known_volume = 0;   // Cached volume for optimistic UI updates
+static int s_last_known_volume_min = -80;  // Cached volume min for clamping
+static int s_last_known_volume_max = 0;    // Cached volume max for clamping
 static bool s_bridge_verified = false;  // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 #define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
@@ -110,6 +112,8 @@ static void ui_update_cb(void *arg) {
     }
     // Cache volume for optimistic UI updates
     s_last_known_volume = state->volume;
+    s_last_known_volume_min = state->volume_min;
+    s_last_known_volume_max = state->volume_max;
     ui_update(state->line1, state->line2, state->is_playing, state->volume, state->volume_min, state->volume_max, state->seek_position, state->length);
 
     // Update artwork if image_key changed or forced refresh
@@ -943,6 +947,52 @@ void roon_client_handle_input(ui_input_event_t event) {
         break;
     default:
         break;
+    }
+}
+
+// Velocity-sensitive volume rotation handler
+// Maps encoder tick count over 100ms window to step size:
+//   1-2 ticks = slow (step 1)
+//   3-4 ticks = medium (step 3)
+//   5+ ticks = fast (step 5)
+void roon_client_handle_volume_rotation(int ticks) {
+    if (ticks == 0) return;
+
+    // Determine step size based on velocity (tick count = ticks per 100ms)
+    int abs_ticks = ticks < 0 ? -ticks : ticks;
+    int step;
+    if (abs_ticks >= 5) {
+        step = 5;  // Fast rotation
+    } else if (abs_ticks >= 3) {
+        step = 3;  // Medium rotation
+    } else {
+        step = 1;  // Slow rotation (fine-grained control)
+    }
+
+    // Apply direction
+    int delta = (ticks > 0) ? step : -step;
+
+    // Calculate optimistic new volume with clamping
+    int predicted_vol = s_last_known_volume + delta;
+    if (predicted_vol < s_last_known_volume_min) {
+        predicted_vol = s_last_known_volume_min;
+    }
+    if (predicted_vol > s_last_known_volume_max) {
+        predicted_vol = s_last_known_volume_max;
+    }
+
+    // Show volume overlay immediately with predicted value (optimistic UI)
+    ui_show_volume_change(predicted_vol);
+
+    // Send volume request to Roon
+    char body[256];
+    lock_state();
+    snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}",
+        s_state.cfg.zone_id, delta);
+    unlock_state();
+
+    if (!send_control_json(body)) {
+        post_ui_message("Volume change failed");
     }
 }
 

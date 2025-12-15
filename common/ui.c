@@ -1075,6 +1075,11 @@ void ui_dispatch_input(ui_input_event_t input) {
     }
 }
 
+void ui_handle_volume_rotation(int ticks) {
+    // Dispatch velocity-sensitive volume rotation to roon_client
+    roon_client_handle_volume_rotation(ticks);
+}
+
 void ui_set_progress(int seek_ms, int length_ms) {
     os_mutex_lock(&s_state_lock);
     s_pending.seek_position = seek_ms;

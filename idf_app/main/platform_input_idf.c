@@ -37,6 +37,7 @@ static QueueHandle_t s_input_queue = NULL;
 // ============================================================================
 #define ENCODER_POLL_INTERVAL_MS 3      // Poll encoder every 3ms (matching hardware demo)
 #define ENCODER_DEBOUNCE_TICKS   2      // Debounce count
+#define ENCODER_BATCH_INTERVAL_MS 100   // Batch encoder ticks over 100ms window for velocity detection
 
 
 // ============================================================================
@@ -112,6 +113,10 @@ static void process_encoder_channel(uint8_t current_level, uint8_t *prev_level,
     *prev_level = current_level;
 }
 
+// Accumulated encoder ticks for velocity-sensitive batching
+static int s_accumulated_ticks = 0;
+static int64_t s_last_batch_time = 0;
+
 static void encoder_read_and_dispatch(void) {
     static int last_count = 0;
 
@@ -125,19 +130,33 @@ static void encoder_read_and_dispatch(void) {
     process_encoder_channel(phb_value, &s_encoder.encoder_b_level,
                            &s_encoder.debounce_b_cnt, &s_encoder.count_value, false);
 
-    // Detect count changes and queue events (ISR-safe)
+    // Accumulate ticks (don't dispatch immediately)
     int delta = s_encoder.count_value - last_count;
     if (delta != 0) {
-        ESP_LOGI(TAG, "Encoder count: %d (delta: %d)", s_encoder.count_value, delta);
+        s_accumulated_ticks += delta;
         last_count = s_encoder.count_value;
+    }
 
-        ui_input_event_t input = (delta > 0) ? UI_INPUT_VOL_UP : UI_INPUT_VOL_DOWN;
-        // Use FromISR variant since this runs in esp_timer context
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        xQueueSendFromISR(s_input_queue, &input, &xHigherPriorityTaskWoken);
-        if (xHigherPriorityTaskWoken) {
-            portYIELD_FROM_ISR();
+    // Check if it's time to dispatch batched ticks
+    int64_t now = esp_timer_get_time() / 1000;  // Convert to ms
+    if (now - s_last_batch_time >= ENCODER_BATCH_INTERVAL_MS) {
+        if (s_accumulated_ticks != 0) {
+            ESP_LOGD(TAG, "Encoder batch: %d ticks over %lldms",
+                     s_accumulated_ticks, now - s_last_batch_time);
+
+            // Queue a volume rotation event with the accumulated ticks
+            // We use a special sentinel value to pass the tick count through the queue
+            // The sign indicates direction, magnitude indicates tick count
+            int ticks_to_send = s_accumulated_ticks;
+            s_accumulated_ticks = 0;
+
+            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+            xQueueSendFromISR(s_input_queue, &ticks_to_send, &xHigherPriorityTaskWoken);
+            if (xHigherPriorityTaskWoken) {
+                portYIELD_FROM_ISR();
+            }
         }
+        s_last_batch_time = now;
     }
 }
 
@@ -177,8 +196,8 @@ static esp_err_t poll_timer_init(void) {
 void platform_input_init(void) {
     ESP_LOGI(TAG, "Initializing platform input (encoder only - touch handled by LVGL)");
 
-    // Create input event queue (holds up to 10 events)
-    s_input_queue = xQueueCreate(10, sizeof(ui_input_event_t));
+    // Create input event queue (holds up to 10 batched tick counts)
+    s_input_queue = xQueueCreate(10, sizeof(int));
     if (!s_input_queue) {
         ESP_LOGE(TAG, "Failed to create input event queue");
         return;
@@ -202,11 +221,12 @@ void platform_input_init(void) {
 }
 
 void platform_input_process_events(void) {
-    ui_input_event_t input;
+    int ticks;
     // Process all queued events (non-blocking)
-    while (xQueueReceive(s_input_queue, &input, 0) == pdTRUE) {
+    while (xQueueReceive(s_input_queue, &ticks, 0) == pdTRUE) {
         display_activity_detected();  // Wake display and reset sleep timers
-        ui_dispatch_input(input);
+        // Dispatch volume rotation with tick count for velocity-sensitive handling
+        ui_handle_volume_rotation(ticks);
     }
 }
 
