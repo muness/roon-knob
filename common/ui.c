@@ -1076,8 +1076,13 @@ void ui_dispatch_input(ui_input_event_t input) {
 }
 
 void ui_handle_volume_rotation(int ticks) {
-    // Dispatch velocity-sensitive volume rotation to roon_client
-    roon_client_handle_volume_rotation(ticks);
+    if (ui_is_zone_picker_visible()) {
+        // Scroll zone picker instead of changing volume
+        ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
+    } else {
+        // Dispatch velocity-sensitive volume rotation to roon_client
+        roon_client_handle_volume_rotation(ticks);
+    }
 }
 
 void ui_set_progress(int seek_ms, int length_ms) {
