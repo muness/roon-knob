@@ -37,7 +37,7 @@ static QueueHandle_t s_input_queue = NULL;
 // ============================================================================
 #define ENCODER_POLL_INTERVAL_MS 3      // Poll encoder every 3ms (matching hardware demo)
 #define ENCODER_DEBOUNCE_TICKS   2      // Debounce count
-#define ENCODER_BATCH_INTERVAL_MS 100   // Batch encoder ticks over 100ms window for velocity detection
+#define ENCODER_BATCH_INTERVAL_MS 50    // Batch encoder ticks over 50ms window for velocity detection
 
 
 // ============================================================================

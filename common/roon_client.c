@@ -951,19 +951,19 @@ void roon_client_handle_input(ui_input_event_t event) {
 }
 
 // Velocity-sensitive volume rotation handler
-// Maps encoder tick count over 100ms window to step size:
-//   1-2 ticks = slow (step 1)
-//   3-4 ticks = medium (step 3)
-//   5+ ticks = fast (step 5)
+// Maps encoder tick count over 50ms window to step size:
+//   1 tick = slow (step 1)
+//   2 ticks = medium (step 3)
+//   3+ ticks = fast (step 5)
 void roon_client_handle_volume_rotation(int ticks) {
     if (ticks == 0) return;
 
-    // Determine step size based on velocity (tick count = ticks per 100ms)
+    // Determine step size based on velocity (tick count = ticks per 50ms)
     int abs_ticks = ticks < 0 ? -ticks : ticks;
     int step;
-    if (abs_ticks >= 5) {
+    if (abs_ticks >= 3) {
         step = 5;  // Fast rotation
-    } else if (abs_ticks >= 3) {
+    } else if (abs_ticks >= 2) {
         step = 3;  // Medium rotation
     } else {
         step = 1;  // Slow rotation (fine-grained control)
