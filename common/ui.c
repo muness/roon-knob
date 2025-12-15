@@ -60,7 +60,7 @@ static lv_obj_t *s_volume_overlay;     // Large volume popup when adjusting
 static lv_obj_t *s_volume_overlay_label;  // Volume text in overlay
 static lv_timer_t *s_volume_overlay_timer;  // Timer to hide volume overlay
 static lv_obj_t *s_status_dot;         // Online/offline indicator
-static lv_obj_t *s_battery_label;      // Battery status
+static lv_obj_t *s_battery_icon;       // Battery icon (Material Symbols)
 static lv_obj_t *s_zone_label;         // Zone name
 static lv_obj_t *s_btn_prev;           // Previous track button
 static lv_obj_t *s_btn_play;           // Play/pause button (center, large)
@@ -82,14 +82,16 @@ static lv_style_t style_button_label;      // Button text labels
 static lv_obj_t *s_status_bar;         // Status bar label at bottom
 static lv_timer_t *s_status_timer;     // Timer to clear status messages
 
-// Zone picker - using LVGL roller widget
+// Zone picker - using LVGL list widget (supports per-item icons)
 static lv_obj_t *s_zone_picker_overlay;    // Dark background overlay
-static lv_obj_t *s_zone_roller;            // Roller widget for zone selection
+static lv_obj_t *s_zone_list;              // List widget for zone selection
 static bool s_zone_picker_visible = false;
 #define MAX_ZONE_PICKER_ZONES 16
 #define MAX_ZONE_ID_LEN 48
 static char s_zone_picker_ids[MAX_ZONE_PICKER_ZONES][MAX_ZONE_ID_LEN];  // Store zone IDs
 static int s_zone_picker_count = 0;
+static int s_zone_picker_selected = 0;     // Currently highlighted item
+static int s_zone_picker_current = -1;     // Currently active zone (no-op if selected)
 
 // OTA update notification
 static lv_obj_t *s_update_btn;             // Update notification button
@@ -125,10 +127,33 @@ static ui_jpeg_image_t s_artwork_img;  // Decoded RGB565 image for artwork (ESP3
 static char *s_artwork_data = NULL;  // Raw JPEG data for PC simulator
 #endif
 
-// Fonts - larger sizes for better readability
+// Fonts - use pre-rendered bitmap fonts on ESP32, built-in on PC
+// Two font families: text (Charis SIL) and icons (Material Symbols)
+#if !TARGET_PC
+#include "font_manager.h"
+// Text fonts for music metadata
+static inline const lv_font_t *font_small(void) { return font_manager_get_small(); }
+static inline const lv_font_t *font_normal(void) { return font_manager_get_normal(); }
+static inline const lv_font_t *font_large(void) { return font_manager_get_large(); }
+// Icon fonts for UI controls
+static inline const lv_font_t *font_icon_small(void) { return font_manager_get_icon_small(); }
+static inline const lv_font_t *font_icon_normal(void) { return font_manager_get_icon_normal(); }
+static inline const lv_font_t *font_icon_large(void) { return font_manager_get_icon_large(); }
+// Icon aliases (Material Symbols on ESP32)
+#define UI_ICON_BLUETOOTH ICON_BLUETOOTH
+#define UI_ICON_DOWNLOAD  ICON_DOWNLOAD
+#else
+// PC fallback - use built-in Montserrat (has LVGL symbols)
 static inline const lv_font_t *font_small(void) { return &lv_font_montserrat_20; }
 static inline const lv_font_t *font_normal(void) { return &lv_font_montserrat_28; }
 static inline const lv_font_t *font_large(void) { return &lv_font_montserrat_48; }
+static inline const lv_font_t *font_icon_small(void) { return &lv_font_montserrat_20; }
+static inline const lv_font_t *font_icon_normal(void) { return &lv_font_montserrat_28; }
+static inline const lv_font_t *font_icon_large(void) { return &lv_font_montserrat_48; }
+// Icon aliases (LVGL symbols on PC)
+#define UI_ICON_BLUETOOTH LV_SYMBOL_BLUETOOTH
+#define UI_ICON_DOWNLOAD  LV_SYMBOL_DOWNLOAD
+#endif
 
 // Forward declarations
 static void apply_state(const struct ui_state *state);
@@ -140,7 +165,7 @@ static void zone_label_long_press_cb(lv_event_t *e);
 static void btn_prev_event_cb(lv_event_t *e);
 static void btn_play_event_cb(lv_event_t *e);
 static void btn_next_event_cb(lv_event_t *e);
-static void zone_roller_event_cb(lv_event_t *e);
+static void zone_list_item_event_cb(lv_event_t *e);
 static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
@@ -299,7 +324,7 @@ static void build_layout(void) {
     lv_obj_add_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
 
     s_volume_overlay_label = lv_label_create(s_volume_overlay);
-    lv_obj_set_style_text_font(s_volume_overlay_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(s_volume_overlay_label, font_large(), 0);
     lv_obj_set_style_text_color(s_volume_overlay_label, lv_color_hex(0xfafafa), 0);
     lv_label_set_text(s_volume_overlay_label, "0 dB");
     lv_obj_center(s_volume_overlay_label);
@@ -307,7 +332,7 @@ static void build_layout(void) {
     // Volume label - small text at top
     s_volume_label = lv_label_create(s_ui_container);
     lv_label_set_text(s_volume_label, "-- dB");
-    lv_obj_set_style_text_font(s_volume_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_volume_label, font_small(), 0);
     lv_obj_set_style_text_color(s_volume_label, lv_color_hex(0xfafafa), 0);  // Off-white
     lv_obj_align(s_volume_label, LV_ALIGN_TOP_MID, 0, 12);
 
@@ -316,13 +341,17 @@ static void build_layout(void) {
     lv_obj_set_size(s_status_dot, 10, 10);
     lv_obj_set_style_radius(s_status_dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(s_status_dot, 0, 0);
-    lv_obj_align(s_volume_label, LV_ALIGN_OUT_RIGHT_MID, 15, 0);
+    lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
-    // Battery indicator - top left
-    s_battery_label = lv_label_create(s_ui_container);
-    lv_label_set_text(s_battery_label, "");
-    lv_obj_set_style_text_font(s_battery_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(s_battery_label, LV_ALIGN_TOP_LEFT, 15, 12);
+    // Battery indicator - top left (adjusted for round display)
+    // Icon only - no numeric label needed with 5 discrete states
+#if !TARGET_PC
+    s_battery_icon = lv_label_create(s_ui_container);
+    lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
+    lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
+    lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
+    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_LEFT, 100, 38);  // Just inside the arc
+#endif
 
     // Zone label - clickable zone name, positioned below the arc edge
     s_zone_label = lv_label_create(s_ui_container);
@@ -344,26 +373,22 @@ static void build_layout(void) {
     // Place track at CENTER - 20 to sit nicely above the buttons
     s_track_label = lv_label_create(s_background);
     lv_obj_set_width(s_track_label, SCREEN_SIZE - 80);
-    lv_obj_set_height(s_track_label, LV_SIZE_CONTENT);  // Limit to single line
     lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
     lv_obj_set_style_text_align(s_track_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_track_label, lv_color_hex(0xfafafa), 0);  // Off-white for primary text
-    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Slow scroll for long text
-    lv_obj_set_style_anim_duration(s_track_label, 8000, LV_PART_MAIN);  // 8 second scroll cycle
-    lv_obj_set_style_max_height(s_track_label, 30, 0);  // Limit height to prevent overflow
+    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Horizontal circular scroll
+    lv_obj_set_style_anim_time(s_track_label, 25000, LV_PART_MAIN);  // Scroll speed
     lv_obj_align(s_track_label, LV_ALIGN_CENTER, 0, -20);  // Just above media controls
     lv_label_set_text(s_track_label, s_pending.line1);
 
     // Artist - positioned above track name with smaller font
     s_artist_label = lv_label_create(s_background);
     lv_obj_set_width(s_artist_label, SCREEN_SIZE - 80);
-    lv_obj_set_height(s_artist_label, LV_SIZE_CONTENT);  // Limit to single line
     lv_obj_set_style_text_font(s_artist_label, font_small(), 0);
     lv_obj_set_style_text_align(s_artist_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_artist_label, lv_color_hex(0xaaaaaa), 0);  // Light grey for secondary text
-    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Slow scroll for long text
-    lv_obj_set_style_anim_duration(s_artist_label, 8000, LV_PART_MAIN);  // 8 second scroll cycle
-    lv_obj_set_style_max_height(s_artist_label, 25, 0);  // Limit height to prevent overflow
+    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Horizontal circular scroll
+    lv_obj_set_style_anim_time(s_artist_label, 25000, LV_PART_MAIN);  // Scroll speed
     lv_obj_align(s_artist_label, LV_ALIGN_CENTER, 0, -55);  // Above track name
     lv_label_set_text(s_artist_label, s_pending.line2);
 
@@ -385,8 +410,13 @@ static void build_layout(void) {
     lv_obj_set_style_border_color(s_btn_prev, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
 
     lv_obj_t *prev_label = lv_label_create(s_btn_prev);
+#if !TARGET_PC
+    lv_label_set_text(prev_label, ICON_SKIP_PREV);
+    lv_obj_set_style_text_font(prev_label, font_icon_normal(), 0);
+#else
     lv_label_set_text(prev_label, LV_SYMBOL_PREV);
-    lv_obj_set_style_text_font(prev_label, font_normal(), 0);
+    lv_obj_set_style_text_font(prev_label, &lv_font_montserrat_28, 0);
+#endif
     lv_obj_add_style(prev_label, &style_button_label, 0);
     lv_obj_center(prev_label);
 
@@ -404,8 +434,13 @@ static void build_layout(void) {
     lv_obj_set_style_border_color(s_btn_play, lv_color_hex(0x7bb9e8), LV_STATE_PRESSED);
 
     s_play_icon = lv_label_create(s_btn_play);
+#if !TARGET_PC
+    lv_label_set_text(s_play_icon, ICON_PLAY);
+    lv_obj_set_style_text_font(s_play_icon, font_icon_large(), 0);
+#else
     lv_label_set_text(s_play_icon, LV_SYMBOL_PLAY);
-    lv_obj_set_style_text_font(s_play_icon, font_large(), 0);
+    lv_obj_set_style_text_font(s_play_icon, &lv_font_montserrat_48, 0);
+#endif
     lv_obj_add_style(s_play_icon, &style_button_label, 0);
     lv_obj_center(s_play_icon);
 
@@ -423,8 +458,13 @@ static void build_layout(void) {
     lv_obj_set_style_border_color(s_btn_next, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
 
     lv_obj_t *next_label = lv_label_create(s_btn_next);
+#if !TARGET_PC
+    lv_label_set_text(next_label, ICON_SKIP_NEXT);
+    lv_obj_set_style_text_font(next_label, font_icon_normal(), 0);
+#else
     lv_label_set_text(next_label, LV_SYMBOL_NEXT);
-    lv_obj_set_style_text_font(next_label, font_normal(), 0);
+    lv_obj_set_style_text_font(next_label, &lv_font_montserrat_28, 0);
+#endif
     lv_obj_add_style(next_label, &style_button_label, 0);
     lv_obj_center(next_label);
 
@@ -432,7 +472,7 @@ static void build_layout(void) {
     s_status_bar = lv_label_create(s_ui_container);
     lv_label_set_text(s_status_bar, "");
     lv_obj_set_width(s_status_bar, SCREEN_SIZE - 60);
-    lv_obj_set_style_text_font(s_status_bar, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_status_bar, font_small(), 0);
     lv_obj_set_style_text_align(s_status_bar, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_status_bar, lv_color_hex(0x000000), 0);  // Black text
     lv_label_set_long_mode(s_status_bar, LV_LABEL_LONG_DOT);
@@ -501,8 +541,10 @@ static void btn_next_event_cb(lv_event_t *e) {
     }
 }
 
-static void zone_roller_event_cb(lv_event_t *e) {
-    (void)e;
+static void zone_list_item_event_cb(lv_event_t *e) {
+    lv_obj_t *btn = lv_event_get_target(e);
+    int index = (int)(intptr_t)lv_obj_get_user_data(btn);
+    s_zone_picker_selected = index;
     if (s_input_cb) {
         s_input_cb(UI_INPUT_PLAY_PAUSE);  // Trigger zone selection
     }
@@ -561,11 +603,11 @@ static void apply_state(const struct ui_state *state) {
 
     // Update play/pause icon
     if (s_play_icon) {
-        if (state->playing) {
-            lv_label_set_text(s_play_icon, LV_SYMBOL_PAUSE);
-        } else {
-            lv_label_set_text(s_play_icon, LV_SYMBOL_PLAY);
-        }
+#if !TARGET_PC
+        lv_label_set_text(s_play_icon, state->playing ? ICON_PAUSE : ICON_PLAY);
+#else
+        lv_label_set_text(s_play_icon, state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+#endif
     }
 
     // Update online status
@@ -638,29 +680,49 @@ static void poll_pending(lv_timer_t *timer) {
     }
 }
 
+static int s_last_battery_level = -1;  // 0-4 bars for hysteresis
+static bool s_last_battery_charging = false;  // Track charging state changes
+
 static void update_battery_display(void) {
 #ifdef ESP_PLATFORM
+    if (!s_battery_icon) return;
+
     int percent = battery_get_percentage();
     bool charging = battery_is_charging();
 
     if (percent < 0) {
-        lv_label_set_text(s_battery_label, "");
+        lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+        s_last_battery_level = -1;
+        s_last_battery_charging = false;
         return;
     }
 
-    char buf[16];
-    if (charging) {
-        snprintf(buf, sizeof(buf), "\xE2\x9A\xA1 %d%%", percent);
-    } else {
-        snprintf(buf, sizeof(buf), "%d%%", percent);
-    }
-    lv_label_set_text(s_battery_label, buf);
+    // Convert to 5 discrete levels (0-4) for stability
+    int level = percent / 20;  // 0-19%=0, 20-39%=1, 40-59%=2, 60-79%=3, 80-100%=4
+    if (level > 4) level = 4;
 
-    // Warning color for low battery
-    if (percent < 20 && !charging) {
-        lv_obj_set_style_text_color(s_battery_label, lv_color_hex(0xff0000), 0);  // Red
+    // Only update display if level or charging state changed (prevents flicker)
+    if (level == s_last_battery_level && charging == s_last_battery_charging) {
+        return;
+    }
+    s_last_battery_level = level;
+    s_last_battery_charging = charging;
+
+    // Update battery icon based on state
+    lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    if (charging) {
+        lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGE);
+    } else if (level == 0) {
+        lv_label_set_text(s_battery_icon, ICON_BATTERY_ALERT);
     } else {
-        lv_obj_set_style_text_color(s_battery_label, lv_color_hex(0xfafafa), 0);  // Off-white
+        lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
+    }
+
+    // Warning color for low battery, subtle grey otherwise
+    if (level == 0 && !charging) {
+        lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0xff0000), 0);
+    } else {
+        lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);
     }
 #endif
 }
@@ -735,8 +797,13 @@ static void show_volume_overlay(int volume) {
 }
 
 // ============================================================================
-// Zone Picker - LVGL Roller Widget
+// Zone Picker - LVGL List Widget (supports per-item icons)
 // ============================================================================
+
+// Special zone IDs (must match roon_client.c)
+#define ZONE_ID_BACK "__back__"
+#define ZONE_ID_SETTINGS "__settings__"
+#define ZONE_ID_BLUETOOTH "__bluetooth__"
 
 void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int count, int selected) {
     if (s_zone_picker_visible) {
@@ -745,6 +812,8 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
 
     // Store zone IDs for later retrieval
     s_zone_picker_count = (count > MAX_ZONE_PICKER_ZONES) ? MAX_ZONE_PICKER_ZONES : count;
+    s_zone_picker_selected = selected;
+    s_zone_picker_current = selected;  // Remember current zone for no-op detection
     for (int i = 0; i < s_zone_picker_count; i++) {
         strncpy(s_zone_picker_ids[i], zone_ids[i], MAX_ZONE_ID_LEN - 1);
         s_zone_picker_ids[i][MAX_ZONE_ID_LEN - 1] = '\0';
@@ -754,61 +823,114 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
     s_zone_picker_overlay = lv_obj_create(lv_screen_active());
     lv_obj_set_size(s_zone_picker_overlay, SCREEN_SIZE, SCREEN_SIZE);
     lv_obj_center(s_zone_picker_overlay);
-    lv_obj_set_style_bg_color(s_zone_picker_overlay, lv_color_hex(0x000000), 0);  // Pure black
+    lv_obj_set_style_bg_color(s_zone_picker_overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_zone_picker_overlay, LV_OPA_90, 0);
     lv_obj_set_style_border_width(s_zone_picker_overlay, 0, 0);
     lv_obj_set_style_radius(s_zone_picker_overlay, 0, 0);
+    lv_obj_set_style_pad_all(s_zone_picker_overlay, 0, 0);
 
     // Title at top
     lv_obj_t *title = lv_label_create(s_zone_picker_overlay);
     lv_label_set_text(title, "SELECT ZONE");
     lv_obj_set_style_text_font(title, font_normal(), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xfafafa), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
 
-    // Create roller widget - native LVGL scrollable picker
-    s_zone_roller = lv_roller_create(s_zone_picker_overlay);
-    lv_obj_set_width(s_zone_roller, SCREEN_SIZE - 80);
+    // Create list widget - allows per-item icons
+    s_zone_list = lv_list_create(s_zone_picker_overlay);
+    lv_obj_set_size(s_zone_list, SCREEN_SIZE - 60, SCREEN_SIZE - 120);
+    lv_obj_align(s_zone_list, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_set_style_bg_color(s_zone_list, lv_color_hex(0x0a0a0a), 0);
+    lv_obj_set_style_bg_opa(s_zone_list, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_zone_list, 0, 0);
+    lv_obj_set_style_pad_all(s_zone_list, 0, 0);
+    lv_obj_set_style_radius(s_zone_list, 10, 0);
 
-    // Build options string (newline-separated)
-    char options[1024] = "";
+    // Add items to list with appropriate icons
     for (int i = 0; i < s_zone_picker_count; i++) {
-        if (i > 0) strcat(options, "\n");
-        strncat(options, zone_names[i], sizeof(options) - strlen(options) - 1);
+        lv_obj_t *btn = lv_list_add_btn(s_zone_list, NULL, NULL);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x1a1a1a), 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x3a3a3a), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_ver(btn, 18, 0);   // Larger vertical padding for easier tapping
+        lv_obj_set_style_pad_hor(btn, 16, 0);
+        lv_obj_set_height(btn, LV_SIZE_CONTENT);
+        lv_obj_set_style_min_height(btn, 56, 0);  // Minimum 56px tap target (Material Design guideline)
+
+        // Use flex layout for proper vertical alignment of icon and text
+        lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(btn, 12, 0);  // Gap between icon and text
+
+        // Highlight current selection
+        if (i == selected) {
+            lv_obj_set_style_bg_color(btn, lv_color_hex(0x2a4a6a), 0);
+        }
+
+        // Create icon label (using icon font)
+        lv_obj_t *icon_label = lv_label_create(btn);
+#if !TARGET_PC
+        lv_obj_set_style_text_font(icon_label, font_icon_small(), 0);
+        // Icon font glyphs sit high in their bounding box - add top padding to center visually
+        lv_obj_set_style_pad_top(icon_label, 4, 0);
+#else
+        lv_obj_set_style_text_font(icon_label, font_normal(), 0);
+#endif
+        lv_obj_set_style_text_color(icon_label, lv_color_hex(0xaaaaaa), 0);
+
+        // Set icon based on zone type
+        const char *zone_id = zone_ids[i];
+        if (strcmp(zone_id, ZONE_ID_BACK) == 0) {
+#if !TARGET_PC
+            lv_label_set_text(icon_label, ICON_ARROW_BACK);
+#else
+            lv_label_set_text(icon_label, LV_SYMBOL_LEFT);
+#endif
+        } else if (strcmp(zone_id, ZONE_ID_BLUETOOTH) == 0) {
+#if !TARGET_PC
+            lv_label_set_text(icon_label, ICON_BLUETOOTH);
+#else
+            lv_label_set_text(icon_label, LV_SYMBOL_BLUETOOTH);
+#endif
+        } else if (strcmp(zone_id, ZONE_ID_SETTINGS) == 0) {
+#if !TARGET_PC
+            lv_label_set_text(icon_label, ICON_SETTINGS);
+#else
+            lv_label_set_text(icon_label, LV_SYMBOL_SETTINGS);
+#endif
+        } else {
+            // Regular zone - use music note icon
+#if !TARGET_PC
+            lv_label_set_text(icon_label, ICON_MUSIC_NOTE);
+#else
+            lv_label_set_text(icon_label, LV_SYMBOL_AUDIO);
+#endif
+        }
+
+        // Create text label (using text font)
+        lv_obj_t *text_label = lv_label_create(btn);
+        lv_obj_set_style_text_font(text_label, font_normal(), 0);
+        lv_obj_set_style_text_color(text_label, lv_color_hex(0xfafafa), 0);
+        lv_label_set_text(text_label, zone_names[i]);
+
+        // Store index in button user data
+        lv_obj_set_user_data(btn, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(btn, zone_list_item_event_cb, LV_EVENT_CLICKED, NULL);
     }
-    // Only use infinite mode if we have enough options (3+), otherwise it repeats weirdly
-    lv_roller_mode_t mode = (s_zone_picker_count >= 3) ? LV_ROLLER_MODE_INFINITE : LV_ROLLER_MODE_NORMAL;
-    lv_roller_set_options(s_zone_roller, options, mode);
 
-    // Set selected zone
-    lv_roller_set_selected(s_zone_roller, selected, LV_ANIM_OFF);
-
-    // Show 5 rows at once
-    lv_roller_set_visible_row_count(s_zone_roller, 5);
-
-    // Add click event handler to select zone
-    lv_obj_add_event_cb(s_zone_roller, zone_roller_event_cb, LV_EVENT_CLICKED, NULL);
-
-    // Style the roller - good contrast for readability
-    lv_obj_set_style_text_font(s_zone_roller, font_normal(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_zone_roller, font_normal(), LV_PART_SELECTED);
-    lv_obj_set_style_text_color(s_zone_roller, lv_color_hex(0xaaaaaa), LV_PART_MAIN);  // Light grey for non-selected
-
-    // Style the roller background
-    lv_obj_set_style_bg_color(s_zone_roller, lv_color_hex(0x0a0a0a), LV_PART_MAIN);  // Very dark background
-    lv_obj_set_style_bg_opa(s_zone_roller, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_zone_roller, 0, LV_PART_MAIN);
-
-    // Style selected item - bright white text with blue highlight
-    lv_obj_set_style_bg_color(s_zone_roller, lv_color_hex(0x5a9fd4), LV_PART_SELECTED);
-    lv_obj_set_style_bg_opa(s_zone_roller, LV_OPA_50, LV_PART_SELECTED);
-    lv_obj_set_style_text_color(s_zone_roller, lv_color_hex(0xffffff), LV_PART_SELECTED);
-
-    lv_obj_center(s_zone_roller);
+    // Scroll to selected item
+    if (selected > 0 && selected < s_zone_picker_count) {
+        lv_obj_t *selected_btn = lv_obj_get_child(s_zone_list, selected);
+        if (selected_btn) {
+            lv_obj_scroll_to_view(selected_btn, LV_ANIM_OFF);
+        }
+    }
 
     // Hint text at bottom
     lv_obj_t *hint = lv_label_create(s_zone_picker_overlay);
-    lv_label_set_text(hint, "Scroll to select, tap to confirm");
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
+    lv_label_set_text(hint, "Tap to select");
+    lv_obj_set_style_text_font(hint, font_small(), 0);
+    lv_obj_set_style_text_color(hint, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
 
@@ -823,16 +945,16 @@ void ui_hide_zone_picker(void) {
     if (s_zone_picker_overlay) {
         lv_obj_delete(s_zone_picker_overlay);
         s_zone_picker_overlay = NULL;
-        s_zone_roller = NULL;
+        s_zone_list = NULL;
     }
     s_zone_picker_visible = false;
 }
 
 int ui_get_zone_picker_selected(void) {
-    if (!s_zone_picker_visible || !s_zone_roller) {
-        return -1;  // Invalid state - picker not visible
+    if (!s_zone_picker_visible) {
+        return -1;
     }
-    return (int)lv_roller_get_selected(s_zone_roller);
+    return s_zone_picker_selected;
 }
 
 void ui_zone_picker_get_selected_id(char *out, size_t len) {
@@ -840,16 +962,19 @@ void ui_zone_picker_get_selected_id(char *out, size_t len) {
         return;
     }
     out[0] = '\0';
-    if (!s_zone_picker_visible || !s_zone_roller) {
+    if (!s_zone_picker_visible) {
         return;
     }
-    int selected = (int)lv_roller_get_selected(s_zone_roller);
-    // Normalize index for infinite mode (modulo actual count)
-    if (s_zone_picker_count > 0) {
-        selected = selected % s_zone_picker_count;
+    int selected = s_zone_picker_selected;
+    if (selected >= 0 && selected < s_zone_picker_count) {
         strncpy(out, s_zone_picker_ids[selected], len - 1);
         out[len - 1] = '\0';
     }
+}
+
+bool ui_zone_picker_is_current_selection(void) {
+    // Returns true if user selected the same zone they started with (no-op)
+    return s_zone_picker_selected == s_zone_picker_current;
 }
 
 // ============================================================================
@@ -1151,18 +1276,32 @@ int ui_zone_picker_get_selected(void) {
 }
 
 void ui_zone_picker_scroll(int delta) {
-    if (!s_zone_picker_visible || !s_zone_roller) {
+    if (!s_zone_picker_visible || !s_zone_list || s_zone_picker_count == 0) {
         return;
     }
 
-    // Get current selection and adjust by delta
-    uint16_t current = lv_roller_get_selected(s_zone_roller);
-    uint16_t option_cnt = lv_roller_get_option_cnt(s_zone_roller);
-
     // Calculate new position with wraparound
-    int new_pos = ((int)current + delta + option_cnt) % option_cnt;
+    int new_pos = s_zone_picker_selected + delta;
+    if (new_pos < 0) new_pos = s_zone_picker_count - 1;
+    if (new_pos >= s_zone_picker_count) new_pos = 0;
 
-    lv_roller_set_selected(s_zone_roller, new_pos, LV_ANIM_ON);
+    // Update visual selection
+    if (new_pos != s_zone_picker_selected) {
+        // Remove highlight from old selection
+        lv_obj_t *old_btn = lv_obj_get_child(s_zone_list, s_zone_picker_selected);
+        if (old_btn) {
+            lv_obj_set_style_bg_color(old_btn, lv_color_hex(0x1a1a1a), 0);
+        }
+
+        // Add highlight to new selection
+        lv_obj_t *new_btn = lv_obj_get_child(s_zone_list, new_pos);
+        if (new_btn) {
+            lv_obj_set_style_bg_color(new_btn, lv_color_hex(0x2a4a6a), 0);
+            lv_obj_scroll_to_view(new_btn, LV_ANIM_ON);
+        }
+
+        s_zone_picker_selected = new_pos;
+    }
 }
 
 // ============================================================================
@@ -1205,7 +1344,7 @@ void ui_set_update_available(const char *version) {
             lv_obj_t *label = lv_obj_get_user_data(s_update_btn);
             if (label) {
                 char text[64];
-                snprintf(text, sizeof(text), LV_SYMBOL_DOWNLOAD " Update to %s", s_update_version);
+                snprintf(text, sizeof(text), UI_ICON_DOWNLOAD " Update to %s", s_update_version);
                 lv_label_set_text(label, text);
             }
             lv_obj_clear_flag(s_update_btn, LV_OBJ_FLAG_HIDDEN);
@@ -1262,7 +1401,7 @@ void ui_set_controls_visible(bool visible) {
         if (s_artist_label) lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
         if (s_zone_label) lv_obj_clear_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
         if (s_volume_label) lv_obj_clear_flag(s_volume_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_battery_label) lv_obj_clear_flag(s_battery_label, LV_OBJ_FLAG_HIDDEN);
+        if (s_battery_icon) lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
         if (s_status_bar) lv_obj_clear_flag(s_status_bar, LV_OBJ_FLAG_HIDDEN);
         // Restore artwork dimming for text contrast
@@ -1277,7 +1416,7 @@ void ui_set_controls_visible(bool visible) {
         if (s_artist_label) lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
         if (s_zone_label) lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
         if (s_volume_label) lv_obj_add_flag(s_volume_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_battery_label) lv_obj_add_flag(s_battery_label, LV_OBJ_FLAG_HIDDEN);
+        if (s_battery_icon) lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
         if (s_status_bar) lv_obj_add_flag(s_status_bar, LV_OBJ_FLAG_HIDDEN);
         // Make artwork fully visible in art mode
@@ -1301,7 +1440,7 @@ void ui_set_ble_mode(bool enabled) {
         ESP_LOGI(UI_TAG, "Switching to Bluetooth mode UI");
         // Update zone label to show "Bluetooth"
         if (s_zone_label) {
-            lv_label_set_text(s_zone_label, LV_SYMBOL_BLUETOOTH " Bluetooth");
+            lv_label_set_text(s_zone_label, UI_ICON_BLUETOOTH " Bluetooth");
         }
         // Show waiting message until ESP32 sends track info
         if (s_track_label) {

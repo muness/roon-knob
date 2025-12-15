@@ -42,16 +42,15 @@ CONFIG_ESP32S3_BROWNOUT_DET_LVL=4
 # LVGL JPEG Decoder - Disabled (using ESP_NEW_JPEG instead)
 # CONFIG_LV_USE_TJPGD is not set
 
-# LVGL Fonts (for larger, more readable text)
+# LVGL Fonts - built-in Montserrat for fallback only
+# Main fonts are pre-rendered bitmap fonts (Charis SIL + Material Symbols)
+# generated at build time via scripts/generate_fonts.sh
 CONFIG_LV_FONT_MONTSERRAT_14=y
-CONFIG_LV_FONT_MONTSERRAT_18=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
-CONFIG_LV_FONT_MONTSERRAT_22=y
-CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
-CONFIG_LV_FONT_MONTSERRAT_30=y
-CONFIG_LV_FONT_MONTSERRAT_32=y
-CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Arabic/Persian text shaping (contextual glyph forms for bitmap fonts)
+CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y
 
 # Display Sleep Settings
 CONFIG_RK_DISPLAY_DIM_TIMEOUT_SEC=30
