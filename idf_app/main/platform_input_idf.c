@@ -222,11 +222,18 @@ void platform_input_init(void) {
 
 void platform_input_process_events(void) {
     int ticks;
-    // Process all queued events (non-blocking)
+    int total_ticks = 0;
+
+    // Drain all queued batches and coalesce into single total
+    // This prevents HTTP request queue buildup when turning quickly
     while (xQueueReceive(s_input_queue, &ticks, 0) == pdTRUE) {
+        total_ticks += ticks;
+    }
+
+    if (total_ticks != 0) {
         display_activity_detected();  // Wake display and reset sleep timers
-        // Dispatch volume rotation with tick count for velocity-sensitive handling
-        ui_handle_volume_rotation(ticks);
+        // Dispatch single volume rotation with coalesced tick count
+        ui_handle_volume_rotation(total_ticks);
     }
 }
 
