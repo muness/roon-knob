@@ -113,10 +113,6 @@ static void process_encoder_channel(uint8_t current_level, uint8_t *prev_level,
     *prev_level = current_level;
 }
 
-// Accumulated encoder ticks for velocity-sensitive batching
-static int s_accumulated_ticks = 0;
-static int64_t s_last_batch_time = 0;
-
 static void encoder_read_and_dispatch(void) {
     static int last_count = 0;
 
@@ -130,33 +126,17 @@ static void encoder_read_and_dispatch(void) {
     process_encoder_channel(phb_value, &s_encoder.encoder_b_level,
                            &s_encoder.debounce_b_cnt, &s_encoder.count_value, false);
 
-    // Accumulate ticks (don't dispatch immediately)
+    // Dispatch immediately on any change (coalescing happens in main loop)
     int delta = s_encoder.count_value - last_count;
     if (delta != 0) {
-        s_accumulated_ticks += delta;
         last_count = s_encoder.count_value;
-    }
 
-    // Check if it's time to dispatch batched ticks
-    int64_t now = esp_timer_get_time() / 1000;  // Convert to ms
-    if (now - s_last_batch_time >= ENCODER_BATCH_INTERVAL_MS) {
-        if (s_accumulated_ticks != 0) {
-            ESP_LOGD(TAG, "Encoder batch: %d ticks over %lldms",
-                     s_accumulated_ticks, now - s_last_batch_time);
-
-            // Queue a volume rotation event with the accumulated ticks
-            // We use a special sentinel value to pass the tick count through the queue
-            // The sign indicates direction, magnitude indicates tick count
-            int ticks_to_send = s_accumulated_ticks;
-            s_accumulated_ticks = 0;
-
-            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            xQueueSendFromISR(s_input_queue, &ticks_to_send, &xHigherPriorityTaskWoken);
-            if (xHigherPriorityTaskWoken) {
-                portYIELD_FROM_ISR();
-            }
+        // Queue the delta - main loop will coalesce multiple deltas
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xQueueSendFromISR(s_input_queue, &delta, &xHigherPriorityTaskWoken);
+        if (xHigherPriorityTaskWoken) {
+            portYIELD_FROM_ISR();
         }
-        s_last_batch_time = now;
     }
 }
 
