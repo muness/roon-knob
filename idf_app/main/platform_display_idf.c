@@ -246,15 +246,6 @@ static esp_lcd_panel_io_handle_t s_io_handle = NULL;
 static bool s_hardware_ready = false;
 static bool s_lvgl_ready = false;
 
-// Callback when flush is ready
-static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
-    (void)panel_io;
-    (void)edata;
-    lv_display_t *disp = (lv_display_t *)user_ctx;
-    lv_display_flush_ready(disp);
-    return false;
-}
-
 // Rounder callback for SH8601 display (requires 2-pixel alignment)
 static void lvgl_rounder_cb(lv_event_t *e) {
     lv_area_t *area = lv_event_get_param(e);

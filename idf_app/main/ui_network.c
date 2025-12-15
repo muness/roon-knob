@@ -177,68 +177,6 @@ static void set_status_text(const char *msg) {
     lv_label_set_text_fmt(s_widgets.status_label, "%s", msg ? msg : "");
 }
 
-static void hide_form(lv_obj_t *form) {
-    if (!form) {
-        return;
-    }
-    lv_obj_add_flag(form, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void show_form(lv_obj_t *form) {
-    if (!form) {
-        return;
-    }
-    lv_obj_clear_flag(form, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void wifi_form_cancel(lv_event_t *e) {
-    (void)e;
-    hide_form(s_widgets.wifi_form);
-}
-
-static void bridge_form_cancel(lv_event_t *e) {
-    (void)e;
-    hide_form(s_widgets.bridge_form);
-}
-
-static void wifi_form_submit(lv_event_t *e) {
-    (void)e;
-    if (!s_widgets.wifi_ssid || !s_widgets.wifi_pass) {
-        return;
-    }
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-    copy_str(cfg.ssid, sizeof(cfg.ssid), lv_textarea_get_text(s_widgets.wifi_ssid));
-    copy_str(cfg.pass, sizeof(cfg.pass), lv_textarea_get_text(s_widgets.wifi_pass));
-
-    // Show feedback and close panel
-    set_status_text("Connecting...");
-    hide_form(s_widgets.wifi_form);
-    if (s_widgets.panel) {
-        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    if (platform_storage_save(&cfg)) {
-        wifi_mgr_reconnect(&cfg);
-    } else {
-        ESP_LOGW(TAG, "failed to save Wi-Fi config");
-    }
-}
-
-static void bridge_form_submit(lv_event_t *e) {
-    (void)e;
-    if (!s_widgets.bridge_input) {
-        return;
-    }
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-    copy_str(cfg.bridge_base, sizeof(cfg.bridge_base), lv_textarea_get_text(s_widgets.bridge_input));
-    if (!platform_storage_save(&cfg)) {
-        ESP_LOGW(TAG, "failed to save bridge base");
-    }
-    hide_form(s_widgets.bridge_form);
-}
-
 static void factory_reset_cb(lv_event_t *e) {
     (void)e;
     show_reset_confirm_dialog();
@@ -309,20 +247,6 @@ static void bluetooth_mode_cb(lv_event_t *e) {
     ui_set_zone_name("Bluetooth");
 }
 
-static void clear_bridge_cb(lv_event_t *e) {
-    (void)e;
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-    cfg.bridge_base[0] = '\0';  // Clear stored bridge URL
-    if (platform_storage_save(&cfg)) {
-        set_status_text("Bridge cleared (mDNS)");
-        ESP_LOGI(TAG, "Bridge URL cleared, will use mDNS discovery");
-    } else {
-        set_status_text("Clear failed");
-        ESP_LOGW(TAG, "Failed to clear bridge URL");
-    }
-}
-
 static void update_version_label(void) {
     if (!s_widgets.version_label) return;
 
@@ -370,31 +294,6 @@ static void check_update_cb(lv_event_t *e) {
     update_version_label();
 }
 
-static void show_wifi_form(lv_event_t *e) {
-    (void)e;
-    if (!s_widgets.wifi_form) {
-        return;
-    }
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-    lv_textarea_set_text(s_widgets.wifi_ssid, cfg.ssid);
-    lv_textarea_set_text(s_widgets.wifi_pass, cfg.pass);
-    show_form(s_widgets.wifi_form);
-    hide_form(s_widgets.bridge_form);
-}
-
-static void show_bridge_form(lv_event_t *e) {
-    (void)e;
-    if (!s_widgets.bridge_form) {
-        return;
-    }
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-    lv_textarea_set_text(s_widgets.bridge_input, cfg.bridge_base);
-    show_form(s_widgets.bridge_form);
-    hide_form(s_widgets.wifi_form);
-}
-
 static lv_obj_t *create_button(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
     lv_obj_t *btn = lv_btn_create(parent);
     lv_obj_set_width(btn, lv_pct(100));
@@ -403,59 +302,6 @@ static lv_obj_t *create_button(lv_obj_t *parent, const char *label, lv_event_cb_
     lv_label_set_text(lbl, label);
     lv_obj_center(lbl);
     return btn;
-}
-
-static lv_obj_t *create_text_area(lv_obj_t *parent, const char *placeholder, bool password) {
-    lv_obj_t *ta = lv_textarea_create(parent);
-    lv_textarea_set_placeholder_text(ta, placeholder);
-    if (password) {
-        lv_textarea_set_password_mode(ta, true);
-    }
-    lv_obj_set_width(ta, lv_pct(100));
-    return ta;
-}
-
-static void build_wifi_form(lv_obj_t *parent) {
-    s_widgets.wifi_form = lv_obj_create(parent);
-    lv_obj_set_width(s_widgets.wifi_form, lv_pct(100));
-    lv_obj_set_flex_flow(s_widgets.wifi_form, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_widgets.wifi_form, 8, 0);
-    lv_obj_add_flag(s_widgets.wifi_form, LV_OBJ_FLAG_HIDDEN);
-
-    s_widgets.wifi_ssid = create_text_area(s_widgets.wifi_form, "SSID", false);
-    s_widgets.wifi_pass = create_text_area(s_widgets.wifi_form, "Password", true);
-
-    lv_obj_t *row = lv_obj_create(s_widgets.wifi_form);
-    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *cancel = create_button(row, "Cancel", wifi_form_cancel);
-    lv_obj_t *save = create_button(row, "Save Wi-Fi", wifi_form_submit);
-    lv_obj_set_flex_grow(cancel, 1);
-    lv_obj_set_flex_grow(save, 1);
-}
-
-static void build_bridge_form(lv_obj_t *parent) {
-    s_widgets.bridge_form = lv_obj_create(parent);
-    lv_obj_set_width(s_widgets.bridge_form, lv_pct(100));
-    lv_obj_set_flex_flow(s_widgets.bridge_form, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_widgets.bridge_form, 8, 0);
-    lv_obj_add_flag(s_widgets.bridge_form, LV_OBJ_FLAG_HIDDEN);
-
-    s_widgets.bridge_input = create_text_area(s_widgets.bridge_form, "Bridge Base URL", false);
-
-    lv_obj_t *row = lv_obj_create(s_widgets.bridge_form);
-    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *cancel = create_button(row, "Cancel", bridge_form_cancel);
-    lv_obj_t *save = create_button(row, "Save Bridge", bridge_form_submit);
-    lv_obj_set_flex_grow(cancel, 1);
-    lv_obj_set_flex_grow(save, 1);
 }
 
 static void ensure_panel(void) {

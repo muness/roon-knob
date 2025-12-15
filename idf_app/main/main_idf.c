@@ -235,44 +235,6 @@ static void mode_change_callback(controller_mode_t new_mode, void *user_data) {
     }
 }
 
-// Test bridge connectivity and show result to user
-static bool test_bridge_connectivity(void) {
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-
-    if (cfg.bridge_base[0] == '\0') {
-        ESP_LOGI(TAG, "No bridge configured, will discover via mDNS");
-        ui_set_message("Bridge: Searching...");
-        // Show guidance in case mDNS fails
-        ui_set_network_status("Tap zone for Settings");
-        return false;  // No bridge to test yet
-    }
-
-    ESP_LOGI(TAG, "Testing bridge: %s", cfg.bridge_base);
-    ui_set_message("Bridge: Testing...");
-
-    // Test /zones endpoint
-    char url[256];
-    snprintf(url, sizeof(url), "%s/zones", cfg.bridge_base);
-
-    char *response = NULL;
-    size_t response_len = 0;
-    int result = platform_http_get(url, &response, &response_len);
-    platform_http_free(response);
-
-    if (result == 0 && response_len > 0) {
-        ESP_LOGI(TAG, "✓ Bridge reachable: %s (%zu bytes)", cfg.bridge_base, response_len);
-        ui_set_message("Bridge: Connected");
-        ui_set_network_status(NULL);  // Clear any persistent error
-        return true;
-    } else {
-        ESP_LOGW(TAG, "✗ Bridge unreachable: %s (error %d)", cfg.bridge_base, result);
-        ui_set_message("Bridge: Unreachable");
-        // Show persistent guidance - tap zone opens picker with Settings option
-        ui_set_network_status("Tap zone for Settings");
-        return false;
-    }
-}
 
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     // Notify UI about network events (uses lv_async_call internally)
