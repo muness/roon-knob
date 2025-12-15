@@ -4,6 +4,7 @@
 #include "controller_mode.h"
 #include "display_sleep.h"
 #include "esp32_comm.h"
+#include "font_manager.h"
 #include "ota_update.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
@@ -479,6 +480,12 @@ void app_main(void) {
     if (!platform_display_register_lvgl_driver()) {
         ESP_LOGE(TAG, "Display driver registration failed!");
         return;
+    }
+
+    // Initialize font manager (pre-rendered bitmap fonts for Unicode support)
+    ESP_LOGI(TAG, "Initializing font manager...");
+    if (!font_manager_init()) {
+        ESP_LOGW(TAG, "Font manager init failed - using built-in ASCII fonts");
     }
 
     // Now safe to initialize UI (depends on LVGL display being registered)

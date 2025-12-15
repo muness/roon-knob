@@ -762,16 +762,25 @@ void roon_client_handle_input(ui_input_event_t event) {
             ui_zone_picker_get_selected_id(selected_id, sizeof(selected_id));
             LOGI("Zone picker: selected zone id '%s'", selected_id);
 
-            // Check for special options first
+            // Check for Back (always a no-op, just closes picker)
             if (strcmp(selected_id, ZONE_ID_BACK) == 0) {
-                LOGI("Zone picker: Back selected");
+                LOGI("Zone picker: Back selected (no-op)");
                 ui_hide_zone_picker();
                 return;
             }
+
+            // Check for Settings
             if (strcmp(selected_id, ZONE_ID_SETTINGS) == 0) {
                 LOGI("Zone picker: Settings selected");
                 ui_hide_zone_picker();
                 ui_show_settings();
+                return;
+            }
+
+            // Check if user selected the same zone they started with (no-op)
+            if (ui_zone_picker_is_current_selection()) {
+                LOGI("Zone picker: Same zone selected (no-op)");
+                ui_hide_zone_picker();
                 return;
             }
 
@@ -837,11 +846,12 @@ void roon_client_handle_input(ui_input_event_t event) {
     if (event == UI_INPUT_MENU) {
         const char *names[MAX_ZONES + 4];  /* +4 for Back, Bluetooth, Settings, margin */
         const char *ids[MAX_ZONES + 4];
-        static const char *back_name = "< Back";
+        // Note: Icons are added by ui.c based on zone ID, so names are plain text
+        static const char *back_name = "Back";
         static const char *back_id = ZONE_ID_BACK;
         static const char *bt_name = "Bluetooth";
         static const char *bt_id = ZONE_ID_BLUETOOTH;
-        static const char *settings_name = "Settings...";
+        static const char *settings_name = "Settings";
         static const char *settings_id = ZONE_ID_SETTINGS;
         int selected = 1;  /* Default to first zone after Back */
         int count = 0;

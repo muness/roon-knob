@@ -1,5 +1,6 @@
 #include "ui_network.h"
 #include "ui.h"
+#include "font_manager.h"
 
 #include <esp_log.h>
 #include <stdio.h>
@@ -103,14 +104,14 @@ static void show_reset_confirm_dialog(void) {
     // Title
     lv_obj_t *title = lv_label_create(s_reset_confirm_dialog);
     lv_label_set_text(title, "Factory Reset?");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(title, font_manager_get_small(), 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0xfafafa), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
 
     // Subtitle
     lv_obj_t *subtitle = lv_label_create(s_reset_confirm_dialog);
     lv_label_set_text(subtitle, "Erases all settings");
-    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(subtitle, font_manager_get_small(), 0);
     lv_obj_set_style_text_color(subtitle, lv_color_hex(0xaaaaaa), 0);
     lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 100);
 
@@ -126,7 +127,7 @@ static void show_reset_confirm_dialog(void) {
 
     lv_obj_t *reset_label = lv_label_create(btn_reset);
     lv_label_set_text(reset_label, "Reset");
-    lv_obj_set_style_text_font(reset_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(reset_label, font_manager_get_small(), 0);
     lv_obj_set_style_text_color(reset_label, lv_color_hex(0xfafafa), 0);
     lv_obj_center(reset_label);
 
@@ -142,7 +143,7 @@ static void show_reset_confirm_dialog(void) {
 
     lv_obj_t *cancel_label = lv_label_create(btn_cancel);
     lv_label_set_text(cancel_label, "Cancel");
-    lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(cancel_label, font_manager_get_small(), 0);
     lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xaaaaaa), 0);
     lv_obj_center(cancel_label);
 
