@@ -80,7 +80,7 @@ The knob finds the extension automatically via mDNS.
 ## Features
 
 - Real-time now playing with album artwork
-- Volume control with dB display
+- Velocity-sensitive volume control (turn slow for fine adjustment, fast for quick jumps)
 - Multi-zone support
 - Automatic display dimming and sleep
 - Over-the-air firmware updates
@@ -133,3 +133,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for building firmware, running the PC 
 ## Support
 
 Questions or issues? [Open an issue](https://github.com/muness/roon-knob/issues), join the [Roon Community discussion](https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363), or [buy me a coffee](https://www.buymeacoffee.com/muness).
+
+## Acknowledgments
+
+Thanks to **gTunes** from the Roon community for alpha testing, detailed feedback, and help with the velocity-sensitive volume control implementation.
