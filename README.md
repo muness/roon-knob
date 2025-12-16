@@ -15,6 +15,8 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ## Quick Start
 
+> **New to Docker or ESP32 devices?** See the [Getting Started from Scratch](docs/GETTING_STARTED.md) guide for detailed step-by-step instructions.
+
 ### 1. Flash the Firmware (one-time)
 
 Download `roon_knob.bin` from the [latest release](https://github.com/muness/roon-knob/releases/latest) and flash it to your knob:
