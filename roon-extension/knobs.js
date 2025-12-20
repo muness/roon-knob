@@ -1,0 +1,153 @@
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+// Config file path - use data directory for persistence in Docker
+const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, 'data');
+const KNOBS_FILE = path.join(CONFIG_DIR, 'knobs.json');
+
+// Default config for new knobs
+const DEFAULT_CONFIG = {
+  name: '',
+  rotation_charging: 180,
+  rotation_not_charging: 0,
+  dim_charging: { enabled: true, timeout_sec: 30 },
+  dim_battery: { enabled: true, timeout_sec: 30 },
+  sleep_charging: { enabled: true, timeout_sec: 60 },
+  sleep_battery: { enabled: true, timeout_sec: 60 },
+  zones: { mode: 'all', zone_ids: [] },
+};
+
+function computeSha(config) {
+  const json = JSON.stringify(config);
+  return crypto.createHash('sha256').update(json).digest('hex').substring(0, 8);
+}
+
+function ensureDir() {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+}
+
+function loadKnobs() {
+  ensureDir();
+  try {
+    const content = fs.readFileSync(KNOBS_FILE, { encoding: 'utf8' });
+    return JSON.parse(content) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveKnobs(knobs) {
+  ensureDir();
+  fs.writeFileSync(KNOBS_FILE, JSON.stringify(knobs, null, 2));
+}
+
+function createKnobsStore(opts = {}) {
+  const log = opts.logger || console;
+  let knobs = loadKnobs();
+
+  function getKnob(knobId) {
+    if (!knobId) return null;
+    return knobs[knobId] || null;
+  }
+
+  function getOrCreateKnob(knobId, version = null) {
+    if (!knobId) return null;
+
+    if (!knobs[knobId]) {
+      log.info('Creating new knob config', { knobId });
+      const config = { ...DEFAULT_CONFIG };
+      knobs[knobId] = {
+        name: '',
+        last_seen: new Date().toISOString(),
+        version: version || null,
+        config,
+        config_sha: computeSha(config),
+      };
+      saveKnobs(knobs);
+    } else {
+      // Update last_seen and version
+      knobs[knobId].last_seen = new Date().toISOString();
+      if (version) {
+        knobs[knobId].version = version;
+      }
+      saveKnobs(knobs);
+    }
+
+    return knobs[knobId];
+  }
+
+  function updateKnobConfig(knobId, updates) {
+    if (!knobId) return null;
+
+    const knob = getOrCreateKnob(knobId);
+    if (!knob) return null;
+
+    // Merge updates into existing config
+    const newConfig = { ...knob.config };
+
+    // Handle top-level updates
+    if (updates.name !== undefined) knob.name = updates.name;
+    if (updates.rotation_charging !== undefined) newConfig.rotation_charging = updates.rotation_charging;
+    if (updates.rotation_not_charging !== undefined) newConfig.rotation_not_charging = updates.rotation_not_charging;
+
+    // Handle nested objects (merge, don't replace)
+    if (updates.dim_charging) {
+      newConfig.dim_charging = { ...newConfig.dim_charging, ...updates.dim_charging };
+    }
+    if (updates.dim_battery) {
+      newConfig.dim_battery = { ...newConfig.dim_battery, ...updates.dim_battery };
+    }
+    if (updates.sleep_charging) {
+      newConfig.sleep_charging = { ...newConfig.sleep_charging, ...updates.sleep_charging };
+    }
+    if (updates.sleep_battery) {
+      newConfig.sleep_battery = { ...newConfig.sleep_battery, ...updates.sleep_battery };
+    }
+    if (updates.zones) {
+      newConfig.zones = { ...newConfig.zones, ...updates.zones };
+    }
+
+    knob.config = newConfig;
+    knob.config_sha = computeSha(newConfig);
+    knob.last_seen = new Date().toISOString();
+
+    log.info('Updated knob config', { knobId, config_sha: knob.config_sha });
+    saveKnobs(knobs);
+
+    return knob;
+  }
+
+  function listKnobs() {
+    return Object.entries(knobs).map(([knobId, data]) => ({
+      knob_id: knobId,
+      name: data.name || '',
+      last_seen: data.last_seen,
+      version: data.version,
+    }));
+  }
+
+  function getConfigSha(knobId) {
+    const knob = knobs[knobId];
+    return knob?.config_sha || null;
+  }
+
+  function recordKnobSeen(knobId, version = null) {
+    if (!knobId) return;
+    getOrCreateKnob(knobId, version);
+  }
+
+  return {
+    getKnob,
+    getOrCreateKnob,
+    updateKnobConfig,
+    listKnobs,
+    getConfigSha,
+    recordKnobSeen,
+    DEFAULT_CONFIG,
+  };
+}
+
+module.exports = { createKnobsStore, DEFAULT_CONFIG, computeSha };

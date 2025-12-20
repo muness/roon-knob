@@ -8,6 +8,7 @@ const { createRoutes } = require('./routes');
 const { createRoonBridge } = require('./bridge');
 const { createMetricsTracker } = require('./metrics');
 const { createLogger } = require('./logger');
+const { createKnobsStore } = require('./knobs');
 const { version: VERSION } = require('./package.json');
 
 function getGitSha() {
@@ -38,7 +39,9 @@ function startServer() {
   const bridge = createRoonBridge({ service_port: ROON_SERVICE_PORT, display_name: MDNS_NAME, log: createLogger('Bridge') });
   bridge.start();
 
-  app.use(createRoutes({ bridge, metrics, log: createLogger('HTTP') }));
+  const knobs = createKnobsStore({ logger: createLogger('Knobs') });
+
+  app.use(createRoutes({ bridge, metrics, logger: createLogger('HTTP'), knobs }));
 
   app.get('/status', (_req, res) => {
     res.json({ status: 'ok', version: VERSION, git_sha: GIT_SHA });

@@ -68,13 +68,12 @@ Based on Aim 1 (force-multiplier through reduced friction) and Aim 4 (margin pro
 
 - [ ] **Wake-without-action** — First tap just wakes screen
 - [ ] **Larger tap targets** — More padding on play/pause/skip
-- [ ] **Powered use** Configurable dimming and sleep
 - [ ] **Settings icon** — Visible affordance for settings access
 - [ ] **Display rotation (180°)** — 90/180/270 + Always | When powered | Never. From device or via Bridge advanced settings UX?
+- [ ] **Always-on / configurable sleep** — Configurable dimming and sleep
 
 ### Evaluate with Users: Configuration Options
 
-- [ ] **Always-on / configurable sleep** — Understand demand before implementing
 - [ ] **Zone filtering per knob** — Nice-to-have, needs UI design
 
 ### Park for now

@@ -17,30 +17,101 @@ function extractKnob(req) {
   return { id, version };
 }
 
-function createRoutes({ bridge, metrics, logger }) {
+function createRoutes({ bridge, metrics, logger, knobs }) {
   const router = express.Router();
 
+  // Knob config endpoints
+  router.get('/knobs', (req, res) => {
+    logger?.debug('Knobs list requested', { ip: req.ip });
+    res.json({ knobs: knobs.listKnobs() });
+  });
+
+  router.get('/config/:knob_id', (req, res) => {
+    const knobId = req.params.knob_id;
+    const version = req.get('x-knob-version');
+    logger?.debug('Config requested', { knobId, version, ip: req.ip });
+
+    const knob = knobs.getOrCreateKnob(knobId, version);
+    if (!knob) {
+      return res.status(400).json({ error: 'knob_id required' });
+    }
+
+    res.json({
+      config: {
+        knob_id: knobId,
+        name: knob.name,
+        ...knob.config,
+      },
+      config_sha: knob.config_sha,
+    });
+  });
+
+  router.put('/config/:knob_id', (req, res) => {
+    const knobId = req.params.knob_id;
+    const updates = req.body || {};
+    logger?.info('Config update', { knobId, updates, ip: req.ip });
+
+    const knob = knobs.updateKnobConfig(knobId, updates);
+    if (!knob) {
+      return res.status(400).json({ error: 'knob_id required' });
+    }
+
+    res.json({
+      config: {
+        knob_id: knobId,
+        name: knob.name,
+        ...knob.config,
+      },
+      config_sha: knob.config_sha,
+    });
+  });
+
   router.get('/zones', (req, res) => {
-    recordEvent(metrics, 'zones', req, { knob: extractKnob(req) });
-    logger?.debug('Zones requested', { ip: req.ip });
-    res.json(bridge.getZones());
+    const knob = extractKnob(req);
+    recordEvent(metrics, 'zones', req, { knob });
+    logger?.debug('Zones requested', { ip: req.ip, knob_id: knob?.id });
+
+    let zones = bridge.getZones();
+
+    // Apply zone filtering if knob has config
+    if (knob?.id) {
+      const knobData = knobs.getKnob(knob.id);
+      if (knobData?.config?.zones) {
+        const { mode, zone_ids } = knobData.config.zones;
+        if (mode === 'include' && zone_ids.length > 0) {
+          zones = zones.filter(z => zone_ids.includes(z.zone_id));
+        } else if (mode === 'exclude' && zone_ids.length > 0) {
+          zones = zones.filter(z => !zone_ids.includes(z.zone_id));
+        }
+        // mode === 'all' -> no filtering
+      }
+    }
+
+    res.json(zones);
   });
 
   router.get('/now_playing', (req, res) => {
     const zoneId = req.query.zone_id;
+    const knob = extractKnob(req);
+
     if (!zoneId) {
       return res.status(400).json({ error: 'zone_id required', zones: bridge.getZones() });
     }
     const data = bridge.getNowPlaying(zoneId);
     if (!data) {
-      recordEvent(metrics, 'now_playing', req, { zone_id: zoneId, status: 'miss', knob: extractKnob(req) });
+      recordEvent(metrics, 'now_playing', req, { zone_id: zoneId, status: 'miss', knob });
       logger?.warn('now_playing miss', { zoneId, ip: req.ip });
       return res.status(404).json({ error: 'zone not found', zones: bridge.getZones() });
     }
-    recordEvent(metrics, 'now_playing', req, { zone_id: zoneId, knob: extractKnob(req) });
+    recordEvent(metrics, 'now_playing', req, { zone_id: zoneId, knob });
     logger?.debug('now_playing served', { zoneId, ip: req.ip });
+
     const image_url = `/now_playing/image?zone_id=${encodeURIComponent(zoneId)}`;
-    res.json({ ...data, image_url, zones: bridge.getZones() });
+
+    // Include config_sha for change detection
+    const config_sha = knob?.id ? knobs.getKnob(knob.id)?.config_sha : null;
+
+    res.json({ ...data, image_url, zones: bridge.getZones(), config_sha });
   });
 
   router.get('/now_playing/image', async (req, res) => {
