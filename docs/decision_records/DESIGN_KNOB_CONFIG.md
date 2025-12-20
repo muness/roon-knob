@@ -18,6 +18,18 @@ Bridge-managed per-knob configuration for display rotation, dim/sleep behavior, 
 | Fallback         | NVS cache first, then compile-time defaults                                             |
 | Config UI        | Bridge admin dashboard only (not on-device "advanced config")                           |
 
+### Rationale
+
+**Config retrieval via dedicated endpoint + SHA polling:** The knob already polls `/now_playing` every second. Adding a `config_sha` field there gives us pseudo-push behavior with zero extra HTTP requests. When SHA changes, the knob fetches full config from `/config/{knob_id}`. This is simpler than WebSocket and leverages existing infrastructure.
+
+**Two rotation values (charging vs battery):** USB-powered desk setups often want 180° rotation (cable from top). Battery/portable use may want 0°. Two separate values let users optimize for both scenarios without compromise. Defaults (180° charging, 0° battery) match the common "USB on desk" use case.
+
+**Three zone filter modes:** Zones come and go (Roon groups, Bluetooth virtual zone). Include-list is precise but breaks when zones disappear. Exclude-list is resilient but verbose. Supporting all three lets users pick what fits their setup. "All" is the safe default.
+
+**Bridge-only config UI:** User explicitly said "I don't really want to do advanced config on the knob." Keeping config in the bridge admin dashboard simplifies the firmware and provides a better editing experience (larger screen, keyboard input for names).
+
+**NVS cache fallback:** If bridge is unreachable at boot, using cached config provides continuity. Compile-time defaults are last resort for fresh devices.
+
 ## Config Schema
 
 ```typescript
