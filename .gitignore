@@ -18,3 +18,5 @@ roon-extension/config.json
 idf_app/managed_components/*
 idf_app/sdkconfig.override
 .agneto/
+.claude/
+.superego/
