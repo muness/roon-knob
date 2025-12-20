@@ -498,8 +498,12 @@ static bool refresh_zone_label(bool prefer_zone_id) {
         return false;
     }
 
+    // Get knob ID for zone filtering
+    char knob_id[16];
+    platform_http_get_knob_id(knob_id, sizeof(knob_id));
+
     char url[256];
-    snprintf(url, sizeof(url), "%s/zones", bridge_base);
+    snprintf(url, sizeof(url), "%s/zones?knob_id=%s", bridge_base, knob_id);
     LOGI("refresh_zone_label: Requesting %s", url);
 
     char *resp = NULL;
@@ -801,12 +805,12 @@ void roon_client_start(const rk_cfg_t *cfg) {
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     unlock_state();
 
-    // Apply saved config (rotation, timeouts) on startup
-    if (cfg->config_sha[0] != '\0') {
-        LOGI("Applying saved config on startup: rot=%d/%d sha='%s'",
-             cfg->rotation_charging, cfg->rotation_not_charging, cfg->config_sha);
-        apply_knob_config(cfg);
-    }
+    // Always apply config on startup (uses defaults if no saved config)
+    // This ensures rotation is applied even on fresh devices
+    LOGI("Applying config on startup: rot=%d/%d sha='%s'",
+         cfg->rotation_charging, cfg->rotation_not_charging,
+         cfg->config_sha[0] ? cfg->config_sha : "(none)");
+    apply_knob_config(cfg);
 
     s_running = true;
     platform_task_start(roon_poll_thread, NULL);

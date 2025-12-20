@@ -275,6 +275,7 @@ static void rotate180_rgb565_simple(const uint16_t *src, uint16_t *dst, int pixe
     }
 }
 
+
 // LVGL flush callback with software rotation support
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
@@ -293,6 +294,7 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
     int32_t out_y2 = area->y2;
 
     // Handle 180-degree rotation (for "upside down" mounting when charging)
+    // Note: 90/270 rotation not supported due to poor performance (see DECISION_ROTATION.md)
     if (rotation == LV_DISPLAY_ROTATION_180 && s_rotate_buf != NULL) {
         // Safety check: ensure flush area fits in rotation buffer
         const int max_pixels = LCD_H_RES * ROTATE_BUF_ROWS;
@@ -580,13 +582,14 @@ void platform_display_set_rotation(uint16_t degrees) {
         return;
     }
 
-    // Only 0 and 180 are supported (90/270 would require dimension swap)
+    // Only 0 and 180 are supported - 90/270 have poor performance due to
+    // cache-unfriendly memory access patterns (see DECISION_ROTATION.md)
     lv_display_rotation_t rotation;
     if (degrees == 180) {
         rotation = LV_DISPLAY_ROTATION_180;
     } else {
         if (degrees != 0) {
-            ESP_LOGW(TAG, "Rotation %d not supported, using 0", degrees);
+            ESP_LOGW(TAG, "Rotation %d not supported (only 0/180), using 0", degrees);
         }
         rotation = LV_DISPLAY_ROTATION_0;
     }
