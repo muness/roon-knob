@@ -108,6 +108,23 @@ There is also `GET /now_playing/mock` for UI smoke tests without a running Core.
 
 If the firmware or simulator includes `X-Knob-Id` and `X-Knob-Version` headers on requests, the dashboard will show each device’s last activity (zone, timestamp, IP). Fall back to anonymous IP tracking if those headers are missing.
 
+## Development
+
+### Running Tests
+
+```bash
+npm test          # Run all tests
+npm run test:watch  # Run tests in watch mode
+```
+
+The test suite uses Jest and covers the knobs configuration module.
+
+### Syntax Check
+
+```bash
+node -c knobs.js && node -c routes.js && node -c server.js
+```
+
 ## Notes
 
 - On first launch, Roon will prompt you to enable "Roon Knob Bridge".

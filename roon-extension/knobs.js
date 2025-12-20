@@ -3,8 +3,13 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Config file path - use data directory for persistence in Docker
-const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, 'data');
-const KNOBS_FILE = path.join(CONFIG_DIR, 'knobs.json');
+function getConfigDir() {
+  return process.env.CONFIG_DIR || path.join(__dirname, 'data');
+}
+
+function getKnobsFile() {
+  return path.join(getConfigDir(), 'knobs.json');
+}
 
 // Default config for new knobs
 const DEFAULT_CONFIG = {
@@ -24,15 +29,16 @@ function computeSha(config) {
 }
 
 function ensureDir() {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const configDir = getConfigDir();
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
   }
 }
 
 function loadKnobs() {
   ensureDir();
   try {
-    const content = fs.readFileSync(KNOBS_FILE, { encoding: 'utf8' });
+    const content = fs.readFileSync(getKnobsFile(), { encoding: 'utf8' });
     return JSON.parse(content) || {};
   } catch (e) {
     return {};
@@ -41,7 +47,7 @@ function loadKnobs() {
 
 function saveKnobs(knobs) {
   ensureDir();
-  fs.writeFileSync(KNOBS_FILE, JSON.stringify(knobs, null, 2));
+  fs.writeFileSync(getKnobsFile(), JSON.stringify(knobs, null, 2));
 }
 
 function createKnobsStore(opts = {}) {

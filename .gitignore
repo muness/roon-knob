@@ -12,6 +12,8 @@ idf_app/dependencies.lock
 # Node modules
 roon-extension/node_modules/
 roon-extension/config.json
+roon-extension/data/
+roon-extension/test-data/
 
 # Beads db
 .beads/
