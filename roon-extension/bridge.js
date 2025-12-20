@@ -61,6 +61,7 @@ function createRoonBridge(opts = {}) {
     publisher: 'Roon Knob',
     email: 'support@example.com',
     website: 'https://github.com/muness/roon-knob',
+    log_level: 'none',  // Suppress verbose RPC logging (Buffer data, etc.)
     core_paired(core) {
       log.info('Roon core paired', { id: core.core_id, name: core.display_name });
       state.core = core;
@@ -147,7 +148,11 @@ function createRoonBridge(opts = {}) {
     }
 
     transport.subscribe_zones((msg, data) => {
-      log.debug('transport event', { msg, zones: data?.zones?.length });
+      // Only log if there's meaningful data (suppress noisy empty Changed events)
+      const hasData = data?.zones?.length || data?.zones_changed?.length || data?.zones_removed?.length;
+      if (hasData) {
+        log.debug('transport event', { msg, zones: data?.zones?.length, changed: data?.zones_changed?.length });
+      }
       if (msg === 'Subscribed' && data?.zones) {
         state.zones = data.zones;
         data.zones.forEach(updateZone);

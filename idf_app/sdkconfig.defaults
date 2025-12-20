@@ -42,6 +42,11 @@ CONFIG_ESP32S3_BROWNOUT_DET_LVL=4
 # LVGL JPEG Decoder - Disabled (using ESP_NEW_JPEG instead)
 # CONFIG_LV_USE_TJPGD is not set
 
+# LVGL Matrix Rotation - Required for software display rotation
+CONFIG_LV_USE_FLOAT=y
+CONFIG_LV_USE_MATRIX=y
+CONFIG_LV_DRAW_TRANSFORM_USE_MATRIX=y
+
 # LVGL Fonts - built-in Montserrat for fallback only
 # Main fonts are pre-rendered bitmap fonts (Charis SIL + Material Symbols)
 # generated at build time via scripts/generate_fonts.sh

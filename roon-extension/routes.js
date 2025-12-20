@@ -104,6 +104,25 @@ function createRoutes({ bridge, metrics, logger, knobs }) {
     if (!zoneId) {
       return res.status(400).json({ error: 'zone_id required', zones: bridge.getZones() });
     }
+
+    // Capture status info from query params (battery_level, battery_charging)
+    if (knob?.id) {
+      const statusUpdates = { zone_id: zoneId };
+
+      // Parse battery info if provided
+      if (req.query.battery_level !== undefined) {
+        const level = parseInt(req.query.battery_level, 10);
+        if (!isNaN(level) && level >= 0 && level <= 100) {
+          statusUpdates.battery_level = level;
+        }
+      }
+      if (req.query.battery_charging !== undefined) {
+        statusUpdates.battery_charging = req.query.battery_charging === '1' || req.query.battery_charging === 'true';
+      }
+
+      knobs.updateKnobStatus(knob.id, statusUpdates);
+    }
+
     const data = bridge.getNowPlaying(zoneId);
     if (!data) {
       recordEvent(metrics, 'now_playing', req, { zone_id: zoneId, status: 'miss', knob });
@@ -258,6 +277,7 @@ function createRoutes({ bridge, metrics, logger, knobs }) {
     res.json({
       bridge: bridge.getStatus(),
       metrics: snapshot(metrics),
+      knobs: knobs.listKnobs(),
     });
   });
 

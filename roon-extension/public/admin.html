@@ -18,6 +18,38 @@
     .pill.offline { background: #da3633; }
     .muted { color: #8b949e; font-size: 0.9rem; }
     code { background: #0d1117; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    button { cursor: pointer; }
+    button.ctrl { padding: 0.3rem 0.6rem; margin: 0 0.1rem; background: #21262d; border: 1px solid #30363d; color: #e6edf3; border-radius: 4px; }
+    button.ctrl:hover { background: #30363d; }
+    button.config-btn { padding: 0.3rem 0.8rem; background: #238636; border: none; color: #fff; border-radius: 4px; font-size: 0.85rem; }
+    button.config-btn:hover { background: #2ea043; }
+
+    /* Modal styles */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 1.5rem; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .modal h2 { margin-top: 0; margin-bottom: 1rem; }
+    .modal-close { float: right; background: none; border: none; color: #8b949e; font-size: 1.5rem; cursor: pointer; padding: 0; line-height: 1; }
+    .modal-close:hover { color: #e6edf3; }
+
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; margin-bottom: 0.3rem; color: #93ccea; font-size: 0.9rem; }
+    .form-group input, .form-group select { width: 100%; padding: 0.5rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #e6edf3; font-size: 0.9rem; box-sizing: border-box; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #58a6ff; }
+    .form-group .hint { font-size: 0.8rem; color: #8b949e; margin-top: 0.2rem; }
+
+    .form-row { display: flex; gap: 1rem; }
+    .form-row .form-group { flex: 1; }
+
+    .form-section { border-top: 1px solid #30363d; padding-top: 1rem; margin-top: 1rem; }
+    .form-section h3 { margin: 0 0 0.8rem 0; font-size: 0.95rem; color: #e6edf3; }
+
+    .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #30363d; }
+    .btn { padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.9rem; cursor: pointer; }
+    .btn-primary { background: #238636; border: none; color: #fff; }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-secondary { background: #21262d; border: 1px solid #30363d; color: #e6edf3; }
+    .btn-secondary:hover { background: #30363d; }
   </style>
 </head>
 <body>
@@ -27,12 +59,26 @@
   <div id="knobs" class="section"></div>
   <div id="clients" class="section"></div>
   <div id="events" class="section"></div>
+
+  <!-- Config Modal -->
+  <div id="configModal" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close" onclick="closeConfigModal()">&times;</button>
+      <h2>Knob Configuration</h2>
+      <div id="configFormContainer">Loading...</div>
+    </div>
+  </div>
+
   <script>
     const statusEl = document.getElementById('status');
     const zonesEl = document.getElementById('zones');
     const knobsEl = document.getElementById('knobs');
     const clientsEl = document.getElementById('clients');
     const eventsEl = document.getElementById('events');
+    const configModal = document.getElementById('configModal');
+    const configFormContainer = document.getElementById('configFormContainer');
+
+    let cachedZones = [];
 
     function ago(ts) {
       if (!ts) return 'never';
@@ -52,13 +98,14 @@
       try {
         const resp = await fetch('/admin/status.json');
         const data = await resp.json();
+        cachedZones = data.bridge?.zones || [];
         render(data);
       } catch (err) {
         statusEl.innerHTML = `<div class="pill offline">Error</div> Failed to load status: ${err}`;
       }
     }
 
-    function render({ bridge, metrics }) {
+    function render({ bridge, metrics, knobs }) {
       const connected = bridge.connected;
       const pill = `<span class="pill ${connected ? 'online' : 'offline'}">${connected ? 'Online' : 'Offline'}</span>`;
       const coreText = bridge.core ? `${bridge.core.name} (${bridge.core.version})` : 'Not paired – open Roon > Settings > Extensions and enable "Roon Knob Bridge"';
@@ -107,20 +154,31 @@
       `;
       attachZoneControls();
 
-      const knobRows = (metrics.knobs || []).map((knob) => `
-        <tr>
-          <td>${knob.id || '(unknown)'}</td>
-          <td>${knob.ip || ''}</td>
-          <td>${knob.version || ''}</td>
-          <td>${knob.last_zone || ''}</td>
-          <td>${ago(knob.last_seen)}</td>
-        </tr>
-      `).join('');
+      const knobRows = (knobs || []).map((knob) => {
+        const status = knob.status || {};
+        const batteryText = status.battery_level != null
+          ? `${status.battery_level}%${status.battery_charging ? ' ⚡' : ''}`
+          : '—';
+        const zoneName = status.zone_id
+          ? (bridge.zones || []).find(z => z.zone_id === status.zone_id)?.zone_name || status.zone_id
+          : '—';
+        return `
+          <tr>
+            <td><code>${knob.knob_id || '(unknown)'}</code></td>
+            <td>${knob.name || ''}</td>
+            <td>${knob.version || ''}</td>
+            <td>${zoneName}</td>
+            <td>${batteryText}</td>
+            <td>${ago(new Date(knob.last_seen).getTime())}</td>
+            <td><button class="config-btn" onclick="openConfigModal('${knob.knob_id}')">Config</button></td>
+          </tr>
+        `;
+      }).join('');
       knobsEl.innerHTML = `
-        <h2>Knob Clients</h2>
+        <h2>Knob Devices</h2>
         <table>
-          <thead><tr><th>ID</th><th>IP</th><th>Version</th><th>Last Zone</th><th>Seen</th></tr></thead>
-          <tbody>${knobRows || '<tr><td colspan="5" class="muted">No devices yet</td></tr>'}</tbody>
+          <thead><tr><th>ID</th><th>Name</th><th>Version</th><th>Zone</th><th>Battery</th><th>Seen</th><th></th></tr></thead>
+          <tbody>${knobRows || '<tr><td colspan="7" class="muted">No devices yet</td></tr>'}</tbody>
         </table>
       `;
 
@@ -176,6 +234,219 @@
         });
       });
     }
+
+    // Config Modal Functions
+    async function openConfigModal(knobId) {
+      configFormContainer.innerHTML = 'Loading...';
+      configModal.classList.add('open');
+
+      try {
+        const resp = await fetch(`/config/${knobId}`);
+        if (!resp.ok) throw new Error('Failed to load config');
+        const data = await resp.json();
+        renderConfigForm(knobId, data.config || {});
+      } catch (err) {
+        configFormContainer.innerHTML = `<p style="color: #da3633;">Error: ${err.message}</p>`;
+      }
+    }
+
+    function closeConfigModal() {
+      configModal.classList.remove('open');
+    }
+
+    function renderConfigForm(knobId, config) {
+      // Extract config matching bridge schema (knobs.js updateKnobConfig expects these field names)
+      const rotChg = config.rotation_charging ?? 180;
+      const rotBat = config.rotation_not_charging ?? 0;
+      const artChg = config.art_mode_charging || { enabled: true, timeout_sec: 60 };
+      const artBat = config.art_mode_battery || { enabled: true, timeout_sec: 30 };
+      const dimChg = config.dim_charging || { enabled: true, timeout_sec: 120 };
+      const dimBat = config.dim_battery || { enabled: true, timeout_sec: 30 };
+      const slpChg = config.sleep_charging || { enabled: false, timeout_sec: 0 };
+      const slpBat = config.sleep_battery || { enabled: true, timeout_sec: 60 };
+      const zones = config.zones || { mode: 'all', zone_ids: [] };
+
+      function rotSelect(name, val) {
+        return `<select name="${name}">
+          <option value="0" ${val === 0 ? 'selected' : ''}>0°</option>
+          <option value="90" ${val === 90 ? 'selected' : ''}>90°</option>
+          <option value="180" ${val === 180 ? 'selected' : ''}>180°</option>
+          <option value="270" ${val === 270 ? 'selected' : ''}>270°</option>
+        </select>`;
+      }
+
+      const zoneCheckboxes = cachedZones.map(z => {
+        const checked = zones.zone_ids.includes(z.zone_id) ? 'checked' : '';
+        return `<label style="display:block;margin:0.2rem 0;cursor:pointer;">
+          <input type="checkbox" name="zone_ids" value="${z.zone_id}" ${checked}> ${z.zone_name}
+        </label>`;
+      }).join('') || '<div class="muted">No zones available</div>';
+
+      configFormContainer.innerHTML = `
+        <form id="configForm" onsubmit="saveConfig(event, '${knobId}')">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" name="name" value="${config.name || ''}" placeholder="Living Room Knob">
+          </div>
+
+          <div class="form-section">
+            <h3>Display Rotation</h3>
+            <table style="width:100%"><tr>
+              <td style="width:50%;padding-right:0.5rem;">
+                <label>While Charging</label>${rotSelect('rotation_charging', rotChg)}
+              </td>
+              <td style="width:50%;padding-left:0.5rem;">
+                <label>On Battery</label>${rotSelect('rotation_not_charging', rotBat)}
+              </td>
+            </tr></table>
+          </div>
+
+          <div class="form-section">
+            <h3>Power Saving Timers</h3>
+            <p class="hint" style="margin-bottom:0.8rem;">After inactivity: Art Mode → Dim → Sleep. Timeout in seconds (0 = skip stage).</p>
+            <table style="width:100%;border-collapse:collapse;">
+              <thead><tr>
+                <th style="text-align:left;padding:0.3rem;width:35%;"></th>
+                <th style="text-align:center;padding:0.3rem;">Charging</th>
+                <th style="text-align:center;padding:0.3rem;">Battery</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td style="padding:0.5rem 0.3rem;"><strong>Art Mode</strong><div class="hint">Full brightness, no controls</div></td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="art_chg_sec" value="${artChg.timeout_sec}" min="0" max="3600" style="width:60px;">
+                    <label style="display:block;"><input type="checkbox" name="art_chg_on" ${artChg.enabled ? 'checked' : ''}> On</label>
+                  </td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="art_bat_sec" value="${artBat.timeout_sec}" min="0" max="3600" style="width:60px;">
+                    <label style="display:block;"><input type="checkbox" name="art_bat_on" ${artBat.enabled ? 'checked' : ''}> On</label>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.3rem;"><strong>Dim</strong><div class="hint">Reduced brightness</div></td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="dim_chg_sec" value="${dimChg.timeout_sec}" min="0" max="3600" style="width:60px;">
+                    <label style="display:block;"><input type="checkbox" name="dim_chg_on" ${dimChg.enabled ? 'checked' : ''}> On</label>
+                  </td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="dim_bat_sec" value="${dimBat.timeout_sec}" min="0" max="3600" style="width:60px;">
+                    <label style="display:block;"><input type="checkbox" name="dim_bat_on" ${dimBat.enabled ? 'checked' : ''}> On</label>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.3rem;"><strong>Sleep</strong><div class="hint">Display off</div></td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="slp_chg_sec" value="${slpChg.timeout_sec}" min="0" max="3600" style="width:60px;">
+                    <label style="display:block;"><input type="checkbox" name="slp_chg_on" ${slpChg.enabled ? 'checked' : ''}> On</label>
+                  </td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="slp_bat_sec" value="${slpBat.timeout_sec}" min="0" max="3600" style="width:60px;">
+                    <label style="display:block;"><input type="checkbox" name="slp_bat_on" ${slpBat.enabled ? 'checked' : ''}> On</label>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="form-section">
+            <h3>Zone Filtering</h3>
+            <div class="form-group">
+              <select name="zones_mode" style="margin-bottom:0.5rem;">
+                <option value="all" ${zones.mode === 'all' ? 'selected' : ''}>Show all zones</option>
+                <option value="include" ${zones.mode === 'include' ? 'selected' : ''}>Only show selected</option>
+                <option value="exclude" ${zones.mode === 'exclude' ? 'selected' : ''}>Hide selected</option>
+              </select>
+              <div style="max-height:150px;overflow-y:auto;border:1px solid #30363d;border-radius:4px;padding:0.5rem;">
+                ${zoneCheckboxes}
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeConfigModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      `;
+    }
+
+    async function saveConfig(event, knobId) {
+      event.preventDefault();
+      const form = event.target;
+
+      // Helper to get form values safely
+      const val = (name) => form.querySelector(`[name="${name}"]`)?.value || '';
+      const num = (name) => parseInt(val(name)) || 0;
+      const chk = (name) => form.querySelector(`[name="${name}"]`)?.checked || false;
+
+      // Collect selected zone_ids
+      const selectedZones = [];
+      form.querySelectorAll('input[name="zone_ids"]:checked').forEach(cb => {
+        selectedZones.push(cb.value);
+      });
+
+      // Build config matching bridge schema (knobs.js updateKnobConfig)
+      const config = {
+        name: val('name') || undefined,
+        rotation_charging: num('rotation_charging'),
+        rotation_not_charging: num('rotation_not_charging'),
+        art_mode_charging: {
+          enabled: chk('art_chg_on'),
+          timeout_sec: num('art_chg_sec'),
+        },
+        art_mode_battery: {
+          enabled: chk('art_bat_on'),
+          timeout_sec: num('art_bat_sec'),
+        },
+        dim_charging: {
+          enabled: chk('dim_chg_on'),
+          timeout_sec: num('dim_chg_sec'),
+        },
+        dim_battery: {
+          enabled: chk('dim_bat_on'),
+          timeout_sec: num('dim_bat_sec'),
+        },
+        sleep_charging: {
+          enabled: chk('slp_chg_on'),
+          timeout_sec: num('slp_chg_sec'),
+        },
+        sleep_battery: {
+          enabled: chk('slp_bat_on'),
+          timeout_sec: num('slp_bat_sec'),
+        },
+        zones: {
+          mode: val('zones_mode') || 'all',
+          zone_ids: selectedZones,
+        },
+      };
+
+      console.log('Saving config:', config);
+
+      try {
+        const resp = await fetch(`/config/${knobId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config),
+        });
+        if (!resp.ok) throw new Error('Failed to save config');
+        closeConfigModal();
+        refresh();
+      } catch (err) {
+        alert('Failed to save config: ' + err.message);
+      }
+    }
+
+    // Close modal on outside click
+    configModal.addEventListener('click', (e) => {
+      if (e.target === configModal) closeConfigModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && configModal.classList.contains('open')) {
+        closeConfigModal();
+      }
+    });
   </script>
   <footer style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #30363d; text-align: center; color: #8b949e; font-size: 0.9rem;">
     If you want to support my work, you can <a href="https://www.buymeacoffee.com/muness" style="color: #93ccea;">buy me a coffee</a>

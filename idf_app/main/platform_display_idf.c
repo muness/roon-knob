@@ -2,10 +2,13 @@
 #include "platform/platform_display.h"
 #include "display_sleep.h"
 #include "roon_client.h"
+#include "battery.h"
 #include "i2c_bsp.h"
 #include "lcd_touch_bsp.h"
 
 #include <stdint.h>
+#include <string.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -258,26 +261,68 @@ static void lvgl_rounder_cb(lv_event_t *e) {
     area->y2 = ((area->y2 >> 1) << 1) + 1;
 }
 
-// LVGL flush callback
+// Static rotation buffer - sized to handle LVGL's combined flushes when rotation
+// is enabled. Observed max: 54 rows. Using 60 rows with margin.
+// (360 x 60 x 2 = 43200 bytes - fits in internal DMA-capable RAM)
+static uint8_t *s_rotate_buf = NULL;
+#define ROTATE_BUF_ROWS 60
+#define ROTATE_BUF_SIZE (LCD_H_RES * ROTATE_BUF_ROWS * sizeof(uint16_t))
+
+// Simple 180-degree rotation for RGB565 buffer (reverse pixel order)
+static void rotate180_rgb565_simple(const uint16_t *src, uint16_t *dst, int pixel_count) {
+    for (int i = 0; i < pixel_count; i++) {
+        dst[pixel_count - 1 - i] = src[i];
+    }
+}
+
+// LVGL flush callback with software rotation support
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
 
-    const int offsetx1 = area->x1;
-    const int offsetx2 = area->x2;
-    const int offsety1 = area->y1;
-    const int offsety2 = area->y2;
+    lv_display_rotation_t rotation = lv_display_get_rotation(disp);
+
+    // Get area dimensions
+    const int32_t src_w = lv_area_get_width(area);
+    const int32_t src_h = lv_area_get_height(area);
+    const int pixel_count = src_w * src_h;
+
+    // Calculate output coordinates (may differ for rotation)
+    int32_t out_x1 = area->x1;
+    int32_t out_y1 = area->y1;
+    int32_t out_x2 = area->x2;
+    int32_t out_y2 = area->y2;
+
+    // Handle 180-degree rotation (for "upside down" mounting when charging)
+    if (rotation == LV_DISPLAY_ROTATION_180 && s_rotate_buf != NULL) {
+        // Safety check: ensure flush area fits in rotation buffer
+        const int max_pixels = LCD_H_RES * ROTATE_BUF_ROWS;
+        if (pixel_count > max_pixels) {
+            ESP_LOGE(TAG, "Flush area too large for rotation buffer: %d > %d pixels (%" PRId32 "x%" PRId32 ")",
+                     pixel_count, max_pixels, src_w, src_h);
+            goto skip_rotation;
+        }
+
+        // Rotate pixels: px_map -> s_rotate_buf (in PSRAM)
+        rotate180_rgb565_simple((const uint16_t *)px_map, (uint16_t *)s_rotate_buf, pixel_count);
+
+        // Copy back to px_map (DMA-capable) for LCD transfer
+        memcpy(px_map, s_rotate_buf, pixel_count * sizeof(uint16_t));
+
+        // Mirror coordinates around display center
+        out_x1 = LCD_H_RES - 1 - area->x2;
+        out_x2 = LCD_H_RES - 1 - area->x1;
+        out_y1 = LCD_V_RES - 1 - area->y2;
+        out_y2 = LCD_V_RES - 1 - area->y1;
+    }
+skip_rotation:
 
     // Swap bytes for big-endian QSPI display (SH8601 expects big-endian RGB565)
-    // ESP32 is little-endian, so we need to swap each 16-bit pixel
-    const int width = offsetx2 - offsetx1 + 1;
-    const int height = offsety2 - offsety1 + 1;
-    const int pixel_count = width * height;
     uint16_t *pixels = (uint16_t *)px_map;
     for (int i = 0; i < pixel_count; i++) {
         pixels[i] = (pixels[i] >> 8) | (pixels[i] << 8);
     }
 
-    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
+    esp_lcd_panel_draw_bitmap(panel_handle, out_x1, out_y1, out_x2 + 1, out_y2 + 1, px_map);
 
     // MUST call flush_ready here - the notify callback doesn't work properly with LVGL 9.x
     lv_display_flush_ready(disp);
@@ -447,6 +492,15 @@ bool platform_display_register_lvgl_driver(void) {
     lv_display_set_flush_cb(s_display, lvgl_flush_cb);
     lv_display_set_user_data(s_display, s_panel_handle);
 
+    // Allocate rotation buffer in PSRAM (internal RAM is too limited)
+    // We'll copy back to the DMA-capable px_map buffer before sending to LCD
+    s_rotate_buf = heap_caps_malloc(ROTATE_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    if (!s_rotate_buf) {
+        ESP_LOGW(TAG, "Failed to allocate rotation buffer - rotation disabled");
+    } else {
+        ESP_LOGI(TAG, "Allocated %d bytes for rotation buffer in PSRAM", ROTATE_BUF_SIZE);
+    }
+
     // Register rounder callback for 2-pixel alignment requirement
     lv_display_add_event_cb(s_display, lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
 
@@ -518,4 +572,33 @@ void platform_display_process_pending(void) {
     }
     // Process deferred timer-triggered state changes
     display_process_pending();
+}
+
+void platform_display_set_rotation(uint16_t degrees) {
+    if (!s_display) {
+        ESP_LOGW(TAG, "Cannot set rotation - display not initialized");
+        return;
+    }
+
+    // Only 0 and 180 are supported (90/270 would require dimension swap)
+    lv_display_rotation_t rotation;
+    if (degrees == 180) {
+        rotation = LV_DISPLAY_ROTATION_180;
+    } else {
+        if (degrees != 0) {
+            ESP_LOGW(TAG, "Rotation %d not supported, using 0", degrees);
+        }
+        rotation = LV_DISPLAY_ROTATION_0;
+    }
+
+    ESP_LOGI(TAG, "Setting display rotation to %d degrees", degrees == 180 ? 180 : 0);
+    lv_display_set_rotation(s_display, rotation);
+}
+
+bool platform_battery_is_charging(void) {
+    return battery_is_charging();
+}
+
+int platform_battery_get_level(void) {
+    return battery_get_percentage();
 }

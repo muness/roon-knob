@@ -18,6 +18,10 @@ static void get_knob_id(char *out, size_t len) {
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
+void platform_http_get_knob_id(char *out, size_t len) {
+    get_knob_id(out, len);
+}
+
 // Get firmware version
 static const char* get_knob_version(void) {
     const esp_app_desc_t *app_desc = esp_app_get_description();

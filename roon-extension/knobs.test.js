@@ -218,6 +218,10 @@ describe('knobs', () => {
     it('has expected default values', () => {
       expect(DEFAULT_CONFIG.rotation_charging).toBe(180);
       expect(DEFAULT_CONFIG.rotation_not_charging).toBe(0);
+      expect(DEFAULT_CONFIG.art_mode_charging.enabled).toBe(true);
+      expect(DEFAULT_CONFIG.art_mode_charging.timeout_sec).toBe(10);
+      expect(DEFAULT_CONFIG.art_mode_battery.enabled).toBe(true);
+      expect(DEFAULT_CONFIG.art_mode_battery.timeout_sec).toBe(10);
       expect(DEFAULT_CONFIG.dim_charging.enabled).toBe(true);
       expect(DEFAULT_CONFIG.dim_charging.timeout_sec).toBe(30);
       expect(DEFAULT_CONFIG.sleep_charging.enabled).toBe(true);

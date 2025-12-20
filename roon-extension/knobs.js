@@ -11,14 +11,18 @@ function getKnobsFile() {
   return path.join(getConfigDir(), 'knobs.json');
 }
 
-// Default config for new knobs
+// Default config for new knobs (match firmware defaults in rk_cfg.h)
 const DEFAULT_CONFIG = {
   name: '',
   rotation_charging: 180,
   rotation_not_charging: 0,
-  dim_charging: { enabled: true, timeout_sec: 30 },
+  // Charging: longer timeouts, no sleep (plugged in = always on)
+  art_mode_charging: { enabled: true, timeout_sec: 60 },
+  dim_charging: { enabled: true, timeout_sec: 120 },
+  sleep_charging: { enabled: false, timeout_sec: 0 },
+  // Battery: shorter timeouts to save power
+  art_mode_battery: { enabled: true, timeout_sec: 30 },
   dim_battery: { enabled: true, timeout_sec: 30 },
-  sleep_charging: { enabled: true, timeout_sec: 60 },
   sleep_battery: { enabled: true, timeout_sec: 60 },
   zones: { mode: 'all', zone_ids: [] },
 };
@@ -71,6 +75,11 @@ function createKnobsStore(opts = {}) {
         version: version || null,
         config,
         config_sha: computeSha(config),
+        status: {
+          battery_level: null,
+          battery_charging: null,
+          zone_id: null,
+        },
       };
       saveKnobs(knobs);
     } else {
@@ -78,6 +87,14 @@ function createKnobsStore(opts = {}) {
       knobs[knobId].last_seen = new Date().toISOString();
       if (version) {
         knobs[knobId].version = version;
+      }
+      // Ensure status object exists (migration for existing entries)
+      if (!knobs[knobId].status) {
+        knobs[knobId].status = {
+          battery_level: null,
+          battery_charging: null,
+          zone_id: null,
+        };
       }
       saveKnobs(knobs);
     }
@@ -100,6 +117,12 @@ function createKnobsStore(opts = {}) {
     if (updates.rotation_not_charging !== undefined) newConfig.rotation_not_charging = updates.rotation_not_charging;
 
     // Handle nested objects (merge, don't replace)
+    if (updates.art_mode_charging) {
+      newConfig.art_mode_charging = { ...newConfig.art_mode_charging, ...updates.art_mode_charging };
+    }
+    if (updates.art_mode_battery) {
+      newConfig.art_mode_battery = { ...newConfig.art_mode_battery, ...updates.art_mode_battery };
+    }
     if (updates.dim_charging) {
       newConfig.dim_charging = { ...newConfig.dim_charging, ...updates.dim_charging };
     }
@@ -132,6 +155,7 @@ function createKnobsStore(opts = {}) {
       name: data.name || '',
       last_seen: data.last_seen,
       version: data.version,
+      status: data.status || null,
     }));
   }
 
@@ -145,10 +169,22 @@ function createKnobsStore(opts = {}) {
     getOrCreateKnob(knobId, version);
   }
 
+  function updateKnobStatus(knobId, statusUpdates) {
+    if (!knobId) return;
+    const knob = getOrCreateKnob(knobId);
+    if (!knob) return;
+
+    // Merge status updates
+    knob.status = { ...knob.status, ...statusUpdates };
+    knob.last_seen = new Date().toISOString();
+    saveKnobs(knobs);
+  }
+
   return {
     getKnob,
     getOrCreateKnob,
     updateKnobConfig,
+    updateKnobStatus,
     listKnobs,
     getConfigSha,
     recordKnobSeen,

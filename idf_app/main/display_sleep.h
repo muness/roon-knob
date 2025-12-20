@@ -4,6 +4,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "rk_cfg.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,6 +78,14 @@ display_state_t display_get_state(void);
  * Call this from the UI loop to safely handle timer-triggered state changes
  */
 void display_process_pending(void);
+
+/**
+ * @brief Update dim/sleep timeouts from config
+ * Call this when config changes or charging state changes
+ * @param cfg Pointer to config (can be NULL to use Kconfig defaults)
+ * @param is_charging Current charging state
+ */
+void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging);
 
 #ifdef __cplusplus
 }

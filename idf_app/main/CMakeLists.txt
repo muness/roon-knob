@@ -64,6 +64,7 @@ idf_component_register(
         esp_adc
         espressif__esp_new_jpeg
         app_update
+        json
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

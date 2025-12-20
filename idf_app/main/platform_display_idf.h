@@ -2,6 +2,7 @@
 #define PLATFORM_DISPLAY_IDF_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -23,5 +24,9 @@ void platform_display_init_sleep(TaskHandle_t lvgl_task_handle);
 
 // Process any pending display actions (call from UI loop)
 void platform_display_process_pending(void);
+
+// Set display rotation (0, 90, 180, 270 degrees)
+// @param degrees Rotation in degrees (0, 90, 180, 270)
+void platform_display_set_rotation(uint16_t degrees);
 
 #endif // PLATFORM_DISPLAY_IDF_H

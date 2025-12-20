@@ -11,7 +11,7 @@ static inline int os_thread_create(os_thread_t *thread, os_thread_func_t func, v
     BaseType_t ret = xTaskCreate(
         (TaskFunction_t)func,
         "task",
-        4096,
+        8192,
         arg,
         5,
         thread

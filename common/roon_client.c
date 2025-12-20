@@ -11,19 +11,31 @@
 #include "os_mutex.h"
 #include "ui.h"
 
+#ifdef ESP_PLATFORM
+#include "display_sleep.h"
+#endif
+
 #include <ctype.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cJSON.h>
+
+// Forward declarations for config handling
+static bool fetch_knob_config(void);
+static void apply_knob_config(const rk_cfg_t *cfg);
+static void check_config_sha(const char *new_sha);
+static void check_charging_state_change(void);
 
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
 #define MAX_ZONES 32
-#define POLL_DELAY_AWAKE_MS 1000     // 1 second when display is on
-#define POLL_DELAY_SLEEPING_MS 30000  // 30 seconds when display is sleeping
-#define POLL_DELAY_BRIDGE_ERROR_MS 10000  // 10 seconds when bridge unreachable (after max retries)
+#define POLL_DELAY_AWAKE_CHARGING_MS 2000   // 2 seconds when charging and display on
+#define POLL_DELAY_AWAKE_BATTERY_MS 5000   // 5 seconds on battery to save power
+#define POLL_DELAY_SLEEPING_MS 30000       // 30 seconds when display is sleeping
+#define POLL_DELAY_BRIDGE_ERROR_MS 10000   // 10 seconds when bridge unreachable
 
 // Special zone picker options (not actual zones)
 #define ZONE_ID_BACK "__back__"
@@ -40,6 +52,7 @@ struct now_playing_state {
     int seek_position;
     int length;
     char image_key[128];  // For tracking album artwork changes
+    char config_sha[9];   // Config SHA for change detection
 };
 
 struct zone_entry {
@@ -68,6 +81,7 @@ static int s_last_known_volume_min = -80;  // Cached volume min for clamping
 static int s_last_known_volume_max = 0;    // Cached volume max for clamping
 static bool s_bridge_verified = false;  // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
+static bool s_last_charging_state = true;  // Track charging state for config reapply
 #define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
@@ -99,6 +113,7 @@ static void post_ui_status(bool online);
 static void post_ui_zone_name(const char *name);
 static void post_ui_message(const char *msg);
 static void post_ui_message_copy(char *msg_copy);
+static void strip_trailing_slashes(char *url);
 static void post_ui_status_copy(bool *status_copy);
 static void post_ui_zone_name_copy(char *name_copy);
 static void reset_bridge_fail_count(void);
@@ -202,6 +217,7 @@ static void default_now_playing(struct now_playing_state *state) {
     state->seek_position = 0;
     state->length = 0;
     state->image_key[0] = '\0';
+    state->config_sha[0] = '\0';
 }
 
 static void post_ui_update(const struct now_playing_state *state) {
@@ -258,14 +274,16 @@ static void post_ui_zone_name(const char *name) {
 }
 
 static void wait_for_poll_interval(void) {
-    // Use longer delay when display is sleeping or bridge is unreachable
+    // Use longer delay when display is sleeping, on battery, or bridge unreachable
     uint32_t delay_ms;
     if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
         delay_ms = POLL_DELAY_BRIDGE_ERROR_MS;  // Slow down when bridge unreachable
     } else if (platform_display_is_sleeping()) {
         delay_ms = POLL_DELAY_SLEEPING_MS;
+    } else if (platform_battery_is_charging()) {
+        delay_ms = POLL_DELAY_AWAKE_CHARGING_MS;  // Fast polling when plugged in
     } else {
-        delay_ms = POLL_DELAY_AWAKE_MS;
+        delay_ms = POLL_DELAY_AWAKE_BATTERY_MS;   // Slower on battery to save power
     }
     uint64_t start = platform_millis();
     while (s_running) {
@@ -285,6 +303,15 @@ static void wait_for_poll_interval(void) {
 #define CONFIG_RK_DEFAULT_BRIDGE_BASE "http://127.0.0.1:8088"
 #endif
 
+// Strip trailing slashes from URL to prevent double-slash issues
+static void strip_trailing_slashes(char *url) {
+    if (!url) return;
+    size_t len = strlen(url);
+    while (len > 0 && url[len - 1] == '/') {
+        url[--len] = '\0';
+    }
+}
+
 static void maybe_update_bridge_base(void) {
     char discovered[sizeof(s_state.cfg.bridge_base)];
     bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
@@ -297,6 +324,7 @@ static void maybe_update_bridge_base(void) {
             LOGI("mDNS discovered bridge: %s", discovered);
             strncpy(s_state.cfg.bridge_base, discovered, sizeof(s_state.cfg.bridge_base) - 1);
             s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
+            strip_trailing_slashes(s_state.cfg.bridge_base);
             platform_storage_save(&s_state.cfg);
         }
         unlock_state();
@@ -323,6 +351,7 @@ static void maybe_update_bridge_base(void) {
             lock_state();
             strncpy(s_state.cfg.bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE, sizeof(s_state.cfg.bridge_base) - 1);
             s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
+            strip_trailing_slashes(s_state.cfg.bridge_base);
             // Don't save the fallback - let mDNS retry on next poll
             unlock_state();
         } else {
@@ -348,8 +377,17 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         return false;
     }
 
-    char url[256];
-    snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s", bridge_base, zone_id);
+    // Get battery status for reporting to bridge
+    int battery_level = platform_battery_get_level();
+    bool battery_charging = platform_battery_is_charging();
+
+    // Get knob ID for config_sha lookup
+    char knob_id[16];
+    platform_http_get_knob_id(knob_id, sizeof(knob_id));
+
+    char url[384];
+    snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_level=%d&battery_charging=%d&knob_id=%s",
+             bridge_base, zone_id, battery_level, battery_charging ? 1 : 0, knob_id);
 
     char *resp = NULL;
     size_t resp_len = 0;
@@ -431,6 +469,16 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         extract_json_string(image_key, "\"image_key\"", state->image_key, sizeof(state->image_key));
     } else {
         state->image_key[0] = '\0';  // No artwork available
+    }
+
+    // Parse config_sha for config change detection
+    const char *config_sha_key = strstr(resp, "\"config_sha\"");
+    if (config_sha_key) {
+        extract_json_string(config_sha_key, "\"config_sha\"", state->config_sha, sizeof(state->config_sha));
+        LOGI("now_playing: config_sha='%s'", state->config_sha);
+    } else {
+        state->config_sha[0] = '\0';
+        LOGI("now_playing: no config_sha in response");
     }
 
     // Note: Don't parse zones from now_playing response - it doesn't have zone_name
@@ -635,6 +683,12 @@ static void roon_poll_thread(void *arg) {
         bool ok = fetch_now_playing(&state);
         post_ui_status(ok);
 
+        // Check for config changes and charging state (only when bridge is responding)
+        if (ok) {
+            check_config_sha(state.config_sha);
+            check_charging_state_change();
+        }
+
         // Skip bridge status tracking in Bluetooth mode - we're not using the bridge
         bool in_bluetooth_mode = false;
         lock_state();
@@ -746,6 +800,14 @@ void roon_client_start(const rk_cfg_t *cfg) {
     strncpy(s_state.zone_label, cfg->zone_id[0] ? cfg->zone_id : "Tap here to select zone", sizeof(s_state.zone_label) - 1);
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     unlock_state();
+
+    // Apply saved config (rotation, timeouts) on startup
+    if (cfg->config_sha[0] != '\0') {
+        LOGI("Applying saved config on startup: rot=%d/%d sha='%s'",
+             cfg->rotation_charging, cfg->rotation_not_charging, cfg->config_sha);
+        apply_knob_config(cfg);
+    }
+
     s_running = true;
     platform_task_start(roon_poll_thread, NULL);
 }
@@ -1081,4 +1143,264 @@ bool roon_client_get_bridge_url(char *buf, size_t len) {
 
 bool roon_client_is_bridge_connected(void) {
     return s_last_net_ok;
+}
+
+// Config fetch and apply implementation
+
+// Data passed to UI thread for config application
+struct apply_config_ui_data {
+    uint16_t rotation;
+    bool is_charging;
+    rk_cfg_t cfg;  // Copy of config for timeout updates
+};
+
+// Called on UI thread to apply config safely
+static void apply_config_on_ui_thread(void *arg) {
+    struct apply_config_ui_data *data = (struct apply_config_ui_data *)arg;
+    if (!data) return;
+
+    platform_display_set_rotation(data->rotation);
+
+#ifdef ESP_PLATFORM
+    display_update_timeouts(&data->cfg, data->is_charging);
+#endif
+
+    LOGI("Config applied on UI thread: rotation=%d", data->rotation);
+    free(data);
+}
+
+static void apply_knob_config(const rk_cfg_t *cfg) {
+    if (!cfg) {
+        return;
+    }
+
+    // Get current charging state
+    bool is_charging = platform_battery_is_charging();
+    uint16_t rotation = rk_cfg_get_rotation(cfg, is_charging);
+
+    LOGI("Config apply requested: name='%s' rotation=%d (charging=%s)",
+         cfg->knob_name[0] ? cfg->knob_name : "(unnamed)",
+         rotation, is_charging ? "yes" : "no");
+
+    // Post to UI thread since LVGL is not thread-safe
+    struct apply_config_ui_data *data = malloc(sizeof(*data));
+    if (data) {
+        data->rotation = rotation;
+        data->is_charging = is_charging;
+        data->cfg = *cfg;
+        platform_task_post_to_ui(apply_config_on_ui_thread, data);
+    }
+}
+
+static void check_config_sha(const char *new_sha) {
+    if (!new_sha || !new_sha[0]) {
+        return;
+    }
+
+    lock_state();
+    bool sha_changed = (strcmp(s_state.cfg.config_sha, new_sha) != 0);
+    unlock_state();
+
+    if (sha_changed) {
+        LOGI("Config SHA changed: '%s' -> '%s', fetching new config",
+             s_state.cfg.config_sha[0] ? s_state.cfg.config_sha : "(empty)", new_sha);
+        fetch_knob_config();
+    }
+}
+
+static bool fetch_knob_config(void) {
+    lock_state();
+    char bridge_base[sizeof(s_state.cfg.bridge_base)];
+    strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
+    bridge_base[sizeof(bridge_base) - 1] = '\0';
+    unlock_state();
+
+    if (bridge_base[0] == '\0') {
+        LOGW("fetch_knob_config: No bridge configured");
+        return false;
+    }
+
+    // Get knob ID
+    char knob_id[16];
+    platform_http_get_knob_id(knob_id, sizeof(knob_id));
+
+    // Build URL
+    char url[256];
+    snprintf(url, sizeof(url), "%s/config/%s", bridge_base, knob_id);
+
+    LOGI("Fetching config from %s", url);
+
+    char *resp = NULL;
+    size_t resp_len = 0;
+    if (platform_http_get(url, &resp, &resp_len) != 0 || !resp) {
+        LOGW("fetch_knob_config: HTTP request failed");
+        platform_http_free(resp);
+        return false;
+    }
+
+    // Parse JSON response using cJSON
+    cJSON *root = cJSON_Parse(resp);
+    platform_http_free(resp);
+
+    if (!root) {
+        LOGW("fetch_knob_config: JSON parse failed");
+        return false;
+    }
+
+    // Extract config fields
+    lock_state();
+    rk_cfg_t *cfg = &s_state.cfg;
+
+    // name
+    cJSON *name = cJSON_GetObjectItem(root, "name");
+    if (cJSON_IsString(name) && name->valuestring) {
+        strncpy(cfg->knob_name, name->valuestring, sizeof(cfg->knob_name) - 1);
+        cfg->knob_name[sizeof(cfg->knob_name) - 1] = '\0';
+    }
+
+    // config_sha (at root level)
+    cJSON *sha = cJSON_GetObjectItem(root, "config_sha");
+    if (cJSON_IsString(sha) && sha->valuestring) {
+        strncpy(cfg->config_sha, sha->valuestring, sizeof(cfg->config_sha) - 1);
+        cfg->config_sha[sizeof(cfg->config_sha) - 1] = '\0';
+    }
+
+    // Get nested config object - all config fields are inside "config"
+    cJSON *config_obj = cJSON_GetObjectItem(root, "config");
+    if (!cJSON_IsObject(config_obj)) {
+        LOGW("fetch_knob_config: missing 'config' object in response");
+        unlock_state();
+        cJSON_Delete(root);
+        return false;
+    }
+
+    // rotation
+    cJSON *rot_charging = cJSON_GetObjectItem(config_obj, "rotation_charging");
+    if (cJSON_IsNumber(rot_charging)) {
+        cfg->rotation_charging = (uint16_t)rot_charging->valueint;
+    }
+    cJSON *rot_battery = cJSON_GetObjectItem(config_obj, "rotation_not_charging");
+    if (cJSON_IsNumber(rot_battery)) {
+        cfg->rotation_not_charging = (uint16_t)rot_battery->valueint;
+    }
+
+    // art_mode_charging
+    cJSON *art_charging = cJSON_GetObjectItem(config_obj, "art_mode_charging");
+    if (cJSON_IsObject(art_charging)) {
+        cJSON *enabled = cJSON_GetObjectItem(art_charging, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->art_mode_charging_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(art_charging, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->art_mode_charging_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // art_mode_battery
+    cJSON *art_battery = cJSON_GetObjectItem(config_obj, "art_mode_battery");
+    if (cJSON_IsObject(art_battery)) {
+        cJSON *enabled = cJSON_GetObjectItem(art_battery, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->art_mode_battery_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(art_battery, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->art_mode_battery_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // dim_charging
+    cJSON *dim_charging = cJSON_GetObjectItem(config_obj, "dim_charging");
+    if (cJSON_IsObject(dim_charging)) {
+        cJSON *enabled = cJSON_GetObjectItem(dim_charging, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->dim_charging_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(dim_charging, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->dim_charging_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // dim_battery
+    cJSON *dim_battery = cJSON_GetObjectItem(config_obj, "dim_battery");
+    if (cJSON_IsObject(dim_battery)) {
+        cJSON *enabled = cJSON_GetObjectItem(dim_battery, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->dim_battery_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(dim_battery, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->dim_battery_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // sleep_charging
+    cJSON *sleep_charging = cJSON_GetObjectItem(config_obj, "sleep_charging");
+    if (cJSON_IsObject(sleep_charging)) {
+        cJSON *enabled = cJSON_GetObjectItem(sleep_charging, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->sleep_charging_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(sleep_charging, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->sleep_charging_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // sleep_battery
+    cJSON *sleep_battery = cJSON_GetObjectItem(config_obj, "sleep_battery");
+    if (cJSON_IsObject(sleep_battery)) {
+        cJSON *enabled = cJSON_GetObjectItem(sleep_battery, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->sleep_battery_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(sleep_battery, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->sleep_battery_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // Log parsed config values
+    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds",
+         cfg->rotation_charging, cfg->rotation_not_charging,
+         cfg->art_mode_charging_enabled, cfg->art_mode_charging_timeout_sec,
+         cfg->art_mode_battery_enabled, cfg->art_mode_battery_timeout_sec,
+         cfg->dim_charging_enabled, cfg->dim_charging_timeout_sec,
+         cfg->dim_battery_enabled, cfg->dim_battery_timeout_sec,
+         cfg->sleep_charging_enabled, cfg->sleep_charging_timeout_sec,
+         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec);
+
+    // Make a copy for apply and save
+    rk_cfg_t cfg_copy = *cfg;
+    unlock_state();
+
+    cJSON_Delete(root);
+
+    // Save to NVS
+    platform_storage_save(&cfg_copy);
+
+    // Apply the config
+    apply_knob_config(&cfg_copy);
+
+    LOGI("Config fetch complete: sha='%s'", cfg_copy.config_sha);
+    return true;
+}
+
+// Check for charging state changes and reapply config if needed
+static void check_charging_state_change(void) {
+    bool current_charging = platform_battery_is_charging();
+    if (current_charging != s_last_charging_state) {
+        LOGI("Charging state changed: %s -> %s",
+             s_last_charging_state ? "charging" : "battery",
+             current_charging ? "charging" : "battery");
+        s_last_charging_state = current_charging;
+
+        // Reapply config with new charging state
+        lock_state();
+        rk_cfg_t cfg_copy = s_state.cfg;
+        unlock_state();
+        apply_knob_config(&cfg_copy);
+    }
 }

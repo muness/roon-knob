@@ -1,5 +1,7 @@
 # Claude Agent Instructions
 
+See [PROJECT_AIMS](./docs/PROJECT_AIMS.md) for this project's aims. See [decision_records](./docs/decision_records/) for decisions we've made along the way.
+
 See [AGENTS.md](AGENTS.md) for complete instructions on working with this project.
 
 ## Key Points

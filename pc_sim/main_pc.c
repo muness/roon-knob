@@ -7,6 +7,7 @@
 #include "src/drivers/sdl/lv_sdl_mouse.h"
 #include "src/drivers/sdl/lv_sdl_window.h"
 
+#include <stdint.h>
 #include <stdio.h>
 
 #define SCREEN_SIZE 240
@@ -26,6 +27,20 @@ bool ui_is_settings_visible(void) {
 // Display sleep stub - PC simulator never sleeps
 bool platform_display_is_sleeping(void) {
     return false;
+}
+
+// Display rotation stub - PC simulator ignores rotation
+void platform_display_set_rotation(uint16_t degrees) {
+    printf("[PC] Display rotation set to %d degrees (ignored in simulator)\n", degrees);
+}
+
+// Battery stubs - PC simulator always reports charging (USB powered)
+bool platform_battery_is_charging(void) {
+    return true;
+}
+
+int platform_battery_get_level(void) {
+    return 100;  // PC always "fully charged"
 }
 
 int main(int argc, char **argv) {
