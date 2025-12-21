@@ -1167,6 +1167,7 @@ static void apply_config_on_ui_thread(void *arg) {
 
 #ifdef ESP_PLATFORM
     display_update_timeouts(&data->cfg, data->is_charging);
+    display_update_power_settings(&data->cfg);
 #endif
 
     LOGI("Config applied on UI thread: rotation=%d", data->rotation);
@@ -1366,15 +1367,26 @@ static bool fetch_knob_config(void) {
         }
     }
 
+    // Power management settings
+    cJSON *wifi_ps = cJSON_GetObjectItem(config_obj, "wifi_power_save_enabled");
+    if (cJSON_IsBool(wifi_ps)) {
+        cfg->wifi_power_save_enabled = cJSON_IsTrue(wifi_ps) ? 1 : 0;
+    }
+    cJSON *cpu_freq = cJSON_GetObjectItem(config_obj, "cpu_freq_scaling_enabled");
+    if (cJSON_IsBool(cpu_freq)) {
+        cfg->cpu_freq_scaling_enabled = cJSON_IsTrue(cpu_freq) ? 1 : 0;
+    }
+
     // Log parsed config values
-    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds",
+    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds power=wifi:%d,cpu:%d",
          cfg->rotation_charging, cfg->rotation_not_charging,
          cfg->art_mode_charging_enabled, cfg->art_mode_charging_timeout_sec,
          cfg->art_mode_battery_enabled, cfg->art_mode_battery_timeout_sec,
          cfg->dim_charging_enabled, cfg->dim_charging_timeout_sec,
          cfg->dim_battery_enabled, cfg->dim_battery_timeout_sec,
          cfg->sleep_charging_enabled, cfg->sleep_charging_timeout_sec,
-         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec);
+         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec,
+         cfg->wifi_power_save_enabled, cfg->cpu_freq_scaling_enabled);
 
     // Make a copy for apply and save
     rk_cfg_t cfg_copy = *cfg;

@@ -66,6 +66,12 @@ CONFIG_RK_BACKLIGHT_DIM=25
 # HTTP Server - larger header buffer for modern browsers
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 
+# Power Management - enables CPU frequency scaling (optional, disabled by default in firmware)
+# When enabled in bridge config, allows CPU to scale down when idle to save power
+# Trade-off: adds 0.2-40us interrupt latency
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+
 # Bluetooth disabled on S3 - Bluetooth functionality moved to ESP32 chip
 # See docs/DUAL_CHIP_ARCHITECTURE.md for the dual-chip Bluetooth architecture
 CONFIG_BT_ENABLED=n

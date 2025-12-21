@@ -2,9 +2,11 @@
 #include "captive_portal.h"
 #include "platform/platform_display.h"
 #include "roon_client.h"
+#include "wifi_manager.h"
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "driver/ledc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -47,6 +49,46 @@ static display_state_t s_display_state = DISPLAY_STATE_NORMAL;
 static uint32_t s_art_mode_timeout_ms = DEFAULT_ART_MODE_TIMEOUT_MS;
 static uint32_t s_dim_timeout_ms = DEFAULT_DIM_TIMEOUT_MS;
 static uint32_t s_sleep_timeout_ms = DEFAULT_SLEEP_TIMEOUT_MS;
+
+// Power management settings
+static bool s_wifi_power_save_enabled = false;
+static bool s_cpu_freq_scaling_enabled = false;
+
+#if CONFIG_PM_ENABLE
+static esp_pm_lock_handle_t s_pm_cpu_lock = NULL;
+static bool s_pm_initialized = false;
+
+// Initialize power management (call once during init)
+static void pm_init(void) {
+    if (s_pm_initialized) return;
+
+    // Configure PM: allow scaling between 80MHz (min) and 240MHz (max)
+    esp_pm_config_t pm_config = {
+        .max_freq_mhz = 240,
+        .min_freq_mhz = 80,
+        .light_sleep_enable = false,  // Don't auto-sleep, we control display separately
+    };
+
+    esp_err_t err = esp_pm_configure(&pm_config);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to configure PM: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Create a CPU frequency lock - when held, keeps CPU at max freq
+    err = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "display", &s_pm_cpu_lock);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to create PM lock: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Start with lock held (display is awake at boot)
+    esp_pm_lock_acquire(s_pm_cpu_lock);
+
+    s_pm_initialized = true;
+    ESP_LOGI(TAG, "Power management initialized (80-240MHz scaling)");
+}
+#endif
 
 // Set backlight brightness using LEDC PWM
 void display_set_backlight(uint8_t brightness) {
@@ -136,6 +178,19 @@ void display_sleep(void) {
             ESP_LOGI(TAG, "LVGL task priority lowered");
         }
 
+        // Enable WiFi power save if configured
+        if (s_wifi_power_save_enabled) {
+            wifi_mgr_set_power_save(true);
+        }
+
+        // Release CPU frequency lock to allow scaling down
+#if CONFIG_PM_ENABLE
+        if (s_cpu_freq_scaling_enabled && s_pm_initialized && s_pm_cpu_lock) {
+            esp_pm_lock_release(s_pm_cpu_lock);
+            ESP_LOGI(TAG, "CPU frequency lock released (scaling enabled)");
+        }
+#endif
+
         s_display_state = DISPLAY_STATE_SLEEP;
         ESP_LOGI(TAG, "Display sleeping");
     }
@@ -157,6 +212,19 @@ void display_wake(void) {
     sleep_timeout = s_sleep_timeout_ms;
 
     if (s_display_state == DISPLAY_STATE_SLEEP && s_panel_handle != NULL) {
+        // Acquire CPU frequency lock first (need full performance)
+#if CONFIG_PM_ENABLE
+        if (s_cpu_freq_scaling_enabled && s_pm_initialized && s_pm_cpu_lock) {
+            esp_pm_lock_acquire(s_pm_cpu_lock);
+            ESP_LOGI(TAG, "CPU frequency lock acquired (max freq)");
+        }
+#endif
+
+        // Disable WiFi power save (need full performance for responsive polling)
+        if (s_wifi_power_save_enabled) {
+            wifi_mgr_set_power_save(false);
+        }
+
         // Turn on display panel first
         esp_lcd_panel_disp_on_off(s_panel_handle, true);
 
@@ -401,4 +469,37 @@ void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging) {
         }
     }
     // DISPLAY_STATE_SLEEP: no timers to start
+}
+
+// Update power management settings from config
+void display_update_power_settings(const rk_cfg_t *cfg) {
+    if (!cfg) return;
+
+    bool wifi_changed = (s_wifi_power_save_enabled != (cfg->wifi_power_save_enabled != 0));
+    bool cpu_changed = (s_cpu_freq_scaling_enabled != (cfg->cpu_freq_scaling_enabled != 0));
+
+    s_wifi_power_save_enabled = cfg->wifi_power_save_enabled != 0;
+    s_cpu_freq_scaling_enabled = cfg->cpu_freq_scaling_enabled != 0;
+
+    if (wifi_changed || cpu_changed) {
+        ESP_LOGI(TAG, "Power settings updated: wifi_ps=%d, cpu_scaling=%d",
+                 s_wifi_power_save_enabled, s_cpu_freq_scaling_enabled);
+    }
+
+    // If currently sleeping and wifi power save setting changed, apply immediately
+    if (wifi_changed && s_display_state == DISPLAY_STATE_SLEEP) {
+        wifi_mgr_set_power_save(s_wifi_power_save_enabled);
+    }
+
+#if CONFIG_PM_ENABLE
+    // Initialize PM when CPU scaling is first enabled
+    if (cpu_changed && s_cpu_freq_scaling_enabled) {
+        pm_init();
+        // If currently sleeping, release the lock to enable scaling
+        if (s_display_state == DISPLAY_STATE_SLEEP && s_pm_initialized && s_pm_cpu_lock) {
+            esp_pm_lock_release(s_pm_cpu_lock);
+            ESP_LOGI(TAG, "CPU scaling enabled while sleeping - lock released");
+        }
+    }
+#endif
 }
