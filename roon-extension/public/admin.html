@@ -44,9 +44,6 @@
     .form-section { border-top: 1px solid #30363d; padding-top: 1rem; margin-top: 1rem; }
     .form-section h3 { margin: 0 0 0.8rem 0; font-size: 0.95rem; color: #e6edf3; }
 
-    .zone-checkbox { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; cursor: pointer; }
-    .zone-checkbox input[type="checkbox"] { margin: 0; flex-shrink: 0; }
-
     .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #30363d; }
     .btn { padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.9rem; cursor: pointer; }
     .btn-primary { background: #238636; border: none; color: #fff; }
@@ -267,7 +264,6 @@
       const dimBat = config.dim_battery || { enabled: true, timeout_sec: 30 };
       const slpChg = config.sleep_charging || { enabled: false, timeout_sec: 0 };
       const slpBat = config.sleep_battery || { enabled: true, timeout_sec: 60 };
-      const zones = config.zones || { mode: 'all', zone_ids: [] };
 
       function rotSelect(name, val) {
         return `<select name="${name}">
@@ -275,23 +271,6 @@
           <option value="180" ${val === 180 ? 'selected' : ''}>180°</option>
         </select>`;
       }
-
-      // Add Bluetooth as a special zone option
-      const btChecked = zones.zone_ids.includes('__bluetooth__') ? 'checked' : '';
-      const btZone = `<label class="zone-checkbox">
-          <input type="checkbox" name="zone_ids" value="__bluetooth__" ${btChecked}>
-          <span>🎧 Bluetooth</span>
-        </label>`;
-
-      const roonZones = cachedZones.map(z => {
-        const checked = zones.zone_ids.includes(z.zone_id) ? 'checked' : '';
-        return `<label class="zone-checkbox">
-          <input type="checkbox" name="zone_ids" value="${z.zone_id}" ${checked}>
-          <span>${z.zone_name}</span>
-        </label>`;
-      }).join('');
-
-      const zoneCheckboxes = btZone + roonZones || '<div class="muted">No zones available</div>';
 
       configFormContainer.innerHTML = `
         <form id="configForm" onsubmit="saveConfig(event, '${knobId}')">
@@ -359,20 +338,6 @@
             </table>
           </div>
 
-          <div class="form-section">
-            <h3>Zone Filtering</h3>
-            <div class="form-group">
-              <select name="zones_mode" style="margin-bottom:0.5rem;">
-                <option value="all" ${zones.mode === 'all' ? 'selected' : ''}>Show all zones</option>
-                <option value="include" ${zones.mode === 'include' ? 'selected' : ''}>Only show selected</option>
-                <option value="exclude" ${zones.mode === 'exclude' ? 'selected' : ''}>Hide selected</option>
-              </select>
-              <div style="max-height:150px;overflow-y:auto;border:1px solid #30363d;border-radius:4px;padding:0.5rem;">
-                ${zoneCheckboxes}
-              </div>
-            </div>
-          </div>
-
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" onclick="closeConfigModal()">Cancel</button>
             <button type="submit" class="btn btn-primary">Save</button>
@@ -390,15 +355,9 @@
       const num = (name) => parseInt(val(name)) || 0;
       const chk = (name) => form.querySelector(`[name="${name}"]`)?.checked || false;
 
-      // Collect selected zone_ids
-      const selectedZones = [];
-      form.querySelectorAll('input[name="zone_ids"]:checked').forEach(cb => {
-        selectedZones.push(cb.value);
-      });
-
       // Build config matching bridge schema (knobs.js updateKnobConfig)
       const config = {
-        name: val('name') || undefined,
+        name: val('name'),  // Empty string clears name to <unset>
         rotation_charging: num('rotation_charging'),
         rotation_not_charging: num('rotation_not_charging'),
         art_mode_charging: {
@@ -424,10 +383,6 @@
         sleep_battery: {
           enabled: chk('slp_bat_on'),
           timeout_sec: num('slp_bat_sec'),
-        },
-        zones: {
-          mode: val('zones_mode') || 'all',
-          zone_ids: selectedZones,
         },
       };
 

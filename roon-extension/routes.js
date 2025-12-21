@@ -39,8 +39,8 @@ function createRoutes({ bridge, metrics, logger, knobs }) {
     res.json({
       config: {
         knob_id: knobId,
-        name: knob.name,
         ...knob.config,
+        name: knob.name,  // Must be after spread to override stale config.name
       },
       config_sha: knob.config_sha,
     });
@@ -59,8 +59,8 @@ function createRoutes({ bridge, metrics, logger, knobs }) {
     res.json({
       config: {
         knob_id: knobId,
-        name: knob.name,
         ...knob.config,
+        name: knob.name,  // Must be after spread to override stale config.name
       },
       config_sha: knob.config_sha,
     });
@@ -71,30 +71,8 @@ function createRoutes({ bridge, metrics, logger, knobs }) {
     recordEvent(metrics, 'zones', req, { knob });
     logger?.debug('Zones requested', { ip: req.ip, knob_id: knob?.id });
 
-    const allZones = bridge.getZones();
-    let zones = allZones;
-
-    // Apply zone filtering if knob has config
-    if (knob?.id) {
-      const knobData = knobs.getKnob(knob.id);
-      if (knobData?.config?.zones) {
-        const { mode, zone_ids } = knobData.config.zones;
-        if (mode === 'include' && zone_ids.length > 0) {
-          zones = allZones.filter(z => zone_ids.includes(z.zone_id));
-        } else if (mode === 'exclude' && zone_ids.length > 0) {
-          zones = allZones.filter(z => !zone_ids.includes(z.zone_id));
-        }
-        // mode === 'all' -> no filtering
-      }
-    }
-
-    // Fallback to all zones if filtering results in empty list
-    if (zones.length === 0 && allZones.length > 0) {
-      logger?.debug('Zone filtering resulted in empty list, falling back to all zones', { knob_id: knob?.id });
-      zones = allZones;
-    }
-
-    res.json(zones);
+    // Return all Roon zones (no filtering - knob handles Bluetooth locally)
+    res.json(bridge.getZones());
   });
 
   router.get('/now_playing', (req, res) => {

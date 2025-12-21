@@ -1,6 +1,6 @@
 # Decision: Use cJSON for Config Parsing
 
-**Date:** 2024-12-20
+**Date:** 2025-12-20
 **Status:** Accepted
 
 ## Context

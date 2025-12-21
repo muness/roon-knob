@@ -41,6 +41,7 @@ static void copy_str(char *dst, size_t len, const char *src) {
 
 struct ui_net_widgets {
     lv_obj_t *panel;
+    lv_obj_t *name_value;
     lv_obj_t *ssid_value;
     lv_obj_t *ip_value;
     lv_obj_t *version_label;
@@ -153,6 +154,14 @@ static void show_reset_confirm_dialog(void) {
 static void refresh_labels(void) {
     rk_cfg_t cfg = {0};
     platform_storage_load(&cfg);
+
+    if (s_widgets.name_value) {
+        if (cfg.knob_name[0]) {
+            lv_label_set_text_fmt(s_widgets.name_value, "%s", cfg.knob_name);
+        } else {
+            lv_label_set_text(s_widgets.name_value, "<unset>");
+        }
+    }
 
     if (s_widgets.ssid_value) {
         if (cfg.ssid[0]) {
@@ -317,6 +326,15 @@ static void ensure_panel(void) {
 
     lv_obj_t *title = lv_label_create(s_widgets.panel);
     lv_label_set_text(title, "Settings");
+
+    // Name row (knob name from bridge config)
+    lv_obj_t *name_row = lv_obj_create(s_widgets.panel);
+    lv_obj_set_size(name_row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(name_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all(name_row, 4, 0);
+    lv_obj_clear_flag(name_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_label_set_text(lv_label_create(name_row), "Name:");
+    s_widgets.name_value = lv_label_create(name_row);
 
     // Version row
     lv_obj_t *ver_row = lv_obj_create(s_widgets.panel);

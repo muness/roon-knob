@@ -124,15 +124,7 @@ describe('knobs', () => {
         dim_charging: { enabled: false },
       });
       expect(updated.config.dim_charging.enabled).toBe(false);
-      expect(updated.config.dim_charging.timeout_sec).toBe(30); // preserved
-    });
-
-    it('updates zones config', () => {
-      const updated = knobs.updateKnobConfig('abc123', {
-        zones: { mode: 'exclude', zone_ids: ['zone-1', 'zone-2'] },
-      });
-      expect(updated.config.zones.mode).toBe('exclude');
-      expect(updated.config.zones.zone_ids).toEqual(['zone-1', 'zone-2']);
+      expect(updated.config.dim_charging.timeout_sec).toBe(120); // preserved
     });
 
     it('updates config_sha on change', () => {
@@ -219,15 +211,13 @@ describe('knobs', () => {
       expect(DEFAULT_CONFIG.rotation_charging).toBe(180);
       expect(DEFAULT_CONFIG.rotation_not_charging).toBe(0);
       expect(DEFAULT_CONFIG.art_mode_charging.enabled).toBe(true);
-      expect(DEFAULT_CONFIG.art_mode_charging.timeout_sec).toBe(10);
+      expect(DEFAULT_CONFIG.art_mode_charging.timeout_sec).toBe(60);
       expect(DEFAULT_CONFIG.art_mode_battery.enabled).toBe(true);
-      expect(DEFAULT_CONFIG.art_mode_battery.timeout_sec).toBe(10);
+      expect(DEFAULT_CONFIG.art_mode_battery.timeout_sec).toBe(30);
       expect(DEFAULT_CONFIG.dim_charging.enabled).toBe(true);
-      expect(DEFAULT_CONFIG.dim_charging.timeout_sec).toBe(30);
-      expect(DEFAULT_CONFIG.sleep_charging.enabled).toBe(true);
-      expect(DEFAULT_CONFIG.sleep_charging.timeout_sec).toBe(60);
-      expect(DEFAULT_CONFIG.zones.mode).toBe('all');
-      expect(DEFAULT_CONFIG.zones.zone_ids).toEqual([]);
+      expect(DEFAULT_CONFIG.dim_charging.timeout_sec).toBe(120);
+      expect(DEFAULT_CONFIG.sleep_charging.enabled).toBe(false);
+      expect(DEFAULT_CONFIG.sleep_charging.timeout_sec).toBe(0);
     });
   });
 });

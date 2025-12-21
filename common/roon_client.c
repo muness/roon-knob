@@ -942,7 +942,7 @@ void roon_client_handle_input(ui_input_event_t event) {
                 count++;
             }
         }
-        /* Add Bluetooth option if available */
+        /* Add Bluetooth option if hardware is available */
         if (controller_mode_bluetooth_available() && count < MAX_ZONES + 3) {
             names[count] = bt_name;
             ids[count] = bt_id;
@@ -1255,13 +1255,6 @@ static bool fetch_knob_config(void) {
     lock_state();
     rk_cfg_t *cfg = &s_state.cfg;
 
-    // name
-    cJSON *name = cJSON_GetObjectItem(root, "name");
-    if (cJSON_IsString(name) && name->valuestring) {
-        strncpy(cfg->knob_name, name->valuestring, sizeof(cfg->knob_name) - 1);
-        cfg->knob_name[sizeof(cfg->knob_name) - 1] = '\0';
-    }
-
     // config_sha (at root level)
     cJSON *sha = cJSON_GetObjectItem(root, "config_sha");
     if (cJSON_IsString(sha) && sha->valuestring) {
@@ -1276,6 +1269,13 @@ static bool fetch_knob_config(void) {
         unlock_state();
         cJSON_Delete(root);
         return false;
+    }
+
+    // name (inside config object)
+    cJSON *name = cJSON_GetObjectItem(config_obj, "name");
+    if (cJSON_IsString(name) && name->valuestring) {
+        strncpy(cfg->knob_name, name->valuestring, sizeof(cfg->knob_name) - 1);
+        cfg->knob_name[sizeof(cfg->knob_name) - 1] = '\0';
     }
 
     // rotation

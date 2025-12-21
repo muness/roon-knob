@@ -12,8 +12,8 @@ function getKnobsFile() {
 }
 
 // Default config for new knobs (match firmware defaults in rk_cfg.h)
+// Note: 'name' is a top-level knob field, not part of config
 const DEFAULT_CONFIG = {
-  name: '',
   rotation_charging: 180,
   rotation_not_charging: 0,
   // Charging: longer timeouts, no sleep (plugged in = always on)
@@ -24,7 +24,6 @@ const DEFAULT_CONFIG = {
   art_mode_battery: { enabled: true, timeout_sec: 30 },
   dim_battery: { enabled: true, timeout_sec: 30 },
   sleep_battery: { enabled: true, timeout_sec: 60 },
-  zones: { mode: 'all', zone_ids: [] },
 };
 
 function computeSha(config) {
@@ -69,12 +68,13 @@ function createKnobsStore(opts = {}) {
     if (!knobs[knobId]) {
       log.info('Creating new knob config', { knobId });
       const config = { ...DEFAULT_CONFIG };
+      const name = '';
       knobs[knobId] = {
-        name: '',
+        name,
         last_seen: new Date().toISOString(),
         version: version || null,
         config,
-        config_sha: computeSha(config),
+        config_sha: computeSha({ ...config, name }),  // Include name in SHA
         status: {
           battery_level: null,
           battery_charging: null,
@@ -135,12 +135,10 @@ function createKnobsStore(opts = {}) {
     if (updates.sleep_battery) {
       newConfig.sleep_battery = { ...newConfig.sleep_battery, ...updates.sleep_battery };
     }
-    if (updates.zones) {
-      newConfig.zones = { ...newConfig.zones, ...updates.zones };
-    }
 
     knob.config = newConfig;
-    knob.config_sha = computeSha(newConfig);
+    // SHA includes name since it's part of the config payload sent to knob
+    knob.config_sha = computeSha({ ...newConfig, name: knob.name });
     knob.last_seen = new Date().toISOString();
 
     log.info('Updated knob config', { knobId, config_sha: knob.config_sha });
