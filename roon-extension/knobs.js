@@ -27,6 +27,7 @@ const DEFAULT_CONFIG = {
   // Power management (disabled by default until proven stable)
   wifi_power_save_enabled: false,
   cpu_freq_scaling_enabled: false,
+  sleep_poll_stopped_sec: 60,  // Poll interval when sleeping AND zone stopped (0=30s default)
 };
 
 function computeSha(config) {
@@ -144,6 +145,9 @@ function createKnobsStore(opts = {}) {
     }
     if (updates.cpu_freq_scaling_enabled !== undefined) {
       newConfig.cpu_freq_scaling_enabled = updates.cpu_freq_scaling_enabled;
+    }
+    if (updates.sleep_poll_stopped_sec !== undefined) {
+      newConfig.sleep_poll_stopped_sec = updates.sleep_poll_stopped_sec;
     }
 
     knob.config = newConfig;

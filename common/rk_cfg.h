@@ -31,6 +31,7 @@
 // Power management defaults (disabled until proven stable)
 #define RK_DEFAULT_WIFI_POWER_SAVE_ENABLED 0
 #define RK_DEFAULT_CPU_FREQ_SCALING_ENABLED 0
+#define RK_DEFAULT_SLEEP_POLL_STOPPED_SEC 60   // Poll interval when sleeping AND zone stopped
 
 typedef struct {
     // === V1 fields (network config) - DO NOT REORDER ===
@@ -69,6 +70,7 @@ typedef struct {
     // Power management (V2 addition)
     uint8_t wifi_power_save_enabled;     // Enable WiFi modem sleep when display sleeping
     uint8_t cpu_freq_scaling_enabled;    // Enable CPU frequency reduction when idle
+    uint16_t sleep_poll_stopped_sec;     // Poll interval (sec) when sleeping AND zone stopped (0=use default 30s)
 } rk_cfg_t;
 
 static inline bool rk_cfg_is_valid(const rk_cfg_t *cfg) {
@@ -97,6 +99,7 @@ static inline void rk_cfg_set_display_defaults(rk_cfg_t *cfg) {
     cfg->sleep_battery_timeout_sec = RK_DEFAULT_SLEEP_BATTERY_TIMEOUT_SEC;
     cfg->wifi_power_save_enabled = RK_DEFAULT_WIFI_POWER_SAVE_ENABLED;
     cfg->cpu_freq_scaling_enabled = RK_DEFAULT_CPU_FREQ_SCALING_ENABLED;
+    cfg->sleep_poll_stopped_sec = RK_DEFAULT_SLEEP_POLL_STOPPED_SEC;
 }
 
 // Get effective rotation based on charging state
@@ -138,4 +141,4 @@ static inline uint16_t rk_cfg_get_sleep_timeout(const rk_cfg_t *cfg, bool is_cha
     return cfg->sleep_battery_enabled ? cfg->sleep_battery_timeout_sec : 0;
 }
 
-_Static_assert(sizeof(rk_cfg_t) == 362, "rk_cfg_t size changed - update RK_CFG_V1_SIZE if needed");
+_Static_assert(sizeof(rk_cfg_t) == 364, "rk_cfg_t size changed - update RK_CFG_V1_SIZE if needed");

@@ -35,6 +35,7 @@ static void check_charging_state_change(void);
 #define POLL_DELAY_AWAKE_CHARGING_MS 2000   // 2 seconds when charging and display on
 #define POLL_DELAY_AWAKE_BATTERY_MS 5000   // 5 seconds on battery to save power
 #define POLL_DELAY_SLEEPING_MS 30000       // 30 seconds when display is sleeping
+#define POLL_DELAY_SLEEPING_STOPPED_MS 60000  // 60 seconds when sleeping AND zone stopped
 #define POLL_DELAY_BRIDGE_ERROR_MS 10000   // 10 seconds when bridge unreachable
 
 // Special zone picker options (not actual zones)
@@ -82,6 +83,7 @@ static int s_last_known_volume_max = 0;    // Cached volume max for clamping
 static bool s_bridge_verified = false;  // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 static bool s_last_charging_state = true;  // Track charging state for config reapply
+static bool s_last_is_playing = false;     // Track play state for extended sleep polling
 #define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
@@ -279,7 +281,15 @@ static void wait_for_poll_interval(void) {
     if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
         delay_ms = POLL_DELAY_BRIDGE_ERROR_MS;  // Slow down when bridge unreachable
     } else if (platform_display_is_sleeping()) {
-        delay_ms = POLL_DELAY_SLEEPING_MS;
+        // When sleeping AND zone not playing, use extended poll interval from config
+        lock_state();
+        uint16_t sleep_poll_stopped = s_state.cfg.sleep_poll_stopped_sec;
+        unlock_state();
+        if (!s_last_is_playing && sleep_poll_stopped > 0) {
+            delay_ms = sleep_poll_stopped * 1000;  // Config is in seconds
+        } else {
+            delay_ms = POLL_DELAY_SLEEPING_MS;  // Default 30s when playing
+        }
     } else if (platform_battery_is_charging()) {
         delay_ms = POLL_DELAY_AWAKE_CHARGING_MS;  // Fast polling when plugged in
     } else {
@@ -686,6 +696,11 @@ static void roon_poll_thread(void *arg) {
         }
         bool ok = fetch_now_playing(&state);
         post_ui_status(ok);
+
+        // Track play state for extended sleep polling
+        if (ok) {
+            s_last_is_playing = state.is_playing;
+        }
 
         // Check for config changes and charging state (only when bridge is responding)
         if (ok) {
@@ -1376,17 +1391,23 @@ static bool fetch_knob_config(void) {
     if (cJSON_IsBool(cpu_freq)) {
         cfg->cpu_freq_scaling_enabled = cJSON_IsTrue(cpu_freq) ? 1 : 0;
     }
+    cJSON *sleep_poll = cJSON_GetObjectItem(config_obj, "sleep_poll_stopped_sec");
+    if (cJSON_IsNumber(sleep_poll)) {
+        cfg->sleep_poll_stopped_sec = (uint16_t)sleep_poll->valueint;
+    }
 
     // Log parsed config values
-    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds power=wifi:%d,cpu:%d",
+    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds",
          cfg->rotation_charging, cfg->rotation_not_charging,
          cfg->art_mode_charging_enabled, cfg->art_mode_charging_timeout_sec,
          cfg->art_mode_battery_enabled, cfg->art_mode_battery_timeout_sec,
          cfg->dim_charging_enabled, cfg->dim_charging_timeout_sec,
          cfg->dim_battery_enabled, cfg->dim_battery_timeout_sec,
          cfg->sleep_charging_enabled, cfg->sleep_charging_timeout_sec,
-         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec,
-         cfg->wifi_power_save_enabled, cfg->cpu_freq_scaling_enabled);
+         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec);
+    LOGI("Power config: wifi_ps=%d cpu_scale=%d sleep_poll_stopped=%ds",
+         cfg->wifi_power_save_enabled, cfg->cpu_freq_scaling_enabled,
+         cfg->sleep_poll_stopped_sec);
 
     // Make a copy for apply and save
     rk_cfg_t cfg_copy = *cfg;
