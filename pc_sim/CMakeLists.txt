@@ -14,7 +14,15 @@ FetchContent_Declare(
   GIT_TAG v9.1.0
   GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(lvgl)
+# cJSON requires old CMake policy - set minimum version to allow it
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+FetchContent_Declare(
+  cjson
+  GIT_REPOSITORY https://github.com/DaveGamble/cJSON.git
+  GIT_TAG v1.7.18
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(lvgl cjson)
 
 find_package(CURL REQUIRED)
 find_package(SDL2 REQUIRED)
@@ -45,6 +53,7 @@ target_include_directories(roon_knob_pc PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/components/net_client
   ${CMAKE_CURRENT_SOURCE_DIR}/../common
   ${CMAKE_CURRENT_SOURCE_DIR}/../include
+  ${cjson_SOURCE_DIR}
 )
 
 target_compile_definitions(roon_knob_pc PRIVATE TARGET_PC=1 LV_CONF_INCLUDE_SIMPLE)
@@ -52,6 +61,6 @@ target_compile_definitions(roon_knob_pc PRIVATE TARGET_PC=1 LV_CONF_INCLUDE_SIMP
 target_link_libraries(lvgl PUBLIC SDL2::SDL2)
 target_include_directories(lvgl PUBLIC ${SDL2_INCLUDE_DIRS})
 
-target_link_libraries(roon_knob_pc PRIVATE CURL::libcurl lvgl SDL2::SDL2 Threads::Threads)
+target_link_libraries(roon_knob_pc PRIVATE CURL::libcurl lvgl cjson SDL2::SDL2 Threads::Threads)
 
 install(TARGETS roon_knob_pc DESTINATION bin)
