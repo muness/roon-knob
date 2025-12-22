@@ -49,7 +49,7 @@
 
 ## Related Docs
 
-- Pin assignments: [HARDWARE_PINS.md](../HARDWARE_PINS.md)
+- Pin assignments: [HARDWARE_PINS.md](HARDWARE_PINS.md)
 - Touch controller: [cst816d.md](cst816d.md)
 - Rotary encoder: [encoder.md](encoder.md)
-- Display colors: [COLORTEST_HELLOWORLD.md](../COLORTEST_HELLOWORLD.md)
+- Display colors: [COLORTEST_HELLOWORLD.md](COLORTEST_HELLOWORLD.md)

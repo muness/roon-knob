@@ -1,8 +1,28 @@
 # Claude Agent Instructions
 
-See [PROJECT_AIMS](./docs/PROJECT_AIMS.md) for this project's aims. See [decision_records](./docs/decision_records/) for decisions we've made along the way.
+See [PROJECT_AIMS](./docs/meta/PROJECT_AIMS.md) for this project's aims. See [decisions](./docs/meta/decisions/) for decisions we've made along the way.
 
 See [AGENTS.md](AGENTS.md) for complete instructions on working with this project.
+
+## Documentation by Area
+
+| Area | Path | Description |
+|------|------|-------------|
+| **Usage** | `docs/usage/` | End-user guides: WiFi setup, OTA updates, Bluetooth mode |
+| **Dev** | `docs/dev/` | Developer reference: build, boot sequence, FreeRTOS, NVS storage |
+| **ESP** | `docs/esp/` | Hardware specifics: display, touch, encoder, battery, BLE HID |
+| **Meta** | `docs/meta/` | Project aims, roadmap ideas, architectural decisions |
+| **Howto** | `docs/howto/` | Tutorials: porting to other boards, reusing patterns |
+
+**When working on:**
+- **UI changes** → `docs/esp/DISPLAY.md`, `docs/esp/TOUCH_INPUT.md`, `docs/esp/FONTS.md`
+- **Input handling** → `docs/esp/ROTARY_ENCODER.md`, `docs/esp/SWIPE_GESTURES.md`
+- **WiFi/networking** → `docs/usage/WIFI_PROVISIONING.md`, `docs/dev/NVS_STORAGE.md`
+- **Bluetooth** → `docs/esp/BLE_HID.md`, `docs/usage/DUAL_CHIP_ARCHITECTURE.md`
+- **Build/config** → `docs/dev/KCONFIG.md`, `docs/dev/DEVELOPMENT.md`
+- **Architecture decisions** → `docs/meta/decisions/`
+
+**Keeping docs current:** When you learn something new about the hardware (pin mappings, component behavior, timing), update the relevant file in `docs/esp/hw-reference/`.
 
 ## Key Points
 
@@ -128,7 +148,7 @@ rm sdkconfig
 idf.py build
 ```
 `idf.py reconfigure` and `idf.py fullclean` do NOT regenerate sdkconfig from defaults.
-See [docs/KCONFIG.md](docs/KCONFIG.md) for details.
+See [docs/dev/KCONFIG.md](docs/dev/KCONFIG.md) for details.
 
 ### ESP-IDF Version
 This project uses ESP-IDF v5.4.3. The local install is symlinked at `~/esp/esp-idf`.

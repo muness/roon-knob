@@ -141,7 +141,7 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
 }
 ```
 
-See [COLORTEST_HELLOWORLD.md](references/COLORTEST_HELLOWORLD.md) for details.
+See [COLORTEST_HELLOWORLD.md](../esp/hw-reference/COLORTEST_HELLOWORLD.md) for details.
 
 **Initialization sequence:**
 1. Initialize SPI bus

@@ -2,7 +2,7 @@
 
 > **Historical Document** - This was the original design. The implementation diverged:
 > - Zone filtering was removed (too buggy, will redesign later)
-> - Rotation limited to 0°/180° only (see [DECISION_ROTATION.md](DECISION_ROTATION.md))
+> - Rotation limited to 0°/180° only (see [DECISION_ROTATION.md](2025-12-20_DECISION_ROTATION.md))
 > - Timeout defaults differ from below
 >
 > For current behavior, see the code: `roon-extension/knobs.js`, `common/rk_cfg.h`
