@@ -1,7 +1,7 @@
 # BLE HID (Bluetooth Media Control)
 
 > **Note**: This project uses the dedicated ESP32 chip for Bluetooth instead of S3 BLE.
-> See [DUAL_CHIP_ARCHITECTURE.md](DUAL_CHIP_ARCHITECTURE.md) for the current implementation.
+> See [DUAL_CHIP_ARCHITECTURE.md](../usage/DUAL_CHIP_ARCHITECTURE.md) for the current implementation.
 > The documentation below is preserved for developers who want to implement BLE HID on ESP32-S3.
 
 ---

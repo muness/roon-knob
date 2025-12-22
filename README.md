@@ -15,7 +15,7 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ## Quick Start
 
-> **New to Docker or ESP32 devices?** See the [Getting Started from Scratch](docs/GETTING_STARTED.md) guide for detailed step-by-step instructions.
+> **New to Docker or ESP32 devices?** See the [Getting Started from Scratch](docs/usage/GETTING_STARTED.md) guide for detailed step-by-step instructions.
 
 ### 1. Flash the Firmware (one-time)
 
@@ -130,7 +130,7 @@ If mDNS doesn't work on your network, enter the extension URL manually in Settin
 
 ## Development
 
-See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for building firmware, running the PC simulator, and contributing.
+See [DEVELOPMENT.md](docs/dev/DEVELOPMENT.md) for building firmware, running the PC simulator, and contributing.
 
 ## Support
 

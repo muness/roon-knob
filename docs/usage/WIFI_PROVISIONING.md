@@ -238,7 +238,7 @@ typedef struct {
 } rk_cfg_t;
 ```
 
-See [NVS_STORAGE.md](NVS_STORAGE.md) for details on persistence.
+See [NVS_STORAGE.md](../dev/NVS_STORAGE.md) for details on persistence.
 
 ## Kconfig Options
 

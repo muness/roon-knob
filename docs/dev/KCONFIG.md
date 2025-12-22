@@ -133,7 +133,7 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 ```
 
-Uses custom partition layout for dual-OTA support. See [OTA_UPDATES.md](OTA_UPDATES.md) for partition details.
+Uses custom partition layout for dual-OTA support. See [OTA_UPDATES.md](../usage/OTA_UPDATES.md) for partition details.
 
 ## Changing Options
 

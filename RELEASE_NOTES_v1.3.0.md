@@ -42,18 +42,18 @@ The chips communicate via a 1Mbps UART protocol with CRC verification and heartb
 
 1. Flash ESP32-S3 firmware (normal orientation)
 2. Flip USB-C connector, flash ESP32 firmware from `esp32_bt/`
-3. See `docs/DUAL_CHIP_ARCHITECTURE.md` for detailed instructions
+3. See `docs/usage/DUAL_CHIP_ARCHITECTURE.md` for detailed instructions
 
 ## Documentation
 
 New and updated documentation:
-- `docs/DUAL_CHIP_ARCHITECTURE.md` - Complete architecture guide
-- `docs/BLE_HID.md` - BLE HID implementation details
-- `docs/BOOT_SEQUENCE.md` - System initialization
-- `docs/FREERTOS_PATTERNS.md` - FreeRTOS usage patterns
-- `docs/KCONFIG.md` - Configuration options
-- `docs/NVS_STORAGE.md` - Non-volatile storage
-- `docs/WIFI_PROVISIONING.md` - WiFi setup flow
+- `docs/usage/DUAL_CHIP_ARCHITECTURE.md` - Complete architecture guide
+- `docs/esp/BLE_HID.md` - BLE HID implementation details
+- `docs/dev/BOOT_SEQUENCE.md` - System initialization
+- `docs/dev/FREERTOS_PATTERNS.md` - FreeRTOS usage patterns
+- `docs/dev/KCONFIG.md` - Configuration options
+- `docs/dev/NVS_STORAGE.md` - Non-volatile storage
+- `docs/usage/WIFI_PROVISIONING.md` - WiFi setup flow
 
 ## Known Limitations
 
