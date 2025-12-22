@@ -518,6 +518,20 @@ void wifi_mgr_stop_ap(void) {
     // The STA_START event will trigger connect_now()
 }
 
+void wifi_mgr_set_power_save(bool enable) {
+    if (!s_started || s_ap_mode) {
+        return;  // Only change power save in STA mode
+    }
+
+    wifi_ps_type_t ps_type = enable ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE;
+    esp_err_t err = esp_wifi_set_ps(ps_type);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi power save %s", enable ? "enabled (modem sleep)" : "disabled");
+    } else {
+        ESP_LOGW(TAG, "Failed to set WiFi power save: %s", esp_err_to_name(err));
+    }
+}
+
 __attribute__((weak)) void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     (void)evt;
     (void)ip_opt;

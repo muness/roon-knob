@@ -264,6 +264,9 @@
       const dimBat = config.dim_battery || { enabled: true, timeout_sec: 30 };
       const slpChg = config.sleep_charging || { enabled: false, timeout_sec: 0 };
       const slpBat = config.sleep_battery || { enabled: true, timeout_sec: 60 };
+      const wifiPs = config.wifi_power_save_enabled ?? false;
+      const cpuScale = config.cpu_freq_scaling_enabled ?? false;
+      const sleepPollStopped = config.sleep_poll_stopped_sec ?? 60;
 
       function rotSelect(name, val) {
         return `<select name="${name}">
@@ -338,6 +341,42 @@
             </table>
           </div>
 
+          <div class="form-section">
+            <h3>Power Management (Experimental)</h3>
+            <p class="hint" style="margin-bottom:0.8rem;">These features may improve battery life but are disabled by default until proven stable.</p>
+            <table style="width:100%;border-collapse:collapse;">
+              <tbody>
+                <tr>
+                  <td style="padding:0.5rem 0.3rem;width:60%;">
+                    <strong>WiFi Modem Sleep</strong>
+                    <div class="hint">Power down radio between polls when sleeping (~50mA savings)</div>
+                  </td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <label><input type="checkbox" name="wifi_ps" ${wifiPs ? 'checked' : ''}> Enabled</label>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.3rem;">
+                    <strong>CPU Frequency Scaling</strong>
+                    <div class="hint">Reduce CPU speed when sleeping (240→80MHz, ~20mA savings)</div>
+                  </td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <label><input type="checkbox" name="cpu_scale" ${cpuScale ? 'checked' : ''}> Enabled</label>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.3rem;">
+                    <strong>Extended Sleep Polling</strong>
+                    <div class="hint">Poll interval (sec) when sleeping AND zone stopped (0 = use 30s)</div>
+                  </td>
+                  <td style="text-align:center;padding:0.5rem;">
+                    <input type="number" name="sleep_poll_stopped" value="${sleepPollStopped}" min="0" max="300" style="width:60px;"> sec
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" onclick="closeConfigModal()">Cancel</button>
             <button type="submit" class="btn btn-primary">Save</button>
@@ -384,6 +423,10 @@
           enabled: chk('slp_bat_on'),
           timeout_sec: num('slp_bat_sec'),
         },
+        // Power management
+        wifi_power_save_enabled: chk('wifi_ps'),
+        cpu_freq_scaling_enabled: chk('cpu_scale'),
+        sleep_poll_stopped_sec: num('sleep_poll_stopped'),
       };
 
       console.log('Saving config:', config);

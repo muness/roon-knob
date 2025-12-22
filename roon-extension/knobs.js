@@ -24,6 +24,10 @@ const DEFAULT_CONFIG = {
   art_mode_battery: { enabled: true, timeout_sec: 30 },
   dim_battery: { enabled: true, timeout_sec: 30 },
   sleep_battery: { enabled: true, timeout_sec: 60 },
+  // Power management (disabled by default until proven stable)
+  wifi_power_save_enabled: false,
+  cpu_freq_scaling_enabled: false,
+  sleep_poll_stopped_sec: 60,  // Poll interval when sleeping AND zone stopped (0=30s default)
 };
 
 function computeSha(config) {
@@ -134,6 +138,16 @@ function createKnobsStore(opts = {}) {
     }
     if (updates.sleep_battery) {
       newConfig.sleep_battery = { ...newConfig.sleep_battery, ...updates.sleep_battery };
+    }
+    // Power management
+    if (updates.wifi_power_save_enabled !== undefined) {
+      newConfig.wifi_power_save_enabled = updates.wifi_power_save_enabled;
+    }
+    if (updates.cpu_freq_scaling_enabled !== undefined) {
+      newConfig.cpu_freq_scaling_enabled = updates.cpu_freq_scaling_enabled;
+    }
+    if (updates.sleep_poll_stopped_sec !== undefined) {
+      newConfig.sleep_poll_stopped_sec = updates.sleep_poll_stopped_sec;
     }
 
     knob.config = newConfig;

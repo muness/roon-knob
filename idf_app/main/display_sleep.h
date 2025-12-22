@@ -87,6 +87,13 @@ void display_process_pending(void);
  */
 void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging);
 
+/**
+ * @brief Update power management settings from config
+ * Call this when config changes to update WiFi power save and CPU scaling settings
+ * @param cfg Pointer to config
+ */
+void display_update_power_settings(const rk_cfg_t *cfg);
+
 #ifdef __cplusplus
 }
 #endif
