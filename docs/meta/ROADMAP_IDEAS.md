@@ -6,7 +6,7 @@ User feedback and feature ideas collected from the Roon community. See [PROJECT_
 
 ## Current User Feedback Summary
 
-As of December 20 2025, I have received feedback through the Roon Labs community forum.
+As of December 22 2025, I have received feedback through the Roon Labs community forum.
 
 ### Setup & First-Run Issues
 
@@ -18,6 +18,8 @@ As of December 20 2025, I have received feedback through the Roon Labs community
 
 4. **Setup complexity** (gTunes) — Multiple separate experiences: captive portal, bridge setup, Roon authorization. Waveshare's on-device WiFi setup "took seconds." *Question: Why URLs instead of IP+port? Why not configure on device?*
 
+21. **Bridge IP configuration in knob settings** (Frank_M) — When mDNS fails, manually setting bridge IP is difficult. Suggestion: assume same subnet (first 3 octets) and provide way to set just the last octet in knob settings. [#47](https://github.com/muness/roon-knob/issues/47)
+
 ### Display & Configuration Requests
 
 5. **180° display rotation** (Foo_Bar) — USB cable comes from bottom; would prefer top. For desk placement with USB power.
@@ -25,6 +27,12 @@ As of December 20 2025, I have received feedback through the Roon Labs community
 6. **Always-on display** (Foo_Bar) — At least while music playing. Battery not a concern for USB-powered setups.
 
 7. **Configurable dim/sleep timing** — Related to always-on request.
+
+18. **Track progress circle not updating** (Frank_M) — Inner circle (track progress indicator) not updating during playback. Needs investigation. [#44](https://github.com/muness/roon-knob/issues/44)
+
+19. **Display off when zone not playing** (Foo_Bar) — Like RoPieee: display turns off when zone isn't playing. Good visual signal that playback is stopped, saves power. Could be sub-option under Always On mode. [#45](https://github.com/muness/roon-knob/issues/45)
+
+20. **Volume display format option** (Frank_M) — Some devices use 0-96 scale where 96=0dB, making "dB" suffix confusing. Request to show volume as plain number (e.g., "40") instead of "40dB". [#46](https://github.com/muness/roon-knob/issues/46)
 
 ### Touch UX Issues
 
@@ -36,15 +44,15 @@ As of December 20 2025, I have received feedback through the Roon Labs community
 
 11. **Settings icon needed** (gTunes) — No obvious way to access settings.
 
+12. **Swipe gestures don't adapt to rotation** (Foo_Bar) — After 180° rotation, swipe-up (to access Art Mode) becomes swipe-down. Gesture coordinates should transform with rotation setting. [#43](https://github.com/muness/roon-knob/issues/43)
+
 ### Multi-Knob & Zone Features
 
-12. **Multiple knobs work** (Trebz) — Confirmed working. Each knob sees all zones.
+13. **Multiple knobs work** (Trebz) — Confirmed working. Each knob sees all zones.
 
-13. **Zone filtering per knob** — Allow deselecting zones so each knob controls a subset.
+14. **Zone filtering per knob** — Allow deselecting zones so each knob controls a subset.
 
 ### Architecture Ideas
-
-14. **Device-as-extension** (gTunes) — Eliminate bridge entirely; knob talks directly to Roon. *Trade-off: battery life. Counter-proposal: "caffeine mode" for always-on vs deep-sleep.*
 
 15. **On-device bridge config** (gTunes) — Device discovers bridge, if not found, prompts for IP+port. Pre-fill with device's first 3 IP octets.
 
@@ -75,7 +83,3 @@ Based on Aim 1 (force-multiplier through reduced friction) and Aim 4 (margin pro
 ### Evaluate with Users: Configuration Options
 
 - [ ] **Zone filtering per knob** — Nice-to-have, needs UI design
-
-### Park for now
-
-- [-] **Device-as-extension** — I don't think this is even feasible on an embedded device, not a fit for my desires for controllers.
