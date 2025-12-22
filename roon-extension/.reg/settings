@@ -11,13 +11,13 @@ NAME=roon-extension-knob
 FRIENDLY_NAME="Roon Knob Bridge"
 
 # Set the DESCRIPTION variable to a single line string that summarizes the function of your extension
-DESCRIPTION="Local bridge that exposes the HTTP API the Roon Knob firmware and simulator poll."
+DESCRIPTION="Hardware volume knob for Roon with ESP32-S3 touchscreen displaying now-playing artwork and track info."
 
 # Set the VERSION variable to the version number of your extension
-VERSION=0.1.0
+VERSION=1.4.1
 
 # Set the EMAIL variable to the address that users can use for support questions
-EMAIL=support@example.com
+EMAIL=muness@gmail.com
 
 # Set the WEBSITE variable to the location where more information about your extension can be found
 WEBSITE=https://github.com/muness/roon-knob

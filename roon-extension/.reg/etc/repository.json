@@ -1,9 +1,9 @@
 [{
-    "display_name": "Test",
+    "display_name": "Remote Control",
     "extensions": [{
         "author": "Muness",
-        "display_name": "Roon Knob Bridge",
-        "description": "Local bridge that exposes the HTTP API the Roon Knob firmware and simulator poll.",
+        "display_name": "Roon Knob",
+        "description": "Hardware volume knob for Roon with ESP32-S3 touchscreen displaying now-playing artwork and track info.",
         "image": {
             "repo": "muness/roon-extension-knob",
             "tags": {
@@ -12,8 +12,14 @@
                 "arm64": "latest"
             },
             "binds": [
-                "/home/node/config.json"
-            ]
+                "/home/node/app/data/config.json"
+            ],
+            "options": {
+                "env": {
+                    "PORT": "8088:HTTP Port",
+                    "TZ": ":Time Zone"
+                }
+            }
         }
     }]
 }]

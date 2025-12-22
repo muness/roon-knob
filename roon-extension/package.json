@@ -1,5 +1,5 @@
 {
-  "name": "roon-knob-bridge",
+  "name": "roon-extension-knob",
   "version": "1.3.1",
   "main": "app.js",
   "scripts": {
