@@ -319,12 +319,24 @@ jobs:
   deploy-pages:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
-    # TODO: Remove PR condition after testing
-    if: github.ref == 'refs/heads/master' || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download ESP32-S3 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: esp32s3-firmware
+          path: esp32s3-artifacts
+
+      - name: Download ESP32 BT firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: esp32bt-firmware
+          path: esp32bt-artifacts
 
       - name: Prepare gh-pages content
         run: |
@@ -332,6 +344,9 @@ jobs:
           cp roon-extension/public/index.html gh-pages-build/
           cp roon-extension/public/flash.html gh-pages-build/
           cp roon-extension/public/manifest-*.json gh-pages-build/
+          # Copy merged binaries for web flashing (same-origin, no CORS issues)
+          cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/
+          cp esp32bt-artifacts/esp32_bt_merged.bin gh-pages-build/
           echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
 
