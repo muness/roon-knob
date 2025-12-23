@@ -283,7 +283,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         stop_wifi_msg_alternation();
         // Show setup instructions in main display area (line2 is top, line1 is bottom)
         ui_update("roon-knob-setup", "Connect to WiFi:", false, 0, 0, 100, 0, 0);
-        ui_set_zone_name("Tap for Bluetooth");  // Offer Bluetooth as alternative to WiFi setup
+        ui_set_zone_name("WiFi Setup");
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
         break;
@@ -485,16 +485,9 @@ void app_main(void) {
     app_entry();
 
     // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
-    // Skip WiFi if starting in Bluetooth mode
-    // NOTE: BT mode setup is handled via mode_change_callback triggered by app_entry()
-    // calling controller_mode_set(). Don't duplicate BT activation here.
-    if (controller_mode_get() != CONTROLLER_MODE_BLUETOOTH) {
-        ESP_LOGI(TAG, "Starting WiFi...");
-        wifi_mgr_start();
-    } else {
-        ESP_LOGI(TAG, "Starting in Bluetooth mode (setup via callback)");
-        // BT activation already sent via mode_change_callback from app_entry()
-    }
+    // Always start WiFi - we always boot into Roon mode now
+    ESP_LOGI(TAG, "Starting WiFi...");
+    wifi_mgr_start();
 
     ESP_LOGI(TAG, "Initialization complete");
 }
