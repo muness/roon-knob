@@ -109,8 +109,7 @@ static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(void);
 static void roon_poll_thread(void *arg);
-static bool host_is_numeric_ip(const char *url);
-static bool host_is_numeric_ip(const char *url);
+static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
 static void post_ui_update(const struct now_playing_state *state);
 static void post_ui_status(bool online);
@@ -151,33 +150,15 @@ static void ui_update_cb(void *arg) {
     free(state);
 }
 
-static bool host_is_numeric_ip(const char *url) {
-    if (!url || !url[0]) {
-        return false;
-    }
+static bool host_is_valid(const char *url) {
+    // Accept any URL with a non-empty hostname (IP or mDNS name like rooExtend.localdomain)
+    if (!url || !url[0]) return false;
     const char *host = url;
     const char *scheme = strstr(url, "://");
-    if (scheme) {
-        host = scheme + 3;
-    }
+    if (scheme) host = scheme + 3;
     const char *end = host;
-    while (*end && *end != ':' && *end != '/' && *end != '\0') {
-        ++end;
-    }
-    if (end == host) {
-        return false;
-    }
-    bool has_digit = false;
-    for (const char *p = host; p < end; ++p) {
-        if (*p == '.') {
-            continue;
-        }
-        if (!isdigit((unsigned char)*p)) {
-            return false;
-        }
-        has_digit = true;
-    }
-    return has_digit;
+    while (*end && *end != ':' && *end != '/') ++end;
+    return (end > host);
 }
 
 static void ui_status_cb(void *arg) {
@@ -328,8 +309,8 @@ static void maybe_update_bridge_base(void) {
     char discovered[sizeof(s_state.cfg.bridge_base)];
     bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
 
-    if (mdns_ok && host_is_numeric_ip(discovered)) {
-        // mDNS found a bridge - update if different
+    if (mdns_ok && host_is_valid(discovered)) {
+        // mDNS found a bridge (IP or hostname) - update if different
         s_mdns_fail_count = 0;  // Reset failure counter on success
         lock_state();
         bool is_new = (strcmp(s_state.cfg.bridge_base, discovered) != 0);
@@ -347,12 +328,7 @@ static void maybe_update_bridge_base(void) {
         return;
     }
 
-    // mDNS failed or returned non-numeric host
-    if (mdns_ok) {
-        LOGW("mDNS returned non-numeric host: %s (ignoring)", discovered);
-    }
-
-    // If no bridge is configured yet, check for compile-time default
+    // mDNS failed - check for compile-time default or increment fail counter
     lock_state();
     bool need_default = (s_state.cfg.bridge_base[0] == '\0');
     unlock_state();
