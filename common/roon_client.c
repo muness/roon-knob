@@ -957,16 +957,11 @@ void roon_client_handle_input(ui_input_event_t event) {
                 count++;
             }
         }
-        /* Add Bluetooth option if hardware is available */
-        if (controller_mode_bluetooth_available() && count < MAX_ZONES + 3) {
-            names[count] = bt_name;
-            ids[count] = bt_id;
-            /* Select Bluetooth if currently in BT mode */
-            if (controller_mode_is_bluetooth_zone(s_state.cfg.zone_id)) {
-                selected = count;
-            }
-            count++;
-        }
+        /* Bluetooth option disabled - UART comms unreliable (see HANDSHAKE_FAILURE_LESSONS.md)
+         * Access via Settings menu instead (marked as alpha)
+         */
+        (void)bt_name;
+        (void)bt_id;
         unlock_state();
 
         /* Add Settings as last option */

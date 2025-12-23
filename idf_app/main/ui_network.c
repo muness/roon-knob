@@ -368,7 +368,7 @@ static void ensure_panel(void) {
     create_button(s_widgets.panel, "Check for Update", check_update_cb);
     create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
     create_button(s_widgets.panel, "Factory Reset", factory_reset_cb);
-    create_button(s_widgets.panel, "Bluetooth Mode", bluetooth_mode_cb);
+    create_button(s_widgets.panel, "Bluetooth Mode *alpha", bluetooth_mode_cb);
     create_button(s_widgets.panel, "Back", hide_panel_cb);
 }
 
