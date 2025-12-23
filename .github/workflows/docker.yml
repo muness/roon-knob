@@ -57,14 +57,14 @@ jobs:
       - name: Create merged flash image for web flashing
         run: |
           pip install esptool
-          esptool.py --chip esp32s3 merge_bin \
-            -o idf_app/build/roon_knob_merged.bin \
-            --flash_mode dio --flash_freq 80m --flash_size 8MB \
+          esptool --chip esp32s3 merge-bin \
+            -o roon_knob_merged.bin \
+            --flash-mode dio --flash-freq 80m --flash-size 8MB \
             0x0 idf_app/build/bootloader/bootloader.bin \
             0x8000 idf_app/build/partition_table/partition-table.bin \
             0xd000 idf_app/build/ota_data_initial.bin \
             0x10000 idf_app/build/roon_knob.bin
-          ls -la idf_app/build/*.bin
+          ls -la *.bin
 
       - name: Upload ESP32-S3 artifact
         uses: actions/upload-artifact@v4
@@ -72,7 +72,7 @@ jobs:
           name: esp32s3-firmware
           path: |
             idf_app/build/roon_knob.bin
-            idf_app/build/roon_knob_merged.bin
+            roon_knob_merged.bin
             roon-extension/firmware/version.json
           retention-days: 30
 
@@ -92,13 +92,13 @@ jobs:
       - name: Create merged flash image for web flashing
         run: |
           pip install esptool
-          esptool.py --chip esp32 merge_bin \
-            -o esp32_bt/build/esp32_bt_merged.bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+          esptool --chip esp32 merge-bin \
+            -o esp32_bt_merged.bin \
+            --flash-mode dio --flash-freq 40m --flash-size 4MB \
             0x1000 esp32_bt/build/bootloader/bootloader.bin \
             0x8000 esp32_bt/build/partition_table/partition-table.bin \
             0x10000 esp32_bt/build/esp32_bt.bin
-          ls -la esp32_bt/build/*.bin
+          ls -la *.bin
 
       - name: Upload ESP32 BT artifact
         uses: actions/upload-artifact@v4
@@ -106,7 +106,7 @@ jobs:
           name: esp32bt-firmware
           path: |
             esp32_bt/build/esp32_bt.bin
-            esp32_bt/build/esp32_bt_merged.bin
+            esp32_bt_merged.bin
           retention-days: 30
 
   release:
@@ -174,10 +174,10 @@ jobs:
           mkdir -p release-assets
           # ESP32-S3 (main controller) - app binary for OTA, merged for web flashing
           cp esp32s3-artifacts/idf_app/build/roon_knob.bin release-assets/
-          cp esp32s3-artifacts/idf_app/build/roon_knob_merged.bin release-assets/
+          cp esp32s3-artifacts/roon_knob_merged.bin release-assets/
           # ESP32 (Bluetooth chip) - app binary for OTA, merged for web flashing
           cp esp32bt-artifacts/esp32_bt/build/esp32_bt.bin release-assets/
-          cp esp32bt-artifacts/esp32_bt/build/esp32_bt_merged.bin release-assets/
+          cp esp32bt-artifacts/esp32_bt_merged.bin release-assets/
           ls -la release-assets/
 
       - name: Build release body
@@ -266,11 +266,11 @@ jobs:
           # Flatten artifact structure to expected locations
           # ESP32-S3 (main controller) - app binary for OTA, merged for web flashing
           cp firmware-artifact/idf_app/build/roon_knob.bin roon-extension/firmware/
-          cp firmware-artifact/idf_app/build/roon_knob_merged.bin roon-extension/firmware/
+          cp firmware-artifact/roon_knob_merged.bin roon-extension/firmware/
           cp firmware-artifact/roon-extension/firmware/version.json roon-extension/firmware/
           # ESP32 (Bluetooth chip) - app binary for OTA, merged for web flashing
           cp esp32bt-artifact/esp32_bt/build/esp32_bt.bin roon-extension/firmware/
-          cp esp32bt-artifact/esp32_bt/build/esp32_bt_merged.bin roon-extension/firmware/
+          cp esp32bt-artifact/esp32_bt_merged.bin roon-extension/firmware/
           echo "Firmware prepared:"
           ls -la roon-extension/firmware/
           cat roon-extension/firmware/version.json
