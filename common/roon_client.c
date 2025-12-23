@@ -88,7 +88,9 @@ static bool s_last_is_playing = false;     // Track play state for extended slee
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
 #define BRIDGE_FAIL_THRESHOLD 5  // Show recovery info after this many consecutive failures
+#define MDNS_FAIL_THRESHOLD 10   // Show recovery info after this many mDNS failures (~30s)
 static int s_bridge_fail_count = 0;
+static int s_mdns_fail_count = 0;
 static char s_device_ip[16] = {0};  // Device IP for recovery messages
 
 static void lock_state(void) {
@@ -107,8 +109,7 @@ static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(void);
 static void roon_poll_thread(void *arg);
-static bool host_is_numeric_ip(const char *url);
-static bool host_is_numeric_ip(const char *url);
+static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
 static void post_ui_update(const struct now_playing_state *state);
 static void post_ui_status(bool online);
@@ -149,33 +150,15 @@ static void ui_update_cb(void *arg) {
     free(state);
 }
 
-static bool host_is_numeric_ip(const char *url) {
-    if (!url || !url[0]) {
-        return false;
-    }
+static bool host_is_valid(const char *url) {
+    // Accept any URL with a non-empty hostname (IP or mDNS name like rooExtend.localdomain)
+    if (!url || !url[0]) return false;
     const char *host = url;
     const char *scheme = strstr(url, "://");
-    if (scheme) {
-        host = scheme + 3;
-    }
+    if (scheme) host = scheme + 3;
     const char *end = host;
-    while (*end && *end != ':' && *end != '/' && *end != '\0') {
-        ++end;
-    }
-    if (end == host) {
-        return false;
-    }
-    bool has_digit = false;
-    for (const char *p = host; p < end; ++p) {
-        if (*p == '.') {
-            continue;
-        }
-        if (!isdigit((unsigned char)*p)) {
-            return false;
-        }
-        has_digit = true;
-    }
-    return has_digit;
+    while (*end && *end != ':' && *end != '/') ++end;
+    return (end > host);
 }
 
 static void ui_status_cb(void *arg) {
@@ -326,8 +309,9 @@ static void maybe_update_bridge_base(void) {
     char discovered[sizeof(s_state.cfg.bridge_base)];
     bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
 
-    if (mdns_ok && host_is_numeric_ip(discovered)) {
-        // mDNS found a bridge - update if different
+    if (mdns_ok && host_is_valid(discovered)) {
+        // mDNS found a bridge (IP or hostname) - update if different
+        s_mdns_fail_count = 0;  // Reset failure counter on success
         lock_state();
         bool is_new = (strcmp(s_state.cfg.bridge_base, discovered) != 0);
         if (is_new) {
@@ -344,12 +328,7 @@ static void maybe_update_bridge_base(void) {
         return;
     }
 
-    // mDNS failed or returned non-numeric host
-    if (mdns_ok) {
-        LOGW("mDNS returned non-numeric host: %s (ignoring)", discovered);
-    }
-
-    // If no bridge is configured yet, check for compile-time default
+    // mDNS failed - check for compile-time default or increment fail counter
     lock_state();
     bool need_default = (s_state.cfg.bridge_base[0] == '\0');
     unlock_state();
@@ -365,8 +344,12 @@ static void maybe_update_bridge_base(void) {
             // Don't save the fallback - let mDNS retry on next poll
             unlock_state();
         } else {
-            // No fallback configured - user needs to configure bridge manually
-            LOGW("mDNS discovery failed and no fallback configured - use Settings to configure bridge");
+            // No fallback configured - increment mDNS failure counter
+            if (s_mdns_fail_count < MDNS_FAIL_THRESHOLD) {
+                s_mdns_fail_count++;
+            }
+            LOGW("mDNS discovery failed (%d/%d) - use Settings to configure bridge",
+                 s_mdns_fail_count, MDNS_FAIL_THRESHOLD);
         }
     }
 }
@@ -762,10 +745,36 @@ static void roon_poll_thread(void *arg) {
 
             if (!has_bridge) {
                 // No bridge URL - searching via mDNS
-                // line1=main content (bottom), line2=header (top)
+                // Show retry progress or recovery info based on failure count
+                char line1_msg[64];
+                char line2_msg[64];
+                char status_msg[96];
                 ui_set_zone_name("");  // Clear zone name to avoid overlay
-                ui_update("via mDNS...", "Searching for Bridge", false, 0, 0, 100, 0, 0);
-                ui_set_network_status("Bridge: Searching via mDNS...");
+
+                if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
+                    // mDNS search exhausted - show recovery info
+                    if (s_device_ip[0]) {
+                        snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
+                        snprintf(line2_msg, sizeof(line2_msg), "Set Bridge URL at:");
+                        snprintf(status_msg, sizeof(status_msg),
+                                 "mDNS failed. Set Bridge at http://%s", s_device_ip);
+                    } else {
+                        snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
+                        snprintf(line2_msg, sizeof(line2_msg), "Bridge Not Found");
+                        snprintf(status_msg, sizeof(status_msg),
+                                 "mDNS failed. Configure Bridge in Settings.");
+                    }
+                    ui_update(line1_msg, line2_msg, false, 0, 0, 100, 0, 0);
+                    ui_set_network_status(status_msg);
+                } else {
+                    // Still searching - show progress
+                    snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+                             s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
+                    ui_update(line1_msg, "Searching for Bridge", false, 0, 0, 100, 0, 0);
+                    snprintf(status_msg, sizeof(status_msg), "mDNS: %d/%d",
+                             s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
+                    ui_set_network_status(status_msg);
+                }
             } else {
                 // Bridge URL configured but not responding - show retry progress
                 increment_bridge_fail_count();

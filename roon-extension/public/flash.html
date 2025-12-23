@@ -104,7 +104,7 @@
 </head>
 <body>
   <div class="container">
-    <a href="/admin" class="back-link">&larr; Back to Admin</a>
+    <a href="/" class="back-link" id="back-link">&larr; Back</a>
 
     <h1>Flash Roon Knob Firmware</h1>
     <p class="subtitle">Flash firmware directly from your browser - no tools to install</p>
@@ -193,6 +193,13 @@
       .then(r => r.json())
       .then(data => { document.getElementById('s3-version').textContent = `v${data.version}`; })
       .catch(() => { document.getElementById('s3-version').textContent = '(bundled)'; });
+
+    // Dynamic back link: / on hosted web, /admin on bridge
+    const backLink = document.getElementById('back-link');
+    if (location.hostname !== 'roon-knob.muness.com') {
+      backLink.href = '/admin';
+      backLink.textContent = '← Back to Admin';
+    }
   </script>
 </body>
 </html>
