@@ -84,6 +84,7 @@
     .steps { margin-top: 20px; }
     .steps ol { padding-left: 20px; }
     .steps li { margin-bottom: 8px; color: var(--text-muted); }
+    .port-tip { margin-top: 12px; color: var(--text-muted); font-size: 14px; }
     .steps code {
       background: var(--primary);
       padding: 2px 6px;
@@ -140,6 +141,7 @@
           <li>Click "Flash ESP32-S3" and select the serial port</li>
           <li>Wait ~30 seconds for flashing to complete</li>
         </ol>
+        <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> · Linux: <code>ttyACM0</code> · Windows: <code>COM*</code></p>
       </div>
     </div>
 
@@ -164,6 +166,7 @@
           <li>Click "Flash ESP32-BT" and select the serial port</li>
           <li>Wait ~20 seconds for flashing to complete</li>
         </ol>
+        <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbserial-*</code> · Linux: <code>ttyUSB0</code> · Windows: <code>COM*</code></p>
       </div>
     </div>
 
