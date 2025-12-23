@@ -1,0 +1,12 @@
+{
+  "name": "Roon Knob (Main Controller)",
+  "version": "latest",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [{
+      "path": "https://github.com/muness/roon-knob/releases/latest/download/roon_knob_merged.bin",
+      "offset": 0
+    }]
+  }]
+}

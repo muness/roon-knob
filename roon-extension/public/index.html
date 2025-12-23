@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roon Knob</title>
+  <style>
+    :root { --bg: #1a1a2e; --surface: #16213e; --accent: #e94560; --text: #eee; --text-muted: #888; --donate: #ffdd00; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; min-height: 100vh; }
+    .container { max-width: 600px; margin: 0 auto; text-align: center; }
+    h1 { color: var(--accent); margin-bottom: 10px; font-size: 2.5em; }
+    .tagline { color: var(--text-muted); margin-bottom: 30px; font-size: 1.2em; }
+    .buttons { margin-bottom: 30px; }
+    .btn { display: inline-block; padding: 14px 28px; border-radius: 8px; font-size: 1.1em; font-weight: 600; margin: 8px; text-decoration: none; }
+    .btn:hover { filter: brightness(1.1); }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-donate { background: var(--donate); color: #000; }
+    .card { background: var(--surface); border-radius: 12px; padding: 24px; margin-bottom: 20px; text-align: left; }
+    .card h2 { margin-top: 0; }
+    .card p { color: var(--text-muted); line-height: 1.6; margin-bottom: 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .links { margin-top: 30px; }
+    .links a { margin: 0 15px; color: var(--text-muted); }
+    .links a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Roon Knob</h1>
+    <p class="tagline">A physical volume controller for Roon</p>
+
+    <div class="buttons">
+      <a href="flash.html" class="btn btn-primary">Flash Firmware</a>
+      <a href="https://www.buymeacoffee.com/muness" class="btn btn-donate" target="_blank">Buy Me a Coffee</a>
+    </div>
+
+    <div class="card">
+      <h2>What is this?</h2>
+      <p>Roon Knob is a DIY hardware volume controller for <a href="https://roon.app" target="_blank">Roon</a>. Features a rotary encoder, touchscreen display, and WiFi connectivity to control your Roon zones.</p>
+    </div>
+
+    <div class="card">
+      <h2>Getting Started</h2>
+      <p>
+        <strong>1.</strong> Flash firmware using the <a href="flash.html">web flasher</a> (Chrome/Edge)<br>
+        <strong>2.</strong> Connect to WiFi via captive portal<br>
+        <strong>3.</strong> Run the bridge via Docker<br>
+        <strong>4.</strong> Authorize in Roon Settings &rarr; Extensions
+      </p>
+    </div>
+
+    <div class="links">
+      <a href="https://github.com/muness/roon-knob">GitHub</a>
+      <a href="https://github.com/muness/roon-knob/releases">Releases</a>
+      <a href="https://github.com/muness/roon-knob/blob/master/docs/usage/FIRMWARE_FLASHING.md">Docs</a>
+      <a href="https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363">Community</a>
+    </div>
+  </div>
+</body>
+</html>
