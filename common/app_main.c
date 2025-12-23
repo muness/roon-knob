@@ -19,14 +19,10 @@ void app_entry(void) {
         platform_storage_save(&cfg);
     }
 
-    // Check if we should start in Bluetooth mode (saved zone_id is Bluetooth)
-    if (controller_mode_is_bluetooth_zone(cfg.zone_id) && controller_mode_bluetooth_available()) {
-        LOGI("Saved zone is Bluetooth, starting in BLE mode");
-        controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
-        // Don't start Roon client in BLE mode, but still pass config for future use
-        ui_set_zone_name("Bluetooth");
-        roon_client_start(&cfg);
-        return;
+    // Always boot into Roon mode (Bluetooth mode is alpha and accessed via Settings)
+    // If saved zone was Bluetooth, clear it so user selects a Roon zone
+    if (controller_mode_is_bluetooth_zone(cfg.zone_id)) {
+        cfg.zone_id[0] = '\0';
     }
 
     // Note: mDNS init moved to after WiFi connects (in main_idf.c)
