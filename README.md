@@ -15,26 +15,23 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ## Quick Start
 
-> **New to Docker or ESP32 devices?** See the [Getting Started from Scratch](docs/usage/GETTING_STARTED.md) guide for detailed step-by-step instructions.
+> **New to this?** See the [Getting Started from Scratch](docs/usage/GETTING_STARTED.md) guide for detailed step-by-step instructions.
 
 ### 1. Flash the Firmware (one-time)
 
-Download `roon_knob.bin` from the [latest release](https://github.com/muness/roon-knob/releases/latest) and flash it to your knob:
+Use the [Web Flasher](https://roon-knob.muness.com/flash.html) in Chrome or Edge—no tools to install. Just plug in the knob via USB-C and click "Flash ESP32-S3".
 
-```bash
-pip install esptool
-esptool.py --chip esp32s3 -p /dev/tty.usbmodem101 -b 460800 \
-  --before default-reset --after hard-reset \
-  write_flash 0x10000 roon_knob.bin
-```
+> **Prefer command line?** See [Firmware Flashing](docs/usage/FIRMWARE_FLASHING.md) for esptool instructions.
 
-(Adjust the port for your system—see release notes for details.)
-
-After this initial flash, future updates happen automatically over WiFi.
+After flashing, future updates happen automatically over WiFi.
 
 ### 2. Run the Roon Extension
 
-The extension connects Roon to your knob. On a Docker host (NAS, Raspberry Pi, etc.):
+The extension connects Roon to your knob.
+
+**Docker (recommended)**
+
+On any Docker host (NAS, Raspberry Pi, etc.):
 
 ```yaml
 # docker-compose.yml
@@ -44,19 +41,19 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - roon-knob-bridge-data:/home/node/app/data  # Persists Roon pairing token
+      - roon-knob-bridge-data:/home/node/app/data
 
 volumes:
   roon-knob-bridge-data:
 ```
 
-> **Image tags:** Use `latest` for stable releases, or `edge` for bleeding-edge builds from master.
->
-> **Volume:** The `data` volume stores your Roon pairing token. Without it, you'd need to re-authorize in Roon after every container restart.
-
 ```bash
 docker compose up -d
 ```
+
+**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?**
+
+Find "Roon Knob" in the extension list and install it from there.
 
 ### 3. Authorize in Roon
 
