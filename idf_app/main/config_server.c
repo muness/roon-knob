@@ -3,6 +3,7 @@
 
 #include "config_server.h"
 #include "platform/platform_storage.h"
+#include "platform/platform_mdns.h"
 #include "roon_client.h"
 #include "wifi_manager.h"
 
@@ -118,6 +119,55 @@ static bool get_form_field(const char *data, const char *field, char *out, size_
     return true;
 }
 
+// Resolve .local hostname in URL to IP address via mDNS
+// Modifies url in place if resolution succeeds
+static void resolve_local_in_url(char *url, size_t url_len) {
+    if (!url || !url[0]) return;
+
+    // Check if URL contains .local
+    char *local_pos = strstr(url, ".local");
+    if (!local_pos) return;
+
+    // Make sure it's actually the hostname suffix (followed by : or / or end)
+    char after = local_pos[6];
+    if (after != ':' && after != '/' && after != '\0') return;
+
+    // Extract hostname: skip http://
+    const char *host_start = strstr(url, "://");
+    if (!host_start) return;
+    host_start += 3;
+
+    // Find end of hostname
+    const char *host_end = host_start;
+    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
+
+    // Extract hostname
+    size_t host_len = host_end - host_start;
+    if (host_len == 0 || host_len >= 64) return;
+
+    char hostname[64];
+    memcpy(hostname, host_start, host_len);
+    hostname[host_len] = '\0';
+
+    // Resolve via mDNS
+    char ip[16];
+    if (!platform_mdns_resolve_local(hostname, ip, sizeof(ip))) {
+        ESP_LOGW(TAG, "Could not resolve %s via mDNS", hostname);
+        return;
+    }
+
+    // Build new URL with IP instead of hostname
+    char new_url[128];
+    size_t scheme_len = host_start - url;
+    snprintf(new_url, sizeof(new_url), "%.*s%s%s", (int)scheme_len, url, ip, host_end);
+
+    // Copy back if it fits
+    if (strlen(new_url) < url_len) {
+        strcpy(url, new_url);
+        ESP_LOGI(TAG, "Resolved .local URL to: %s", url);
+    }
+}
+
 // Handler for GET / - serve the config form
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config page");
@@ -203,8 +253,14 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
         }
 
         strncpy(cfg.bridge_base, bridge, sizeof(cfg.bridge_base) - 1);
-        message = bridge[0] ? "Bridge URL saved!" : "Bridge cleared! Will use mDNS.";
-        ESP_LOGI(TAG, "Bridge URL set to: %s", bridge[0] ? bridge : "(mDNS)");
+
+        // Resolve .local hostnames to IPs (ESP32 lwIP has issues with .local DNS)
+        if (bridge[0]) {
+            resolve_local_in_url(cfg.bridge_base, sizeof(cfg.bridge_base));
+        }
+
+        message = cfg.bridge_base[0] ? "Bridge URL saved!" : "Bridge cleared! Will use mDNS.";
+        ESP_LOGI(TAG, "Bridge URL set to: %s", cfg.bridge_base[0] ? cfg.bridge_base : "(mDNS)");
     }
 
     if (!platform_storage_save(&cfg)) {
@@ -242,6 +298,7 @@ void config_server_start(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 4;
+    config.stack_size = 8192;  // Increased for mDNS resolution during config save
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
     ESP_LOGI(TAG, "Starting config server on port %d", config.server_port);

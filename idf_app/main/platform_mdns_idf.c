@@ -84,9 +84,12 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
             ESP_LOGI(TAG, "  Found base TXT: %s", url);
             found = true;
         }
-        if (!found && r->hostname && r->port) {
-            snprintf(url, sizeof(url), "http://%s:%u", r->hostname, r->port);
-            ESP_LOGI(TAG, "  Using hostname:port: %s", url);
+        // Prefer IP address over hostname - ESP32 lwIP has issues resolving .local hostnames
+        if (!found && r->addr && r->port) {
+            char ip_str[16];
+            snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
+            snprintf(url, sizeof(url), "http://%s:%u", ip_str, r->port);
+            ESP_LOGI(TAG, "  Using IP:port: %s (hostname=%s)", url, r->hostname ? r->hostname : "(null)");
             found = true;
         }
     }
@@ -96,4 +99,32 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
         copy_str(out, len, url);
     }
     return found && out[0];
+}
+
+bool platform_mdns_resolve_local(const char *hostname, char *ip_out, size_t ip_len) {
+    if (!hostname || !ip_out || ip_len < 16) {
+        return false;
+    }
+    ip_out[0] = '\0';
+
+    // Strip .local suffix if present
+    char host[64];
+    copy_str(host, sizeof(host), hostname);
+    char *suffix = strstr(host, ".local");
+    if (suffix) {
+        *suffix = '\0';
+    }
+
+    ESP_LOGI(TAG, "Resolving mDNS hostname: %s", host);
+    esp_ip4_addr_t addr;
+    addr.addr = 0;
+    esp_err_t err = mdns_query_a(host, 2000, &addr);
+    if (err != ESP_OK || addr.addr == 0) {
+        ESP_LOGW(TAG, "mDNS resolve failed for %s: %s", host, esp_err_to_name(err));
+        return false;
+    }
+
+    snprintf(ip_out, ip_len, IPSTR, IP2STR(&addr));
+    ESP_LOGI(TAG, "Resolved %s -> %s", host, ip_out);
+    return true;
 }
