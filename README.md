@@ -87,15 +87,17 @@ The knob finds the extension automatically via mDNS.
 - Automatic display dimming and sleep
 - Over-the-air firmware updates
 - WiFi setup via captive portal
-- Bluetooth mode for non-Roon devices
+- Bluetooth mode for non-Roon devices *(alpha)*
 
-## Bluetooth Mode
+## Bluetooth Mode *(alpha)*
+
+> **Note:** Due to a regression in UART communication between the two chips, Bluetooth mode is temporarily hidden from the zone picker. Access it via **Settings** (long-press the zone name) → **Bluetooth Mode *alpha***.
 
 When you're away from your Roon setup, the knob can control any Bluetooth audio device (phone, DAP, etc.).
 
 **To enter Bluetooth mode:**
-1. Press the knob to open the zone picker
-2. Select "Bluetooth" from the zone list
+1. Long-press the zone name to open Settings
+2. Tap "Bluetooth Mode *alpha"
 3. Pair your phone/DAP with two Bluetooth devices:
    - **"Knob control"** (BLE HID) - for sending commands to your device
    - **"Knob info"** (Classic BT) - for receiving track metadata from your device
