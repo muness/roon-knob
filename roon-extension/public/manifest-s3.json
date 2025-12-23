@@ -5,7 +5,7 @@
   "builds": [{
     "chipFamily": "ESP32-S3",
     "parts": [{
-      "path": "https://github.com/muness/roon-knob/releases/latest/download/roon_knob_merged.bin",
+      "path": "roon_knob_merged.bin",
       "offset": 0
     }]
   }]
