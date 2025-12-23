@@ -167,6 +167,15 @@ function createRoonBridge(opts = {}) {
         if (Array.isArray(data?.zones_changed)) {
           data.zones_changed.forEach(updateZone);
         }
+        // Handle continuous seek position updates from Roon
+        if (Array.isArray(data?.zones_seek_changed)) {
+          data.zones_seek_changed.forEach((e) => {
+            const cached = state.nowPlayingByZone.get(e.zone_id);
+            if (cached && e.seek_position != null) {
+              cached.seek_position = e.seek_position;
+            }
+          });
+        }
       } else if (msg === 'NetworkError') {
         log.warn('Zone subscription network error - entering grace period');
         // Mark when transport became unavailable, but keep serving cached data briefly
