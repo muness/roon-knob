@@ -597,8 +597,10 @@ static void apply_state(const struct ui_state *state) {
         if (progress_pct > 100) progress_pct = 100;
         if (progress_pct < 0) progress_pct = 0;
         lv_arc_set_value(s_progress_arc, progress_pct);
+        lv_obj_invalidate(s_progress_arc);
     } else if (s_progress_arc) {
         lv_arc_set_value(s_progress_arc, 0);
+        lv_obj_invalidate(s_progress_arc);
     }
 
     // Update play/pause icon
