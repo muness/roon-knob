@@ -319,7 +319,8 @@ jobs:
   deploy-pages:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    # TODO: Remove feature/web-flasher after testing
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feature/web-flasher' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
