@@ -29,25 +29,59 @@ The Waveshare knob contains **two separate chips**:
 
 | Chip | Firmware | What it does |
 |------|----------|--------------|
-| **ESP32-S3** | `roon_knob.bin` | Main chip: display, WiFi, touch, Roon control |
-| **ESP32** | `esp32_bt.bin` | Bluetooth chip: BLE HID controls + AVRCP metadata |
+| **ESP32-S3** | Main chip | Display, WiFi, touch, Roon control |
+| **ESP32** | Bluetooth chip | BLE HID controls + AVRCP metadata (optional) |
 
-**You must flash at least the ESP32-S3** (the main firmware). The ESP32 firmware is only needed if you want to use Bluetooth mode (controlling your phone/DAP when away from Roon).
+**You only need to flash the ESP32-S3** for normal Roon use. The ESP32 (Bluetooth) is only needed if you want [Bluetooth mode](DUAL_CHIP_ARCHITECTURE.md) for controlling your phone/DAP when away from Roon.
 
 ### How USB Works on This Device
 
 The knob has a clever trick: **flipping the USB-C cable switches which chip you're programming**. The connector works in either orientation, but each orientation connects to a different chip.
 
 - One orientation → ESP32-S3 (main chip)
-- Flip the cable → ESP32 (Bluetooth chip)
-
-You'll figure out which is which by the port name that appears (explained below).
+- Flip the cable 180° → ESP32 (Bluetooth chip)
 
 ### What You Need
 
 - The Waveshare ESP32-S3 Knob
 - A USB-C cable (data-capable, not charge-only)
-- A computer (Windows, Mac, or Linux)
+- A computer with **Chrome or Edge** browser (for web flasher)
+
+### Method 1: Web Flasher (Recommended)
+
+The easiest way to flash—no software to install.
+
+1. **Turn on the knob** (power slider towards the USB-C port)
+2. **Connect via USB-C** to your computer
+3. **Open the [Web Flasher](https://roon-knob.muness.com/flash.html)** in Chrome or Edge
+4. **Click "Flash ESP32-S3"** and select the serial port when prompted
+5. **Wait ~30 seconds** for flashing to complete
+
+The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
+
+**Which serial port?** Look for:
+- macOS: `cu.usbmodem...`
+- Windows: `COM3` or similar
+- Linux: `ttyACM0`
+
+**Optional: Flash Bluetooth Chip**
+
+1. Flip the USB-C cable 180° to connect to the other chip
+2. Click "Flash ESP32-BT" and select the new port (`cu.usbserial...` on Mac, `ttyUSB0` on Linux)
+
+**Troubleshooting:**
+
+| Problem | Solution |
+|---------|----------|
+| No serial port appears | Try a different USB cable (some only charge). Try flipping the USB-C cable. |
+| "Browser not supported" | Use Chrome or Edge. Safari and Firefox don't support Web Serial. |
+| Wrong chip detected | Flip the USB-C cable 180° to switch between chips. |
+
+---
+
+### Method 2: Command Line (esptool)
+
+For advanced users who prefer command-line tools. This requires Python.
 
 ### Step 1: Install Python and esptool
 
@@ -221,7 +255,11 @@ Note: The chip type is `esp32` (not `esp32s3`) for this firmware.
 
 ## Part 2: Run the Bridge
 
-The bridge is a small program that connects Roon to your knob. It runs in Docker, which is like a lightweight container that packages everything the program needs.
+The bridge is a small program that connects Roon to your knob. It needs to run on an always-on device (NAS, Raspberry Pi, etc.) on your network.
+
+**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?** Just find "Roon Knob" in the extension list and install it. Skip to [Part 3](#part-3-connect-everything).
+
+For everyone else, we'll use Docker.
 
 ### What is Docker?
 

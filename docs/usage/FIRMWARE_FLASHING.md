@@ -11,33 +11,25 @@ The easiest way to flash firmware. Works directly in your browser using the Web 
 ### Requirements
 - **Browser**: Chrome or Edge (version 89+). Safari and Firefox are NOT supported.
 - **USB cable**: Connect your ESP32 board to your computer
-- **Download mode**: Device must be in bootloader mode (see steps below)
 
 ### Flashing the Main Controller (ESP32-S3)
 
 1. Connect the ESP32-S3 board via USB-C
-2. Put it in download mode:
-   - Hold the **BOOT** button
-   - Press the **RST** button
-   - Release the **BOOT** button
-3. Go to the flash page: `http://<bridge-ip>:8088/flash.html`
+2. Turn on the device (power slider towards USB-C port)
+3. Go to the **[Web Flasher](https://roon-knob.muness.com/flash.html)**
 4. Click **"Flash ESP32-S3"**
 5. Select the serial port when prompted
 6. Wait ~30 seconds for flashing to complete
 
 ### Flashing the Bluetooth Controller (ESP32)
 
-Only needed if you have the dual-chip configuration.
+Only needed if you want [Bluetooth mode](DUAL_CHIP_ARCHITECTURE.md).
 
-1. Connect the ESP32 board via USB (typically through a UART adapter)
-2. Put it in download mode:
-   - Hold the **BOOT** button
-   - Press the **EN** button
-   - Release the **BOOT** button
-3. Go to the flash page: `http://<bridge-ip>:8088/flash.html`
-4. Click **"Flash ESP32-BT"**
-5. Select the serial port when prompted
-6. Wait ~20 seconds for flashing to complete
+1. Flip the USB-C cable 180° to connect to the ESP32 chip
+2. Go to the **[Web Flasher](https://roon-knob.muness.com/flash.html)**
+3. Click **"Flash ESP32-BT"**
+4. Select the serial port when prompted
+5. Wait ~20 seconds for flashing to complete
 
 ### Chip Auto-Detection
 
@@ -134,7 +126,7 @@ Note: ESP32-S3 bootloader is at offset `0x0`, while ESP32 bootloader is at `0x10
 ## After Flashing
 
 After flashing a fresh device:
-1. The device will create a WiFi access point named "RoonKnob-XXXX"
+1. The device will create a WiFi access point named **"roon-knob-setup"**
 2. Connect to this network with your phone or computer
 3. A captive portal will open for WiFi configuration
 4. Enter your WiFi credentials
