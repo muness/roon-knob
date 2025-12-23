@@ -1,0 +1,21 @@
+dependencies:
+  espp/cobs:
+    component_hash: 4a18a2c7644040a2c1a773580987af182d35663b2f04f4832fbca7629705ae79
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.33
+  idf:
+    source:
+      type: idf
+    version: 5.4.3
+direct_dependencies:
+- espp/cobs
+- idf
+manifest_hash: 573f26367a6e359264ccf4b3146f4ed1c1f14a1243c49dacd342809adb798905
+target: esp32
+version: 2.0.0
