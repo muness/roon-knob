@@ -88,7 +88,9 @@ static bool s_last_is_playing = false;     // Track play state for extended slee
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
 #define BRIDGE_FAIL_THRESHOLD 5  // Show recovery info after this many consecutive failures
+#define MDNS_FAIL_THRESHOLD 10   // Show recovery info after this many mDNS failures (~30s)
 static int s_bridge_fail_count = 0;
+static int s_mdns_fail_count = 0;
 static char s_device_ip[16] = {0};  // Device IP for recovery messages
 
 static void lock_state(void) {
@@ -328,6 +330,7 @@ static void maybe_update_bridge_base(void) {
 
     if (mdns_ok && host_is_numeric_ip(discovered)) {
         // mDNS found a bridge - update if different
+        s_mdns_fail_count = 0;  // Reset failure counter on success
         lock_state();
         bool is_new = (strcmp(s_state.cfg.bridge_base, discovered) != 0);
         if (is_new) {
@@ -365,8 +368,12 @@ static void maybe_update_bridge_base(void) {
             // Don't save the fallback - let mDNS retry on next poll
             unlock_state();
         } else {
-            // No fallback configured - user needs to configure bridge manually
-            LOGW("mDNS discovery failed and no fallback configured - use Settings to configure bridge");
+            // No fallback configured - increment mDNS failure counter
+            if (s_mdns_fail_count < MDNS_FAIL_THRESHOLD) {
+                s_mdns_fail_count++;
+            }
+            LOGW("mDNS discovery failed (%d/%d) - use Settings to configure bridge",
+                 s_mdns_fail_count, MDNS_FAIL_THRESHOLD);
         }
     }
 }
@@ -762,10 +769,36 @@ static void roon_poll_thread(void *arg) {
 
             if (!has_bridge) {
                 // No bridge URL - searching via mDNS
-                // line1=main content (bottom), line2=header (top)
+                // Show retry progress or recovery info based on failure count
+                char line1_msg[64];
+                char line2_msg[64];
+                char status_msg[96];
                 ui_set_zone_name("");  // Clear zone name to avoid overlay
-                ui_update("via mDNS...", "Searching for Bridge", false, 0, 0, 100, 0, 0);
-                ui_set_network_status("Bridge: Searching via mDNS...");
+
+                if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
+                    // mDNS search exhausted - show recovery info
+                    if (s_device_ip[0]) {
+                        snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
+                        snprintf(line2_msg, sizeof(line2_msg), "Set Bridge URL at:");
+                        snprintf(status_msg, sizeof(status_msg),
+                                 "mDNS failed. Set Bridge at http://%s", s_device_ip);
+                    } else {
+                        snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
+                        snprintf(line2_msg, sizeof(line2_msg), "Bridge Not Found");
+                        snprintf(status_msg, sizeof(status_msg),
+                                 "mDNS failed. Configure Bridge in Settings.");
+                    }
+                    ui_update(line1_msg, line2_msg, false, 0, 0, 100, 0, 0);
+                    ui_set_network_status(status_msg);
+                } else {
+                    // Still searching - show progress
+                    snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+                             s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
+                    ui_update(line1_msg, "Searching for Bridge", false, 0, 0, 100, 0, 0);
+                    snprintf(status_msg, sizeof(status_msg), "mDNS: %d/%d",
+                             s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
+                    ui_set_network_status(status_msg);
+                }
             } else {
                 // Bridge URL configured but not responding - show retry progress
                 increment_bridge_fail_count();
