@@ -306,51 +306,50 @@ static void strip_trailing_slashes(char *url) {
 }
 
 static void maybe_update_bridge_base(void) {
+    // Only use mDNS when no bridge URL is configured.
+    // This respects user-set URLs (via web config) and allows Clear to trigger fresh discovery.
+    lock_state();
+    bool need_discovery = (s_state.cfg.bridge_base[0] == '\0');
+    unlock_state();
+
+    if (!need_discovery) {
+        return;  // Bridge URL already configured - don't overwrite with mDNS
+    }
+
+    // Bridge is empty - try mDNS discovery
     char discovered[sizeof(s_state.cfg.bridge_base)];
     bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
 
     if (mdns_ok && host_is_valid(discovered)) {
-        // mDNS found a bridge (IP or hostname) - update if different
-        s_mdns_fail_count = 0;  // Reset failure counter on success
+        // mDNS found a bridge - save it
+        s_mdns_fail_count = 0;
         lock_state();
-        bool is_new = (strcmp(s_state.cfg.bridge_base, discovered) != 0);
-        if (is_new) {
-            LOGI("mDNS discovered bridge: %s", discovered);
-            strncpy(s_state.cfg.bridge_base, discovered, sizeof(s_state.cfg.bridge_base) - 1);
-            s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
-            strip_trailing_slashes(s_state.cfg.bridge_base);
-            platform_storage_save(&s_state.cfg);
-        }
+        LOGI("mDNS discovered bridge: %s", discovered);
+        strncpy(s_state.cfg.bridge_base, discovered, sizeof(s_state.cfg.bridge_base) - 1);
+        s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
+        strip_trailing_slashes(s_state.cfg.bridge_base);
+        platform_storage_save(&s_state.cfg);
         unlock_state();
-        if (is_new) {
-            post_ui_message("Bridge: Found");
-        }
+        post_ui_message("Bridge: Found");
         return;
     }
 
-    // mDNS failed - check for compile-time default or increment fail counter
-    lock_state();
-    bool need_default = (s_state.cfg.bridge_base[0] == '\0');
-    unlock_state();
-
-    if (need_default) {
-        // Check if there's a compile-time fallback configured
-        if (CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0') {
-            LOGI("mDNS discovery failed, using fallback: %s", CONFIG_RK_DEFAULT_BRIDGE_BASE);
-            lock_state();
-            strncpy(s_state.cfg.bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE, sizeof(s_state.cfg.bridge_base) - 1);
-            s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
-            strip_trailing_slashes(s_state.cfg.bridge_base);
-            // Don't save the fallback - let mDNS retry on next poll
-            unlock_state();
-        } else {
-            // No fallback configured - increment mDNS failure counter
-            if (s_mdns_fail_count < MDNS_FAIL_THRESHOLD) {
-                s_mdns_fail_count++;
-            }
-            LOGW("mDNS discovery failed (%d/%d) - use Settings to configure bridge",
-                 s_mdns_fail_count, MDNS_FAIL_THRESHOLD);
+    // mDNS failed - try compile-time default fallback
+    if (CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0') {
+        LOGI("mDNS discovery failed, using fallback: %s", CONFIG_RK_DEFAULT_BRIDGE_BASE);
+        lock_state();
+        strncpy(s_state.cfg.bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE, sizeof(s_state.cfg.bridge_base) - 1);
+        s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
+        strip_trailing_slashes(s_state.cfg.bridge_base);
+        // Don't save the fallback - let mDNS retry on next poll
+        unlock_state();
+    } else {
+        // No fallback configured - increment mDNS failure counter
+        if (s_mdns_fail_count < MDNS_FAIL_THRESHOLD) {
+            s_mdns_fail_count++;
         }
+        LOGW("mDNS discovery failed (%d/%d) - use Settings to configure bridge",
+             s_mdns_fail_count, MDNS_FAIL_THRESHOLD);
     }
 }
 
