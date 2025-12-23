@@ -36,7 +36,7 @@ function startServer() {
   app.use(cors());
   app.use(morgan(LOG_LEVEL === 'debug' ? 'dev' : 'tiny'));
 
-  const bridge = createRoonBridge({ service_port: ROON_SERVICE_PORT, display_name: MDNS_NAME, log: createLogger('Bridge') });
+  const bridge = createRoonBridge({ service_port: ROON_SERVICE_PORT, display_name: MDNS_NAME, base_url: MDNS_BASE, log: createLogger('Bridge') });
   bridge.start();
 
   const knobs = createKnobsStore({ logger: createLogger('Knobs') });
@@ -47,11 +47,12 @@ function startServer() {
     res.json({ status: 'ok', version: VERSION, git_sha: GIT_SHA });
   });
 
-  app.use(express.static(path.join(__dirname, 'public')));
-
+  // Redirect / to /admin on the bridge (before static so index.html doesn't override)
   app.get('/', (_req, res) => {
     res.redirect('/admin');
   });
+
+  app.use(express.static(path.join(__dirname, 'public')));
 
   app.use((err, req, res, _next) => {
     log.error('Unhandled request error', { path: req.path, err });

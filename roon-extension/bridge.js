@@ -40,6 +40,7 @@ const fallbackSummary = (zone) => {
 
 function createRoonBridge(opts = {}) {
   const log = opts.logger || console;
+  const baseUrl = opts.base_url || '';
   const state = {
     core: null,
     coreInfo: null,
@@ -179,7 +180,8 @@ function createRoonBridge(opts = {}) {
       }
     });
 
-    svc_status.set_status('Connected to Roon core', false);
+    const statusMsg = baseUrl ? `Connected to Roon core • ${baseUrl}` : 'Connected to Roon core';
+    svc_status.set_status(statusMsg, false);
   }
 
   function updateZone(zone) {
