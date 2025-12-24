@@ -11,6 +11,7 @@
 #include "wifi_manager.h"
 #include "ota_update.h"
 #include "controller_mode.h"
+#include "roon_client.h"
 
 #if defined(__has_include)
 #  if __has_include("lvgl.h")
@@ -42,6 +43,7 @@ static void copy_str(char *dst, size_t len, const char *src) {
 struct ui_net_widgets {
     lv_obj_t *panel;
     lv_obj_t *name_value;
+    lv_obj_t *bridge_value;
     lv_obj_t *ssid_value;
     lv_obj_t *ip_value;
     lv_obj_t *version_label;
@@ -168,6 +170,22 @@ static void refresh_labels(void) {
             lv_label_set_text_fmt(s_widgets.ssid_value, "%s", cfg.ssid);
         } else {
             lv_label_set_text(s_widgets.ssid_value, "<unset>");
+        }
+    }
+
+    if (s_widgets.bridge_value) {
+        char bridge_url[128];
+        if (roon_client_get_bridge_url(bridge_url, sizeof(bridge_url))) {
+            // Extract host:port from URL (skip http://)
+            const char *host = bridge_url;
+            if (strncmp(host, "http://", 7) == 0) {
+                host += 7;
+            }
+            // Show with discovery method
+            const char *source = roon_client_is_bridge_mdns() ? " (mDNS)" : "";
+            lv_label_set_text_fmt(s_widgets.bridge_value, "%s%s", host, source);
+        } else {
+            lv_label_set_text(s_widgets.bridge_value, "(discovering...)");
         }
     }
 }
@@ -361,6 +379,17 @@ static void ensure_panel(void) {
     lv_obj_clear_flag(ip_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_label_set_text(lv_label_create(ip_row), "IP:");
     s_widgets.ip_value = lv_label_create(ip_row);
+
+    // Bridge row (with horizontal scroll for long URLs)
+    lv_obj_t *bridge_row = lv_obj_create(s_widgets.panel);
+    lv_obj_set_size(bridge_row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(bridge_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all(bridge_row, 4, 0);
+    lv_obj_clear_flag(bridge_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_label_set_text(lv_label_create(bridge_row), "Bridge:");
+    s_widgets.bridge_value = lv_label_create(bridge_row);
+    lv_obj_set_width(s_widgets.bridge_value, 120);  // Constrain width to enable scroll
+    lv_label_set_long_mode(s_widgets.bridge_value, LV_LABEL_LONG_SCROLL_CIRCULAR);
 
     s_widgets.status_label = lv_label_create(s_widgets.panel);
     lv_label_set_text(s_widgets.status_label, "Wi-Fi idle");

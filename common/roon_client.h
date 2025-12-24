@@ -18,3 +18,4 @@ int roon_client_get_bridge_retry_count(void);    // Current retry attempt (0 = c
 int roon_client_get_bridge_retry_max(void);      // Max retries before showing recovery info
 bool roon_client_get_bridge_url(char *buf, size_t len);  // Get configured bridge URL
 bool roon_client_is_bridge_connected(void);      // True if bridge is responding
+bool roon_client_is_bridge_mdns(void);           // True if bridge was discovered via mDNS (persisted)
