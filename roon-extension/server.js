@@ -9,7 +9,9 @@ const { createRoonBridge } = require('./bridge');
 const { createMetricsTracker } = require('./metrics');
 const { createLogger } = require('./logger');
 const { createKnobsStore } = require('./knobs');
-const { version: VERSION } = require('./package.json');
+// Version: use APP_VERSION env var (set by CI), fall back to 'dev' for local development
+// package.json version is stale in repo; CI injects correct version during builds
+const VERSION = process.env.APP_VERSION || 'dev';
 
 function getGitSha() {
   try {

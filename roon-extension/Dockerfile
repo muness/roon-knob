@@ -1,5 +1,9 @@
 FROM alpine:3.22
 
+# Version injected at build time by CI; defaults to 'dev' for local builds
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 RUN apk add --no-cache nodejs-current npm tzdata git
 
 WORKDIR /home/node/app
