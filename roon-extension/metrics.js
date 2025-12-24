@@ -83,6 +83,8 @@ function snapshot(metrics) {
   return {
     startedAt: metrics.startedAt,
     uptimeMs: Date.now() - metrics.startedAt,
+    version: metrics.version,
+    git_sha: metrics.git_sha,
     mdns: metrics.mdns,
     lastZonesRequest: metrics.lastZonesRequest,
     lastControlRequest: metrics.lastControlRequest,
