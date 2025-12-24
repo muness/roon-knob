@@ -29,7 +29,7 @@ Then: `docker compose pull && docker compose up -d`
 
 ### Web Flasher (Recommended)
 
-Use the [web flasher](https://github.com/muness/roon-knob/blob/master/roon-extension/public/flash.html) in Chrome/Edge - no tools to install.
+Use the [web flasher](https://roon-knob.muness.com/flash.html) in Chrome/Edge - no tools to install.
 
 ### Command Line (esptool.py)
 
