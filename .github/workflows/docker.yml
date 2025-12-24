@@ -238,15 +238,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject version into package.json
+      - name: Get version for Docker build
+        id: version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
-            # Update package.json version
-            sed -i 's/"version": "[^"]*"/"version": "'$VERSION'"/' roon-extension/package.json
-            echo "Bridge version set to: $VERSION"
-            grep '"version"' roon-extension/package.json
+          else
+            VERSION="edge"
           fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Docker image version: $VERSION"
 
       - name: Download ESP32-S3 firmware
         uses: actions/download-artifact@v4
@@ -313,6 +314,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

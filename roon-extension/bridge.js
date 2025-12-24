@@ -2,7 +2,8 @@ const RoonApi = require('node-roon-api');
 const RoonApiStatus = require('node-roon-api-status');
 const RoonApiTransport = require('node-roon-api-transport');
 const RoonApiImage = require('node-roon-api-image');
-const { version: VERSION } = require('./package.json');
+// Version: use APP_VERSION env var (set by CI), fall back to 'dev' for local development
+const VERSION = process.env.APP_VERSION || 'dev';
 const fs = require('fs');
 const path = require('path');
 

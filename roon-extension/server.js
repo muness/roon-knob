@@ -9,9 +9,15 @@ const { createRoonBridge } = require('./bridge');
 const { createMetricsTracker } = require('./metrics');
 const { createLogger } = require('./logger');
 const { createKnobsStore } = require('./knobs');
-const { version: VERSION } = require('./package.json');
+// Version: use APP_VERSION env var (set by CI), fall back to 'dev' for local development
+// package.json version is stale in repo; CI injects correct version during builds
+const VERSION = process.env.APP_VERSION || 'dev';
 
 function getGitSha() {
+  // Use GIT_SHA env var (set by CI), fall back to git command for local dev
+  if (process.env.GIT_SHA && process.env.GIT_SHA !== 'unknown') {
+    return process.env.GIT_SHA.substring(0, 7); // Short SHA
+  }
   try {
     return execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).trim();
   } catch {
