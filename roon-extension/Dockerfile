@@ -1,8 +1,10 @@
 FROM alpine:3.22
 
-# Version injected at build time by CI; defaults to 'dev' for local builds
+# Version and git SHA injected at build time by CI; defaults for local builds
 ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
 ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
 
 RUN apk add --no-cache nodejs-current npm tzdata git
 
