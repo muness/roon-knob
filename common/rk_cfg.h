@@ -71,6 +71,9 @@ typedef struct {
     uint8_t wifi_power_save_enabled;     // Enable WiFi modem sleep when display sleeping
     uint8_t cpu_freq_scaling_enabled;    // Enable CPU frequency reduction when idle
     uint16_t sleep_poll_stopped_sec;     // Poll interval (sec) when sleeping AND zone stopped (0=use default 30s)
+
+    // Bridge discovery source (V2 addition)
+    uint8_t bridge_from_mdns;            // 1 if bridge was discovered via mDNS, 0 if manually configured
 } rk_cfg_t;
 
 static inline bool rk_cfg_is_valid(const rk_cfg_t *cfg) {
@@ -141,4 +144,4 @@ static inline uint16_t rk_cfg_get_sleep_timeout(const rk_cfg_t *cfg, bool is_cha
     return cfg->sleep_battery_enabled ? cfg->sleep_battery_timeout_sec : 0;
 }
 
-_Static_assert(sizeof(rk_cfg_t) == 364, "rk_cfg_t size changed - update RK_CFG_V1_SIZE if needed");
+_Static_assert(sizeof(rk_cfg_t) == 366, "rk_cfg_t size changed - update RK_CFG_V1_SIZE if needed");

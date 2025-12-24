@@ -328,6 +328,7 @@ static void maybe_update_bridge_base(void) {
         strncpy(s_state.cfg.bridge_base, discovered, sizeof(s_state.cfg.bridge_base) - 1);
         s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
         strip_trailing_slashes(s_state.cfg.bridge_base);
+        s_state.cfg.bridge_from_mdns = 1;  // Persist mDNS source
         platform_storage_save(&s_state.cfg);
         unlock_state();
         post_ui_message("Bridge: Found");
@@ -1165,6 +1166,13 @@ bool roon_client_get_bridge_url(char *buf, size_t len) {
 
 bool roon_client_is_bridge_connected(void) {
     return s_last_net_ok;
+}
+
+bool roon_client_is_bridge_mdns(void) {
+    lock_state();
+    bool from_mdns = (s_state.cfg.bridge_from_mdns != 0);
+    unlock_state();
+    return from_mdns;
 }
 
 // Config fetch and apply implementation

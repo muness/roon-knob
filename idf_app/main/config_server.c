@@ -239,6 +239,7 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
     const char *message;
     if (strcmp(action, "Clear") == 0) {
         cfg.bridge_base[0] = '\0';
+        cfg.bridge_from_mdns = 0;  // Will be set when mDNS discovers
         message = "Bridge cleared! Will use mDNS.";
         ESP_LOGI(TAG, "Bridge URL cleared");
     } else {
@@ -257,6 +258,9 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
         // Resolve .local hostnames to IPs (ESP32 lwIP has issues with .local DNS)
         if (bridge[0]) {
             resolve_local_in_url(cfg.bridge_base, sizeof(cfg.bridge_base));
+            cfg.bridge_from_mdns = 0;  // Manually configured
+        } else {
+            cfg.bridge_from_mdns = 0;  // Will be set when mDNS discovers
         }
 
         message = cfg.bridge_base[0] ? "Bridge URL saved!" : "Bridge cleared! Will use mDNS.";
