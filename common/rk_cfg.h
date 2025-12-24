@@ -103,6 +103,7 @@ static inline void rk_cfg_set_display_defaults(rk_cfg_t *cfg) {
     cfg->wifi_power_save_enabled = RK_DEFAULT_WIFI_POWER_SAVE_ENABLED;
     cfg->cpu_freq_scaling_enabled = RK_DEFAULT_CPU_FREQ_SCALING_ENABLED;
     cfg->sleep_poll_stopped_sec = RK_DEFAULT_SLEEP_POLL_STOPPED_SEC;
+    cfg->bridge_from_mdns = 0;  // Default until mDNS discovers
 }
 
 // Get effective rotation based on charging state
