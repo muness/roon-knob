@@ -1336,6 +1336,9 @@ void ui_set_update_available(const char *version) {
         s_update_version[sizeof(s_update_version) - 1] = '\0';
         ESP_LOGI(UI_TAG, "Update available: %s", s_update_version);
 
+        // Hide settings panel so update button is visible
+        ui_hide_settings();
+
         // Create update button if it doesn't exist
         if (!s_update_btn && s_ui_container) {
             s_update_btn = lv_btn_create(s_ui_container);
