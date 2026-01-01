@@ -174,7 +174,6 @@ static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
 static void show_volume_overlay(float volume, float volume_step);
-static inline void format_volume_text(char *buf, size_t len, float volume, float volume_min, float volume_step);
 
 // ============================================================================
 // Volume Formatting Helper
@@ -197,6 +196,16 @@ static inline void format_volume_text(char *buf, size_t len, float volume, float
             snprintf(buf, len, "%.0f", volume);
         }
     }
+}
+
+static inline int calculate_volume_percentage(float volume, float volume_min, float volume_max) {
+    float vol_range = volume_max - volume_min;
+    if (vol_range < 0.01f) return 0;
+
+    int vol_pct = (int)(((volume - volume_min) * 100.0f) / vol_range);
+    if (vol_pct < 0) return 0;
+    if (vol_pct > 100) return 100;
+    return vol_pct;
 }
 
 // ============================================================================
@@ -611,13 +620,7 @@ static void apply_state(const struct ui_state *state) {
     last_volume = state->volume;
 
     // Convert to 0-100 scale for arc display using zone's actual min/max
-    float vol_range = state->volume_max - state->volume_min;
-    int vol_pct = 0;
-    if (vol_range > 0.01f) {
-        vol_pct = (int)(((state->volume - state->volume_min) * 100.0f) / vol_range);
-    }
-    if (vol_pct < 0) vol_pct = 0;
-    if (vol_pct > 100) vol_pct = 100;
+    int vol_pct = calculate_volume_percentage(state->volume, state->volume_min, state->volume_max);
     lv_arc_set_value(s_volume_arc, vol_pct);
 
     // Display volume (format matches zone's step precision)
@@ -816,22 +819,8 @@ static void show_volume_overlay(float volume, float volume_step) {
 
     // Update the volume text (format matches zone's step precision)
     char vol_text[16];
-    float step_abs = volume_step < 0.0f ? -volume_step : volume_step;
-    int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
-
-    if (s_pending.volume_min < 0.0f) {
-        if (step_is_fractional) {
-            snprintf(vol_text, sizeof(vol_text), "%.1f dB", volume);  // e.g., "25.5 dB"
-        } else {
-            snprintf(vol_text, sizeof(vol_text), "%.0f dB", volume);  // e.g., "25 dB"
-        }
-    } else {
-        if (step_is_fractional) {
-            snprintf(vol_text, sizeof(vol_text), "%.1f", volume);  // e.g., "25.5"
-        } else {
-            snprintf(vol_text, sizeof(vol_text), "%.0f", volume);  // e.g., "25"
-        }
-    }
+    // Note: s_pending.volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
+    format_volume_text(vol_text, sizeof(vol_text), volume, s_pending.volume_min, volume_step);
     lv_label_set_text(s_volume_overlay_label, vol_text);
     lv_obj_center(s_volume_overlay_label);
 
@@ -1073,10 +1062,17 @@ void ui_set_volume_with_range(float vol, float vol_min, float vol_max, float vol
 void ui_show_volume_change(float vol, float vol_step) {
     s_last_predicted_volume = vol;  // Track prediction for overlay suppression
 
+    // Note: Reading volume_min/volume_max without lock (atomic float reads, self-correct on next poll if stale)
+
+    // Update volume arc immediately (optimistic)
+    if (s_volume_arc) {
+        int vol_pct = calculate_volume_percentage(vol, s_pending.volume_min, s_pending.volume_max);
+        lv_arc_set_value(s_volume_arc, vol_pct);
+    }
+
     // Update small label immediately (optimistic)
     if (s_volume_label) {
         char vol_text[16];
-        // Note: s_pending.volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
         format_volume_text(vol_text, sizeof(vol_text), vol, s_pending.volume_min, vol_step);
         lv_label_set_text(s_volume_label, vol_text);
     }
