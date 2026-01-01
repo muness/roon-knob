@@ -1068,7 +1068,6 @@ void ui_show_volume_change(float vol, float vol_step) {
         char vol_text[16];
         float step_abs = vol_step < 0.0f ? -vol_step : vol_step;
         int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
-        ESP_LOGI(UI_TAG, "Volume overlay: vol=%.1f, step=%.1f, step_is_frac=%d", vol, vol_step, step_is_fractional);
 
         if (s_pending.volume_min < 0.0f) {
             if (step_is_fractional) {

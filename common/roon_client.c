@@ -134,7 +134,6 @@ static void ui_update_cb(void *arg) {
     s_last_known_volume_min = state->volume_min;
     s_last_known_volume_max = state->volume_max;
     s_last_known_volume_step = state->volume_step;
-    LOGI("Cached volume: %.1f, step: %.1f", s_last_known_volume, s_last_known_volume_step);
     ui_update(state->line1, state->line2, state->is_playing, state->volume, state->volume_min, state->volume_max, state->volume_step, state->seek_position, state->length);
 
     // Update artwork if image_key changed or forced refresh
@@ -989,12 +988,12 @@ void roon_client_handle_input(ui_input_event_t event) {
     switch (event) {
     case UI_INPUT_VOL_DOWN: {
         lock_state();
-        int predicted_down = s_last_known_volume - 2;
+        float predicted_down = s_last_known_volume - s_last_known_volume_step;
         if (predicted_down < s_last_known_volume_min) {
             predicted_down = s_last_known_volume_min;
         }
         s_last_known_volume = predicted_down;
-        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
+        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
             s_state.cfg.zone_id, predicted_down);
         unlock_state();
         ui_show_volume_change(predicted_down, s_last_known_volume_step);
@@ -1005,12 +1004,12 @@ void roon_client_handle_input(ui_input_event_t event) {
     }
     case UI_INPUT_VOL_UP: {
         lock_state();
-        int predicted_up = s_last_known_volume + 2;
+        float predicted_up = s_last_known_volume + s_last_known_volume_step;
         if (predicted_up > s_last_known_volume_max) {
             predicted_up = s_last_known_volume_max;
         }
         s_last_known_volume = predicted_up;
-        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
+        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
             s_state.cfg.zone_id, predicted_up);
         unlock_state();
         ui_show_volume_change(predicted_up, s_last_known_volume_step);
