@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # App version (semver) - update this for releases
-set(PROJECT_VER "2.1.0")
+set(PROJECT_VER "2.1.1")
 
 # Auto-append -dev if not building from a release tag
 # CI builds from tags get clean version, local builds get -dev
