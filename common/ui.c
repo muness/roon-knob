@@ -586,9 +586,13 @@ static void apply_state(const struct ui_state *state) {
     if (vol_pct > 100) vol_pct = 100;
     lv_arc_set_value(s_volume_arc, vol_pct);
 
-    // Display volume in dB
+    // Display volume (show dB for negative-range zones, raw number otherwise)
     char vol_text[16];
-    snprintf(vol_text, sizeof(vol_text), "%d dB", state->volume);
+    if (state->volume_min < 0) {
+        snprintf(vol_text, sizeof(vol_text), "%d dB", state->volume);
+    } else {
+        snprintf(vol_text, sizeof(vol_text), "%d", state->volume);
+    }
     lv_label_set_text(s_volume_label, vol_text);
 
     // Update progress arc based on seek position and track length
@@ -779,9 +783,13 @@ static void show_volume_overlay(int volume) {
         return;
     }
 
-    // Update the volume text (display in dB)
+    // Update the volume text (use current zone's volume_min to determine format)
     char vol_text[16];
-    snprintf(vol_text, sizeof(vol_text), "%d dB", volume);
+    if (s_pending.volume_min < 0) {
+        snprintf(vol_text, sizeof(vol_text), "%d dB", volume);
+    } else {
+        snprintf(vol_text, sizeof(vol_text), "%d", volume);
+    }
     lv_label_set_text(s_volume_overlay_label, vol_text);
     lv_obj_center(s_volume_overlay_label);
 

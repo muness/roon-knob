@@ -1069,11 +1069,11 @@ void roon_client_handle_volume_rotation(int ticks) {
     // Show volume overlay immediately with predicted value (optimistic UI)
     ui_show_volume_change(predicted_vol);
 
-    // Send volume request to Roon
+    // Send volume request to Roon (absolute value for exact match with optimistic UI)
     char body[256];
     lock_state();
-    snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}",
-        s_state.cfg.zone_id, delta);
+    snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
+        s_state.cfg.zone_id, predicted_vol);
     unlock_state();
 
     if (!send_control_json(body)) {
