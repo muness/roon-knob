@@ -984,28 +984,38 @@ void roon_client_handle_input(ui_input_event_t event) {
 
     char body[256];
     switch (event) {
-    case UI_INPUT_VOL_DOWN:
+    case UI_INPUT_VOL_DOWN: {
         lock_state();
-        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}",
-            s_state.cfg.zone_id, -2);
+        int predicted_down = s_last_known_volume - 2;
+        if (predicted_down < s_last_known_volume_min) {
+            predicted_down = s_last_known_volume_min;
+        }
+        s_last_known_volume = predicted_down;
+        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
+            s_state.cfg.zone_id, predicted_down);
         unlock_state();
-        // Show volume overlay immediately with predicted value (optimistic UI)
-        ui_show_volume_change(s_last_known_volume - 2);
+        ui_show_volume_change(predicted_down);
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
         break;
-    case UI_INPUT_VOL_UP:
+    }
+    case UI_INPUT_VOL_UP: {
         lock_state();
-        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_rel\",\"value\":%d}",
-            s_state.cfg.zone_id, 2);
+        int predicted_up = s_last_known_volume + 2;
+        if (predicted_up > s_last_known_volume_max) {
+            predicted_up = s_last_known_volume_max;
+        }
+        s_last_known_volume = predicted_up;
+        snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
+            s_state.cfg.zone_id, predicted_up);
         unlock_state();
-        // Show volume overlay immediately with predicted value (optimistic UI)
-        ui_show_volume_change(s_last_known_volume + 2);
+        ui_show_volume_change(predicted_up);
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
         break;
+    }
     case UI_INPUT_PLAY_PAUSE:
         lock_state();
         snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"play_pause\"}", s_state.cfg.zone_id);
@@ -1057,7 +1067,8 @@ void roon_client_handle_volume_rotation(int ticks) {
     // Apply direction
     int delta = (ticks > 0) ? step : -step;
 
-    // Calculate optimistic new volume with clamping
+    // Calculate optimistic new volume with clamping (inside lock for consistency)
+    lock_state();
     int predicted_vol = s_last_known_volume + delta;
     if (predicted_vol < s_last_known_volume_min) {
         predicted_vol = s_last_known_volume_min;
@@ -1066,15 +1077,17 @@ void roon_client_handle_volume_rotation(int ticks) {
         predicted_vol = s_last_known_volume_max;
     }
 
-    // Show volume overlay immediately with predicted value (optimistic UI)
-    ui_show_volume_change(predicted_vol);
+    // Update cached volume immediately for next rotation (optimistic tracking)
+    s_last_known_volume = predicted_vol;
 
     // Send volume request to Roon (absolute value for exact match with optimistic UI)
     char body[256];
-    lock_state();
     snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
         s_state.cfg.zone_id, predicted_vol);
     unlock_state();
+
+    // Show volume overlay immediately with predicted value (optimistic UI)
+    ui_show_volume_change(predicted_vol);
 
     if (!send_control_json(body)) {
         post_ui_message("Volume change failed");

@@ -121,6 +121,7 @@ static bool s_network_status_dirty = false;
 static ui_input_cb_t s_input_cb;
 static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
+static int s_last_predicted_volume = -9999;  // Track user's predicted volume for overlay suppression
 #ifdef ESP_PLATFORM
 static ui_jpeg_image_t s_artwork_img;  // Decoded RGB565 image for artwork (ESP32)
 #else
@@ -571,7 +572,11 @@ static void apply_state(const struct ui_state *state) {
     static int last_volume = -9999;  // Sentinel value (unlikely real volume)
     static bool volume_initialized = false;
     if (volume_initialized && last_volume != state->volume) {
-        show_volume_overlay(state->volume);
+        // Only show overlay if value differs from last user prediction
+        // (suppresses redundant popup when poll confirms user's change)
+        if (state->volume != s_last_predicted_volume) {
+            show_volume_overlay(state->volume);
+        }
     }
     volume_initialized = true;
     last_volume = state->volume;
@@ -1028,6 +1033,19 @@ void ui_set_volume_with_range(int vol, int vol_min, int vol_max) {
 }
 
 void ui_show_volume_change(int vol) {
+    s_last_predicted_volume = vol;  // Track prediction for overlay suppression
+
+    // Update small label immediately (optimistic)
+    if (s_volume_label) {
+        char vol_text[16];
+        if (s_pending.volume_min < 0) {
+            snprintf(vol_text, sizeof(vol_text), "%d dB", vol);
+        } else {
+            snprintf(vol_text, sizeof(vol_text), "%d", vol);
+        }
+        lv_label_set_text(s_volume_label, vol_text);
+    }
+
     show_volume_overlay(vol);
 }
 
