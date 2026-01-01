@@ -4,9 +4,13 @@ This document describes the font implementation for the Roon Knob display.
 
 ## Overview
 
-The display uses two font families:
-1. **Charis SIL** - Text font for music metadata (artist, track, album names)
-2. **Material Symbols** - Icon font for UI controls (play, pause, settings, etc.)
+The display uses three font families:
+1. **Lato** - Text font for artist names, volume labels, status text (22px)
+2. **Noto Sans** - Text font for track names, zone names, volume display (28px)
+3. **Material Symbols** - Icon font for UI controls (play, pause, settings, etc.)
+
+Typography matches Roon's design (Lato for metadata, Noto Sans for content).
+Source: https://fontsinuse.com/uses/38585/roon-music-player-redesign
 
 ## Implementation: Pre-rendered Bitmap Fonts
 
@@ -42,12 +46,15 @@ However, TinyTTF proved **unstable on ESP32-S3** due to memory constraints:
 
 | Font | Small | Normal | Large |
 |------|-------|--------|-------|
-| Charis SIL (text) | 22px | 28px | 40px |
-| Material Symbols (icons) | 22px | 28px | 48px |
+| Lato (metadata) | 22px | - | - |
+| Noto Sans (content) | - | 28px | - |
+| Material Symbols (icons) | 22px | 44px | 60px |
+
+Icon sizes scaled to match enlarged transport buttons (60/80px backgrounds = 44/60px icons for 70-75% fill ratio)
 
 ## Unicode Coverage
 
-### Text Font (Charis SIL)
+### Text Fonts (Lato + Noto Sans)
 
 - Basic Latin (U+0020-007F) - ASCII
 - Latin-1 Supplement (U+00A0-00FF) - Western European accents
@@ -56,6 +63,8 @@ However, TinyTTF proved **unstable on ESP32-S3** due to memory constraints:
 - Greek and Coptic (U+0370-03FF) - Greek alphabet
 - Cyrillic (U+0400-04FF) - Russian, Ukrainian, Bulgarian, etc.
 - General Punctuation (U+2010-2027) - Dashes, quotes, ellipsis
+
+Note: Arrow range (U+2190-2193) removed - not needed for music metadata
 
 This covers most music metadata including:
 - French: é, è, ê, ë, à, â, ç, ô, û, etc.
@@ -127,20 +136,21 @@ This maintains the stability benefits while allowing extended language support.
 - `idf_app/main/fonts/*.c` - Generated bitmap font data
 - `idf_app/main/font_manager.c` - Font access API
 - `idf_app/main/font_manager.h` - Font API and icon definitions
-- `idf_app/spiffs_data/CharisSIL.ttf` - Source TTF (used by generator)
-- `idf_app/spiffs_data/MaterialSymbols.ttf` - Source TTF (used by generator)
+- `idf_app/spiffs_data/Lato-Regular.ttf` - Source TTF for metadata font
+- `idf_app/spiffs_data/NotoSans-Regular.ttf` - Source TTF for content font
+- `idf_app/spiffs_data/MaterialIcons-Regular.ttf` - Source TTF for icons
 
 ## Memory Usage
 
 | Component | Size |
 |-----------|------|
-| charis_22.c | 580 KB |
-| charis_28.c | 856 KB |
-| charis_40.c | 1620 KB |
-| material_icons_22.c | 56 KB |
-| material_icons_28.c | 80 KB |
-| material_icons_48.c | 200 KB |
-| **Total** | **~3.4 MB** |
+| lato_22.c | 636 KB |
+| notosans_28.c | 1.0 MB |
+| material_icons_22.c | 29 KB |
+| material_icons_28.c | 41 KB |
+| material_icons_44.c | 90 KB |
+| material_icons_60.c | 158 KB |
+| **Total** | **~2.0 MB** |
 
 Note: Text fonts are larger due to Cyrillic and Greek support. The device has
 16MB flash, so this is well within capacity.
