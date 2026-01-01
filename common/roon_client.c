@@ -46,10 +46,10 @@ struct now_playing_state {
     char line1[MAX_LINE];
     char line2[MAX_LINE];
     bool is_playing;
-    int volume;
-    int volume_min;
-    int volume_max;
-    int volume_step;
+    float volume;
+    float volume_min;
+    float volume_max;
+    float volume_step;
     int seek_position;
     int length;
     char image_key[128];  // For tracking album artwork changes
@@ -77,9 +77,10 @@ static bool s_trigger_poll;
 static bool s_last_net_ok;
 static bool s_network_ready;
 static bool s_force_artwork_refresh;  // Force artwork reload on zone change
-static int s_last_known_volume = 0;   // Cached volume for optimistic UI updates
-static int s_last_known_volume_min = -80;  // Cached volume min for clamping
-static int s_last_known_volume_max = 0;    // Cached volume max for clamping
+static float s_last_known_volume = 0.0f;   // Cached volume for optimistic UI updates
+static float s_last_known_volume_min = -80.0f;  // Cached volume min for clamping
+static float s_last_known_volume_max = 0.0f;    // Cached volume max for clamping
+static float s_last_known_volume_step = 1.0f;  // Cached volume step
 static bool s_bridge_verified = false;  // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 static bool s_last_charging_state = true;  // Track charging state for config reapply
@@ -132,7 +133,9 @@ static void ui_update_cb(void *arg) {
     s_last_known_volume = state->volume;
     s_last_known_volume_min = state->volume_min;
     s_last_known_volume_max = state->volume_max;
-    ui_update(state->line1, state->line2, state->is_playing, state->volume, state->volume_min, state->volume_max, state->seek_position, state->length);
+    s_last_known_volume_step = state->volume_step;
+    LOGI("Cached volume: %.1f, step: %.1f", s_last_known_volume, s_last_known_volume_step);
+    ui_update(state->line1, state->line2, state->is_playing, state->volume, state->volume_min, state->volume_max, state->volume_step, state->seek_position, state->length);
 
     // Update artwork if image_key changed or forced refresh
     static char last_image_key[128] = "";
@@ -195,10 +198,10 @@ static void default_now_playing(struct now_playing_state *state) {
     snprintf(state->line1, sizeof(state->line1), "Idle");
     state->line2[0] = '\0';
     state->is_playing = false;
-    state->volume = 0;
-    state->volume_min = -80;
-    state->volume_max = 0;
-    state->volume_step = 0;
+    state->volume = 0.0f;
+    state->volume_min = -80.0f;
+    state->volume_max = 0.0f;
+    state->volume_step = 0.0f;
     state->seek_position = 0;
     state->length = 0;
     state->image_key[0] = '\0';
@@ -409,7 +412,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (vol_key) {
         const char *colon = strchr(vol_key, ':');
         if (colon) {
-            state->volume = atoi(colon + 1);
+            state->volume = atof(colon + 1);
         }
     }
 
@@ -417,7 +420,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (vol_min_key) {
         const char *colon = strchr(vol_min_key, ':');
         if (colon) {
-            state->volume_min = atoi(colon + 1);
+            state->volume_min = atof(colon + 1);
         }
     }
 
@@ -425,17 +428,17 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (vol_max_key) {
         const char *colon = strchr(vol_max_key, ':');
         if (colon) {
-            state->volume_max = atoi(colon + 1);
+            state->volume_max = atof(colon + 1);
         }
     }
 
-    state->volume_step = state->volume_step > 0 ? state->volume_step : 2;
+    state->volume_step = state->volume_step > 0.0f ? state->volume_step : 1.0f;  // Default 1.0 dB
     const char *step_key = strstr(resp, "\"volume_step\"");
     if (step_key) {
         const char *colon = strchr(step_key, ':');
         if (colon) {
-            int parsed = atoi(colon + 1);
-            if (parsed > 0) {
+            float parsed = atof(colon + 1);
+            if (parsed > 0.0f) {
                 state->volume_step = parsed;
             }
         }
@@ -735,7 +738,7 @@ static void roon_poll_thread(void *arg) {
             snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                      s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
             ui_set_zone_name("");  // Clear zone name to avoid overlay
-            ui_update(line1_msg, "Testing Bridge", false, 0, 0, 100, 0, 0);
+            ui_update(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
             ui_set_network_status("Bridge: Offline - retrying...");
         } else if (!ok && !s_last_net_ok) {
             // Still trying to connect - check if we have a bridge URL
@@ -764,13 +767,13 @@ static void roon_poll_thread(void *arg) {
                         snprintf(status_msg, sizeof(status_msg),
                                  "mDNS failed. Configure Bridge in Settings.");
                     }
-                    ui_update(line1_msg, line2_msg, false, 0, 0, 100, 0, 0);
+                    ui_update(line1_msg, line2_msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
                     ui_set_network_status(status_msg);
                 } else {
                     // Still searching - show progress
                     snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                              s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
-                    ui_update(line1_msg, "Searching for Bridge", false, 0, 0, 100, 0, 0);
+                    ui_update(line1_msg, "Searching for Bridge", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
                     snprintf(status_msg, sizeof(status_msg), "mDNS: %d/%d",
                              s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
                     ui_set_network_status(status_msg);
@@ -798,7 +801,7 @@ static void roon_poll_thread(void *arg) {
                                  "Bridge unreachable. Check Settings.");
                     }
                     ui_set_zone_name("");  // Clear zone name to avoid overlay
-                    ui_update(line1_msg, line2_msg, false, 0, 0, 100, 0, 0);
+                    ui_update(line1_msg, line2_msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
                     ui_set_network_status(status_msg);
                 } else {
                     // Still retrying - show progress on main display
@@ -806,7 +809,7 @@ static void roon_poll_thread(void *arg) {
                     snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                              s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
                     ui_set_zone_name("");  // Clear zone name to avoid overlay
-                    ui_update(line1_msg, "Testing Bridge", false, 0, 0, 100, 0, 0);
+                    ui_update(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
                     snprintf(status_msg, sizeof(status_msg), "Bridge: Retry %d/%d",
                              s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
                     ui_set_network_status(status_msg);
@@ -994,7 +997,7 @@ void roon_client_handle_input(ui_input_event_t event) {
         snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
             s_state.cfg.zone_id, predicted_down);
         unlock_state();
-        ui_show_volume_change(predicted_down);
+        ui_show_volume_change(predicted_down, s_last_known_volume_step);
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
@@ -1010,7 +1013,7 @@ void roon_client_handle_input(ui_input_event_t event) {
         snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
             s_state.cfg.zone_id, predicted_up);
         unlock_state();
-        ui_show_volume_change(predicted_up);
+        ui_show_volume_change(predicted_up, s_last_known_volume_step);
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
@@ -1053,23 +1056,21 @@ void roon_client_handle_input(ui_input_event_t event) {
 void roon_client_handle_volume_rotation(int ticks) {
     if (ticks == 0) return;
 
-    // Determine step size based on velocity (tick count = ticks per 50ms)
+    // Determine velocity multiplier (applied to zone's step)
     int abs_ticks = ticks < 0 ? -ticks : ticks;
-    int step;
+    int step_multiplier;
     if (abs_ticks >= 3) {
-        step = 5;  // Fast rotation
+        step_multiplier = 5;  // Fast rotation
     } else if (abs_ticks >= 2) {
-        step = 3;  // Medium rotation
+        step_multiplier = 3;  // Medium rotation
     } else {
-        step = 1;  // Slow rotation (fine-grained control)
+        step_multiplier = 1;  // Slow rotation (fine-grained control)
     }
-
-    // Apply direction
-    int delta = (ticks > 0) ? step : -step;
 
     // Calculate optimistic new volume with clamping (inside lock for consistency)
     lock_state();
-    int predicted_vol = s_last_known_volume + delta;
+    float delta = step_multiplier * s_last_known_volume_step;
+    float predicted_vol = s_last_known_volume + (ticks > 0 ? delta : -delta);
     if (predicted_vol < s_last_known_volume_min) {
         predicted_vol = s_last_known_volume_min;
     }
@@ -1082,12 +1083,12 @@ void roon_client_handle_volume_rotation(int ticks) {
 
     // Send volume request to Roon (absolute value for exact match with optimistic UI)
     char body[256];
-    snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%d}",
+    snprintf(body, sizeof(body), "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.1f}",
         s_state.cfg.zone_id, predicted_vol);
     unlock_state();
 
     // Show volume overlay immediately with predicted value (optimistic UI)
-    ui_show_volume_change(predicted_vol);
+    ui_show_volume_change(predicted_vol, s_last_known_volume_step);
 
     if (!send_control_json(body)) {
         post_ui_message("Volume change failed");

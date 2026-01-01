@@ -159,7 +159,7 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Configuring WiFi: SSID='%s'", ssid);
 
     // Show "Saving..." on display
-    ui_update("Saving...", "", false, 0, 0, 100, 0, 0);
+    ui_update("Saving...", "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // Load current config, update WiFi credentials, save
@@ -180,7 +180,7 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
     if (!save_ok) {
         ESP_LOGE(TAG, "Failed to save config");
         // Show error on display
-        ui_update("SAVE FAILED!", "Check serial log", false, 0, 0, 100, 0, 0);
+        ui_update("SAVE FAILED!", "Check serial log", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         vTaskDelay(pdMS_TO_TICKS(5000));
         // Don't reboot - let user see the error
         return ESP_FAIL;
@@ -196,13 +196,13 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
         char countdown[32];
         snprintf(countdown, sizeof(countdown), "Rebooting in %d...", i);
 
-        ui_update(ssid_status, countdown, false, 0, 0, 100, 0, 0);
+        ui_update(ssid_status, countdown, false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         ESP_LOGI(TAG, "%s | %s", countdown, ssid_status);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     // Final message before reboot
-    ui_update("Rebooting...", "Please wait", false, 0, 0, 100, 0, 0);
+    ui_update("Rebooting...", "Please wait", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     ESP_LOGI(TAG, "Rebooting now...");

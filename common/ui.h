@@ -22,7 +22,7 @@ typedef void (*ui_volume_rotation_cb_t)(int ticks);  // Velocity-sensitive volum
 
 void ui_init(void);
 void ui_loop_iter(void);
-void ui_update(const char *line1, const char *line2, bool playing, int volume, int volume_min, int volume_max, int seek_position, int length);
+void ui_update(const char *line1, const char *line2, bool playing, float volume, float volume_min, float volume_max, float volume_step, int seek_position, int length);
 void ui_set_status(bool online);
 void ui_set_message(const char *msg);
 void ui_set_input_handler(ui_input_cb_t handler);
@@ -37,7 +37,7 @@ void ui_zone_picker_get_selected_id(char *out, size_t len);
 void ui_zone_picker_scroll(int delta);
 bool ui_zone_picker_is_current_selection(void);  // Returns true if selected zone == current zone
 void ui_set_artwork(const char *image_key);  // Set album artwork (placeholder for now)
-void ui_show_volume_change(int vol);  // Show volume overlay when adjusting
+void ui_show_volume_change(float vol, float vol_step);  // Show volume overlay when adjusting
 void ui_test_pattern(void);  // Debug: Show RGB test pattern to verify color format
 
 // Settings UI (platform-specific implementation)
