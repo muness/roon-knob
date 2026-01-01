@@ -431,7 +431,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         }
     }
 
-    state->volume_step = state->volume_step > 0.0f ? state->volume_step : 1.0f;  // Default 1.0 dB
+    state->volume_step = 1.0f;  // Default 1.0 dB step
     const char *step_key = strstr(resp, "\"volume_step\"");
     if (step_key) {
         const char *colon = strchr(step_key, ':');

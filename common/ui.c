@@ -174,6 +174,30 @@ static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
 static void show_volume_overlay(float volume, float volume_step);
+static inline void format_volume_text(char *buf, size_t len, float volume, float volume_min, float volume_step);
+
+// ============================================================================
+// Volume Formatting Helper
+// ============================================================================
+
+static inline void format_volume_text(char *buf, size_t len, float volume, float volume_min, float volume_step) {
+    float step_abs = volume_step < 0.0f ? -volume_step : volume_step;
+    int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
+
+    if (volume_min < 0.0f) {
+        if (step_is_fractional) {
+            snprintf(buf, len, "%.1f dB", volume);
+        } else {
+            snprintf(buf, len, "%.0f dB", volume);
+        }
+    } else {
+        if (step_is_fractional) {
+            snprintf(buf, len, "%.1f", volume);
+        } else {
+            snprintf(buf, len, "%.0f", volume);
+        }
+    }
+}
 
 // ============================================================================
 // UI Initialization
@@ -586,11 +610,11 @@ static void apply_state(const struct ui_state *state) {
     volume_initialized = true;
     last_volume = state->volume;
 
-    // Convert dB to 0-100 scale for arc display using zone's actual min/max
-    int vol_range = state->volume_max - state->volume_min;
+    // Convert to 0-100 scale for arc display using zone's actual min/max
+    float vol_range = state->volume_max - state->volume_min;
     int vol_pct = 0;
-    if (vol_range > 0) {
-        vol_pct = ((state->volume - state->volume_min) * 100) / vol_range;
+    if (vol_range > 0.01f) {
+        vol_pct = (int)(((state->volume - state->volume_min) * 100.0f) / vol_range);
     }
     if (vol_pct < 0) vol_pct = 0;
     if (vol_pct > 100) vol_pct = 100;
@@ -598,22 +622,8 @@ static void apply_state(const struct ui_state *state) {
 
     // Display volume (format matches zone's step precision)
     char vol_text[16];
-    float step_abs = state->volume_step < 0.0f ? -state->volume_step : state->volume_step;
-    int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
-
-    if (state->volume_min < 0.0f) {
-        if (step_is_fractional) {
-            snprintf(vol_text, sizeof(vol_text), "%.1f dB", state->volume);
-        } else {
-            snprintf(vol_text, sizeof(vol_text), "%.0f dB", state->volume);
-        }
-    } else {
-        if (step_is_fractional) {
-            snprintf(vol_text, sizeof(vol_text), "%.1f", state->volume);
-        } else {
-            snprintf(vol_text, sizeof(vol_text), "%.0f", state->volume);
-        }
-    }
+    // Note: volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
+    format_volume_text(vol_text, sizeof(vol_text), state->volume, state->volume_min, state->volume_step);
     lv_label_set_text(s_volume_label, vol_text);
 
     // Update progress arc based on seek position and track length
@@ -1066,22 +1076,8 @@ void ui_show_volume_change(float vol, float vol_step) {
     // Update small label immediately (optimistic)
     if (s_volume_label) {
         char vol_text[16];
-        float step_abs = vol_step < 0.0f ? -vol_step : vol_step;
-        int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
-
-        if (s_pending.volume_min < 0.0f) {
-            if (step_is_fractional) {
-                snprintf(vol_text, sizeof(vol_text), "%.1f dB", vol);
-            } else {
-                snprintf(vol_text, sizeof(vol_text), "%.0f dB", vol);
-            }
-        } else {
-            if (step_is_fractional) {
-                snprintf(vol_text, sizeof(vol_text), "%.1f", vol);
-            } else {
-                snprintf(vol_text, sizeof(vol_text), "%.0f", vol);
-            }
-        }
+        // Note: s_pending.volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
+        format_volume_text(vol_text, sizeof(vol_text), vol, s_pending.volume_min, vol_step);
         lv_label_set_text(s_volume_label, vol_text);
     }
 
