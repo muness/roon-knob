@@ -17,12 +17,13 @@ set(SRC_FILES
     "esp32_comm.c"
     "font_manager.c"
     # Generated bitmap fonts (run scripts/generate_fonts.sh to regenerate)
-    "fonts/charis_22.c"
-    "fonts/charis_28.c"
-    "fonts/charis_40.c"
+    # Typography: Lato for metadata, Noto Sans for content (matches Roon's design)
+    "fonts/lato_22.c"
+    "fonts/notosans_28.c"
     "fonts/material_icons_22.c"
     "fonts/material_icons_28.c"
-    "fonts/material_icons_48.c"
+    "fonts/material_icons_44.c"
+    "fonts/material_icons_60.c"
     "../../common/app_main.c"
     "../../common/roon_client.c"
     "../../common/ui.c"

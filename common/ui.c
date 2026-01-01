@@ -57,10 +57,8 @@ static lv_obj_t *s_track_label;        // Main track name
 static lv_obj_t *s_artist_label;       // Artist/album
 static lv_obj_t *s_volume_arc;         // Outer arc for volume
 static lv_obj_t *s_progress_arc;       // Inner arc for track progress
-static lv_obj_t *s_volume_label;       // Volume percentage (small, top)
-static lv_obj_t *s_volume_overlay;     // Large volume popup when adjusting
-static lv_obj_t *s_volume_overlay_label;  // Volume text in overlay
-static lv_timer_t *s_volume_overlay_timer;  // Timer to hide volume overlay
+static lv_obj_t *s_volume_label_large; // Volume display (large, prominent) - primary display
+static lv_timer_t *s_volume_emphasis_timer;  // Timer to reset volume emphasis after adjustment
 static lv_obj_t *s_status_dot;         // Online/offline indicator
 static lv_obj_t *s_battery_icon;       // Battery icon (Material Symbols)
 static lv_obj_t *s_zone_label;         // Zone name
@@ -124,7 +122,7 @@ static bool s_network_status_dirty = false;
 static ui_input_cb_t s_input_cb;
 static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
-static float s_last_predicted_volume = -9999.0f;  // Track user's predicted volume for overlay suppression
+static float s_last_predicted_volume = -9999.0f;  // Track user's predicted volume for emphasis suppression
 #ifdef ESP_PLATFORM
 static ui_jpeg_image_t s_artwork_img;  // Decoded RGB565 image for artwork (ESP32)
 #else
@@ -173,7 +171,8 @@ static void zone_list_item_event_cb(lv_event_t *e);
 static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
-static void show_volume_overlay(float volume, float volume_step);
+static void reset_volume_emphasis_timer_cb(lv_timer_t *timer);
+static void emphasize_volume_label(void);
 
 // ============================================================================
 // Volume Formatting Helper
@@ -349,29 +348,7 @@ static void build_layout(void) {
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
-    // Volume overlay - large centered popup that appears when adjusting volume
-    s_volume_overlay = lv_obj_create(s_ui_container);
-    lv_obj_set_size(s_volume_overlay, 160, 160);
-    lv_obj_center(s_volume_overlay);
-    lv_obj_set_style_bg_color(s_volume_overlay, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(s_volume_overlay, LV_OPA_80, 0);
-    lv_obj_set_style_radius(s_volume_overlay, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(s_volume_overlay, 2, 0);
-    lv_obj_set_style_border_color(s_volume_overlay, lv_color_hex(0x5a9fd4), 0);
-    lv_obj_add_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
 
-    s_volume_overlay_label = lv_label_create(s_volume_overlay);
-    lv_obj_set_style_text_font(s_volume_overlay_label, font_large(), 0);
-    lv_obj_set_style_text_color(s_volume_overlay_label, lv_color_hex(0xfafafa), 0);
-    lv_label_set_text(s_volume_overlay_label, "0 dB");
-    lv_obj_center(s_volume_overlay_label);
-
-    // Volume label - small text at top
-    s_volume_label = lv_label_create(s_ui_container);
-    lv_label_set_text(s_volume_label, "-- dB");
-    lv_obj_set_style_text_font(s_volume_label, font_small(), 0);
-    lv_obj_set_style_text_color(s_volume_label, lv_color_hex(0xfafafa), 0);  // Off-white
-    lv_obj_align(s_volume_label, LV_ALIGN_TOP_MID, 0, 12);
 
     // Status dot - top right (on the outer ring)
     s_status_dot = lv_obj_create(s_ui_container);
@@ -380,14 +357,14 @@ static void build_layout(void) {
     lv_obj_set_style_border_width(s_status_dot, 0, 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
-    // Battery indicator - top left (adjusted for round display)
+    // Battery indicator - top left (same y-coordinate as zone)
     // Icon only - no numeric label needed with 5 discrete states
 #if !TARGET_PC
     s_battery_icon = lv_label_create(s_ui_container);
     lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
     lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
     lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
-    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_LEFT, 100, 38);  // Just inside the arc
+    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_LEFT, 35, 12);  // Same row as volume
 #endif
 
     // Zone label - clickable zone name, positioned below the arc edge
@@ -406,7 +383,16 @@ static void build_layout(void) {
     // Add press state visual feedback
     lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xfafafa), LV_STATE_PRESSED);
 
-    // Track name - positioned just above media controls (buttons are at CENTER + 60)
+    // Volume display - large and prominent (primary use case)
+    // Positioned between zone and artist, using larger font
+    // Emphasis handled by emphasize_volume_label() when volume changes
+    s_volume_label_large = lv_label_create(s_ui_container);
+    lv_label_set_text(s_volume_label_large, "-- dB");
+    lv_obj_set_style_text_font(s_volume_label_large, font_normal(), 0);  // Larger than before
+    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0xfafafa), 0);  // Prominent white
+    lv_obj_align(s_volume_label_large, LV_ALIGN_TOP_MID, 0, 85);
+
+    // Track name - positioned just above media controls (buttons are at CENTER + 80)
     // Place track at CENTER - 20 to sit nicely above the buttons
     s_track_label = lv_label_create(s_background);
     lv_obj_set_width(s_track_label, SCREEN_SIZE - 80);
@@ -430,12 +416,12 @@ static void build_layout(void) {
     lv_label_set_text(s_artist_label, s_pending.line2);
 
     // Media control buttons - Blue Knob style (3 circular buttons)
-    int btn_y = 60;  // Offset from center - move lower
-    int btn_spacing = 70;  // Space between buttons
+    int btn_y = 80;  // Offset from center - moved lower for better ergonomics
+    int btn_spacing = 75;  // Space between buttons (adjusted for larger sizes)
 
     // Previous button (left) - use lv_btn_create for proper button widget
     s_btn_prev = lv_btn_create(s_background);
-    lv_obj_set_size(s_btn_prev, 50, 50);
+    lv_obj_set_size(s_btn_prev, 60, 60);  // Increased from 50x50 for easier tapping
     lv_obj_add_style(s_btn_prev, &style_button_secondary, 0);
     lv_obj_align(s_btn_prev, LV_ALIGN_CENTER, -btn_spacing, btn_y);
     lv_obj_add_event_cb(s_btn_prev, btn_prev_event_cb, LV_EVENT_CLICKED, NULL);
@@ -459,7 +445,7 @@ static void build_layout(void) {
 
     // Play/Pause button (center, larger)
     s_btn_play = lv_btn_create(s_background);
-    lv_obj_set_size(s_btn_play, 70, 70);
+    lv_obj_set_size(s_btn_play, 80, 80);  // Increased from 70x70 for easier tapping
     lv_obj_add_style(s_btn_play, &style_button_primary, 0);
     lv_obj_align(s_btn_play, LV_ALIGN_CENTER, 0, btn_y);
     lv_obj_add_event_cb(s_btn_play, btn_play_event_cb, LV_EVENT_CLICKED, NULL);
@@ -483,7 +469,7 @@ static void build_layout(void) {
 
     // Next button (right)
     s_btn_next = lv_btn_create(s_background);
-    lv_obj_set_size(s_btn_next, 50, 50);
+    lv_obj_set_size(s_btn_next, 60, 60);  // Increased from 50x50 for easier tapping
     lv_obj_add_style(s_btn_next, &style_button_secondary, 0);
     lv_obj_align(s_btn_next, LV_ALIGN_CENTER, btn_spacing, btn_y);
     lv_obj_add_event_cb(s_btn_next, btn_next_event_cb, LV_EVENT_CLICKED, NULL);
@@ -603,17 +589,17 @@ static void apply_state(const struct ui_state *state) {
         ESP_LOGE(UI_TAG, "Label pointers are NULL! track=%p artist=%p", s_track_label, s_artist_label);
     }
 
-    // Update volume arc and label, show overlay if volume changed
+    // Update volume arc and label, emphasize if volume changed
     // Volume is in dB with zone-specific min/max range
     static float last_volume = -9999.0f;  // Sentinel value (unlikely real volume)
     static bool volume_initialized = false;
     float vol_diff = state->volume < last_volume ? last_volume - state->volume : state->volume - last_volume;
     if (volume_initialized && vol_diff > 0.01f) {
-        // Only show overlay if value differs from last user prediction
-        // (suppresses redundant popup when poll confirms user's change)
+        // Only emphasize if value differs from last user prediction
+        // (suppresses redundant emphasis when poll confirms user's change)
         float pred_diff = state->volume < s_last_predicted_volume ? s_last_predicted_volume - state->volume : state->volume - s_last_predicted_volume;
         if (pred_diff > 0.01f) {
-            show_volume_overlay(state->volume, state->volume_step);
+            emphasize_volume_label();
         }
     }
     volume_initialized = true;
@@ -627,7 +613,7 @@ static void apply_state(const struct ui_state *state) {
     char vol_text[16];
     // Note: volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
     format_volume_text(vol_text, sizeof(vol_text), state->volume, state->volume_min, state->volume_step);
-    lv_label_set_text(s_volume_label, vol_text);
+    lv_label_set_text(s_volume_label_large, vol_text);
 
     // Update progress arc based on seek position and track length
     if (s_progress_arc && state->length > 0) {
@@ -801,39 +787,31 @@ static void clear_status_message_timer_cb(lv_timer_t *timer) {
 }
 
 // ============================================================================
-// Volume Overlay - Shows large volume indicator when adjusting
+// Volume Emphasis - Highlights volume display when adjusting
 // ============================================================================
 
-static void hide_volume_overlay_timer_cb(lv_timer_t *timer) {
+static void reset_volume_emphasis_timer_cb(lv_timer_t *timer) {
     (void)timer;
-    if (s_volume_overlay) {
-        lv_obj_add_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (s_volume_label_large) {
+        lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0xfafafa), 0);  // Reset to white
     }
-    s_volume_overlay_timer = NULL;
+    s_volume_emphasis_timer = NULL;
 }
 
-static void show_volume_overlay(float volume, float volume_step) {
-    if (!s_volume_overlay || !s_volume_overlay_label) {
+static void emphasize_volume_label(void) {
+    if (!s_volume_label_large) {
         return;
     }
 
-    // Update the volume text (format matches zone's step precision)
-    char vol_text[16];
-    // Note: s_pending.volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
-    format_volume_text(vol_text, sizeof(vol_text), volume, s_pending.volume_min, volume_step);
-    lv_label_set_text(s_volume_overlay_label, vol_text);
-    lv_obj_center(s_volume_overlay_label);
+    // Emphasize with bright blue
+    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0x7bb9e8), 0);
 
-    // Show the overlay
-    lv_obj_clear_flag(s_volume_overlay, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_volume_overlay);
-
-    // Reset/create the hide timer (1.5 seconds)
-    if (s_volume_overlay_timer) {
-        lv_timer_reset(s_volume_overlay_timer);
+    // Reset/create timer to remove emphasis after 1.5 seconds
+    if (s_volume_emphasis_timer) {
+        lv_timer_reset(s_volume_emphasis_timer);
     } else {
-        s_volume_overlay_timer = lv_timer_create(hide_volume_overlay_timer_cb, 1500, NULL);
-        lv_timer_set_repeat_count(s_volume_overlay_timer, 1);
+        s_volume_emphasis_timer = lv_timer_create(reset_volume_emphasis_timer_cb, 1500, NULL);
+        lv_timer_set_repeat_count(s_volume_emphasis_timer, 1);
     }
 }
 
@@ -1060,7 +1038,7 @@ void ui_set_volume_with_range(float vol, float vol_min, float vol_max, float vol
 }
 
 void ui_show_volume_change(float vol, float vol_step) {
-    s_last_predicted_volume = vol;  // Track prediction for overlay suppression
+    s_last_predicted_volume = vol;  // Track prediction for emphasis suppression
 
     // Note: Reading volume_min/volume_max without lock (atomic float reads, self-correct on next poll if stale)
 
@@ -1070,14 +1048,14 @@ void ui_show_volume_change(float vol, float vol_step) {
         lv_arc_set_value(s_volume_arc, vol_pct);
     }
 
-    // Update small label immediately (optimistic)
-    if (s_volume_label) {
-        char vol_text[16];
-        format_volume_text(vol_text, sizeof(vol_text), vol, s_pending.volume_min, vol_step);
-        lv_label_set_text(s_volume_label, vol_text);
-    }
+    // Update volume label immediately (optimistic)
+    char vol_text[16];
+    format_volume_text(vol_text, sizeof(vol_text), vol, s_pending.volume_min, vol_step);
 
-    show_volume_overlay(vol, vol_step);
+    if (s_volume_label_large) {
+        lv_label_set_text(s_volume_label_large, vol_text);
+        emphasize_volume_label();
+    }
 }
 
 void ui_set_playing(bool playing) {
@@ -1472,7 +1450,7 @@ void ui_set_controls_visible(bool visible) {
         if (s_track_label) lv_obj_clear_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         if (s_artist_label) lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
         if (s_zone_label) lv_obj_clear_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_volume_label) lv_obj_clear_flag(s_volume_label, LV_OBJ_FLAG_HIDDEN);
+        if (s_volume_label_large) lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
         if (s_battery_icon) lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
         if (s_status_bar) lv_obj_clear_flag(s_status_bar, LV_OBJ_FLAG_HIDDEN);
@@ -1487,7 +1465,7 @@ void ui_set_controls_visible(bool visible) {
         if (s_track_label) lv_obj_add_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         if (s_artist_label) lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
         if (s_zone_label) lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_volume_label) lv_obj_add_flag(s_volume_label, LV_OBJ_FLAG_HIDDEN);
+        if (s_volume_label_large) lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
         if (s_battery_icon) lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
         if (s_status_bar) lv_obj_add_flag(s_status_bar, LV_OBJ_FLAG_HIDDEN);
