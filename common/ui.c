@@ -42,10 +42,12 @@ struct ui_state {
     char line2[128];
     char zone_name[64];
     bool playing;
-    int volume;
-    int volume_min;
-    int volume_max;
+    float volume;
+    float volume_min;
+    float volume_max;
     bool online;
+    float volume_step;
+
     int seek_position;
     int length;
 };
@@ -105,9 +107,10 @@ static struct ui_state s_pending = {
     .line2 = "",
     .zone_name = "",
     .playing = false,
-    .volume = 0,
-    .volume_min = -80,
-    .volume_max = 0,
+    .volume = 0.0f,
+    .volume_min = -80.0f,
+    .volume_max = 0.0f,
+    .volume_step = 1.0f,
     .online = false,
     .seek_position = 0,
     .length = 0,
@@ -121,6 +124,7 @@ static bool s_network_status_dirty = false;
 static ui_input_cb_t s_input_cb;
 static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
+static float s_last_predicted_volume = -9999.0f;  // Track user's predicted volume for overlay suppression
 #ifdef ESP_PLATFORM
 static ui_jpeg_image_t s_artwork_img;  // Decoded RGB565 image for artwork (ESP32)
 #else
@@ -169,7 +173,40 @@ static void zone_list_item_event_cb(lv_event_t *e);
 static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
-static void show_volume_overlay(int volume);
+static void show_volume_overlay(float volume, float volume_step);
+
+// ============================================================================
+// Volume Formatting Helper
+// ============================================================================
+
+static inline void format_volume_text(char *buf, size_t len, float volume, float volume_min, float volume_step) {
+    float step_abs = volume_step < 0.0f ? -volume_step : volume_step;
+    int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
+
+    if (volume_min < 0.0f) {
+        if (step_is_fractional) {
+            snprintf(buf, len, "%.1f dB", volume);
+        } else {
+            snprintf(buf, len, "%.0f dB", volume);
+        }
+    } else {
+        if (step_is_fractional) {
+            snprintf(buf, len, "%.1f", volume);
+        } else {
+            snprintf(buf, len, "%.0f", volume);
+        }
+    }
+}
+
+static inline int calculate_volume_percentage(float volume, float volume_min, float volume_max) {
+    float vol_range = volume_max - volume_min;
+    if (vol_range < 0.01f) return 0;
+
+    int vol_pct = (int)(((volume - volume_min) * 100.0f) / vol_range);
+    if (vol_pct < 0) return 0;
+    if (vol_pct > 100) return 100;
+    return vol_pct;
+}
 
 // ============================================================================
 // UI Initialization
@@ -568,27 +605,28 @@ static void apply_state(const struct ui_state *state) {
 
     // Update volume arc and label, show overlay if volume changed
     // Volume is in dB with zone-specific min/max range
-    static int last_volume = -9999;  // Sentinel value (unlikely real volume)
+    static float last_volume = -9999.0f;  // Sentinel value (unlikely real volume)
     static bool volume_initialized = false;
-    if (volume_initialized && last_volume != state->volume) {
-        show_volume_overlay(state->volume);
+    float vol_diff = state->volume < last_volume ? last_volume - state->volume : state->volume - last_volume;
+    if (volume_initialized && vol_diff > 0.01f) {
+        // Only show overlay if value differs from last user prediction
+        // (suppresses redundant popup when poll confirms user's change)
+        float pred_diff = state->volume < s_last_predicted_volume ? s_last_predicted_volume - state->volume : state->volume - s_last_predicted_volume;
+        if (pred_diff > 0.01f) {
+            show_volume_overlay(state->volume, state->volume_step);
+        }
     }
     volume_initialized = true;
     last_volume = state->volume;
 
-    // Convert dB to 0-100 scale for arc display using zone's actual min/max
-    int vol_range = state->volume_max - state->volume_min;
-    int vol_pct = 0;
-    if (vol_range > 0) {
-        vol_pct = ((state->volume - state->volume_min) * 100) / vol_range;
-    }
-    if (vol_pct < 0) vol_pct = 0;
-    if (vol_pct > 100) vol_pct = 100;
+    // Convert to 0-100 scale for arc display using zone's actual min/max
+    int vol_pct = calculate_volume_percentage(state->volume, state->volume_min, state->volume_max);
     lv_arc_set_value(s_volume_arc, vol_pct);
 
-    // Display volume in dB
+    // Display volume (format matches zone's step precision)
     char vol_text[16];
-    snprintf(vol_text, sizeof(vol_text), "%d dB", state->volume);
+    // Note: volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
+    format_volume_text(vol_text, sizeof(vol_text), state->volume, state->volume_min, state->volume_step);
     lv_label_set_text(s_volume_label, vol_text);
 
     // Update progress arc based on seek position and track length
@@ -774,14 +812,15 @@ static void hide_volume_overlay_timer_cb(lv_timer_t *timer) {
     s_volume_overlay_timer = NULL;
 }
 
-static void show_volume_overlay(int volume) {
+static void show_volume_overlay(float volume, float volume_step) {
     if (!s_volume_overlay || !s_volume_overlay_label) {
         return;
     }
 
-    // Update the volume text (display in dB)
+    // Update the volume text (format matches zone's step precision)
     char vol_text[16];
-    snprintf(vol_text, sizeof(vol_text), "%d dB", volume);
+    // Note: s_pending.volume_min is atomic float read; no lock needed (self-corrects on next poll if stale)
+    format_volume_text(vol_text, sizeof(vol_text), volume, s_pending.volume_min, volume_step);
     lv_label_set_text(s_volume_overlay_label, vol_text);
     lv_obj_center(s_volume_overlay_label);
 
@@ -1010,17 +1049,35 @@ void ui_set_volume(int vol) {
     os_mutex_unlock(&s_state_lock);
 }
 
-void ui_set_volume_with_range(int vol, int vol_min, int vol_max) {
+void ui_set_volume_with_range(float vol, float vol_min, float vol_max, float vol_step) {
     os_mutex_lock(&s_state_lock);
     s_pending.volume = vol;
     s_pending.volume_min = vol_min;
     s_pending.volume_max = vol_max;
+    s_pending.volume_step = vol_step;
     s_dirty = true;
     os_mutex_unlock(&s_state_lock);
 }
 
-void ui_show_volume_change(int vol) {
-    show_volume_overlay(vol);
+void ui_show_volume_change(float vol, float vol_step) {
+    s_last_predicted_volume = vol;  // Track prediction for overlay suppression
+
+    // Note: Reading volume_min/volume_max without lock (atomic float reads, self-correct on next poll if stale)
+
+    // Update volume arc immediately (optimistic)
+    if (s_volume_arc) {
+        int vol_pct = calculate_volume_percentage(vol, s_pending.volume_min, s_pending.volume_max);
+        lv_arc_set_value(s_volume_arc, vol_pct);
+    }
+
+    // Update small label immediately (optimistic)
+    if (s_volume_label) {
+        char vol_text[16];
+        format_volume_text(vol_text, sizeof(vol_text), vol, s_pending.volume_min, vol_step);
+        lv_label_set_text(s_volume_label, vol_text);
+    }
+
+    show_volume_overlay(vol, vol_step);
 }
 
 void ui_set_playing(bool playing) {
@@ -1103,10 +1160,10 @@ void ui_set_input_handler(ui_input_cb_t handler) {
     ui_set_input_callback(handler);
 }
 
-void ui_update(const char *line1, const char *line2, bool playing, int volume, int volume_min, int volume_max, int seek_position, int length) {
+void ui_update(const char *line1, const char *line2, bool playing, float volume, float volume_min, float volume_max, float volume_step, int seek_position, int length) {
     ui_set_track(line1, line2);
     ui_set_playing(playing);
-    ui_set_volume_with_range(volume, volume_min, volume_max);
+    ui_set_volume_with_range(volume, volume_min, volume_max, volume_step);
     ui_set_progress(seek_position, length);
 }
 

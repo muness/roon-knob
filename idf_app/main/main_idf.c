@@ -49,7 +49,7 @@ static void wifi_msg_toggle_cb(void *arg) {
     s_wifi_show_error = !s_wifi_show_error;
     // Update main display (line1), not just the status bar
     ui_update(s_wifi_show_error ? s_wifi_error_msg : s_wifi_retry_msg,
-              "", false, 0, 0, 100, 0, 0);
+              "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
 }
 
 static void start_wifi_msg_alternation(const char *error, int attempt, int max) {
@@ -59,7 +59,7 @@ static void start_wifi_msg_alternation(const char *error, int attempt, int max) 
     s_wifi_show_error = true;
 
     // Show error message first in main display
-    ui_update(s_wifi_error_msg, "", false, 0, 0, 100, 0, 0);
+    ui_update(s_wifi_error_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
 
     // Create timer if needed
     if (!s_wifi_msg_timer) {
@@ -94,7 +94,7 @@ static void update_bt_ui(void) {
         title[0] ? title : "Bluetooth",
         artist[0] ? artist : "Waiting for track...",
         esp32_comm_get_play_state() == ESP32_PLAY_STATE_PLAYING,
-        vol_percent, 0, 100,
+        (float)vol_percent, 0.0f, 100.0f, 1.0f,
         (int)(position_ms / 1000), (int)(duration_ms / 1000)
     );
 }
@@ -247,7 +247,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         // Only show "Connecting..." on first attempt; during retries, keep showing error/retry
         if (retry == 0) {
             stop_wifi_msg_alternation();
-            ui_update("WiFi: Connecting...", "", false, 0, 0, 100, 0, 0);
+            ui_update("WiFi: Connecting...", "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         }
         break;
     }
@@ -255,7 +255,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     case RK_NET_EVT_GOT_IP:
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
         stop_wifi_msg_alternation();
-        ui_update("WiFi: Connected", "", false, 0, 0, 100, 0, 0);
+        ui_update("WiFi: Connected", "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         roon_client_set_device_ip(ip_opt);  // Store IP for bridge recovery messages
         roon_client_set_network_ready(true);
         // Defer heavy operations to UI task (sys_evt has limited stack)
@@ -282,7 +282,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
         stop_wifi_msg_alternation();
         // Show setup instructions in main display area (line2 is top, line1 is bottom)
-        ui_update("roon-knob-setup", "Connect to WiFi:", false, 0, 0, 100, 0, 0);
+        ui_update("roon-knob-setup", "Connect to WiFi:", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         ui_set_zone_name("WiFi Setup");
         roon_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
@@ -290,7 +290,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
     case RK_NET_EVT_AP_STOPPED:
         ESP_LOGI(TAG, "WiFi: AP mode stopped, connecting to network...");
-        ui_update("WiFi: Connecting...", "", false, 0, 0, 100, 0, 0);
+        ui_update("WiFi: Connecting...", "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         break;
 
     default:
