@@ -380,7 +380,7 @@ static void ui_loop_task(void *arg) {
         if (s_mdns_init_pending) {
             s_mdns_init_pending = false;
             ESP_LOGI(TAG, "Initializing mDNS (network is up)...");
-            platform_mdns_init(NULL);
+            platform_mdns_init(wifi_mgr_get_hostname());
         }
         if (s_ota_check_pending) {
             s_ota_check_pending = false;

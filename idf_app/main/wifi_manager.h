@@ -24,6 +24,7 @@ void wifi_mgr_forget_wifi(void);             // clears ssid/pass, reconnects usi
 bool wifi_mgr_get_ip(char *buf, size_t n);   // "a.b.c.d"
 void wifi_mgr_get_ssid(char *buf, size_t n);
 bool wifi_mgr_is_ap_mode(void);              // true if in AP provisioning mode
+const char *wifi_mgr_get_hostname(void);     // get device hostname (for mDNS, logs)
 void wifi_mgr_stop_ap(void);                 // stop AP mode, attempt STA connection
 const char *wifi_mgr_get_last_error(void);   // get last disconnect reason string
 int wifi_mgr_get_retry_count(void);          // get current retry attempt count (0 = connected)
