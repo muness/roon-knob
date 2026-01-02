@@ -111,6 +111,19 @@ typedef enum {
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);
 ```
 
+### Device Name on Network
+
+Your router's client list will show the device as:
+- **Default:** `roon-knob-a1b2c3` (unique ID based on device MAC)
+- **Custom:** Set a friendly name like "Kitchen Knob" via the bridge admin UI
+
+**To set a custom name:**
+1. Open bridge admin UI at `http://your-bridge-ip:8088`
+2. Set the "Knob Name" field (e.g., "Kitchen Knob")
+3. Device reboots automatically and appears with new name
+
+**Note:** Some routers take a few minutes to update after name changes.
+
 ## AP Mode (Provisioning)
 
 ### When AP Mode Activates

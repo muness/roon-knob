@@ -113,6 +113,21 @@ static void sanitize_hostname(const char *input, char *output, size_t output_len
     }
     output[j] = '\0';
 
+    // Trim leading hyphens
+    size_t start = 0;
+    while (output[start] == '-') {
+        start++;
+    }
+    if (start > 0) {
+        memmove(output, output + start, j - start + 1);
+        j -= start;
+    }
+
+    // Trim trailing hyphens
+    while (j > 0 && output[j - 1] == '-') {
+        output[--j] = '\0';
+    }
+
     // If sanitization resulted in empty string, use fallback
     if (j == 0) {
         snprintf(output, output_len, "roon-knob");
