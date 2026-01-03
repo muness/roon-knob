@@ -329,7 +329,20 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
     esp_ip4_addr_t ip = evt->ip_info.ip;
     esp_ip4addr_ntoa(&ip, s_ip, sizeof(s_ip));
 
-    ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s", s_cfg.ssid, s_ip);
+    // Debug: Verify hostname persists after connection
+    const char *check_hostname = NULL;
+    esp_netif_get_hostname(s_sta_netif, &check_hostname);
+    ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s, hostname: %s",
+             s_cfg.ssid, s_ip, check_hostname ? check_hostname : "NULL");
+
+    // Re-assert hostname after IP acquisition to force DHCP INFORM
+    // Some routers (UniFi) may need this to solidify the hostname
+    const char *hostname = get_device_hostname();
+    esp_err_t err = esp_netif_set_hostname(s_sta_netif, hostname);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Re-asserted hostname after IP acquisition: %s", hostname);
+    }
+
     reset_backoff();
     s_sta_fail_count = 0;  // Reset failure count on successful connection
     s_last_error = NULL;   // Clear last error on success
@@ -349,6 +362,13 @@ static void start_ap_mode(void) {
     // Create AP netif if needed
     if (!s_ap_netif) {
         s_ap_netif = esp_netif_create_default_wifi_ap();
+
+        // Set hostname for AP mode too (prevents "espressif" from appearing)
+        const char *hostname = get_device_hostname();
+        esp_err_t err = esp_netif_set_hostname(s_ap_netif, hostname);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "AP mode hostname set: %s", hostname);
+        }
     }
 
     // Configure AP with optimal settings for discoverability
