@@ -28,6 +28,9 @@ CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=16
 CONFIG_ESP_WIFI_RX_BA_WIN=6
 CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
 
+# Network identity - replace "espressif" with project name for NetBIOS/LLMNR
+CONFIG_LWIP_LOCAL_HOSTNAME="roon-knob"
+
 # Brownout detection - lower threshold for battery operation
 # Level 4 (2.50V) allows WiFi current spikes without false triggers
 # Level 7 (2.80V default) causes boot failures on battery due to WiFi inrush
