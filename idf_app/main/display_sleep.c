@@ -44,6 +44,7 @@ static esp_timer_handle_t s_dim_timer = NULL;
 static esp_timer_handle_t s_sleep_timer = NULL;
 static SemaphoreHandle_t s_display_state_mutex = NULL;
 static display_state_t s_display_state = DISPLAY_STATE_NORMAL;
+static int64_t s_touch_suppress_until_ms = 0;  // Suppress widget touches after wake
 
 // Current timeout values (in ms, 0 = disabled)
 static uint32_t s_art_mode_timeout_ms = DEFAULT_ART_MODE_TIMEOUT_MS;
@@ -244,6 +245,8 @@ void display_wake(void) {
         // Show controls
         ui_set_controls_visible(true);
         s_display_state = DISPLAY_STATE_NORMAL;
+        // Suppress widget touches for 250ms to prevent accidental activation
+        s_touch_suppress_until_ms = esp_timer_get_time() / 1000 + 250;
         ESP_LOGI(TAG, "Display awake (brightness: %d%%)", (BACKLIGHT_NORMAL * 100) / 255);
     }
 
@@ -393,6 +396,12 @@ void display_activity_detected(void) {
 // Check if display is sleeping
 bool display_is_sleeping(void) {
     return s_display_state == DISPLAY_STATE_SLEEP;
+}
+
+// Check if widget touches should be suppressed (within 250ms after wake)
+bool display_is_touch_suppressed(void) {
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    return now_ms < s_touch_suppress_until_ms;
 }
 
 // Update timeout values from config

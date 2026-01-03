@@ -357,11 +357,20 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
         if (was_not_normal) {
             display_activity_detected();  // Wake display
             // Consume this touch - don't pass to LVGL widgets (prevents accidental activation)
+            data->point.x = x;
+            data->point.y = y;
             data->state = LV_INDEV_STATE_RELEASED;
             return;  // Swipe tracking continues, but widget interaction suppressed
         }
 
-        // Display already awake - normal touch processing
+        // Display already awake - check if touches suppressed after recent wake
+        if (display_is_touch_suppressed()) {
+            // Within 250ms after wake - suppress widget touches but allow swipe tracking
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
+
+        // Normal touch processing
         display_activity_detected();  // Reset sleep timers
         data->point.x = x;
         data->point.y = y;

@@ -72,6 +72,7 @@ bool display_is_sleeping(void);
  * @brief Get current display state
  */
 display_state_t display_get_state(void);
+bool display_is_touch_suppressed(void);
 
 /**
  * @brief Process pending display state changes
