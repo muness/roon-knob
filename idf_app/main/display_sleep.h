@@ -74,6 +74,12 @@ bool display_is_sleeping(void);
 display_state_t display_get_state(void);
 
 /**
+ * @brief Check if widget touches are currently suppressed
+ * @return true if within 250ms after wake (prevents accidental activation)
+ */
+bool display_is_touch_suppressed(void);
+
+/**
  * @brief Process pending display state changes
  * Call this from the UI loop to safely handle timer-triggered state changes
  */

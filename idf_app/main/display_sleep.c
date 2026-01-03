@@ -32,6 +32,9 @@ static const char *TAG = "display_sleep";
 #define LVGL_TASK_PRIORITY_NORMAL 2
 #define LVGL_TASK_PRIORITY_LOW 1
 
+// Touch suppression after wake to prevent accidental widget activation
+#define TOUCH_SUPPRESS_AFTER_WAKE_MS 250
+
 // Mutex for thread safety
 #define LOCK_DISPLAY_STATE() xSemaphoreTake(s_display_state_mutex, portMAX_DELAY)
 #define UNLOCK_DISPLAY_STATE() xSemaphoreGive(s_display_state_mutex)
@@ -44,6 +47,7 @@ static esp_timer_handle_t s_dim_timer = NULL;
 static esp_timer_handle_t s_sleep_timer = NULL;
 static SemaphoreHandle_t s_display_state_mutex = NULL;
 static display_state_t s_display_state = DISPLAY_STATE_NORMAL;
+static int64_t s_touch_suppress_until_ms = 0;  // Suppress widget touches after wake
 
 // Current timeout values (in ms, 0 = disabled)
 static uint32_t s_art_mode_timeout_ms = DEFAULT_ART_MODE_TIMEOUT_MS;
@@ -244,6 +248,8 @@ void display_wake(void) {
         // Show controls
         ui_set_controls_visible(true);
         s_display_state = DISPLAY_STATE_NORMAL;
+        // Suppress widget touches after wake to prevent accidental activation
+        s_touch_suppress_until_ms = esp_timer_get_time() / 1000 + TOUCH_SUPPRESS_AFTER_WAKE_MS;
         ESP_LOGI(TAG, "Display awake (brightness: %d%%)", (BACKLIGHT_NORMAL * 100) / 255);
     }
 
@@ -290,12 +296,10 @@ static void sleep_timer_callback(void *arg) {
 
 // Process pending display state changes (call from UI loop)
 void display_process_pending(void) {
-    // Don't dim/sleep during setup: captive portal active or bridge unreachable
+    // Don't enter art mode during setup (captive portal active or bridge unreachable)
+    // But allow dim/sleep to work regardless of bridge state
     if (captive_portal_is_running() || !roon_client_is_ready_for_art_mode()) {
-        s_pending_art_mode = false;
-        s_pending_dim = false;
-        s_pending_sleep = false;
-        return;
+        s_pending_art_mode = false;  // Only block art mode entry, not dim/sleep
     }
 
     if (s_pending_art_mode) {
@@ -370,41 +374,37 @@ void display_activity_detected(void) {
     uint32_t dim_timeout = s_dim_timeout_ms;
     uint32_t sleep_timeout = s_sleep_timeout_ms;
 
-    // Wake display if dimmed or sleeping
-    if (current_state == DISPLAY_STATE_DIM || current_state == DISPLAY_STATE_SLEEP) {
+    // Wake display if in art mode, dimmed, or sleeping (tap shows controls at normal brightness)
+    if (current_state == DISPLAY_STATE_ART_MODE || current_state == DISPLAY_STATE_DIM || current_state == DISPLAY_STATE_SLEEP) {
         display_wake();
         return;  // display_wake already starts the timer chain
     }
 
-    // Reset timer chain for NORMAL or ART_MODE states
+    // Reset timer chain for NORMAL state (only remaining case after wake check)
     // Stop all timers first
     if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
     if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
     if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
 
-    // Restart appropriate timer based on current state
-    if (current_state == DISPLAY_STATE_NORMAL) {
-        // From normal, start at beginning of chain
-        if (art_timeout > 0 && s_art_mode_timer != NULL) {
-            esp_timer_start_once(s_art_mode_timer, art_timeout * 1000ULL);
-        } else if (dim_timeout > 0 && s_dim_timer != NULL) {
-            esp_timer_start_once(s_dim_timer, dim_timeout * 1000ULL);
-        } else if (sleep_timeout > 0 && s_sleep_timer != NULL) {
-            esp_timer_start_once(s_sleep_timer, sleep_timeout * 1000ULL);
-        }
-    } else if (current_state == DISPLAY_STATE_ART_MODE) {
-        // From art mode, restart dim timer (skip art mode timer - already in art mode)
-        if (dim_timeout > 0 && s_dim_timer != NULL) {
-            esp_timer_start_once(s_dim_timer, dim_timeout * 1000ULL);
-        } else if (sleep_timeout > 0 && s_sleep_timer != NULL) {
-            esp_timer_start_once(s_sleep_timer, sleep_timeout * 1000ULL);
-        }
+    // From NORMAL state, start at beginning of timer chain
+    if (art_timeout > 0 && s_art_mode_timer != NULL) {
+        esp_timer_start_once(s_art_mode_timer, art_timeout * 1000ULL);
+    } else if (dim_timeout > 0 && s_dim_timer != NULL) {
+        esp_timer_start_once(s_dim_timer, dim_timeout * 1000ULL);
+    } else if (sleep_timeout > 0 && s_sleep_timer != NULL) {
+        esp_timer_start_once(s_sleep_timer, sleep_timeout * 1000ULL);
     }
 }
 
 // Check if display is sleeping
 bool display_is_sleeping(void) {
     return s_display_state == DISPLAY_STATE_SLEEP;
+}
+
+// Check if widget touches should be suppressed (within 250ms after wake)
+bool display_is_touch_suppressed(void) {
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    return now_ms < s_touch_suppress_until_ms;
 }
 
 // Update timeout values from config

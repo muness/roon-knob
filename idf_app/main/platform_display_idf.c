@@ -342,18 +342,41 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     uint16_t x, y;
 
     if (tpGetCoordinates(&x, &y)) {
-        display_activity_detected();  // Wake display and reset sleep timers
-        data->point.x = x;
-        data->point.y = y;
-        data->state = LV_INDEV_STATE_PRESSED;
+        display_state_t state = display_get_state();
+        bool was_not_normal = (state != DISPLAY_STATE_NORMAL);
 
-        // Start tracking touch for swipe detection
+        // Always track touch for swipe detection (even during wake)
         if (!s_touch_tracking) {
             s_touch_start_x = x;
             s_touch_start_y = y;
             s_touch_start_time = esp_timer_get_time() / 1000;  // Convert to ms
             s_touch_tracking = true;
         }
+
+        // Wake display if needed
+        if (was_not_normal) {
+            display_activity_detected();  // Wake display
+            // Consume this touch - don't pass to LVGL widgets (prevents accidental activation)
+            data->point.x = x;
+            data->point.y = y;
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;  // Swipe tracking continues, but widget interaction suppressed
+        }
+
+        // Display already awake - check if touches suppressed after recent wake
+        if (display_is_touch_suppressed()) {
+            // Within 250ms after wake - suppress widget touches but track for swipes
+            data->point.x = x;  // Update coordinates for swipe detection
+            data->point.y = y;
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
+
+        // Normal touch processing
+        display_activity_detected();  // Reset sleep timers
+        data->point.x = x;
+        data->point.y = y;
+        data->state = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
 

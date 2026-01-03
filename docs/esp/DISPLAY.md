@@ -200,7 +200,7 @@ The display has four states managed by `display_sleep.c`:
 
 State transitions are timer-driven:
 
-- Activity detected → reset timers, wake if sleeping
+- Activity detected → reset timers, wake if in art mode/dim/sleep
 - Dim timeout → transition to DIM
 - Sleep timeout → transition to SLEEP
 
