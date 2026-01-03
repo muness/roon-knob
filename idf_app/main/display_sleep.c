@@ -290,12 +290,10 @@ static void sleep_timer_callback(void *arg) {
 
 // Process pending display state changes (call from UI loop)
 void display_process_pending(void) {
-    // Don't dim/sleep during setup: captive portal active or bridge unreachable
+    // Don't enter art mode during setup (captive portal active or bridge unreachable)
+    // But allow dim/sleep to work regardless of bridge state
     if (captive_portal_is_running() || !roon_client_is_ready_for_art_mode()) {
-        s_pending_art_mode = false;
-        s_pending_dim = false;
-        s_pending_sleep = false;
-        return;
+        s_pending_art_mode = false;  // Only block art mode entry, not dim/sleep
     }
 
     if (s_pending_art_mode) {
@@ -370,35 +368,25 @@ void display_activity_detected(void) {
     uint32_t dim_timeout = s_dim_timeout_ms;
     uint32_t sleep_timeout = s_sleep_timeout_ms;
 
-    // Wake display if dimmed or sleeping
-    if (current_state == DISPLAY_STATE_DIM || current_state == DISPLAY_STATE_SLEEP) {
+    // Wake display if in art mode, dimmed, or sleeping (tap shows controls at normal brightness)
+    if (current_state == DISPLAY_STATE_ART_MODE || current_state == DISPLAY_STATE_DIM || current_state == DISPLAY_STATE_SLEEP) {
         display_wake();
         return;  // display_wake already starts the timer chain
     }
 
-    // Reset timer chain for NORMAL or ART_MODE states
+    // Reset timer chain for NORMAL state (only remaining case after wake check)
     // Stop all timers first
     if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
     if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
     if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
 
-    // Restart appropriate timer based on current state
-    if (current_state == DISPLAY_STATE_NORMAL) {
-        // From normal, start at beginning of chain
-        if (art_timeout > 0 && s_art_mode_timer != NULL) {
-            esp_timer_start_once(s_art_mode_timer, art_timeout * 1000ULL);
-        } else if (dim_timeout > 0 && s_dim_timer != NULL) {
-            esp_timer_start_once(s_dim_timer, dim_timeout * 1000ULL);
-        } else if (sleep_timeout > 0 && s_sleep_timer != NULL) {
-            esp_timer_start_once(s_sleep_timer, sleep_timeout * 1000ULL);
-        }
-    } else if (current_state == DISPLAY_STATE_ART_MODE) {
-        // From art mode, restart dim timer (skip art mode timer - already in art mode)
-        if (dim_timeout > 0 && s_dim_timer != NULL) {
-            esp_timer_start_once(s_dim_timer, dim_timeout * 1000ULL);
-        } else if (sleep_timeout > 0 && s_sleep_timer != NULL) {
-            esp_timer_start_once(s_sleep_timer, sleep_timeout * 1000ULL);
-        }
+    // From NORMAL state, start at beginning of timer chain
+    if (art_timeout > 0 && s_art_mode_timer != NULL) {
+        esp_timer_start_once(s_art_mode_timer, art_timeout * 1000ULL);
+    } else if (dim_timeout > 0 && s_dim_timer != NULL) {
+        esp_timer_start_once(s_dim_timer, dim_timeout * 1000ULL);
+    } else if (sleep_timeout > 0 && s_sleep_timer != NULL) {
+        esp_timer_start_once(s_sleep_timer, sleep_timeout * 1000ULL);
     }
 }
 
