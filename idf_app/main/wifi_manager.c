@@ -4,6 +4,7 @@
 #include <esp_err.h>
 #include <esp_event.h>
 #include <esp_log.h>
+#include <esp_mac.h>
 #include <esp_netif.h>
 #include <esp_system.h>
 #include <esp_timer.h>
@@ -82,6 +83,7 @@ static bool s_started;
 static char s_ip[16];
 static bool s_ap_mode;           // true when in AP provisioning mode
 static int s_sta_fail_count;     // consecutive STA connection failures
+static char s_device_hostname[32] = {0};  // cached network hostname
 
 static void copy_str(char *dst, size_t dst_len, const char *src) {
     if (!dst || dst_len == 0) {
@@ -93,6 +95,73 @@ static void copy_str(char *dst, size_t dst_len, const char *src) {
     size_t in_len = strnlen(src, dst_len - 1);
     memcpy(dst, src, in_len);
     dst[in_len] = '\0';
+}
+
+// Sanitize hostname: only alphanumeric + hyphen, convert to lowercase
+static void sanitize_hostname(const char *input, char *output, size_t output_len) {
+    size_t j = 0;
+    for (size_t i = 0; input[i] && j < output_len - 1; i++) {
+        char c = input[i];
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+            output[j++] = c;
+        } else if (c >= 'A' && c <= 'Z') {
+            output[j++] = c + 32;  // Convert to lowercase
+        } else if (c == ' ' || c == '_') {
+            output[j++] = '-';  // Space/underscore becomes hyphen
+        }
+        // All other chars are dropped
+    }
+    output[j] = '\0';
+
+    // Trim leading hyphens
+    size_t start = 0;
+    while (output[start] == '-') {
+        start++;
+    }
+    if (start > 0) {
+        memmove(output, output + start, j - start + 1);
+        j -= start;
+    }
+
+    // Trim trailing hyphens
+    while (j > 0 && output[j - 1] == '-') {
+        output[--j] = '\0';
+    }
+
+    // If sanitization resulted in empty string, use fallback
+    if (j == 0) {
+        snprintf(output, output_len, "roon-knob");
+    }
+}
+
+// Get device hostname (cached, generated once per boot)
+// Priority: bridge-configured knob_name → MAC-based → "roon-knob"
+static const char *get_device_hostname(void) {
+    // Cache to avoid regenerating on every call
+    if (s_device_hostname[0] != '\0') {
+        return s_device_hostname;
+    }
+
+    // If bridge has set a custom name, use it
+    if (s_cfg_loaded && s_cfg.knob_name[0] != '\0') {
+        sanitize_hostname(s_cfg.knob_name, s_device_hostname, sizeof(s_device_hostname));
+        ESP_LOGI(TAG, "Hostname from bridge config: %s", s_device_hostname);
+        return s_device_hostname;
+    }
+
+    // Fallback to MAC-based hostname (last 3 bytes for uniqueness)
+    uint8_t mac[6];
+    esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read MAC for hostname: %s", esp_err_to_name(err));
+        snprintf(s_device_hostname, sizeof(s_device_hostname), "roon-knob");
+        return s_device_hostname;
+    }
+
+    snprintf(s_device_hostname, sizeof(s_device_hostname), "roon-knob-%02x%02x%02x",
+             mac[3], mac[4], mac[5]);
+    ESP_LOGI(TAG, "Generated MAC-based hostname: %s", s_device_hostname);
+    return s_device_hostname;
 }
 
 static bool have_blob(const rk_cfg_t *cfg) {
@@ -170,6 +239,12 @@ static void connect_now(void) {
         start_ap_mode();
         return;
     }
+    // Set hostname before connection (with delay per Arduino pattern)
+    const char *hostname = get_device_hostname();
+    esp_netif_set_hostname(s_sta_netif, hostname);
+    vTaskDelay(pdMS_TO_TICKS(100));  // Delay to let hostname settle
+    ESP_LOGI(TAG, "Hostname set before connect: %s", hostname);
+
     ESP_LOGI(TAG, "Connecting to WiFi SSID: '%s'", s_cfg.ssid);
     if (s_retry_timer) {
         esp_timer_stop(s_retry_timer);
@@ -260,7 +335,20 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
     esp_ip4_addr_t ip = evt->ip_info.ip;
     esp_ip4addr_ntoa(&ip, s_ip, sizeof(s_ip));
 
-    ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s", s_cfg.ssid, s_ip);
+    // Debug: Verify hostname persists after connection
+    const char *check_hostname = NULL;
+    esp_netif_get_hostname(s_sta_netif, &check_hostname);
+    ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s, hostname: %s",
+             s_cfg.ssid, s_ip, check_hostname ? check_hostname : "NULL");
+
+    // Re-assert hostname after IP acquisition to force DHCP INFORM
+    // Some routers (UniFi) may need this to solidify the hostname
+    const char *hostname = get_device_hostname();
+    esp_err_t err = esp_netif_set_hostname(s_sta_netif, hostname);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Re-asserted hostname after IP acquisition: %s", hostname);
+    }
+
     reset_backoff();
     s_sta_fail_count = 0;  // Reset failure count on successful connection
     s_last_error = NULL;   // Clear last error on success
@@ -280,6 +368,13 @@ static void start_ap_mode(void) {
     // Create AP netif if needed
     if (!s_ap_netif) {
         s_ap_netif = esp_netif_create_default_wifi_ap();
+
+        // Set hostname for AP mode too (prevents "espressif" from appearing)
+        const char *hostname = get_device_hostname();
+        esp_err_t err = esp_netif_set_hostname(s_ap_netif, hostname);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "AP mode hostname set: %s", hostname);
+        }
     }
 
     // Configure AP with optimal settings for discoverability
@@ -339,6 +434,15 @@ void wifi_mgr_start(void) {
     }
     if (!s_sta_netif) {
         s_sta_netif = esp_netif_create_default_wifi_sta();
+
+        // Set DHCP hostname BEFORE WiFi starts (for router UI visibility)
+        const char *hostname = get_device_hostname();
+        esp_err_t err = esp_netif_set_hostname(s_sta_netif, hostname);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "DHCP hostname set: %s", hostname);
+        } else {
+            ESP_LOGW(TAG, "Failed to set DHCP hostname: %s (continuing)", esp_err_to_name(err));
+        }
     }
 
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -535,4 +639,8 @@ void wifi_mgr_set_power_save(bool enable) {
 __attribute__((weak)) void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     (void)evt;
     (void)ip_opt;
+}
+
+const char *wifi_mgr_get_hostname(void) {
+    return get_device_hostname();
 }

@@ -49,7 +49,13 @@ The struct size is checked at compile time to catch accidental changes that woul
 | `pass` | 65 bytes | WiFi password (max 64 chars) |
 | `bridge_base` | 128 bytes | HTTP URL to bridge, empty = use mDNS |
 | `zone_id` | 64 bytes | Roon zone identifier |
+| `knob_name` | 32 bytes | Device name for DHCP/mDNS hostname (optional, falls back to MAC-based) |
 | `cfg_ver` | 1 byte | Schema version for future migrations |
+
+**Hostname behavior:**
+- `knob_name` is sanitized to RFC 1123 (lowercase alphanumeric + hyphens)
+- If empty, defaults to MAC-based name (`roon-knob-a1b2c3`)
+- Hostname changes require reboot (cache invalidated on boot)
 
 ## API Reference
 
