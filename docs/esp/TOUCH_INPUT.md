@@ -176,7 +176,7 @@ The long press threshold is configurable in `lv_conf.h` (default ~400ms).
 
 ## Display Wake on Touch
 
-Any touch wakes the display from sleep or dim state:
+Any touch wakes the display from sleep, dim, or art mode:
 
 ```c
 if (tpGetCoordinates(&x, &y)) {
