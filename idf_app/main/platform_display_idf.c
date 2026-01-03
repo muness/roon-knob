@@ -342,7 +342,17 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     uint16_t x, y;
 
     if (tpGetCoordinates(&x, &y)) {
-        display_activity_detected();  // Wake display and reset sleep timers
+        // Check if display needs waking
+        display_state_t state = display_get_state();
+        if (state != DISPLAY_STATE_NORMAL) {
+            display_activity_detected();  // Wake display
+            // Consume this touch - don't pass to LVGL widgets (prevents accidental activation)
+            data->state = LV_INDEV_STATE_RELEASED;  // Report as no-touch to LVGL
+            return;
+        }
+
+        // Display awake - normal touch processing
+        display_activity_detected();  // Reset sleep timers
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
