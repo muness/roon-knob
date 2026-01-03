@@ -32,6 +32,9 @@ static const char *TAG = "display_sleep";
 #define LVGL_TASK_PRIORITY_NORMAL 2
 #define LVGL_TASK_PRIORITY_LOW 1
 
+// Touch suppression after wake to prevent accidental widget activation
+#define TOUCH_SUPPRESS_AFTER_WAKE_MS 250
+
 // Mutex for thread safety
 #define LOCK_DISPLAY_STATE() xSemaphoreTake(s_display_state_mutex, portMAX_DELAY)
 #define UNLOCK_DISPLAY_STATE() xSemaphoreGive(s_display_state_mutex)
@@ -245,8 +248,8 @@ void display_wake(void) {
         // Show controls
         ui_set_controls_visible(true);
         s_display_state = DISPLAY_STATE_NORMAL;
-        // Suppress widget touches for 250ms to prevent accidental activation
-        s_touch_suppress_until_ms = esp_timer_get_time() / 1000 + 250;
+        // Suppress widget touches after wake to prevent accidental activation
+        s_touch_suppress_until_ms = esp_timer_get_time() / 1000 + TOUCH_SUPPRESS_AFTER_WAKE_MS;
         ESP_LOGI(TAG, "Display awake (brightness: %d%%)", (BACKLIGHT_NORMAL * 100) / 255);
     }
 

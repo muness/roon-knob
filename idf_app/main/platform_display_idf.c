@@ -365,7 +365,9 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 
         // Display already awake - check if touches suppressed after recent wake
         if (display_is_touch_suppressed()) {
-            // Within 250ms after wake - suppress widget touches but allow swipe tracking
+            // Within 250ms after wake - suppress widget touches but track for swipes
+            data->point.x = x;  // Update coordinates for swipe detection
+            data->point.y = y;
             data->state = LV_INDEV_STATE_RELEASED;
             return;
         }
