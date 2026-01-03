@@ -30,6 +30,7 @@ CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
 
 # Network identity - replace "espressif" with project name for NetBIOS/LLMNR
 CONFIG_LWIP_LOCAL_HOSTNAME="roon-knob"
+CONFIG_LWIP_NETIF_HOSTNAME=y
 
 # Brownout detection - lower threshold for battery operation
 # Level 4 (2.50V) allows WiFi current spikes without false triggers
@@ -78,3 +79,4 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 # Bluetooth disabled on S3 - Bluetooth functionality moved to ESP32 chip
 # See docs/DUAL_CHIP_ARCHITECTURE.md for the dual-chip Bluetooth architecture
 CONFIG_BT_ENABLED=n
+CONFIG_LWIP_NETIF_HOSTNAME=y

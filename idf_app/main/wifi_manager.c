@@ -239,6 +239,12 @@ static void connect_now(void) {
         start_ap_mode();
         return;
     }
+    // Set hostname before connection (with delay per Arduino pattern)
+    const char *hostname = get_device_hostname();
+    esp_netif_set_hostname(s_sta_netif, hostname);
+    vTaskDelay(pdMS_TO_TICKS(100));  // Delay to let hostname settle
+    ESP_LOGI(TAG, "Hostname set before connect: %s", hostname);
+
     ESP_LOGI(TAG, "Connecting to WiFi SSID: '%s'", s_cfg.ssid);
     if (s_retry_timer) {
         esp_timer_stop(s_retry_timer);
@@ -312,6 +318,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         s_last_error = NULL;  // Clear last error on new connection attempt
         connect_now();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        // Set hostname on disconnect too (keeps it consistent for reconnection)
+        const char *hostname = get_device_hostname();
+        esp_netif_set_hostname(s_sta_netif, hostname);
+        ESP_LOGI(TAG, "Hostname set on disconnect: %s", hostname);
+
         // Extract disconnect reason from event data
         wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
         uint8_t reason = disconn ? disconn->reason : 0;

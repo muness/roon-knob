@@ -176,6 +176,47 @@ void sanitize_hostname(const char *input, char *output, size_t len) {
 
 ## Critical Timing and Gotchas
 
+### 1. Known ESP-IDF Issue: Hostname Resets to "espressif" After esp_wifi_start()
+
+**Issue:** [espressif/esp-idf#4737](https://github.com/espressif/esp-idf/issues/4737) (reported 2020, supposedly fixed but still reproduces in v5.4.3)
+
+**Symptom:**
+- Call `esp_netif_set_hostname()` before `esp_wifi_start()`
+- Router briefly shows correct hostname
+- Then reverts to "espressif"
+- `esp_netif_get_hostname()` returns "espressif" after WiFi starts
+
+**Root Cause (per GitHub issue):**
+During WiFi low-level initialization, lwIP overwrites the hostname with `CONFIG_LWIP_LOCAL_HOSTNAME` default value, ignoring any previously-set hostname.
+
+**Workaround (testing in this project):**
+Set hostname in `WIFI_EVENT_STA_START` event handler - after WiFi init completes but before DHCP runs:
+
+```c
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                                int32_t event_id, void *event_data) {
+    if (event_id == WIFI_EVENT_STA_START) {
+        // Netif is now ready - set hostname before connection/DHCP
+        const char *hostname = get_device_hostname();
+        esp_err_t err = esp_netif_set_hostname(s_sta_netif, hostname);
+        ESP_LOGI(TAG, "Hostname set in STA_START event: %s", hostname);
+
+        // Now connect (triggers DHCP with correct hostname)
+        esp_wifi_connect();
+    }
+}
+```
+
+**Verification:**
+- Boot logs: Look for "Hostname set in STA_START event: [hostname]"
+- After connection: `esp_netif_get_hostname()` should return your hostname, not "espressif"
+- Router UI: Should display custom hostname
+- Packet capture: DHCP REQUEST should contain hostname in option 12
+
+**See:** `idf_app/main/wifi_manager.c:314-322` for implementation
+
+**Status:** Workaround implemented, testing in progress against UniFi Controller
+
 ### 1. DHCP Hostname MUST Be Set Before WiFi Starts
 
 **Correct order:**

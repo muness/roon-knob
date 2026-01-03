@@ -33,7 +33,7 @@ void platform_mdns_init(const char *hostname) {
         return;
     }
     const char *host = (hostname && hostname[0]) ? hostname : "roon-knob";
-    ESP_LOGI(TAG, "Setting mDNS hostname: %s (from input: %s)", host, hostname ? hostname : "NULL");
+    ESP_LOGI(TAG, "mDNS hostname: %s", host);
     mdns_hostname_set(host);
 
     // Set instance name to match hostname for UniFi device discovery
