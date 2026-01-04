@@ -245,35 +245,6 @@ static void hide_panel_cb(lv_event_t *e) {
     }
 }
 
-static void bluetooth_mode_cb(lv_event_t *e) {
-    (void)e;
-
-    // Block mode switch during OTA download
-    const ota_info_t *ota = ota_get_info();
-    if (ota && (ota->status == OTA_STATUS_DOWNLOADING || ota->status == OTA_STATUS_CHECKING)) {
-        ESP_LOGW(TAG, "Cannot switch to Bluetooth mode during OTA update");
-        ui_set_message("Update in progress");
-        return;
-    }
-
-    ESP_LOGI(TAG, "Switching to Bluetooth mode");
-
-    // Hide settings panel
-    if (s_widgets.panel) {
-        lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    // Save Bluetooth as the selected zone
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
-    strncpy(cfg.zone_id, "__bluetooth__", sizeof(cfg.zone_id) - 1);
-    platform_storage_save(&cfg);
-
-    // Switch to Bluetooth mode
-    controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
-    ui_set_zone_name("Bluetooth");
-}
-
 static void update_version_label(void) {
     if (!s_widgets.version_label) return;
 
@@ -397,7 +368,6 @@ static void ensure_panel(void) {
     create_button(s_widgets.panel, "Check for Update", check_update_cb);
     create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
     create_button(s_widgets.panel, "Factory Reset", factory_reset_cb);
-    create_button(s_widgets.panel, "Bluetooth Mode *alpha", bluetooth_mode_cb);
     create_button(s_widgets.panel, "Back", hide_panel_cb);
 }
 
