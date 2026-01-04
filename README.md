@@ -9,9 +9,9 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ## What You Need
 
-1. **Hardware**: [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) (~$50)
-2. **Roon Core** running on your network
-3. **Docker host** (NAS, Raspberry Pi, always-on computer) to run the Roon extension
+1. **Hardware**: [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) (~$50) - buy it at [amazon](https://amzn.to/4pYZdiC) to support my work.
+3. **Roon Core** running on your network
+4. **Docker host** (NAS, Raspberry Pi, always-on computer) to run the Roon extension
 
 ## Quick Start
 
