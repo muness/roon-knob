@@ -53,24 +53,8 @@ void ui_trigger_update(void);  // Called when user taps update notification
 // Display state control
 void ui_set_controls_visible(bool visible);  // Show/hide UI controls for art mode
 
-// BLE mode UI
-typedef enum {
-    UI_BLE_STATE_DISABLED,
-    UI_BLE_STATE_ADVERTISING,
-    UI_BLE_STATE_CONNECTED
-} ui_ble_state_t;
-
-void ui_set_ble_mode(bool enabled);  // Switch UI to BLE mode visuals
-void ui_set_ble_status(ui_ble_state_t state, const char *device_name);  // Update BLE connection status
-
 // Network status banner (persistent, doesn't auto-clear)
 void ui_set_network_status(const char *status);  // Show persistent network status (NULL to clear)
-
-// Exit Bluetooth confirmation dialog
-typedef void (*ui_exit_bt_callback_t)(bool confirmed);  // Called with true if user confirms exit
-void ui_show_exit_bt_dialog(ui_exit_bt_callback_t callback);  // Show "Exit Bluetooth?" dialog
-void ui_hide_exit_bt_dialog(void);
-bool ui_is_exit_bt_dialog_visible(void);
 
 #ifdef __cplusplus
 }

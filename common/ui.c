@@ -120,7 +120,6 @@ static bool s_zone_name_dirty = false;
 static char s_network_status[128] = "";   // Persistent network status (doesn't auto-clear)
 static bool s_network_status_dirty = false;
 static ui_input_cb_t s_input_cb;
-static bool s_ble_mode = false;  // BLE mode active (affects long-press behavior)
 static char s_last_image_key[128] = "";  // Track last loaded artwork
 static float s_last_predicted_volume = -9999.0f;  // Track user's predicted volume for emphasis suppression
 #ifdef ESP_PLATFORM
@@ -142,7 +141,6 @@ static inline const lv_font_t *font_icon_small(void) { return font_manager_get_i
 static inline const lv_font_t *font_icon_normal(void) { return font_manager_get_icon_normal(); }
 static inline const lv_font_t *font_icon_large(void) { return font_manager_get_icon_large(); }
 // Icon aliases (Material Symbols on ESP32)
-#define UI_ICON_BLUETOOTH ICON_BLUETOOTH
 #define UI_ICON_DOWNLOAD  ICON_DOWNLOAD
 #else
 // PC fallback - use built-in Montserrat (has LVGL symbols)
@@ -153,7 +151,6 @@ static inline const lv_font_t *font_icon_small(void) { return &lv_font_montserra
 static inline const lv_font_t *font_icon_normal(void) { return &lv_font_montserrat_28; }
 static inline const lv_font_t *font_icon_large(void) { return &lv_font_montserrat_48; }
 // Icon aliases (LVGL symbols on PC)
-#define UI_ICON_BLUETOOTH LV_SYMBOL_BLUETOOTH
 #define UI_ICON_DOWNLOAD  LV_SYMBOL_DOWNLOAD
 #endif
 
@@ -529,15 +526,7 @@ static void zone_label_event_cb(lv_event_t *e) {
 static void zone_label_long_press_cb(lv_event_t *e) {
     (void)e;
     s_zone_long_pressed = true;  // Mark that we handled a long press
-    // In BLE mode, long-press opens zone picker (to allow switching back to WiFi/Roon)
-    // In Roon mode, long-press opens settings panel
-    if (s_ble_mode) {
-        if (s_input_cb) {
-            s_input_cb(UI_INPUT_MENU);
-        }
-    } else {
-        ui_show_settings();
-    }
+    ui_show_settings();
 }
 
 static void btn_prev_event_cb(lv_event_t *e) {
@@ -822,7 +811,6 @@ static void emphasize_volume_label(void) {
 // Special zone IDs (must match roon_client.c)
 #define ZONE_ID_BACK "__back__"
 #define ZONE_ID_SETTINGS "__settings__"
-#define ZONE_ID_BLUETOOTH "__bluetooth__"
 
 void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int count, int selected) {
     if (s_zone_picker_visible) {
@@ -904,12 +892,6 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids, int cou
             lv_label_set_text(icon_label, ICON_ARROW_BACK);
 #else
             lv_label_set_text(icon_label, LV_SYMBOL_LEFT);
-#endif
-        } else if (strcmp(zone_id, ZONE_ID_BLUETOOTH) == 0) {
-#if !TARGET_PC
-            lv_label_set_text(icon_label, ICON_BLUETOOTH);
-#else
-            lv_label_set_text(icon_label, LV_SYMBOL_BLUETOOTH);
 #endif
         } else if (strcmp(zone_id, ZONE_ID_SETTINGS) == 0) {
 #if !TARGET_PC
@@ -1475,210 +1457,3 @@ void ui_set_controls_visible(bool visible) {
     }
 }
 
-// ============================================================================
-// BLE Mode UI
-// ============================================================================
-
-static ui_ble_state_t s_ble_state = UI_BLE_STATE_DISABLED;
-static char s_ble_device_name[32] = "";
-
-void ui_set_ble_mode(bool enabled) {
-    if (s_ble_mode == enabled) return;
-    s_ble_mode = enabled;
-
-    if (enabled) {
-        ESP_LOGI(UI_TAG, "Switching to Bluetooth mode UI");
-        // Update zone label to show "Bluetooth"
-        if (s_zone_label) {
-            lv_label_set_text(s_zone_label, UI_ICON_BLUETOOTH " Bluetooth");
-        }
-        // Show waiting message until ESP32 sends track info
-        if (s_track_label) {
-            lv_label_set_text(s_track_label, "Roon Knob BT");
-        }
-        if (s_artist_label) {
-            lv_label_set_text(s_artist_label, "Waiting for track...");
-        }
-        // Hide artwork - show gradient background
-        if (s_artwork_image) {
-            lv_obj_add_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
-        }
-        // Hide progress arc (no track progress in BLE mode)
-        if (s_progress_arc) {
-            lv_arc_set_value(s_progress_arc, 0);
-        }
-        // Set a nice blue tint to background
-        if (s_background) {
-            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x1a2a3a), 0);
-        }
-        // Hide status dot (no Roon connection)
-        if (s_status_dot) {
-            lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
-        }
-    } else {
-        ESP_LOGI(UI_TAG, "Switching to Roon mode UI");
-        // Restore zone label (remove BT symbol, show saved zone name)
-        if (s_zone_label && s_pending.zone_name[0]) {
-            lv_label_set_text(s_zone_label, s_pending.zone_name);
-        } else if (s_zone_label) {
-            lv_label_set_text(s_zone_label, "Connecting...");
-        }
-        // Restore artwork visibility
-        if (s_artwork_image) {
-            lv_obj_clear_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
-        }
-        // Restore background color
-        if (s_background) {
-            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x1a1a1a), 0);
-        }
-        // Show status dot
-        if (s_status_dot) {
-            lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-}
-
-void ui_set_ble_status(ui_ble_state_t state, const char *device_name) {
-    s_ble_state = state;
-    if (device_name) {
-        strncpy(s_ble_device_name, device_name, sizeof(s_ble_device_name) - 1);
-        s_ble_device_name[sizeof(s_ble_device_name) - 1] = '\0';
-    } else {
-        s_ble_device_name[0] = '\0';
-    }
-
-    if (!s_ble_mode) return;  // Only update if in BLE mode
-
-    const char *status_text = "Disabled";
-    switch (state) {
-        case UI_BLE_STATE_DISABLED:
-            status_text = "BLE Disabled";
-            break;
-        case UI_BLE_STATE_ADVERTISING:
-            status_text = "Pairing...";
-            break;
-        case UI_BLE_STATE_CONNECTED:
-            status_text = device_name ? device_name : "Connected";
-            break;
-    }
-
-    // Update artist label with connection status
-    if (s_artist_label) {
-        lv_label_set_text(s_artist_label, status_text);
-    }
-
-    // Update track label with hint
-    if (s_track_label) {
-        if (state == UI_BLE_STATE_CONNECTED) {
-            lv_label_set_text(s_track_label, "Media Control");
-        } else {
-            lv_label_set_text(s_track_label, "");
-        }
-    }
-}
-
-// ============================================================================
-// Exit Bluetooth Confirmation Dialog
-// ============================================================================
-
-static lv_obj_t *s_exit_bt_dialog = NULL;
-static ui_exit_bt_callback_t s_exit_bt_callback = NULL;
-
-static void exit_bt_btn_cb(lv_event_t *e) {
-    lv_obj_t *btn = lv_event_get_target(e);
-    bool confirmed = (bool)(intptr_t)lv_obj_get_user_data(btn);
-
-    ESP_LOGI(UI_TAG, "Exit BT dialog: user selected %s", confirmed ? "Exit" : "Cancel");
-
-    // Store callback before hiding (hide clears it)
-    ui_exit_bt_callback_t cb = s_exit_bt_callback;
-
-    ui_hide_exit_bt_dialog();
-
-    // Invoke callback after hiding dialog
-    if (cb) {
-        cb(confirmed);
-    }
-}
-
-void ui_show_exit_bt_dialog(ui_exit_bt_callback_t callback) {
-    if (s_exit_bt_dialog) {
-        return;  // Already visible
-    }
-
-    s_exit_bt_callback = callback;
-
-    // Create fullscreen dark overlay
-    s_exit_bt_dialog = lv_obj_create(lv_screen_active());
-    lv_obj_set_size(s_exit_bt_dialog, SCREEN_SIZE, SCREEN_SIZE);
-    lv_obj_center(s_exit_bt_dialog);
-    lv_obj_set_style_bg_color(s_exit_bt_dialog, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(s_exit_bt_dialog, LV_OPA_90, 0);
-    lv_obj_set_style_border_width(s_exit_bt_dialog, 0, 0);
-    lv_obj_set_style_radius(s_exit_bt_dialog, 0, 0);
-    lv_obj_set_style_pad_all(s_exit_bt_dialog, 0, 0);
-
-    // Title
-    lv_obj_t *title = lv_label_create(s_exit_bt_dialog);
-    lv_label_set_text(title, "Exit Bluetooth?");
-    lv_obj_set_style_text_font(title, font_normal(), 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xfafafa), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
-
-    // Subtitle
-    lv_obj_t *subtitle = lv_label_create(s_exit_bt_dialog);
-    lv_label_set_text(subtitle, "Switch back to Roon");
-    lv_obj_set_style_text_font(subtitle, font_small(), 0);
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 100);
-
-    // Exit button (left)
-    lv_obj_t *btn_exit = lv_btn_create(s_exit_bt_dialog);
-    lv_obj_set_size(btn_exit, 110, 50);
-    lv_obj_align(btn_exit, LV_ALIGN_CENTER, -60, 30);
-    lv_obj_set_style_bg_color(btn_exit, lv_color_hex(0x5a9fd4), 0);
-    lv_obj_set_style_bg_color(btn_exit, lv_color_hex(0x7bb9e8), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(btn_exit, 10, 0);
-    lv_obj_set_user_data(btn_exit, (void *)(intptr_t)true);  // confirmed = true
-    lv_obj_add_event_cb(btn_exit, exit_bt_btn_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *exit_label = lv_label_create(btn_exit);
-    lv_label_set_text(exit_label, "Exit");
-    lv_obj_set_style_text_font(exit_label, font_normal(), 0);
-    lv_obj_set_style_text_color(exit_label, lv_color_hex(0xfafafa), 0);
-    lv_obj_center(exit_label);
-
-    // Cancel button (right)
-    lv_obj_t *btn_cancel = lv_btn_create(s_exit_bt_dialog);
-    lv_obj_set_size(btn_cancel, 110, 50);
-    lv_obj_align(btn_cancel, LV_ALIGN_CENTER, 60, 30);
-    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x3c3c3c), 0);
-    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x5a5a5a), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(btn_cancel, 10, 0);
-    lv_obj_set_user_data(btn_cancel, (void *)(intptr_t)false);  // confirmed = false
-    lv_obj_add_event_cb(btn_cancel, exit_bt_btn_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *cancel_label = lv_label_create(btn_cancel);
-    lv_label_set_text(cancel_label, "Cancel");
-    lv_obj_set_style_text_font(cancel_label, font_normal(), 0);
-    lv_obj_set_style_text_color(cancel_label, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_center(cancel_label);
-
-    ESP_LOGI(UI_TAG, "Exit BT dialog shown");
-}
-
-void ui_hide_exit_bt_dialog(void) {
-    if (!s_exit_bt_dialog) {
-        return;
-    }
-
-    lv_obj_delete(s_exit_bt_dialog);
-    s_exit_bt_dialog = NULL;
-    s_exit_bt_callback = NULL;
-
-    ESP_LOGI(UI_TAG, "Exit BT dialog hidden");
-}
-
-bool ui_is_exit_bt_dialog_visible(void) {
-    return s_exit_bt_dialog != NULL;
-}

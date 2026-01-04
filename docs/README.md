@@ -34,8 +34,7 @@ Developer reference for building and extending the firmware.
 
 ### Testing
 
-- [TEST_WIFI_ROON_MODE.md](dev/testing/TEST_WIFI_ROON_MODE.md) - WiFi + Roon integration tests
-- [TEST_BLUETOOTH_MODE.md](dev/testing/TEST_BLUETOOTH_MODE.md) - Bluetooth mode tests
+- [TEST_WIFI_ROON_MODE.md](dev/testing/TEST_WIFI_ROON_MODE.md) - WiFi + bridge integration tests
 - [CODE_REVIEW_FINDINGS.md](dev/testing/CODE_REVIEW_FINDINGS.md) - Code review notes
 
 ## ESP
@@ -48,7 +47,6 @@ ESP32 hardware-specific documentation.
 - [ROTARY_ENCODER.md](esp/ROTARY_ENCODER.md) - Quadrature encoder handling
 - [BATTERY_MONITORING.md](esp/BATTERY_MONITORING.md) - ADC-based battery level
 - [FONTS.md](esp/FONTS.md) - LVGL font configuration
-- [BLE_HID.md](esp/BLE_HID.md) - Bluetooth HID implementation
 
 ### Hardware Reference
 

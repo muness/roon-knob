@@ -10,7 +10,6 @@
 #include "platform/platform_storage.h"
 #include "wifi_manager.h"
 #include "ota_update.h"
-#include "controller_mode.h"
 #include "roon_client.h"
 
 #if defined(__has_include)
