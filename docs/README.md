@@ -4,7 +4,7 @@
 
 | Area | Path | Description |
 |------|------|-------------|
-| [Usage](usage/) | `docs/usage/` | End-user guides: setup, WiFi, OTA, Bluetooth |
+| [Usage](usage/) | `docs/usage/` | End-user guides: setup, WiFi, OTA |
 | [Dev](dev/) | `docs/dev/` | Developer reference: build, boot, FreeRTOS, storage |
 | [ESP](esp/) | `docs/esp/` | Hardware specifics: display, touch, encoder, battery |
 | [Meta](meta/) | `docs/meta/` | Project aims, roadmap, architectural decisions |
@@ -19,7 +19,6 @@ Guides for setting up and using the device.
 - [GETTING_STARTED.md](usage/GETTING_STARTED.md) - First-time setup (Docker, flashing, WiFi)
 - [WIFI_PROVISIONING.md](usage/WIFI_PROVISIONING.md) - WiFi setup via captive portal
 - [OTA_UPDATES.md](usage/OTA_UPDATES.md) - Over-the-air firmware updates
-- [DUAL_CHIP_ARCHITECTURE.md](usage/DUAL_CHIP_ARCHITECTURE.md) - Bluetooth mode via ESP32 coprocessor
 
 ## Dev
 
