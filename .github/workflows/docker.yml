@@ -44,16 +44,6 @@ jobs:
           target: esp32s3
           path: idf_app
 
-      - name: Prepare firmware for Docker
-        run: |
-          cp idf_app/build/roon_knob.bin roon-extension/firmware/roon_knob.bin
-          cat > roon-extension/firmware/version.json << EOF
-          {
-            "version": "${{ steps.version.outputs.version }}",
-            "file": "roon_knob.bin"
-          }
-          EOF
-
       - name: Create merged flash image for web flashing
         run: |
           pip install esptool
@@ -73,7 +63,6 @@ jobs:
           path: |
             idf_app/build/roon_knob.bin
             roon_knob_merged.bin
-            roon-extension/firmware/version.json
           retention-days: 30
 
   release:
