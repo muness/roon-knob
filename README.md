@@ -91,38 +91,6 @@ The knob finds the extension automatically via mDNS.
 - Automatic display dimming and sleep
 - Over-the-air firmware updates
 - WiFi setup via captive portal
-- Bluetooth mode for non-Roon devices *(alpha)*
-
-## Bluetooth Mode *(alpha)*
-
-> **Note:** Due to a regression in UART communication between the two chips, Bluetooth mode is temporarily hidden from the zone picker. Access it via **Settings** (long-press the zone name) → **Bluetooth Mode *alpha***.
-
-When you're away from your Roon setup, the knob can control any Bluetooth audio device (phone, DAP, etc.).
-
-**To enter Bluetooth mode:**
-1. Long-press the zone name to open Settings
-2. Tap "Bluetooth Mode *alpha"
-3. Pair your phone/DAP with two Bluetooth devices:
-   - **"Knob control"** (BLE HID) - for sending commands to your device
-   - **"Knob info"** (Classic BT) - for receiving track metadata from your device
-
-**Controls in Bluetooth mode:**
-- Turn knob: Volume up/down
-- Tap play/pause button: Play/pause
-- Tap prev/next buttons: Previous/next track
-
-**What you'll see:**
-- With both connections: Full control + track info (title, artist, album, progress)
-- With "Knob control" only: Full control, but no track metadata
-- With "Knob info" only: Track info displayed, but controls won't work
-
-**To exit Bluetooth mode:**
-- Press the knob and confirm "Exit Bluetooth"
-
-**Compatibility notes:**
-- Some devices (especially DAPs) can only connect to one Bluetooth profile at a time. In that case, connect "Knob control" for controls and skip "Knob info".
-- The AVRCP implementation is controller-only (no audio sink), which may not work with all devices. This is why metadata is an optional second connection.
-- WiFi is disabled in Bluetooth mode to save power.
 
 ## Troubleshooting
 

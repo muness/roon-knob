@@ -4,7 +4,7 @@
 
 | Area | Path | Description |
 |------|------|-------------|
-| [Usage](usage/) | `docs/usage/` | End-user guides: setup, WiFi, OTA, Bluetooth |
+| [Usage](usage/) | `docs/usage/` | End-user guides: setup, WiFi, OTA |
 | [Dev](dev/) | `docs/dev/` | Developer reference: build, boot, FreeRTOS, storage |
 | [ESP](esp/) | `docs/esp/` | Hardware specifics: display, touch, encoder, battery |
 | [Meta](meta/) | `docs/meta/` | Project aims, roadmap, architectural decisions |
@@ -19,7 +19,6 @@ Guides for setting up and using the device.
 - [GETTING_STARTED.md](usage/GETTING_STARTED.md) - First-time setup (Docker, flashing, WiFi)
 - [WIFI_PROVISIONING.md](usage/WIFI_PROVISIONING.md) - WiFi setup via captive portal
 - [OTA_UPDATES.md](usage/OTA_UPDATES.md) - Over-the-air firmware updates
-- [DUAL_CHIP_ARCHITECTURE.md](usage/DUAL_CHIP_ARCHITECTURE.md) - Bluetooth mode via ESP32 coprocessor
 
 ## Dev
 
@@ -34,8 +33,7 @@ Developer reference for building and extending the firmware.
 
 ### Testing
 
-- [TEST_WIFI_ROON_MODE.md](dev/testing/TEST_WIFI_ROON_MODE.md) - WiFi + Roon integration tests
-- [TEST_BLUETOOTH_MODE.md](dev/testing/TEST_BLUETOOTH_MODE.md) - Bluetooth mode tests
+- [TEST_WIFI_ROON_MODE.md](dev/testing/TEST_WIFI_ROON_MODE.md) - WiFi + bridge integration tests
 - [CODE_REVIEW_FINDINGS.md](dev/testing/CODE_REVIEW_FINDINGS.md) - Code review notes
 
 ## ESP
@@ -48,7 +46,6 @@ ESP32 hardware-specific documentation.
 - [ROTARY_ENCODER.md](esp/ROTARY_ENCODER.md) - Quadrature encoder handling
 - [BATTERY_MONITORING.md](esp/BATTERY_MONITORING.md) - ADC-based battery level
 - [FONTS.md](esp/FONTS.md) - LVGL font configuration
-- [BLE_HID.md](esp/BLE_HID.md) - Bluetooth HID implementation
 
 ### Hardware Reference
 

@@ -8,9 +8,9 @@ See [AGENTS.md](AGENTS.md) for complete instructions on working with this projec
 
 | Area | Path | Description |
 |------|------|-------------|
-| **Usage** | `docs/usage/` | End-user guides: WiFi setup, OTA updates, Bluetooth mode |
+| **Usage** | `docs/usage/` | End-user guides: WiFi setup, OTA updates |
 | **Dev** | `docs/dev/` | Developer reference: build, boot sequence, FreeRTOS, NVS storage |
-| **ESP** | `docs/esp/` | Hardware specifics: display, touch, encoder, battery, BLE HID |
+| **ESP** | `docs/esp/` | Hardware specifics: display, touch, encoder, battery |
 | **Meta** | `docs/meta/` | Project aims, roadmap ideas, architectural decisions |
 | **Howto** | `docs/howto/` | Tutorials: porting to other boards, reusing patterns |
 
@@ -18,7 +18,6 @@ See [AGENTS.md](AGENTS.md) for complete instructions on working with this projec
 - **UI changes** → `docs/esp/DISPLAY.md`, `docs/esp/TOUCH_INPUT.md`, `docs/esp/FONTS.md`
 - **Input handling** → `docs/esp/ROTARY_ENCODER.md`, `docs/esp/SWIPE_GESTURES.md`
 - **WiFi/networking** → `docs/usage/WIFI_PROVISIONING.md`, `docs/dev/NVS_STORAGE.md`
-- **Bluetooth** → `docs/esp/BLE_HID.md`, `docs/usage/DUAL_CHIP_ARCHITECTURE.md`
 - **Build/config** → `docs/dev/KCONFIG.md`, `docs/dev/DEVELOPMENT.md`
 - **Architecture decisions** → `docs/meta/decisions/`
 
@@ -128,14 +127,13 @@ git push origin v1.X.Y
 The GitHub Actions workflow (`docker.yml`) automatically:
 - Extracts version from the tag name
 - Injects it into `idf_app/CMakeLists.txt` (ESP32-S3 firmware)
-- Injects it into `roon-extension/package.json` (Bridge)
-- Builds all firmware and Docker images
-- Creates GitHub release with binaries
+- Builds firmware and creates GitHub release with binaries
+- Deploys web flasher to GitHub Pages
 
 **Version locations (DO NOT EDIT MANUALLY):**
 - `idf_app/CMakeLists.txt` → `PROJECT_VER` (injected by CI)
-- `roon-extension/package.json` → `version` (injected by CI)
-- `esp32_bt/` → No version (rarely changes)
+
+**Bridge:** [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)
 
 ## Common Pitfalls (READ THIS FIRST)
 

@@ -10,9 +10,10 @@ The easiest way to flash firmware. Works directly in your browser using the Web 
 
 ### Requirements
 - **Browser**: Chrome or Edge (version 89+). Safari and Firefox are NOT supported.
+- **HTTPS**: Web Serial requires HTTPS. Use the hosted flasher at [roon-knob.muness.com](https://roon-knob.muness.com/flash.html).
 - **USB cable**: Connect your ESP32 board to your computer
 
-### Flashing the Main Controller (ESP32-S3)
+### Steps
 
 1. Connect the ESP32-S3 board via USB-C
 2. Turn on the device (power slider towards USB-C port)
@@ -20,20 +21,6 @@ The easiest way to flash firmware. Works directly in your browser using the Web 
 4. Click **"Flash ESP32-S3"**
 5. Select the serial port when prompted
 6. Wait ~30 seconds for flashing to complete
-
-### Flashing the Bluetooth Controller (ESP32)
-
-Only needed if you want [Bluetooth mode](DUAL_CHIP_ARCHITECTURE.md).
-
-1. Flip the USB-C cable 180° to connect to the ESP32 chip
-2. Go to the **[Web Flasher](https://roon-knob.muness.com/flash.html)**
-3. Click **"Flash ESP32-BT"**
-4. Select the serial port when prompted
-5. Wait ~20 seconds for flashing to complete
-
-### Chip Auto-Detection
-
-Not sure which board you have? Just try either button - ESP Web Tools automatically detects the chip family and will warn you if you selected the wrong firmware.
 
 ---
 
@@ -50,10 +37,9 @@ pip install esptool
 ### Download Firmware
 
 Download the merged binary from [GitHub Releases](https://github.com/muness/roon-knob/releases/latest):
-- `roon_knob_merged.bin` - Main controller (ESP32-S3)
-- `esp32_bt_merged.bin` - Bluetooth controller (ESP32)
+- `roon_knob_merged.bin` - ESP32-S3 firmware
 
-### Flash ESP32-S3 (Main Controller)
+### Flash ESP32-S3
 
 ```bash
 # Put device in download mode first (BOOT + RST)
@@ -62,13 +48,6 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash 0x0 roon_knob_merged.b
 
 On macOS, the port is typically `/dev/cu.usbserial-*` or `/dev/cu.usbmodem*`.
 On Windows, use `COM3` or similar.
-
-### Flash ESP32 (Bluetooth Controller)
-
-```bash
-# Put device in download mode first (BOOT + EN)
-esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x0 esp32_bt_merged.bin
-```
 
 ### Erase Flash (Factory Reset)
 
@@ -83,21 +62,12 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
 If you need to flash individual components instead of the merged binary:
 
 ```bash
-# ESP32-S3 components
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
   0x0 bootloader.bin \
   0x8000 partition-table.bin \
   0xd000 ota_data_initial.bin \
   0x10000 roon_knob.bin
-
-# ESP32 (BT) components
-esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash \
-  0x1000 bootloader.bin \
-  0x8000 partition-table.bin \
-  0x10000 esp32_bt.bin
 ```
-
-Note: ESP32-S3 bootloader is at offset `0x0`, while ESP32 bootloader is at `0x1000`.
 
 ---
 
@@ -110,12 +80,14 @@ Note: ESP32-S3 bootloader is at offset `0x0`, while ESP32 bootloader is at `0x10
   - [CH340 drivers](https://sparks.gogo.co.nz/ch340.html)
 
 ### "Failed to connect"
+- **Flip the USB-C cable 180°** - One orientation connects to the ESP32-S3, the other to an unpopulated ESP32 footprint. If you see the wrong chip or no response, flip the cable.
 - Ensure you're holding BOOT while pressing RST/EN
 - Try a different USB cable (some cables are charge-only)
 - Try a different USB port
 
 ### "Wrong chip detected"
-- You selected the wrong firmware. Use ESP32-S3 firmware for the main controller, ESP32 firmware for the Bluetooth chip.
+- **Flip the USB-C cable 180°** - The USB-C port connects to different chips depending on orientation.
+- Ensure the firmware matches your chip. Roon Knob uses ESP32-S3.
 
 ### "Access denied" or "Permission error"
 - On Linux, add your user to the `dialout` group: `sudo usermod -a -G dialout $USER`

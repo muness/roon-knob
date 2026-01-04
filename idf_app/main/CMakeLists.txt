@@ -14,7 +14,6 @@ set(SRC_FILES
     "platform_input_idf.c"
     "battery.c"
     "ota_update.c"
-    "esp32_comm.c"
     "font_manager.c"
     # Generated bitmap fonts (run scripts/generate_fonts.sh to regenerate)
     # Typography: Lato for metadata, Noto Sans for content (matches Roon's design)
@@ -31,7 +30,6 @@ set(SRC_FILES
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
-    "../../common/controller_mode.c"
 )
 
 # Suppress component validation warnings - these are ESP-IDF internal circular dependencies

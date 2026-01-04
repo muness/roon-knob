@@ -1,6 +1,5 @@
 #include "app.h"
 
-#include "controller_mode.h"
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
 #include "platform/platform_storage.h"
@@ -17,12 +16,6 @@ void app_entry(void) {
         LOGI("config missing - applying defaults");
         platform_storage_defaults(&cfg);
         platform_storage_save(&cfg);
-    }
-
-    // Always boot into Roon mode (Bluetooth mode is alpha and accessed via Settings)
-    // If saved zone was Bluetooth, clear it so user selects a Roon zone
-    if (controller_mode_is_bluetooth_zone(cfg.zone_id)) {
-        cfg.zone_id[0] = '\0';
     }
 
     // Note: mDNS init moved to after WiFi connects (in main_idf.c)

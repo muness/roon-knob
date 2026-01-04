@@ -5,7 +5,7 @@
 > - Rotation limited to 0°/180° only (see [DECISION_ROTATION.md](2025-12-20_DECISION_ROTATION.md))
 > - Timeout defaults differ from below
 >
-> For current behavior, see the code: `roon-extension/knobs.js`, `common/rk_cfg.h`
+> For current behavior, see the code: `common/rk_cfg.h` and the bridge at [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)
 
 **Status:** Approved (with modifications noted above)
 **Date:** 2025-12-20

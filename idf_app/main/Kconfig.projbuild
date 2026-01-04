@@ -49,15 +49,3 @@ config RK_BACKLIGHT_DIM
         Default 25 is approximately 10% brightness.
 
 endmenu
-
-menu "Roon Knob Bluetooth Settings"
-
-config ROON_KNOB_BLUETOOTH_MODE
-    bool "Enable Bluetooth mode (via ESP32 chip)"
-    default y
-    help
-        Enable Bluetooth mode as an alternative to WiFi Roon control.
-        Uses the ESP32 chip (via UART) for BLE HID + AVRCP.
-        When enabled, "Bluetooth" appears in the zone picker.
-
-endmenu

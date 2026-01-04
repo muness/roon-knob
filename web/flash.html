@@ -142,31 +142,7 @@
           <li>Wait ~30 seconds for flashing to complete</li>
         </ol>
         <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> · Linux: <code>ttyACM0</code> · Windows: <code>COM*</code></p>
-      </div>
-    </div>
-
-    <!-- ESP32 Bluetooth Chip -->
-    <div class="card">
-      <h2>Bluetooth Controller <span class="chip-badge">ESP32</span></h2>
-      <p class="description">
-        Secondary ESP32 for Bluetooth HID volume control. Only needed for dual-chip configuration.
-      </p>
-      <div class="flash-section">
-        <esp-web-install-button manifest="/manifest-bt.json">
-          <button slot="activate">Flash ESP32-BT</button>
-          <span slot="unsupported">Not supported</span>
-          <span slot="not-allowed">HTTPS required</span>
-        </esp-web-install-button>
-        <span class="version-info" id="bt-version">(bundled)</span>
-      </div>
-      <div class="steps">
-        <strong>Steps:</strong>
-        <ol>
-          <li>Flip the USB-C cable 180 degrees to connect the ESP32-BT chip</li>
-          <li>Click "Flash ESP32-BT" and select the serial port</li>
-          <li>Wait ~20 seconds for flashing to complete</li>
-        </ol>
-        <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbserial-*</code> · Linux: <code>ttyUSB0</code> · Windows: <code>COM*</code></p>
+        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180° - one orientation connects to the ESP32-S3, the other to an unpopulated chip.</p>
       </div>
     </div>
 

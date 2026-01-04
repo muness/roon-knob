@@ -1,6 +1,5 @@
 #include "roon_client.h"
 
-#include "controller_mode.h"
 #include "platform/platform_display.h"
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
@@ -693,21 +692,6 @@ static void roon_poll_thread(void *arg) {
             check_charging_state_change();
         }
 
-        // Skip bridge status tracking in Bluetooth mode - we're not using the bridge
-        bool in_bluetooth_mode = false;
-        lock_state();
-        in_bluetooth_mode = (strcmp(s_state.cfg.zone_id, ZONE_ID_BLUETOOTH) == 0);
-        unlock_state();
-
-        if (in_bluetooth_mode) {
-            // In Bluetooth mode - show default UI, don't track bridge failures
-            post_ui_update(&state);
-            reset_bridge_fail_count();
-            s_last_net_ok = ok;
-            wait_for_poll_interval();
-            continue;
-        }
-
         // Handle bridge connection status (mirrors WiFi retry pattern)
         if (ok) {
             // Bridge connected - show now playing data
@@ -880,21 +864,7 @@ void roon_client_handle_input(ui_input_event_t event) {
                 return;
             }
 
-            // Check if Bluetooth was selected
-            if (controller_mode_is_bluetooth_zone(selected_id)) {
-                LOGI("Zone picker: switching to Bluetooth mode");
-                // Hide picker FIRST to ensure it closes before mode change callbacks
-                ui_hide_zone_picker();
-                lock_state();
-                strncpy(s_state.cfg.zone_id, ZONE_ID_BLUETOOTH, sizeof(s_state.cfg.zone_id) - 1);
-                s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
-                unlock_state();
-                platform_storage_save(&s_state.cfg);
-                controller_mode_set(CONTROLLER_MODE_BLUETOOTH);
-                return;
-            }
-
-            // Regular Roon zone selection
+            // Zone selection
             char label_copy[MAX_ZONE_NAME] = {0};
             bool updated = false;
             lock_state();
@@ -912,10 +882,6 @@ void roon_client_handle_input(ui_input_event_t event) {
                     s_trigger_poll = true;
                     s_force_artwork_refresh = true;  // Force artwork reload for new zone
                     updated = true;
-                    // Switch back to Roon mode if we were in BT mode
-                    if (controller_mode_get() == CONTROLLER_MODE_BLUETOOTH) {
-                        controller_mode_set(CONTROLLER_MODE_ROON);
-                    }
                     break;
                 }
             }
@@ -940,13 +906,10 @@ void roon_client_handle_input(ui_input_event_t event) {
     }
 
     if (event == UI_INPUT_MENU) {
-        const char *names[MAX_ZONES + 4];  /* +4 for Back, Bluetooth, Settings, margin */
-        const char *ids[MAX_ZONES + 4];
-        // Note: Icons are added by ui.c based on zone ID, so names are plain text
+        const char *names[MAX_ZONES + 3];  /* +3 for Back, Settings, margin */
+        const char *ids[MAX_ZONES + 3];
         static const char *back_name = "Back";
         static const char *back_id = ZONE_ID_BACK;
-        static const char *bt_name = "Bluetooth";
-        static const char *bt_id = ZONE_ID_BLUETOOTH;
         static const char *settings_name = "Settings";
         static const char *settings_id = ZONE_ID_SETTINGS;
         int selected = 1;  /* Default to first zone after Back */
@@ -968,11 +931,6 @@ void roon_client_handle_input(ui_input_event_t event) {
                 count++;
             }
         }
-        /* Bluetooth option disabled - UART comms unreliable (see HANDSHAKE_FAILURE_LESSONS.md)
-         * Access via Settings menu instead (marked as alpha)
-         */
-        (void)bt_name;
-        (void)bt_id;
         unlock_state();
 
         /* Add Settings as last option */

@@ -1,5 +1,7 @@
 # Dual-Chip Architecture: ESP32 + ESP32-S3
 
+> **Note**: Bluetooth mode was removed from this project. The secondary ESP32 chip is unused. This documentation is kept as reference for the Waveshare board's hardware capabilities.
+
 The Waveshare ESP32-S3-Knob-Touch-LCD-1.8 board contains **two separate ESP32 chips** that communicate via UART. This enables capabilities not possible with either chip alone.
 
 ## Hardware Overview
