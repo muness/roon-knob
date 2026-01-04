@@ -80,11 +80,13 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
   - [CH340 drivers](https://sparks.gogo.co.nz/ch340.html)
 
 ### "Failed to connect"
+- **Flip the USB-C cable 180°** - One orientation connects to the ESP32-S3, the other to an unpopulated ESP32 footprint. If you see the wrong chip or no response, flip the cable.
 - Ensure you're holding BOOT while pressing RST/EN
 - Try a different USB cable (some cables are charge-only)
 - Try a different USB port
 
 ### "Wrong chip detected"
+- **Flip the USB-C cable 180°** - The USB-C port connects to different chips depending on orientation.
 - Ensure the firmware matches your chip. Roon Knob uses ESP32-S3.
 
 ### "Access denied" or "Permission error"
