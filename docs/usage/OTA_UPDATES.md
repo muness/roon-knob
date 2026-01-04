@@ -289,6 +289,6 @@ On tag push (`v*`), GitHub Actions (`.github/workflows/docker.yml`):
 1. Builds firmware with ESP-IDF 5.4
 2. Creates `version.json` with tag version
 3. Creates GitHub Release with `.bin` attached
-4. Builds Docker image `muness/roon-extension-knob` with firmware baked in
+4. Deploys web flasher to GitHub Pages
 
-The Docker image serves as the distribution mechanism - users running the bridge container automatically have the latest firmware available for OTA.
+The control service (Unified Hi-Fi Control) downloads firmware from GitHub releases and serves it to knobs for OTA updates. Docker images are built in the [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control) repository.

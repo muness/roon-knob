@@ -1,18 +1,19 @@
+# Unified Hi-Fi Control - supports Roon, Lyrion (LMS), and OpenHome
+# Legacy image name (roon-extension-knob) also available for compatibility
 services:
-  roon-knob-bridge:
-    image: docker.io/muness/roon-extension-knob:latest
+  unified-hifi-control:
+    image: docker.io/muness/unified-hifi-control:latest
     restart: unless-stopped
     environment:
       TZ: America/New_York
       PORT: 8088
       LOG_LEVEL: info
-      ROON_SERVICE_PORT: 9330
       # Override the mDNS `base` so the knob discovers an IP instead of a hostname.
       # Set this to `http://<ip>:8088` if the default advertised hostname is unreachable.
       # MDNS_BASE: http://192.168.1.2:8088
     network_mode: host
     volumes:
-      - roon-knob-bridge-data:/home/node/app/data
+      - unified-hifi-control-data:/home/node/app/data
 
 volumes:
-  roon-knob-bridge-data:
+  unified-hifi-control-data:

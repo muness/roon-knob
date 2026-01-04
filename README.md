@@ -1,8 +1,13 @@
 # Roon Knob
 
-Custom firmware and a Roon extension that turn a [Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) into a dedicated Roon controller.
+Custom firmware and a companion service that turn a [Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) into a dedicated hi-fi controller.
 
 See what's playing, adjust volume, skip tracks, and switch zones—all from a physical knob on your desk.
+
+**Now supports multiple music sources:**
+- **Roon** - Full zone control with album artwork
+- **Lyrion Music Server (LMS)** - Squeezebox/LMS player control
+- **OpenHome/UPnP** - Control OpenHome-compatible renderers
 
 [![Roon Knob demo](docs/images/roon-knob-photo.jpg)](https://photos.app.goo.gl/s5LpWqBTaXRihmjh7)
 *Click to watch video demo*
@@ -10,8 +15,8 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 ## What You Need
 
 1. **Hardware**: [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) (~$50) - buy it at [amazon](https://amzn.to/4pYZdiC) to support my work.
-3. **Roon Core** running on your network
-4. **Docker host** (NAS, Raspberry Pi, always-on computer) to run the Roon extension
+2. **Music source**: Roon Core, Lyrion Music Server, or OpenHome renderer on your network
+3. **Docker host** (NAS, Raspberry Pi, always-on computer) to run the control service
 
 ## Quick Start
 
@@ -25,9 +30,9 @@ Use the [Web Flasher](https://roon-knob.muness.com/flash.html) in Chrome or Edge
 
 After flashing, future updates happen automatically over WiFi.
 
-### 2. Run the Roon Extension
+### 2. Run the Control Service
 
-The extension connects Roon to your knob.
+The control service (Unified Hi-Fi Control) connects your music source to the knob.
 
 **Docker (recommended)**
 
@@ -36,24 +41,26 @@ On any Docker host (NAS, Raspberry Pi, etc.):
 ```yaml
 # docker-compose.yml
 services:
-  roon-knob-bridge:
-    image: muness/roon-extension-knob:latest
+  unified-hifi-control:
+    image: muness/unified-hifi-control:latest
     restart: unless-stopped
     network_mode: host
     volumes:
-      - roon-knob-bridge-data:/home/node/app/data
+      - unified-hifi-control-data:/home/node/app/data
 
 volumes:
-  roon-knob-bridge-data:
+  unified-hifi-control-data:
 ```
 
 ```bash
 docker compose up -d
 ```
 
+> **Note:** The legacy image name `muness/roon-extension-knob` still works and receives the same updates.
+
 **Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?**
 
-Find "Roon Knob" in the extension list and install it from there.
+Find "Roon Knob" in the extension list and install it from there (Roon-only mode).
 
 ### 3. Authorize in Roon
 

@@ -3,22 +3,25 @@
 
 ## Updating
 
-**OTA (existing users):** Update bridge to `{{VERSION}}`, restart, knob updates automatically.
+**OTA (existing users):** Update the control service, restart, knob updates automatically.
 
 **Docker Compose:**
 ```yaml
+# Unified Hi-Fi Control - supports Roon, Lyrion (LMS), and OpenHome
 services:
-  roon-knob-bridge:
-    image: docker.io/muness/roon-extension-knob:{{VERSION}}
+  unified-hifi-control:
+    image: docker.io/muness/unified-hifi-control:latest
     restart: unless-stopped
     network_mode: host
     environment:
       TZ: America/New_York
     volumes:
-      - roon-knob-bridge-data:/home/node/app/data
+      - unified-hifi-control-data:/home/node/app/data
 volumes:
-  roon-knob-bridge-data:
+  unified-hifi-control-data:
 ```
+
+> **Note:** Legacy image `muness/roon-extension-knob` still works and receives the same updates.
 
 Then: `docker compose pull && docker compose up -d`
 

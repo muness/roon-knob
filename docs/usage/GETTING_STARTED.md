@@ -253,11 +253,11 @@ Note: The chip type is `esp32` (not `esp32s3`) for this firmware.
 
 ---
 
-## Part 2: Run the Bridge
+## Part 2: Run the Control Service
 
-The bridge is a small program that connects Roon to your knob. It needs to run on an always-on device (NAS, Raspberry Pi, etc.) on your network.
+The control service (Unified Hi-Fi Control) connects your music source to your knob. It supports Roon, Lyrion Music Server (LMS), and OpenHome renderers. It needs to run on an always-on device (NAS, Raspberry Pi, etc.) on your network.
 
-**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?** Just find "Roon Knob" in the extension list and install it. Skip to [Part 3](#part-3-connect-everything).
+**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?** Just find "Roon Knob" in the extension list and install it (Roon-only mode). Skip to [Part 3](#part-3-connect-everything).
 
 For everyone else, we'll use Docker.
 
@@ -314,23 +314,26 @@ Docker Compose uses a configuration file to know what to run. You need to create
 3. Paste the following content into the file:
 
    ```yaml
+   # Unified Hi-Fi Control - supports Roon, Lyrion (LMS), and OpenHome
    services:
-     roon-knob-bridge:
-       image: muness/roon-extension-knob:latest
+     unified-hifi-control:
+       image: muness/unified-hifi-control:latest
        restart: unless-stopped
        network_mode: host
        volumes:
-         - roon-knob-bridge-data:/home/node/app/data
+         - unified-hifi-control-data:/home/node/app/data
 
    volumes:
-     roon-knob-bridge-data:
+     unified-hifi-control-data:
    ```
+
+   > **Note:** The legacy image name `muness/roon-extension-knob` still works.
 
 4. Save and close the file
    - In nano: Press `Ctrl+O` to save, then `Ctrl+X` to exit
    - In Notepad: File → Save
 
-### Step 3: Start the Bridge
+### Step 3: Start the Control Service
 
 In the same folder where you created `docker-compose.yml`, run:
 
