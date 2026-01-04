@@ -76,43 +76,10 @@ jobs:
             roon-extension/firmware/version.json
           retention-days: 30
 
-  build-esp32bt:
-    name: Build ESP32 Bluetooth Firmware
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build with ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: release-v5.4
-          target: esp32
-          path: esp32_bt
-
-      - name: Create merged flash image for web flashing
-        run: |
-          pip install esptool
-          esptool --chip esp32 merge-bin \
-            -o esp32_bt_merged.bin \
-            --flash-mode dio --flash-freq 40m --flash-size 4MB \
-            0x1000 esp32_bt/build/bootloader/bootloader.bin \
-            0x8000 esp32_bt/build/partition_table/partition-table.bin \
-            0x10000 esp32_bt/build/esp32_bt.bin
-          ls -la *.bin
-
-      - name: Upload ESP32 BT artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: esp32bt-firmware
-          path: |
-            esp32_bt/build/esp32_bt.bin
-            esp32_bt_merged.bin
-          retention-days: 30
-
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-idf, build-esp32bt]
+    needs: [build-idf]
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
@@ -122,12 +89,6 @@ jobs:
         with:
           name: esp32s3-firmware
           path: esp32s3-artifacts
-
-      - name: Download ESP32 BT firmware
-        uses: actions/download-artifact@v4
-        with:
-          name: esp32bt-firmware
-          path: esp32bt-artifacts
 
       - name: Get version from tag
         id: version
@@ -172,12 +133,8 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          # ESP32-S3 (main controller) - app binary for OTA, merged for web flashing
           cp esp32s3-artifacts/idf_app/build/roon_knob.bin release-assets/
           cp esp32s3-artifacts/roon_knob_merged.bin release-assets/
-          # ESP32 (Bluetooth chip) - app binary for OTA, merged for web flashing
-          cp esp32bt-artifacts/esp32_bt/build/esp32_bt.bin release-assets/
-          cp esp32bt-artifacts/esp32_bt_merged.bin release-assets/
           ls -la release-assets/
 
       - name: Build release body
@@ -210,8 +167,6 @@ jobs:
           files: |
             release-assets/roon_knob.bin
             release-assets/roon_knob_merged.bin
-            release-assets/esp32_bt.bin
-            release-assets/esp32_bt_merged.bin
           body_path: final_body.md
 
       - name: Upload assets to existing release
@@ -250,21 +205,13 @@ jobs:
           name: esp32s3-firmware
           path: esp32s3-artifacts
 
-      - name: Download ESP32 BT firmware
-        uses: actions/download-artifact@v4
-        with:
-          name: esp32bt-firmware
-          path: esp32bt-artifacts
-
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
           cp roon-extension/public/index.html gh-pages-build/
           cp roon-extension/public/flash.html gh-pages-build/
-          cp roon-extension/public/manifest-*.json gh-pages-build/
-          # Copy merged binaries for web flashing (same-origin, no CORS issues)
+          cp roon-extension/public/manifest-s3.json gh-pages-build/
           cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/
-          cp esp32bt-artifacts/esp32_bt_merged.bin gh-pages-build/
           echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
 

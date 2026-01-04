@@ -23,24 +23,6 @@ Roon Knob has two parts that work together:
 
 "Flashing" means copying software onto the device. Unlike a Raspberry Pi (which uses an SD card), the ESP32 chips store their software internally. You flash once over USB, then future updates happen automatically over WiFi.
 
-### Understanding the Hardware
-
-The Waveshare knob contains **two separate chips**:
-
-| Chip | Firmware | What it does |
-|------|----------|--------------|
-| **ESP32-S3** | Main chip | Display, WiFi, touch, Roon control |
-| **ESP32** | Bluetooth chip | BLE HID controls + AVRCP metadata (optional) |
-
-**You only need to flash the ESP32-S3** for normal Roon use. The ESP32 (Bluetooth) is only needed if you want [Bluetooth mode](DUAL_CHIP_ARCHITECTURE.md) for controlling your phone/DAP when away from Roon.
-
-### How USB Works on This Device
-
-The knob has a clever trick: **flipping the USB-C cable switches which chip you're programming**. The connector works in either orientation, but each orientation connects to a different chip.
-
-- One orientation → ESP32-S3 (main chip)
-- Flip the cable 180° → ESP32 (Bluetooth chip)
-
 ### What You Need
 
 - The Waveshare ESP32-S3 Knob
@@ -64,18 +46,12 @@ The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
 - Windows: `COM3` or similar
 - Linux: `ttyACM0`
 
-**Optional: Flash Bluetooth Chip**
-
-1. Flip the USB-C cable 180° to connect to the other chip
-2. Click "Flash ESP32-BT" and select the new port (`cu.usbserial...` on Mac, `ttyUSB0` on Linux)
-
 **Troubleshooting:**
 
 | Problem | Solution |
 |---------|----------|
-| No serial port appears | Try a different USB cable (some only charge). Try flipping the USB-C cable. |
+| No serial port appears | Try a different USB cable (some only charge). |
 | "Browser not supported" | Use Chrome or Edge. Safari and Firefox don't support Web Serial. |
-| Wrong chip detected | Flip the USB-C cable 180° to switch between chips. |
 
 ---
 
@@ -119,12 +95,9 @@ pip3 install esptool
 
 ### Step 2: Download the Firmware
 
-Go to the [latest release](https://github.com/muness/roon-knob/releases/latest) and download:
+Go to the [latest release](https://github.com/muness/roon-knob/releases/latest) and download **`roon_knob.bin`**.
 
-- **`roon_knob.bin`** - Required (main firmware for ESP32-S3)
-- **`esp32_bt.bin`** - Optional (Bluetooth chip firmware, needed for Bluetooth mode)
-
-Save them somewhere easy to find (like your Downloads folder).
+Save it somewhere easy to find (like your Downloads folder).
 
 ### Step 3: Connect the Knob
 
@@ -132,9 +105,9 @@ Save them somewhere easy to find (like your Downloads folder).
 2. Plug the other end into your computer
 3. The knob might turn on and show something on screen—that's fine
 
-### Step 4: Find the USB Port and Identify the Chip
+### Step 4: Find the USB Port
 
-When you plug in the knob, your computer assigns it a "port" name. The port name helps identify which chip you're connected to.
+When you plug in the knob, your computer assigns it a "port" name.
 
 #### On Mac:
 
@@ -142,34 +115,22 @@ When you plug in the knob, your computer assigns it a "port" name. The port name
 ls /dev/tty.usb*
 ```
 
-You'll see something like:
-- `/dev/tty.usbmodem101` - This is the **ESP32-S3** (main chip)
-- `/dev/tty.usbserial-1410` - This is the **ESP32** (Bluetooth chip)
-
-If nothing appears, try flipping the USB-C cable or use a different cable (some only charge).
+Look for `/dev/tty.usbmodem*`. If nothing appears, try flipping the USB-C cable 180° or use a different cable (some only charge).
 
 #### On Windows:
 
 1. Open Device Manager (search for it in the Start menu)
 2. Expand "Ports (COM & LPT)"
-3. Look for:
-   - "USB Serial Device (COMx)" - likely **ESP32-S3**
-   - "Silicon Labs CP210x (COMx)" - likely **ESP32**
+3. Look for "USB Serial Device (COMx)"
 4. Note the COM number (e.g., `COM3`)
 
 #### On Linux:
 
 ```bash
-ls /dev/ttyUSB* /dev/ttyACM*
+ls /dev/ttyACM*
 ```
 
-You'll see something like:
-- `/dev/ttyACM0` - likely **ESP32-S3**
-- `/dev/ttyUSB0` - likely **ESP32**
-
-#### Not Sure Which Chip?
-
-Just try flashing. If esptool reports "Chip is ESP32-S3", you're on the main chip. If it says "Chip is ESP32", you're on the Bluetooth chip. Flip the USB-C cable to switch.
+Look for `/dev/ttyACM0`.
 
 ### Step 5: Flash the Main Firmware (ESP32-S3)
 
@@ -218,35 +179,11 @@ Hard resetting via RTS pin...
 
 The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
 
-### Step 6: Flash the Bluetooth Firmware (ESP32) - Optional
-
-**Skip this step** if you only plan to use the knob with Roon. The Bluetooth firmware is needed for Bluetooth mode, which lets you control your phone/DAP when you're away from your Roon setup.
-
-1. **Flip the USB-C cable** to connect to the ESP32 chip
-2. Verify you see a different port name (e.g., `/dev/tty.usbserial-*` instead of `/dev/tty.usbmodem*`)
-3. Flash the Bluetooth firmware:
-
-#### On Mac/Linux:
-
-```bash
-esptool.py --chip esp32 -p YOUR_PORT -b 460800 \
-  --before default-reset --after hard-reset \
-  write_flash 0x10000 esp32_bt.bin
-```
-
-#### On Windows:
-
-```cmd
-esptool.py --chip esp32 -p COM4 -b 460800 --before default-reset --after hard-reset write_flash 0x10000 esp32_bt.bin
-```
-
-Note: The chip type is `esp32` (not `esp32s3`) for this firmware.
-
 ### Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| "Port not found" | Try a different USB cable. Some cables only charge, they don't transmit data. |
+| "Port not found" | Try a different USB cable or flip the USB-C cable 180°. Some cables only charge, they don't transmit data. |
 | "Permission denied" (Linux) | Add yourself to the dialout group: `sudo usermod -a -G dialout $USER` then log out and back in |
 | Nothing happens when plugging in | Try a different USB port on your computer |
 | esptool command not found | Make sure Python's Scripts folder is in your PATH. Try `python -m esptool` instead of `esptool.py` |
