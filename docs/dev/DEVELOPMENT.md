@@ -8,7 +8,7 @@ Roon Knob has three components:
 |-----------|-------------|
 | **ESP32-S3 Firmware** | LVGL-based UI on a 360×360 round LCD. Polls the bridge for now-playing data and sends control commands. |
 | **PC Simulator** | SDL2 desktop build that mirrors the firmware UI for rapid development without hardware. |
-| **Bridge** | Node.js service that connects to Roon and exposes HTTP endpoints (`/zones`, `/now_playing`, `/control`). Advertises via mDNS (`_roonknob._tcp`). |
+| **Bridge** | Node.js service that connects to Roon/HiFi systems. See [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control). |
 
 ## Repository Structure
 
@@ -23,8 +23,7 @@ roon-knob/
 │   ├── roon_client.c  # HTTP client for bridge API
 │   └── app_main.c     # Main application logic
 ├── pc_sim/            # LVGL + SDL2 simulator
-├── roon-extension/    # Node.js bridge
-│   └── firmware/      # OTA firmware served by bridge
+├── web/               # Web flasher (deployed to GitHub Pages)
 ├── scripts/           # Build and setup helpers
 └── docs/              # Documentation
 ```
@@ -45,11 +44,7 @@ The simulator lets you develop UI without flashing hardware.
 ./scripts/run_pc.sh     # Builds and runs simulator
 ```
 
-The simulator expects the bridge at `http://127.0.0.1:8088`. Start the bridge first:
-
-```bash
-cd roon-extension && npm install && npm run dev
-```
+The simulator expects the bridge at `http://127.0.0.1:8088`. Run the bridge from the [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control) repo.
 
 ### Simulator Controls
 
@@ -88,39 +83,18 @@ Or use the helper script:
 
 ### Releasing Firmware
 
+Releases are handled via CI. Just tag and push:
+
 ```bash
-./scripts/release_firmware.sh 1.2.7  # Bumps version, builds, copies to roon-extension/firmware/
+git tag -a v1.2.7 -m "Release description"
+git push origin v1.2.7
 ```
 
-Then rebuild and push the Docker image to make the update available via OTA.
+The CI builds firmware, creates a GitHub release, and deploys the web flasher.
 
 ## Bridge Development
 
-```bash
-cd roon-extension
-npm install
-npm run dev  # Hot reload mode
-```
-
-### API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/zones` | GET | List all Roon zones |
-| `/now_playing?zone_id=X` | GET | Current track info |
-| `/now_playing/image?zone_id=X` | GET | Album artwork (JPEG) |
-| `/control` | POST | Send commands (play, pause, next, previous, volume) |
-| `/firmware/version` | GET | Latest firmware version info |
-| `/firmware/download` | GET | Download firmware binary |
-
-### Docker Build
-
-```bash
-cd ../roon-extension-generator
-./build-versioned.sh knob
-./publish-versioned.sh knob
-./create-manifest.sh knob
-```
+Bridge code is at [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control).
 
 ## Hardware
 

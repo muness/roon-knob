@@ -7,7 +7,7 @@ Over-the-air firmware updates allow the Roon Knob to download and install new fi
 The OTA system consists of:
 
 - **Device firmware** (`idf_app/main/ota_update.c`) - checks for updates, downloads, and installs
-- **Bridge server** (`roon-extension/routes.js`) - serves version info and firmware binary
+- **Bridge server** ([unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)) - serves version info and firmware binary
 - **CI/CD pipeline** (`.github/workflows/docker.yml`) - builds and packages firmware on release
 
 ## Partition Layout
@@ -107,15 +107,14 @@ The dual-partition scheme ensures the device always has a working firmware to fa
 
 ## Server-Side Setup
 
+The bridge ([unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)) serves firmware to devices.
+
 ### Firmware Directory Structure
 
-The bridge serves firmware from `roon-extension/firmware/`:
-
 ```
-roon-extension/
-└── firmware/
-    ├── version.json    # Version metadata
-    └── roon_knob.bin   # Firmware binary
+firmware/
+├── version.json    # Version metadata
+└── roon_knob.bin   # Firmware binary
 ```
 
 ### version.json Format

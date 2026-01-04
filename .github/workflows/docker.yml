@@ -197,9 +197,9 @@ jobs:
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
-          cp roon-extension/public/index.html gh-pages-build/
-          cp roon-extension/public/flash.html gh-pages-build/
-          cp roon-extension/public/manifest-s3.json gh-pages-build/
+          cp web/index.html gh-pages-build/
+          cp web/flash.html gh-pages-build/
+          cp web/manifest-s3.json gh-pages-build/
           cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/
           echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
