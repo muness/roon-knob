@@ -160,7 +160,7 @@ static void refresh_labels(void) {
         if (cfg.knob_name[0]) {
             lv_label_set_text_fmt(s_widgets.name_value, "%s", cfg.knob_name);
         } else {
-            lv_label_set_text(s_widgets.name_value, "<unset>");
+            lv_label_set_text_fmt(s_widgets.name_value, "%s", wifi_mgr_get_hostname());
         }
     }
 
