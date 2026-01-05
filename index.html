@@ -29,7 +29,7 @@
 <body>
   <div class="container">
     <h1>Roon Knob</h1>
-    <p class="tagline">A physical volume controller for Roon</p>
+    <p class="tagline">A physical volume controller for your hi-fi system</p>
 
     <div class="buttons">
       <a href="flash.html" class="btn btn-primary">Flash Firmware</a>
@@ -38,7 +38,12 @@
 
     <div class="card">
       <h2>What is this?</h2>
-      <p>Roon Knob is a DIY hardware volume controller for <a href="https://roon.app" target="_blank">Roon</a>. Features a rotary encoder, touchscreen display, and WiFi connectivity to control your Roon zones.</p>
+      <p>Roon Knob is a DIY hardware controller for your hi-fi system. Uses the <a href="https://amzn.to/4pYZdiC" target="_blank">Waveshare ESP32-S3 Knob</a> (~$50). Features a rotary encoder, touchscreen display, and WiFi connectivity. Supports:</p>
+      <p style="margin-top: 12px;">
+        <strong>&bull; Roon</strong> &ndash; Full zone control with album artwork<br>
+        <strong>&bull; Lyrion (LMS)</strong> &ndash; Squeezebox player control<br>
+        <strong>&bull; OpenHome/UPnP</strong> &ndash; Control OpenHome renderers
+      </p>
     </div>
 
     <div class="card">
@@ -46,8 +51,9 @@
       <p>
         <strong>1.</strong> Flash firmware using the <a href="flash.html">web flasher</a> (Chrome/Edge)<br>
         <strong>2.</strong> Connect to WiFi via captive portal<br>
-        <strong>3.</strong> Run the bridge via Docker<br>
-        <strong>4.</strong> Authorize in Roon Settings &rarr; Extensions
+        <strong>3.</strong> Run the control service via Docker:<br>
+        <code style="display: block; background: var(--bg); padding: 12px; border-radius: 6px; margin: 10px 0; font-size: 0.9em;">docker run -d --network host muness/unified-hifi-control</code>
+        <strong>4.</strong> For Roon: Authorize in Settings &rarr; Extensions
       </p>
     </div>
 
