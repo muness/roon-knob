@@ -26,6 +26,7 @@
 static bool fetch_knob_config(void);
 static void apply_knob_config(const rk_cfg_t *cfg);
 static void check_config_sha(const char *new_sha);
+static void check_zones_sha(const char *new_sha);
 static void check_charging_state_change(void);
 
 #define MAX_LINE 128
@@ -53,6 +54,7 @@ struct now_playing_state {
     int length;
     char image_key[128];  // For tracking album artwork changes
     char config_sha[9];   // Config SHA for change detection
+    char zones_sha[9];    // Zones SHA for zone list change detection
 };
 
 struct zone_entry {
@@ -84,6 +86,7 @@ static bool s_bridge_verified = false;  // True after bridge found AND responded
 static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 static bool s_last_charging_state = true;  // Track charging state for config reapply
 static bool s_last_is_playing = false;     // Track play state for extended sleep polling
+static char s_last_zones_sha[9] = {0};     // Track zones SHA for zone list change detection
 #define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
@@ -204,6 +207,7 @@ static void default_now_playing(struct now_playing_state *state) {
     state->length = 0;
     state->image_key[0] = '\0';
     state->config_sha[0] = '\0';
+    state->zones_sha[0] = '\0';
 }
 
 static void post_ui_update(const struct now_playing_state *state) {
@@ -473,6 +477,14 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         state->config_sha[0] = '\0';
     }
 
+    // Parse zones_sha for zone list change detection
+    const char *zones_sha_key = strstr(resp, "\"zones_sha\"");
+    if (zones_sha_key) {
+        extract_json_string(zones_sha_key, "\"zones_sha\"", state->zones_sha, sizeof(state->zones_sha));
+    } else {
+        state->zones_sha[0] = '\0';
+    }
+
     // Note: Don't parse zones from now_playing response - it doesn't have zone_name
     // Zones are parsed from /zones endpoint in refresh_zone_label()
     platform_http_free(resp);
@@ -684,9 +696,10 @@ static void roon_poll_thread(void *arg) {
             s_last_is_playing = state.is_playing;
         }
 
-        // Check for config changes and charging state (only when bridge is responding)
+        // Check for config/zones changes and charging state (only when bridge is responding)
         if (ok) {
             check_config_sha(state.config_sha);
+            check_zones_sha(state.zones_sha);
             check_charging_state_change();
         }
 
@@ -1205,6 +1218,28 @@ static void check_config_sha(const char *new_sha) {
         LOGI("Config SHA changed: '%s' -> '%s', fetching new config",
              s_state.cfg.config_sha[0] ? s_state.cfg.config_sha : "(empty)", new_sha);
         fetch_knob_config();
+    }
+}
+
+static void check_zones_sha(const char *new_sha) {
+    // Skip if no SHA provided (backward compatibility with old bridges)
+    if (!new_sha || !new_sha[0]) {
+        return;
+    }
+
+    // Check if zones SHA changed
+    bool sha_changed = (strcmp(s_last_zones_sha, new_sha) != 0);
+
+    if (sha_changed) {
+        LOGI("Zones SHA changed: '%s' -> '%s', refreshing zone list",
+             s_last_zones_sha[0] ? s_last_zones_sha : "(empty)", new_sha);
+
+        // Update cached SHA
+        strncpy(s_last_zones_sha, new_sha, sizeof(s_last_zones_sha) - 1);
+        s_last_zones_sha[sizeof(s_last_zones_sha) - 1] = '\0';
+
+        // Re-fetch zones from bridge
+        refresh_zone_label(true);
     }
 }
 
