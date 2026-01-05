@@ -34,6 +34,14 @@ static int64_t s_touch_start_time = 0;
 static bool s_touch_tracking = false;
 static volatile bool s_pending_art_mode = false;   // Deferred art mode activation
 static volatile bool s_pending_exit_art_mode = false;  // Deferred art mode exit
+static uint16_t s_current_rotation = 0;  // Track rotation for swipe direction transform
+
+// Double-tap detection for art mode toggle
+#define DOUBLE_TAP_MAX_MS 400      // Max time between taps
+#define DOUBLE_TAP_MAX_DISTANCE 40 // Max movement between taps
+static int64_t s_last_tap_time = 0;
+static int16_t s_last_tap_x = 0;
+static int16_t s_last_tap_y = 0;
 
 // LVGL tick timer (critical for LVGL to know time is passing)
 static esp_timer_handle_t s_lvgl_tick_timer = NULL;
@@ -383,16 +391,24 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
         // Check for swipe gesture on release
         if (s_touch_tracking) {
             int64_t elapsed = (esp_timer_get_time() / 1000) - s_touch_start_time;
+            int64_t now_ms = esp_timer_get_time() / 1000;
 
             if (elapsed < SWIPE_MAX_TIME_MS) {
                 int16_t dx = data->point.x - s_touch_start_x;
                 int16_t dy = data->point.y - s_touch_start_y;
 
+                // Transform swipe direction for 180° rotation (#43)
+                // When rotated 180°, user's "swipe up" produces positive raw dy
+                if (s_current_rotation == 180) {
+                    dy = -dy;
+                    dx = -dx;
+                }
+
                 // Check for swipe up (negative Y direction) - enter art mode
                 if (dy < -SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
                     // Only allow art mode when WiFi is configured and bridge is responding with zones
                     if (roon_client_is_ready_for_art_mode()) {
-                        ESP_LOGI(TAG, "Swipe up detected - queueing art mode");
+                        ESP_LOGI(TAG, "Swipe up detected (rotation=%d) - queueing art mode", s_current_rotation);
                         s_pending_art_mode = true;  // Defer to avoid LVGL threading issues
                     } else {
                         ESP_LOGI(TAG, "Swipe up ignored - not ready for art mode (no zones)");
@@ -400,8 +416,33 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
                 }
                 // Check for swipe down (positive Y direction) - exit art mode
                 else if (dy > SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
-                    ESP_LOGI(TAG, "Swipe down detected - queueing exit art mode");
+                    ESP_LOGI(TAG, "Swipe down detected (rotation=%d) - queueing exit art mode", s_current_rotation);
                     s_pending_exit_art_mode = true;  // Defer to avoid LVGL threading issues
+                }
+                // Check for double-tap to enter art mode (#66)
+                // Only if this wasn't a swipe (small movement) and not already in art mode
+                // (any single tap exits art mode, so double-tap is only for entering)
+                else if (display_get_state() != DISPLAY_STATE_ART_MODE &&
+                         abs(dx) < DOUBLE_TAP_MAX_DISTANCE && abs(dy) < DOUBLE_TAP_MAX_DISTANCE) {
+                    int64_t tap_interval = now_ms - s_last_tap_time;
+                    int16_t tap_dx = abs(data->point.x - s_last_tap_x);
+                    int16_t tap_dy = abs(data->point.y - s_last_tap_y);
+
+                    if (tap_interval < DOUBLE_TAP_MAX_MS &&
+                        tap_dx < DOUBLE_TAP_MAX_DISTANCE &&
+                        tap_dy < DOUBLE_TAP_MAX_DISTANCE) {
+                        // Double-tap detected - enter art mode
+                        if (roon_client_is_ready_for_art_mode()) {
+                            ESP_LOGI(TAG, "Double-tap detected - entering art mode");
+                            s_pending_art_mode = true;
+                        }
+                        s_last_tap_time = 0;  // Reset to prevent triple-tap
+                    } else {
+                        // First tap or tap too far from previous - record it
+                        s_last_tap_time = now_ms;
+                        s_last_tap_x = data->point.x;
+                        s_last_tap_y = data->point.y;
+                    }
                 }
             }
             s_touch_tracking = false;
@@ -610,14 +651,16 @@ void platform_display_set_rotation(uint16_t degrees) {
     lv_display_rotation_t rotation;
     if (degrees == 180) {
         rotation = LV_DISPLAY_ROTATION_180;
+        s_current_rotation = 180;
     } else {
         if (degrees != 0) {
             ESP_LOGW(TAG, "Rotation %d not supported (only 0/180), using 0", degrees);
         }
         rotation = LV_DISPLAY_ROTATION_0;
+        s_current_rotation = 0;
     }
 
-    ESP_LOGI(TAG, "Setting display rotation to %d degrees", degrees == 180 ? 180 : 0);
+    ESP_LOGI(TAG, "Setting display rotation to %d degrees", s_current_rotation);
     lv_display_set_rotation(s_display, rotation);
 }
 

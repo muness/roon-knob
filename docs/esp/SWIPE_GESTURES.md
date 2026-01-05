@@ -137,8 +137,23 @@ Why defer? The touch callback runs from LVGL's internal context. Calling display
 |---------|--------|-----------|
 | Swipe Up | Enter art mode | dy < -60px, time < 500ms |
 | Swipe Down | Exit art mode | dy > +60px, time < 500ms |
+| Double-tap | Enter art mode | 2 taps within 400ms, < 40px apart |
+| Any tap | Exit art mode | (when in art mode) |
 
 Art mode hides the control UI and shows fullscreen album artwork.
+
+### Double-tap Detection
+
+Double-tap provides an alternative to swipe for entering art mode:
+
+```c
+#define DOUBLE_TAP_MAX_MS 400      // Max time between taps
+#define DOUBLE_TAP_MAX_DISTANCE 40 // Max movement between taps
+```
+
+The detector tracks the previous tap location and time. If a second tap occurs within the threshold, it enters art mode. This supplements (not replaces) swipe gestures for users who find swiping difficult.
+
+Note: Exiting art mode only requires a single tap anywhere on the screen, so double-tap detection is skipped when already in art mode.
 
 ## Coordinate System
 
@@ -152,6 +167,20 @@ So:
 
 - **Swipe up** = finger moves toward top of screen = negative dy
 - **Swipe down** = finger moves toward bottom = positive dy
+
+### Rotation Handling
+
+When the display is rotated 180°, the raw touch coordinates are inverted relative to the user's perspective. The gesture detection compensates by inverting dx/dy when `s_current_rotation == 180`:
+
+```c
+// Transform swipe direction for 180° rotation
+if (s_current_rotation == 180) {
+    dy = -dy;
+    dx = -dx;
+}
+```
+
+This ensures that a user's physical "swipe up" gesture always triggers art mode entry, regardless of display orientation.
 
 ## Why Software Implementation?
 
