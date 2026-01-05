@@ -465,14 +465,12 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         state->image_key[0] = '\0';  // No artwork available
     }
 
-    // Parse config_sha for config change detection
+    // Parse config_sha for config change detection (silent - checked in poll loop)
     const char *config_sha_key = strstr(resp, "\"config_sha\"");
     if (config_sha_key) {
         extract_json_string(config_sha_key, "\"config_sha\"", state->config_sha, sizeof(state->config_sha));
-        LOGI("now_playing: config_sha='%s'", state->config_sha);
     } else {
         state->config_sha[0] = '\0';
-        LOGI("now_playing: no config_sha in response");
     }
 
     // Note: Don't parse zones from now_playing response - it doesn't have zone_name
