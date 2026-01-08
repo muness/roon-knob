@@ -719,10 +719,20 @@ class StoreManager: ObservableObject {
 
 ### Zone Limiting Logic
 
+**Free tier rules:**
+- User picks 1 zone on first launch
+- Can change zone **once per day** (prevents gaming, allows mistakes)
+- Cooldown resets at midnight local time
+- If selected zone disappears (renamed/removed), allow immediate re-pick
+
 ```swift
 class ZoneAccessManager: ObservableObject {
     @Published var allowedZoneId: String?  // Free tier: one zone
     @Published var isUnlocked: Bool = false
+    @Published var lastZoneChangeDate: Date?
+
+    private let defaults = UserDefaults.standard
+    private let calendar = Calendar.current
 
     var accessibleZones: [Zone] {
         if isUnlocked {
@@ -735,14 +745,61 @@ class ZoneAccessManager: ObservableObject {
         }
     }
 
-    func selectFreeZone(_ zone: Zone) {
-        guard !isUnlocked else { return }
+    var canChangeZone: Bool {
+        guard !isUnlocked else { return true }
+
+        // First pick is always allowed
+        guard let lastChange = lastZoneChangeDate else { return true }
+
+        // Allow if selected zone no longer exists
+        if let allowedId = allowedZoneId,
+           !allZones.contains(where: { $0.zone_id == allowedId }) {
+            return true
+        }
+
+        // Allow once per day (midnight reset)
+        return !calendar.isDateInToday(lastChange)
+    }
+
+    var timeUntilCanChange: TimeInterval? {
+        guard !canChangeZone, let lastChange = lastZoneChangeDate else {
+            return nil
+        }
+        // Calculate time until midnight
+        let tomorrow = calendar.startOfDay(for: Date().addingTimeInterval(86400))
+        return tomorrow.timeIntervalSinceNow
+    }
+
+    func selectFreeZone(_ zone: Zone) -> Bool {
+        guard !isUnlocked else {
+            allowedZoneId = zone.zone_id
+            return true
+        }
+
+        guard canChangeZone else { return false }
+
         allowedZoneId = zone.zone_id
-        UserDefaults.standard.set(zone.zone_id, forKey: "free_zone_id")
+        lastZoneChangeDate = Date()
+        defaults.set(zone.zone_id, forKey: "free_zone_id")
+        defaults.set(Date(), forKey: "free_zone_change_date")
+        return true
     }
 
     func canAccessZone(_ zone: Zone) -> Bool {
         isUnlocked || zone.zone_id == allowedZoneId
+    }
+}
+```
+
+**UI for zone change cooldown:**
+```swift
+// In ZonePickerView
+if !zoneAccessManager.canChangeZone {
+    if let remaining = zoneAccessManager.timeUntilCanChange {
+        let hours = Int(remaining / 3600)
+        Text("You can change zones again in \(hours)h")
+            .font(.caption)
+            .foregroundColor(.secondary)
     }
 }
 ```
