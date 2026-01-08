@@ -114,6 +114,14 @@ See [PROJECT_AIMS.md](docs/meta/PROJECT_AIMS.md) for project goals and decision 
 
 Questions or issues? [Open an issue](https://github.com/muness/roon-knob/issues), join the [Roon Community discussion](https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363), or [buy me a coffee](https://www.buymeacoffee.com/muness).
 
+## License
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+Versions up to and including v2.2.2 were released under the [MIT License](LICENSE-MIT).
+
+For commercial licensing inquiries, see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
 ## Acknowledgments
 
 Thanks to **gTunes** from the Roon community for alpha testing, detailed feedback, and help with the velocity-sensitive volume control implementation.
