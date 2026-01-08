@@ -13,7 +13,9 @@ An Apple Watch app with iPhone companion that provides Roon Knob feature parity 
 1. **Feature parity with Roon Knob** - Play/pause, volume, next/prev, zone selection, album art
 2. **Native Watch experience** - Digital Crown for volume, complications for now playing
 3. **iPhone companion for setup** - Bridge discovery, zone filtering, full controls
-4. **Shared codebase** - Swift package for bridge API client used by both apps
+4. **iPhone widgets & Live Activities** - Lock screen, home screen, Dynamic Island
+5. **Shared codebase** - Swift package for bridge API client used by both apps
+6. **Sustainable monetization** - Free tier + one-time purchase + tips
 
 ## Non-Goals
 
@@ -21,6 +23,7 @@ An Apple Watch app with iPhone companion that provides Roon Knob feature parity 
 - Queue management
 - Roon-specific features (DSP, radio, etc.)
 - Direct Roon API integration (uses bridge like knob)
+- Subscriptions (one-time purchase only)
 
 ---
 
@@ -294,6 +297,218 @@ struct NowPlayingComplication: Widget {
 }
 ```
 
+### 8. iPhone Widgets (Home Screen & Lock Screen)
+
+WidgetKit widgets for quick glance at now playing and controls.
+
+**Widget Families:**
+- `systemSmall` - Album art + play state indicator
+- `systemMedium` - Album art + track info + play/pause button
+- `systemLarge` - Full now playing with transport controls
+- `accessoryCircular` - Lock screen: album art thumbnail
+- `accessoryRectangular` - Lock screen: track + artist
+- `accessoryInline` - Lock screen: "▶ Track - Artist"
+
+```swift
+struct NowPlayingWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(
+            kind: "NowPlayingWidget",
+            provider: NowPlayingWidgetProvider()
+        ) { entry in
+            NowPlayingWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Now Playing")
+        .description("Shows what's playing and quick controls")
+        .supportedFamilies([
+            .systemSmall,
+            .systemMedium,
+            .systemLarge,
+            .accessoryCircular,
+            .accessoryRectangular,
+            .accessoryInline
+        ])
+    }
+}
+
+struct NowPlayingWidgetView: View {
+    let entry: NowPlayingEntry
+    @Environment(\.widgetFamily) var family
+
+    var body: some View {
+        switch family {
+        case .systemSmall:
+            SmallWidgetView(entry: entry)
+        case .systemMedium:
+            MediumWidgetView(entry: entry)
+        case .systemLarge:
+            LargeWidgetView(entry: entry)
+        case .accessoryCircular:
+            CircularLockScreenView(entry: entry)
+        case .accessoryRectangular:
+            RectangularLockScreenView(entry: entry)
+        case .accessoryInline:
+            InlineLockScreenView(entry: entry)
+        default:
+            EmptyView()
+        }
+    }
+}
+```
+
+**Widget Intents (Interactive Controls):**
+```swift
+struct PlayPauseIntent: AppIntent {
+    static var title: LocalizedStringResource = "Play/Pause"
+
+    @Parameter(title: "Zone")
+    var zoneId: String?
+
+    func perform() async throws -> some IntentResult {
+        let client = BridgeClient.shared
+        if let zoneId = zoneId ?? client.selectedZoneId {
+            try await client.playPause(zoneId: zoneId)
+        }
+        return .result()
+    }
+}
+```
+
+### 9. Live Activities (Dynamic Island & Lock Screen)
+
+Live Activities for persistent now playing during active playback.
+
+**When to show:**
+- User starts playback from app
+- Automatically ends when playback stops or after timeout
+
+**Dynamic Island (Compact):**
+- Leading: Album art thumbnail
+- Trailing: Play/pause icon + volume level
+
+**Dynamic Island (Expanded):**
+- Album art, track, artist
+- Play/pause, next/prev buttons
+- Volume slider
+
+**Lock Screen Banner:**
+- Album art + track info
+- Transport controls
+- Progress bar (optional)
+
+```swift
+struct NowPlayingLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: NowPlayingActivityAttributes.self) { context in
+            // Lock screen banner
+            LockScreenLiveActivityView(context: context)
+        } dynamicIsland: { context in
+            DynamicIsland {
+                // Expanded regions
+                DynamicIslandExpandedRegion(.leading) {
+                    AsyncImage(url: context.state.artworkURL)
+                        .frame(width: 60, height: 60)
+                        .cornerRadius(8)
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    VStack(alignment: .leading) {
+                        Text(context.state.line1)
+                            .font(.headline)
+                        Text(context.state.line2)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    HStack {
+                        Button(intent: PreviousIntent()) {
+                            Image(systemName: "backward.fill")
+                        }
+                        Button(intent: PlayPauseIntent()) {
+                            Image(systemName: context.state.isPlaying
+                                  ? "pause.fill" : "play.fill")
+                        }
+                        Button(intent: NextIntent()) {
+                            Image(systemName: "forward.fill")
+                        }
+                    }
+                }
+            } compactLeading: {
+                AsyncImage(url: context.state.artworkURL)
+                    .frame(width: 24, height: 24)
+                    .cornerRadius(4)
+            } compactTrailing: {
+                Image(systemName: context.state.isPlaying
+                      ? "pause.fill" : "play.fill")
+            } minimal: {
+                AsyncImage(url: context.state.artworkURL)
+                    .frame(width: 24, height: 24)
+                    .cornerRadius(4)
+            }
+        }
+    }
+}
+
+struct NowPlayingActivityAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        var line1: String
+        var line2: String
+        var isPlaying: Bool
+        var volume: Double
+        var artworkURL: URL?
+        var seekPosition: Int
+        var length: Int
+    }
+
+    var zoneId: String
+    var zoneName: String
+}
+```
+
+**Live Activity Lifecycle:**
+```swift
+class LiveActivityManager {
+    private var currentActivity: Activity<NowPlayingActivityAttributes>?
+
+    func startActivity(for zone: Zone, nowPlaying: NowPlaying) {
+        let attributes = NowPlayingActivityAttributes(
+            zoneId: zone.zone_id,
+            zoneName: zone.zone_name
+        )
+        let state = NowPlayingActivityAttributes.ContentState(
+            line1: nowPlaying.line1,
+            line2: nowPlaying.line2,
+            isPlaying: nowPlaying.is_playing,
+            volume: nowPlaying.volume,
+            artworkURL: artworkURL(for: zone),
+            seekPosition: nowPlaying.seek_position,
+            length: nowPlaying.length
+        )
+
+        currentActivity = try? Activity.request(
+            attributes: attributes,
+            content: .init(state: state, staleDate: nil),
+            pushType: nil  // We poll, no push notifications
+        )
+    }
+
+    func updateActivity(nowPlaying: NowPlaying) {
+        let state = NowPlayingActivityAttributes.ContentState(...)
+        Task {
+            await currentActivity?.update(
+                ActivityContent(state: state, staleDate: nil)
+            )
+        }
+    }
+
+    func endActivity() {
+        Task {
+            await currentActivity?.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+}
+```
+
 ---
 
 ## Polling Strategy
@@ -334,23 +549,41 @@ struct NowPlayingComplication: Widget {
 hifi-control/
 ├── HiFiControl.xcodeproj
 ├── Packages/
-│   └── BridgeClient/           # Shared Swift package
+│   └── BridgeClient/              # Shared Swift package
 │       ├── Package.swift
 │       └── Sources/
 │           └── BridgeClient/
 │               ├── Models.swift
 │               ├── BridgeClient.swift
 │               └── BridgeDiscovery.swift
-├── HiFiControl/                # iPhone app
+├── Shared/                        # Code shared across all targets
+│   ├── ZoneAccessManager.swift
+│   ├── StoreManager.swift
+│   └── AppIntents.swift           # PlayPauseIntent, NextIntent, etc.
+├── HiFiControl/                   # iPhone app
 │   ├── App.swift
 │   ├── Views/
 │   │   ├── NowPlayingView.swift
 │   │   ├── ZonePickerView.swift
-│   │   └── SettingsView.swift
+│   │   ├── SettingsView.swift
+│   │   └── UpgradeView.swift
 │   ├── Services/
-│   │   └── WatchSyncManager.swift
+│   │   ├── WatchSyncManager.swift
+│   │   └── LiveActivityManager.swift
 │   └── Assets.xcassets
-├── HiFiControl Watch App/      # Watch app
+├── HiFiControlWidgets/            # iPhone widgets (WidgetKit)
+│   ├── NowPlayingWidget.swift
+│   ├── WidgetViews/
+│   │   ├── SmallWidgetView.swift
+│   │   ├── MediumWidgetView.swift
+│   │   ├── LargeWidgetView.swift
+│   │   └── LockScreenWidgetViews.swift
+│   └── Assets.xcassets
+├── HiFiControlLiveActivity/       # Live Activities extension
+│   ├── NowPlayingLiveActivity.swift
+│   ├── DynamicIslandViews.swift
+│   └── LockScreenBannerView.swift
+├── HiFiControl Watch App/         # Watch app
 │   ├── App.swift
 │   ├── Views/
 │   │   ├── NowPlayingView.swift
@@ -358,9 +591,10 @@ hifi-control/
 │   │   └── VolumeOverlay.swift
 │   ├── Services/
 │   │   └── PhoneSyncManager.swift
-│   ├── Complications/
-│   │   └── NowPlayingComplication.swift
 │   └── Assets.xcassets
+├── HiFiControl Watch Widgets/     # Watch complications (WidgetKit)
+│   ├── NowPlayingComplication.swift
+│   └── ComplicationViews.swift
 └── README.md
 ```
 
@@ -368,8 +602,10 @@ hifi-control/
 
 ## Feature Parity Checklist
 
-| Knob Feature | Watch Feature | Status |
-|--------------|---------------|--------|
+### Core Features (Knob Parity)
+
+| Knob Feature | Watch/iPhone Feature | Status |
+|--------------|---------------------|--------|
 | Rotary encoder → volume | Digital Crown | Planned |
 | Tap → play/pause | Tap button | Planned |
 | Encoder press → zone picker | Button / swipe | Planned |
@@ -383,6 +619,151 @@ hifi-control/
 | Progress ring | Optional | Deferred |
 | Seek position | Text display | Planned |
 
+### Beyond Knob (Platform Features)
+
+| Feature | Platform | Status |
+|---------|----------|--------|
+| Watch complications | Watch | Planned |
+| Home screen widgets | iPhone | Planned |
+| Lock screen widgets | iPhone | Planned |
+| Live Activity (Dynamic Island) | iPhone | Planned |
+| Live Activity (lock screen banner) | iPhone | Planned |
+| Interactive widget controls | iPhone | Planned |
+| 1 zone free tier | All | Planned |
+| Unlock all zones (IAP) | All | Planned |
+| Tip jar | iPhone | Planned |
+
+---
+
+## Monetization
+
+### Pricing Model
+
+**Free Tier:**
+- 1 zone (user picks which one)
+- Full functionality for that zone
+- Watch app, iPhone app, widgets, Live Activities
+- No time limits or nag screens
+
+**Unlock All Zones (One-Time Purchase):**
+- Unlimited zones
+- Suggested price: $4.99 - $9.99
+- StoreKit 2 for purchase handling
+- No subscription, own it forever
+
+**Tip Jar (Optional):**
+- For users who want to support development
+- Small ($1), Medium ($3), Large ($5) tip options
+- Accessible from Settings
+- "Buy me a coffee" style
+
+### Why This Model
+
+1. **Low friction adoption** - Free tier is fully functional, not crippled
+2. **Fair value exchange** - Multi-zone is a power user feature worth paying for
+3. **No recurring costs** - Bridge runs on user's hardware, no server costs for us
+4. **Tips for goodwill** - Some users want to support open source adjacent projects
+
+### Implementation
+
+```swift
+import StoreKit
+
+enum ProductID: String {
+    case unlockAllZones = "com.hificontrol.unlock_all_zones"
+    case tipSmall = "com.hificontrol.tip_small"
+    case tipMedium = "com.hificontrol.tip_medium"
+    case tipLarge = "com.hificontrol.tip_large"
+}
+
+class StoreManager: ObservableObject {
+    @Published var isUnlocked: Bool = false
+    @Published var products: [Product] = []
+
+    func loadProducts() async {
+        products = try? await Product.products(for: [
+            ProductID.unlockAllZones.rawValue,
+            ProductID.tipSmall.rawValue,
+            ProductID.tipMedium.rawValue,
+            ProductID.tipLarge.rawValue
+        ])
+    }
+
+    func purchase(_ product: Product) async throws {
+        let result = try await product.purchase()
+        switch result {
+        case .success(let verification):
+            let transaction = try checkVerified(verification)
+            await transaction.finish()
+            if product.id == ProductID.unlockAllZones.rawValue {
+                isUnlocked = true
+            }
+        case .pending, .userCancelled:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    func restorePurchases() async {
+        for await result in Transaction.currentEntitlements {
+            if case .verified(let transaction) = result {
+                if transaction.productID == ProductID.unlockAllZones.rawValue {
+                    isUnlocked = true
+                }
+            }
+        }
+    }
+}
+```
+
+### Zone Limiting Logic
+
+```swift
+class ZoneAccessManager: ObservableObject {
+    @Published var allowedZoneId: String?  // Free tier: one zone
+    @Published var isUnlocked: Bool = false
+
+    var accessibleZones: [Zone] {
+        if isUnlocked {
+            return allZones
+        } else if let allowedId = allowedZoneId {
+            return allZones.filter { $0.zone_id == allowedId }
+        } else {
+            // First launch: let user pick one zone
+            return allZones
+        }
+    }
+
+    func selectFreeZone(_ zone: Zone) {
+        guard !isUnlocked else { return }
+        allowedZoneId = zone.zone_id
+        UserDefaults.standard.set(zone.zone_id, forKey: "free_zone_id")
+    }
+
+    func canAccessZone(_ zone: Zone) -> Bool {
+        isUnlocked || zone.zone_id == allowedZoneId
+    }
+}
+```
+
+### UI Touchpoints
+
+**Zone Picker (Free Tier):**
+- Show all zones, but locked ones have lock icon
+- Tapping locked zone shows upgrade prompt
+- "Unlock All Zones" button at bottom
+
+**Settings:**
+- Current plan: "Free (1 zone)" or "Unlocked"
+- "Unlock All Zones" button (if not purchased)
+- "Restore Purchases" button
+- "Tip Jar" section with tip buttons
+
+**First Launch:**
+- "Choose your zone" picker
+- Explain: "Free version controls one zone. Upgrade anytime for unlimited."
+
 ---
 
 ## Open Questions
@@ -392,6 +773,8 @@ hifi-control/
 3. **Background refresh**: Is it worth the complexity for complications?
 4. **Volume haptics**: How aggressive should Digital Crown haptics be?
 5. **Offline mode**: Show last known state when bridge unreachable?
+6. **Pricing**: $4.99, $6.99, or $9.99 for unlock? Market research needed.
+7. **Family Sharing**: Enable for the unlock purchase?
 
 ---
 
@@ -402,6 +785,7 @@ hifi-control/
 - [ ] Implement `BridgeClient` Swift package
 - [ ] Basic iPhone app with manual bridge URL entry
 - [ ] WatchConnectivity sync
+- [ ] Zone access manager (free tier logic)
 
 ### Phase 2: Watch App MVP
 - [ ] Now playing view (line1, line2, play state)
@@ -415,11 +799,31 @@ hifi-control/
 - [ ] Full playback controls
 - [ ] Settings persistence
 
-### Phase 4: Polish
-- [ ] Complications
+### Phase 4: Widgets & Live Activities
+- [ ] iPhone home screen widgets (small, medium, large)
+- [ ] iPhone lock screen widgets
+- [ ] Live Activities (Dynamic Island + lock screen banner)
+- [ ] Interactive widget controls (App Intents)
+
+### Phase 5: Watch Complications
+- [ ] Circular complication (album art)
+- [ ] Rectangular complication (track + artist)
+- [ ] Inline complication
+- [ ] Background refresh for complications
+
+### Phase 6: Monetization
+- [ ] StoreKit 2 integration
+- [ ] "Unlock All Zones" purchase
+- [ ] Tip jar products
+- [ ] First-launch zone picker (free tier)
+- [ ] Restore purchases flow
+- [ ] App Store Connect product setup
+
+### Phase 7: Polish
 - [ ] Art mode / full-screen artwork
 - [ ] Volume haptic feedback tuning
 - [ ] Error handling and offline states
+- [ ] App Store assets and screenshots
 
 ---
 
