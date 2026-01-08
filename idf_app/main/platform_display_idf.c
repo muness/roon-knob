@@ -1,7 +1,7 @@
 #include "platform_display_idf.h"
 #include "platform/platform_display.h"
 #include "display_sleep.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 #include "battery.h"
 #include "i2c_bsp.h"
 #include "lcd_touch_bsp.h"
@@ -407,7 +407,7 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
                 // Check for swipe up (negative Y direction) - enter art mode
                 if (dy < -SWIPE_MIN_DISTANCE && abs(dy) > abs(dx)) {
                     // Only allow art mode when WiFi is configured and bridge is responding with zones
-                    if (roon_client_is_ready_for_art_mode()) {
+                    if (bridge_client_is_ready_for_art_mode()) {
                         ESP_LOGI(TAG, "Swipe up detected (rotation=%d) - queueing art mode", s_current_rotation);
                         s_pending_art_mode = true;  // Defer to avoid LVGL threading issues
                     } else {
@@ -432,7 +432,7 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
                         tap_dx < DOUBLE_TAP_MAX_DISTANCE &&
                         tap_dy < DOUBLE_TAP_MAX_DISTANCE) {
                         // Double-tap detected - enter art mode
-                        if (roon_client_is_ready_for_art_mode()) {
+                        if (bridge_client_is_ready_for_art_mode()) {
                             ESP_LOGI(TAG, "Double-tap detected - entering art mode");
                             s_pending_art_mode = true;
                         }

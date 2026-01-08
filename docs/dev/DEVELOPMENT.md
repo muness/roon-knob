@@ -20,7 +20,7 @@ roon-knob/
 │   └── sdkconfig.defaults
 ├── common/            # Shared code between firmware and simulator
 │   ├── ui.c           # LVGL UI implementation
-│   ├── roon_client.c  # HTTP client for bridge API
+│   ├── bridge_client.c  # HTTP client for bridge API
 │   └── app_main.c     # Main application logic
 ├── pc_sim/            # LVGL + SDL2 simulator
 ├── web/               # Web flasher (deployed to GitHub Pages)

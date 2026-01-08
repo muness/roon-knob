@@ -204,7 +204,7 @@ From `hid_dev.h`:
 To create a BLE-only app for the Waveshare ESP32-S3 Knob:
 
 1. **Start from `ble_hid_client.c`** as your main control logic
-2. **Remove Roon/WiFi code** - delete `roon_client.c`, `wifi_manager.c`, etc.
+2. **Remove Roon/WiFi code** - delete `bridge_client.c`, `wifi_manager.c`, etc.
 3. **Simplify `main_idf.c`** - just init display, input, and BLE
 4. **Modify the UI** - `ui.c` can be simplified to just show BLE status
 

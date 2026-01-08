@@ -12,7 +12,7 @@
 #include "platform/platform_http.h"
 #include "lvgl.h"
 #include "ui.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -808,7 +808,7 @@ static void emphasize_volume_label(void) {
 // Zone Picker - LVGL List Widget (supports per-item icons)
 // ============================================================================
 
-// Special zone IDs (must match roon_client.c)
+// Special zone IDs (must match bridge_client.c)
 #define ZONE_ID_BACK "__back__"
 #define ZONE_ID_SETTINGS "__settings__"
 
@@ -986,7 +986,7 @@ void ui_loop_iter(void) {
     lv_task_handler();
     lv_timer_handler();
 
-    platform_task_run_pending();  // Process callbacks from roon_client thread
+    platform_task_run_pending();  // Process callbacks from bridge_client thread
 
     // Check for pending UI updates (poll_pending inline - no timer needed)
     poll_pending(NULL);
@@ -1099,8 +1099,8 @@ void ui_handle_volume_rotation(int ticks) {
         // Scroll zone picker instead of changing volume
         ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
     } else {
-        // Dispatch velocity-sensitive volume rotation to roon_client
-        roon_client_handle_volume_rotation(ticks);
+        // Dispatch velocity-sensitive volume rotation to bridge_client
+        bridge_client_handle_volume_rotation(ticks);
     }
 }
 
@@ -1213,7 +1213,7 @@ void ui_set_artwork(const char *image_key) {
     // Build artwork URL (request 360x360 to match display - no scaling needed)
     // With PSRAM enabled, we can handle the full display resolution
     char url[512];
-    if (!roon_client_get_artwork_url(url, sizeof(url), SCREEN_SIZE, SCREEN_SIZE)) {
+    if (!bridge_client_get_artwork_url(url, sizeof(url), SCREEN_SIZE, SCREEN_SIZE)) {
         ESP_LOGW(UI_TAG, "Failed to build artwork URL");
         return;
     }

@@ -1,7 +1,7 @@
 #include "display_sleep.h"
 #include "captive_portal.h"
 #include "platform/platform_display.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 #include "wifi_manager.h"
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
@@ -298,7 +298,7 @@ static void sleep_timer_callback(void *arg) {
 void display_process_pending(void) {
     // Don't enter art mode during setup (captive portal active or bridge unreachable)
     // But allow dim/sleep to work regardless of bridge state
-    if (captive_portal_is_running() || !roon_client_is_ready_for_art_mode()) {
+    if (captive_portal_is_running() || !bridge_client_is_ready_for_art_mode()) {
         s_pending_art_mode = false;  // Only block art mode entry, not dim/sleep
     }
 

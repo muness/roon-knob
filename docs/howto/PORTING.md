@@ -13,7 +13,7 @@ The codebase uses a platform abstraction layer:
 │                     Application Layer                           │
 │                                                                 │
 │   common/ui.c          - LVGL UI (platform-independent)         │
-│   common/roon_client.c - Roon API client                        │
+│   common/bridge_client.c - Roon API client                        │
 │   common/app_main.c    - Application entry point                │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
@@ -65,7 +65,7 @@ If you want to build a different application for the Waveshare ESP32-S3 Knob (e.
 | Component | Replace With |
 |-----------|--------------|
 | `common/ui.c` | Your LVGL UI code |
-| `common/roon_client.c` | Your application logic |
+| `common/bridge_client.c` | Your application logic |
 | `common/app_main.c` | Your entry point |
 | `rk_cfg.h` | Your configuration struct |
 

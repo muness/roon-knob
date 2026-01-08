@@ -24,7 +24,7 @@ set(SRC_FILES
     "fonts/material_icons_44.c"
     "fonts/material_icons_60.c"
     "../../common/app_main.c"
-    "../../common/roon_client.c"
+    "../../common/bridge_client.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
     "../../common/platform/platform_log.c"

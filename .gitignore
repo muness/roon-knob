@@ -18,3 +18,4 @@ idf_app/sdkconfig.override
 .agneto/
 .claude/
 .superego/
+.wm/

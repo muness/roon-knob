@@ -1,4 +1,4 @@
-#include "roon_client.h"
+#include "bridge_client.h"
 
 #include "platform/platform_display.h"
 #include "platform/platform_http.h"
@@ -62,7 +62,7 @@ struct zone_entry {
     char name[MAX_ZONE_NAME];
 };
 
-struct roon_state {
+struct bridge_state {
     rk_cfg_t cfg;
     struct zone_entry zones[MAX_ZONES];
     int zone_count;
@@ -71,7 +71,7 @@ struct roon_state {
     bool net_connected;
 };
 
-static struct roon_state s_state;
+static struct bridge_state s_state;
 static os_mutex_t s_state_lock = OS_MUTEX_INITIALIZER;
 static bool s_running;
 static bool s_trigger_poll;
@@ -111,7 +111,7 @@ static const char *extract_json_string(const char *start, const char *key, char 
 static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(void);
-static void roon_poll_thread(void *arg);
+static void bridge_poll_thread(void *arg);
 static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
 static void post_ui_update(const struct now_playing_state *state);
@@ -661,9 +661,9 @@ static bool send_control_json(const char *json) {
     return true;
 }
 
-static void roon_poll_thread(void *arg) {
+static void bridge_poll_thread(void *arg) {
     (void)arg;
-    LOGI("Roon polling thread started");
+    LOGI("Bridge poll thread started");
     struct now_playing_state state;
     default_now_playing(&state);
     while (s_running) {
@@ -815,7 +815,7 @@ static void roon_poll_thread(void *arg) {
     }
 }
 
-void roon_client_start(const rk_cfg_t *cfg) {
+void bridge_client_start(const rk_cfg_t *cfg) {
     if (!cfg) {
         return;
     }
@@ -834,10 +834,10 @@ void roon_client_start(const rk_cfg_t *cfg) {
     apply_knob_config(cfg);
 
     s_running = true;
-    platform_task_start(roon_poll_thread, NULL);
+    platform_task_start(bridge_poll_thread, NULL);
 }
 
-void roon_client_handle_input(ui_input_event_t event) {
+void bridge_client_handle_input(ui_input_event_t event) {
     if (ui_is_zone_picker_visible()) {
         if (event == UI_INPUT_VOL_UP) {
             ui_zone_picker_scroll(1);
@@ -1021,7 +1021,7 @@ void roon_client_handle_input(ui_input_event_t event) {
 //   1 tick = slow (step 1)
 //   2 ticks = medium (step 3)
 //   3+ ticks = fast (step 5)
-void roon_client_handle_volume_rotation(int ticks) {
+void bridge_client_handle_volume_rotation(int ticks) {
     if (ticks == 0) return;
 
     // Determine velocity multiplier (applied to zone's step)
@@ -1063,7 +1063,7 @@ void roon_client_handle_volume_rotation(int ticks) {
     }
 }
 
-void roon_client_set_network_ready(bool ready) {
+void bridge_client_set_network_ready(bool ready) {
     s_network_ready = ready;
     if (ready) {
         LOGI("Network ready - HTTP requests enabled");
@@ -1073,7 +1073,7 @@ void roon_client_set_network_ready(bool ready) {
     }
 }
 
-const char* roon_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height) {
+const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height) {
     if (!url_buf || buf_len < 256) {
         return NULL;
     }
@@ -1095,7 +1095,7 @@ const char* roon_client_get_artwork_url(char *url_buf, size_t buf_len, int width
     return url_buf;
 }
 
-bool roon_client_is_ready_for_art_mode(void) {
+bool bridge_client_is_ready_for_art_mode(void) {
     lock_state();
     bool ready = s_state.zone_count > 0;
     unlock_state();
@@ -1113,7 +1113,7 @@ static void increment_bridge_fail_count(void) {
     }
 }
 
-void roon_client_set_device_ip(const char *ip) {
+void bridge_client_set_device_ip(const char *ip) {
     if (ip && ip[0]) {
         strncpy(s_device_ip, ip, sizeof(s_device_ip) - 1);
         s_device_ip[sizeof(s_device_ip) - 1] = '\0';
@@ -1122,15 +1122,15 @@ void roon_client_set_device_ip(const char *ip) {
     }
 }
 
-int roon_client_get_bridge_retry_count(void) {
+int bridge_client_get_bridge_retry_count(void) {
     return s_bridge_fail_count;
 }
 
-int roon_client_get_bridge_retry_max(void) {
+int bridge_client_get_bridge_retry_max(void) {
     return BRIDGE_FAIL_THRESHOLD;
 }
 
-bool roon_client_get_bridge_url(char *buf, size_t len) {
+bool bridge_client_get_bridge_url(char *buf, size_t len) {
     if (!buf || len == 0) {
         return false;
     }
@@ -1146,11 +1146,11 @@ bool roon_client_get_bridge_url(char *buf, size_t len) {
     return has_bridge;
 }
 
-bool roon_client_is_bridge_connected(void) {
+bool bridge_client_is_bridge_connected(void) {
     return s_last_net_ok;
 }
 
-bool roon_client_is_bridge_mdns(void) {
+bool bridge_client_is_bridge_mdns(void) {
     lock_state();
     bool from_mdns = (s_state.cfg.bridge_from_mdns != 0);
     unlock_state();

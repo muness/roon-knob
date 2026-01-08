@@ -10,7 +10,7 @@
 #include "platform/platform_storage.h"
 #include "platform/platform_time.h"
 #include "platform_display_idf.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 #include "ui.h"
 #include "ui_network.h"
 #include "wifi_manager.h"
@@ -99,8 +99,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
         stop_wifi_msg_alternation();
         ui_update("WiFi: Connected", "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
-        roon_client_set_device_ip(ip_opt);  // Store IP for bridge recovery messages
-        roon_client_set_network_ready(true);
+        bridge_client_set_device_ip(ip_opt);  // Store IP for bridge recovery messages
+        bridge_client_set_network_ready(true);
         // Defer heavy operations to UI task (sys_evt has limited stack)
         s_mdns_init_pending = true;  // mDNS needs network up first
         s_ota_check_pending = true;
@@ -117,7 +117,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         const char *error = ip_opt ? ip_opt : "Connection failed";
         ESP_LOGW(TAG, "WiFi: %s, attempt %d/%d", error, attempt, max);
         start_wifi_msg_alternation(error, attempt, max);
-        roon_client_set_network_ready(false);
+        bridge_client_set_network_ready(false);
         break;
     }
 
@@ -127,7 +127,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         // Show setup instructions in main display area (line2 is top, line1 is bottom)
         ui_update("roon-knob-setup", "Connect to WiFi:", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         ui_set_zone_name("WiFi Setup");
-        roon_client_set_network_ready(false);
+        bridge_client_set_network_ready(false);
         s_config_server_stop_pending = true;  // Stop config server in AP mode
         break;
 
