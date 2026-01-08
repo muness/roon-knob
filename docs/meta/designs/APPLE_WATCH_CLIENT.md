@@ -25,6 +25,23 @@ An Apple Watch app with iPhone companion that provides Roon Knob feature parity 
 - Direct Roon API integration (uses bridge like knob)
 - Subscriptions (one-time purchase only)
 
+## Explicitly Deferred
+
+### Playlist/Library Browsing
+
+**Status:** Not in v1.0, evaluate based on user feedback
+
+**Why defer:**
+- Knob doesn't have it - feature parity achieved without it
+- Significant complexity - browsing UI, search, queue management
+- Bridge work needed - new endpoints, protocol additions
+- Users have alternatives - Roon/LMS official apps excel at browsing
+
+**If added later (v2.0+):**
+- Start small: "Recently Played" or "Favorites" list
+- NOT full library browsing (that's what native apps are for)
+- Would require bridge API expansion
+
 ---
 
 ## Competitive Landscape
