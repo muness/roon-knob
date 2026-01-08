@@ -663,7 +663,7 @@ static bool send_control_json(const char *json) {
 
 static void bridge_poll_thread(void *arg) {
     (void)arg;
-    LOGI("Roon polling thread started");
+    LOGI("Bridge poll thread started");
     struct now_playing_state state;
     default_now_playing(&state);
     while (s_running) {

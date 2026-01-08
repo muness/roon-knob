@@ -986,7 +986,7 @@ void ui_loop_iter(void) {
     lv_task_handler();
     lv_timer_handler();
 
-    platform_task_run_pending();  // Process callbacks from roon_client thread
+    platform_task_run_pending();  // Process callbacks from bridge_client thread
 
     // Check for pending UI updates (poll_pending inline - no timer needed)
     poll_pending(NULL);
