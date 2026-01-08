@@ -808,7 +808,7 @@ static void emphasize_volume_label(void) {
 // Zone Picker - LVGL List Widget (supports per-item icons)
 // ============================================================================
 
-// Special zone IDs (must match roon_client.c)
+// Special zone IDs (must match bridge_client.c)
 #define ZONE_ID_BACK "__back__"
 #define ZONE_ID_SETTINGS "__settings__"
 
@@ -1099,7 +1099,7 @@ void ui_handle_volume_rotation(int ticks) {
         // Scroll zone picker instead of changing volume
         ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
     } else {
-        // Dispatch velocity-sensitive volume rotation to roon_client
+        // Dispatch velocity-sensitive volume rotation to bridge_client
         bridge_client_handle_volume_rotation(ticks);
     }
 }
