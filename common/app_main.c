@@ -4,7 +4,7 @@
 #include "platform/platform_mdns.h"
 #include "platform/platform_storage.h"
 #include "rk_cfg.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 #include "ui.h"
 
 #include <stdbool.h>
@@ -19,7 +19,7 @@ void app_entry(void) {
     }
 
     // Note: mDNS init moved to after WiFi connects (in main_idf.c)
-    ui_set_input_handler(roon_client_handle_input);
+    ui_set_input_handler(bridge_client_handle_input);
     ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "Tap here to select zone");
-    roon_client_start(&cfg);
+    bridge_client_start(&cfg);
 }

@@ -10,7 +10,7 @@
 #include "platform/platform_storage.h"
 #include "wifi_manager.h"
 #include "ota_update.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 
 #if defined(__has_include)
 #  if __has_include("lvgl.h")
@@ -174,14 +174,14 @@ static void refresh_labels(void) {
 
     if (s_widgets.bridge_value) {
         char bridge_url[128];
-        if (roon_client_get_bridge_url(bridge_url, sizeof(bridge_url))) {
+        if (bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url))) {
             // Extract host:port from URL (skip http://)
             const char *host = bridge_url;
             if (strncmp(host, "http://", 7) == 0) {
                 host += 7;
             }
             // Show with discovery method
-            const char *source = roon_client_is_bridge_mdns() ? " (mDNS)" : "";
+            const char *source = bridge_client_is_bridge_mdns() ? " (mDNS)" : "";
             lv_label_set_text_fmt(s_widgets.bridge_value, "%s%s", host, source);
         } else {
             lv_label_set_text(s_widgets.bridge_value, "(discovering...)");

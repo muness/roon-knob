@@ -283,7 +283,7 @@ void on_zone_selected(const char *zone_id) {
     strncpy(cfg.zone_id, zone_id, sizeof(cfg.zone_id) - 1);
     platform_storage_save(&cfg);
 
-    roon_client_set_zone(zone_id);
+    bridge_client_set_zone(zone_id);
 }
 ```
 

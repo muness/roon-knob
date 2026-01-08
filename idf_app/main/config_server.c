@@ -4,7 +4,7 @@
 #include "config_server.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_mdns.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 #include "wifi_manager.h"
 
 #include <string.h>
@@ -180,9 +180,9 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     // Get bridge connection status
     const char *status_class;
     char status_text[64];
-    bool bridge_connected = roon_client_is_bridge_connected();
-    int retry_count = roon_client_get_bridge_retry_count();
-    int retry_max = roon_client_get_bridge_retry_max();
+    bool bridge_connected = bridge_client_is_bridge_connected();
+    int retry_count = bridge_client_get_bridge_retry_count();
+    int retry_max = bridge_client_get_bridge_retry_max();
 
     if (bridge_connected) {
         status_class = "status-ok";

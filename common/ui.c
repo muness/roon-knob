@@ -12,7 +12,7 @@
 #include "platform/platform_http.h"
 #include "lvgl.h"
 #include "ui.h"
-#include "roon_client.h"
+#include "bridge_client.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -1100,7 +1100,7 @@ void ui_handle_volume_rotation(int ticks) {
         ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
     } else {
         // Dispatch velocity-sensitive volume rotation to roon_client
-        roon_client_handle_volume_rotation(ticks);
+        bridge_client_handle_volume_rotation(ticks);
     }
 }
 
@@ -1213,7 +1213,7 @@ void ui_set_artwork(const char *image_key) {
     // Build artwork URL (request 360x360 to match display - no scaling needed)
     // With PSRAM enabled, we can handle the full display resolution
     char url[512];
-    if (!roon_client_get_artwork_url(url, sizeof(url), SCREEN_SIZE, SCREEN_SIZE)) {
+    if (!bridge_client_get_artwork_url(url, sizeof(url), SCREEN_SIZE, SCREEN_SIZE)) {
         ESP_LOGW(UI_TAG, "Failed to build artwork URL");
         return;
     }

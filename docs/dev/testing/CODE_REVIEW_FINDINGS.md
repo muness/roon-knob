@@ -54,7 +54,7 @@ Code path analysis for test scripts, identifying potential regressions.
 - Single reader (UI callback)
 - Boolean flag - worst case is missed refresh
 
-**File:** `common/roon_client.c:102,679`
+**File:** `common/bridge_client.c:102,679`
 
 ---
 
@@ -86,7 +86,7 @@ Code path analysis for test scripts, identifying potential regressions.
 
 **Impact:** Minor UX delay. User can dismiss and re-open zone picker.
 
-**File:** `common/roon_client.c:590-591`
+**File:** `common/bridge_client.c:590-591`
 
 ---
 
@@ -96,7 +96,7 @@ Code path analysis for test scripts, identifying potential regressions.
 
 **Impact:** Silent failure of control commands. User gets no feedback.
 
-**File:** `common/roon_client.c:546-574`
+**File:** `common/bridge_client.c:546-574`
 
 ---
 
@@ -105,8 +105,8 @@ Code path analysis for test scripts, identifying potential regressions.
 ### FP: LVGL Thread Safety Violation
 
 **Analysis:** Zone picker operations ARE on UI thread because:
-- `ui_show_zone_picker()` called from `roon_client_handle_input()`
-- `roon_client_handle_input()` invoked from LVGL event callbacks
+- `ui_show_zone_picker()` called from `bridge_client_handle_input()`
+- `bridge_client_handle_input()` invoked from LVGL event callbacks
 - All LVGL event callbacks run on UI thread (`ui_loop_task`)
 - Input events processed via `platform_input_process_events()` in same task
 
