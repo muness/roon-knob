@@ -44,6 +44,106 @@ An Apple Watch app with iPhone companion that provides Roon Knob feature parity 
 
 ---
 
+## Requirements
+
+### Minimum OS Versions
+
+| Platform | Minimum | Rationale |
+|----------|---------|-----------|
+| iOS | 26.0 | Latest APIs, widgets, Live Activities |
+| watchOS | 26.0 | WidgetKit complications, SwiftUI improvements |
+
+**Trade-off:** Limits audience to users on latest OS, but simplifies development (no backward compatibility). Audiophile users tend to have current hardware.
+
+### Privacy
+
+**No analytics. No tracking. Local-only.**
+
+- No third-party SDKs (Firebase, Amplitude, etc.)
+- No crash reporting services (use Apple's built-in TestFlight/App Store reporting)
+- No usage telemetry
+- All data stays on device + user's bridge
+- Bridge URL stored locally, not synced to any cloud
+
+**Privacy policy (simple):**
+> This app connects to a bridge server on your local network that you control. No data is collected, stored, or transmitted to the developer or any third party.
+
+### Error Handling
+
+Match or exceed knob's error UX. The knob shows clear, actionable messages.
+
+**Bridge Discovery Errors:**
+| State | Message | Action |
+|-------|---------|--------|
+| Searching | "Searching for bridge..." | Show spinner |
+| Not found (mDNS) | "Bridge not found on network" | "Enter manually" button |
+| Not found (after N attempts) | "Can't find bridge. Check that it's running." | Manual URL entry, help link |
+
+**Bridge Connection Errors:**
+| State | Message | Action |
+|-------|---------|--------|
+| Connecting | "Connecting to bridge..." | Show spinner |
+| Timeout | "Bridge not responding" | Retry button, show last known state dimmed |
+| Connection lost | "Connection lost. Retrying..." | Auto-retry with backoff |
+| Reconnected | "Connected" (brief toast) | Resume normal display |
+
+**Zone Errors:**
+| State | Message | Action |
+|-------|---------|--------|
+| No zones | "No zones available" | Check Roon/LMS is running |
+| Zone disappeared | "Zone no longer available" | Show zone picker |
+| Control failed | "Couldn't send command" | Brief error, auto-dismiss |
+
+**Offline Behavior:**
+- Show last known now-playing state (dimmed/grayed)
+- "Offline" indicator
+- Keep trying to reconnect in background
+- Controls disabled with visual feedback
+
+```swift
+enum ConnectionState {
+    case connecting
+    case connected
+    case disconnected(reason: DisconnectReason)
+    case offline
+}
+
+enum DisconnectReason {
+    case bridgeNotFound
+    case bridgeUnreachable
+    case networkUnavailable
+    case timeout
+}
+
+struct ConnectionStatusView: View {
+    let state: ConnectionState
+
+    var body: some View {
+        switch state {
+        case .connecting:
+            HStack {
+                ProgressView()
+                Text("Connecting...")
+            }
+        case .connected:
+            EmptyView()  // No indicator when healthy
+        case .disconnected(let reason):
+            VStack {
+                Image(systemName: "wifi.slash")
+                Text(reason.userMessage)
+                    .font(.caption)
+                Button("Retry") { /* ... */ }
+            }
+        case .offline:
+            Label("Offline", systemImage: "wifi.slash")
+                .foregroundColor(.secondary)
+        }
+    }
+}
+```
+
+---
+
 ## Competitive Landscape
 
 ### Roon Controllers
@@ -679,6 +779,7 @@ hifi-control/
 | Live Activity (Dynamic Island) | iPhone | Planned |
 | Live Activity (lock screen banner) | iPhone | Planned |
 | Interactive widget controls | iPhone | Planned |
+| Siri / Shortcuts (paid) | iPhone | Planned |
 | 1 zone free tier | All | Planned |
 | Unlock all zones (IAP) | All | Planned |
 | Tip jar | iPhone | Planned |
@@ -870,6 +971,66 @@ if !zoneAccessManager.canChangeZone {
 **First Launch:**
 - "Choose your zone" picker
 - Explain: "Free version controls one zone. Upgrade anytime for unlimited."
+
+### Siri & Shortcuts (Paid Feature)
+
+Available only after "Unlock All Zones" purchase.
+
+**Siri Phrases:**
+- "Play music in Living Room"
+- "Pause Living Room"
+- "Skip track in Office"
+- "Set Living Room volume to 50"
+
+**Shortcuts Actions:**
+| Action | Parameters | Notes |
+|--------|------------|-------|
+| Play/Pause | Zone (optional) | Uses default zone if not specified |
+| Play | Zone | Start playback |
+| Pause | Zone | Pause playback |
+| Next Track | Zone | Skip forward |
+| Previous Track | Zone | Skip backward |
+| Set Volume | Zone, Level (0-100) | Absolute volume |
+| Get Now Playing | Zone | Returns track info for use in shortcuts |
+
+**Implementation:**
+```swift
+// App Intents for Shortcuts (iOS 16+)
+struct PlayPauseIntent: AppIntent {
+    static var title: LocalizedStringResource = "Play/Pause"
+    static var description = IntentDescription("Toggle playback in a zone")
+
+    @Parameter(title: "Zone")
+    var zone: ZoneEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Play/Pause in \(\.$zone)")
+    }
+
+    func perform() async throws -> some IntentResult {
+        // Check if paid
+        guard StoreManager.shared.isUnlocked else {
+            throw IntentError.requiresPurchase
+        }
+
+        let zoneId = zone?.id ?? ZoneAccessManager.shared.selectedZoneId
+        try await BridgeClient.shared.playPause(zoneId: zoneId)
+        return .result()
+    }
+}
+
+// Siri donation for suggestions
+func donatePlayPauseIntent(zone: Zone) {
+    let intent = PlayPauseIntent()
+    intent.zone = ZoneEntity(zone: zone)
+    intent.donate()
+}
+```
+
+**Why paid-only:**
+- Shortcuts/Siri are power-user features
+- Provides clear value differentiation from free tier
+- Automations typically span multiple zones anyway
 
 ---
 
