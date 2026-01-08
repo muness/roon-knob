@@ -27,6 +27,39 @@ An Apple Watch app with iPhone companion that provides Roon Knob feature parity 
 
 ---
 
+## Competitive Landscape
+
+### Roon Controllers
+
+| App | Watch | Widgets | Live Activity | Pricing | Notes |
+|-----|-------|---------|---------------|---------|-------|
+| **Roon (Official)** | No | No | No | Free (with Roon) | Full browsing, no Watch |
+| **Rigelian** | Yes | ? | ? | ~$10/year subscription | Most popular third-party |
+
+### LMS Controllers
+
+| App | Watch | Widgets | Live Activity | Pricing | Notes |
+|-----|-------|---------|---------------|---------|-------|
+| **iPeng** | Yes | ? | ? | ~$10 one-time | Mature, full-featured |
+
+### Our Differentiators
+
+1. **Multi-source** - Single app controls Roon, LMS, AND OpenHome (via bridge)
+2. **One-time purchase** - No subscription, own it forever
+3. **Modern iOS features** - Widgets, Live Activities, complications
+4. **Open bridge** - User runs their own bridge, no cloud dependency
+5. **Free tier** - 1 zone free, not time-limited trial
+6. **Knob companion** - Same bridge as hardware knob (if user has both)
+
+### Why Build This?
+
+- Rigelian is subscription-based; some users prefer one-time purchase
+- No existing app spans Roon + LMS + OpenHome
+- We already have the bridge infrastructure from Roon Knob
+- Widgets/Live Activities are underserved in this space
+
+---
+
 ## Architecture
 
 ```
