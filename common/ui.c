@@ -374,6 +374,7 @@ static void build_layout(void) {
     lv_label_set_long_mode(s_zone_label, LV_LABEL_LONG_DOT);  // Truncate with ... if too long
     lv_obj_align(s_zone_label, LV_ALIGN_TOP_MID, 0, 50);  // Move down to avoid arc edge
     lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_pad_ver(s_zone_label, 12, 0);  // Expand tap area vertically (GH-90)
     lv_obj_add_event_cb(s_zone_label, zone_label_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_zone_label, zone_label_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
 
