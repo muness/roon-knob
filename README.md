@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - unified-hifi-control-data:/home/node/app/data
+      - unified-hifi-control-data:/data
 
 volumes:
   unified-hifi-control-data:
