@@ -219,6 +219,15 @@ static void ui_loop_task(void *arg) {
             check_ota_status();
         }
 
+        // Check stack usage periodically (every 5 seconds = 500 iterations at 10ms)
+        static uint32_t stack_check_counter = 0;
+        if (++stack_check_counter >= 500) {
+            stack_check_counter = 0;
+            UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+            ESP_LOGI(TAG, "ui_loop stack high water mark: %u bytes free",
+                     (unsigned int)(hwm * sizeof(StackType_t)));
+        }
+
         // Process deferred operations (from WiFi event callback)
         if (s_mdns_init_pending) {
             s_mdns_init_pending = false;

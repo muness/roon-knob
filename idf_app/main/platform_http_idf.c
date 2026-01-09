@@ -135,28 +135,88 @@ static size_t decompress_gzip(char **data, size_t compressed_size) {
     if (!data || !*data || compressed_size < 18) return 0;
 
     uint8_t *gzip_data = (uint8_t *)*data;
-    if (gzip_data[0] != 0x1f || gzip_data[1] != 0x8b || gzip_data[2] != 0x08) return 0;
 
+    // Validate gzip magic bytes and compression method
+    if (gzip_data[0] != 0x1f || gzip_data[1] != 0x8b || gzip_data[2] != 0x08) {
+        ESP_LOGE(TAG, "Invalid gzip header (magic bytes or compression method)");
+        return 0;
+    }
+
+    // Parse gzip header to find actual header size (RFC 1952)
+    uint8_t flags = gzip_data[3];
+    size_t header_size = 10;  // Minimum header size
+
+    // Handle optional fields based on FLG byte
+    if (flags & 0x04) {  // FEXTRA present
+        if (header_size + 2 > compressed_size) return 0;
+        uint16_t xlen = gzip_data[header_size] | (gzip_data[header_size + 1] << 8);
+        header_size += 2 + xlen;
+    }
+    if (flags & 0x08) {  // FNAME present (null-terminated string)
+        while (header_size < compressed_size && gzip_data[header_size++] != 0);
+    }
+    if (flags & 0x10) {  // FCOMMENT present (null-terminated string)
+        while (header_size < compressed_size && gzip_data[header_size++] != 0);
+    }
+    if (flags & 0x02) {  // FHCRC present
+        header_size += 2;
+    }
+
+    // Validate header size
+    if (header_size + 8 > compressed_size) {
+        ESP_LOGE(TAG, "Gzip header size (%zu) exceeds compressed size (%zu)", header_size, compressed_size);
+        return 0;
+    }
+
+    // Extract uncompressed size from trailer (ISIZE field, last 4 bytes)
     uint32_t uncompressed_size = gzip_data[compressed_size - 4] |
                                   (gzip_data[compressed_size - 3] << 8) |
                                   (gzip_data[compressed_size - 2] << 16) |
                                   (gzip_data[compressed_size - 1] << 24);
 
+    // Allocate decompression buffer
     char *decompressed = calloc(1, uncompressed_size);
-    if (!decompressed) return 0;
+    if (!decompressed) {
+        ESP_LOGE(TAG, "Failed to allocate decompression buffer (%" PRIu32 " bytes)", uncompressed_size);
+        return 0;
+    }
 
-    const uint8_t *deflate_data = gzip_data + 10;
-    size_t deflate_len = compressed_size - 18;
+    // Decompress deflate data (between header and 8-byte trailer)
+    const uint8_t *deflate_data = gzip_data + header_size;
+    size_t deflate_len = compressed_size - header_size - 8;
 
     size_t actual_size = tinfl_decompress_mem_to_mem(decompressed, uncompressed_size,
                                                        deflate_data, deflate_len, 0);
 
-    if (actual_size == 0 || actual_size != uncompressed_size) {
+    // Check for decompression failure (returns (size_t)(-1) on error)
+    if (actual_size == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
+        ESP_LOGE(TAG, "Gzip decompression failed (tinfl error)");
         free(decompressed);
         return 0;
     }
 
-    ESP_LOGI(TAG, "Gzip decompressed %zu → %" PRIu32 " bytes", compressed_size, uncompressed_size);
+    // Validate decompressed size matches expected
+    if (actual_size != uncompressed_size) {
+        ESP_LOGW(TAG, "Gzip size mismatch: expected %" PRIu32 ", got %zu", uncompressed_size, actual_size);
+        free(decompressed);
+        return 0;
+    }
+
+    // Validate CRC32 from trailer (bytes -8 to -5)
+    uint32_t expected_crc = gzip_data[compressed_size - 8] |
+                            (gzip_data[compressed_size - 7] << 8) |
+                            (gzip_data[compressed_size - 6] << 16) |
+                            (gzip_data[compressed_size - 5] << 24);
+
+    uint32_t actual_crc = mz_crc32(MZ_CRC32_INIT, (const uint8_t*)decompressed, uncompressed_size);
+
+    if (actual_crc != expected_crc) {
+        ESP_LOGE(TAG, "Gzip CRC32 mismatch: expected 0x%08" PRIx32 ", got 0x%08" PRIx32, expected_crc, actual_crc);
+        free(decompressed);
+        return 0;
+    }
+
+    ESP_LOGI(TAG, "Gzip decompressed %zu → %" PRIu32 " bytes (CRC32 valid)", compressed_size, uncompressed_size);
     free(*data);
     *data = decompressed;
     return uncompressed_size;
