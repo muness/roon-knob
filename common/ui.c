@@ -1450,6 +1450,10 @@ void ui_set_controls_visible(bool visible) {
         // Restore artwork dimming for text contrast
         if (s_artwork_image) lv_obj_set_style_img_opa(s_artwork_image, LV_OPA_40, 0);
         ESP_LOGI(UI_TAG, "Controls shown");
+        // Force battery display update after showing controls (GH-86)
+        // Without this, hysteresis in update_battery_display() prevents the icon from reappearing
+        s_last_battery_level = -1;
+        update_battery_display();
     } else {
         // Hide controls for art mode - show only artwork and arcs
         if (s_btn_prev) lv_obj_add_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
