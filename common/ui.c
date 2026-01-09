@@ -354,14 +354,15 @@ static void build_layout(void) {
     lv_obj_set_style_border_width(s_status_dot, 0, 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
-    // Battery indicator - top left (same y-coordinate as zone)
+    // Battery indicator - centered above zone selector
     // Icon only - no numeric label needed with 5 discrete states
 #if !TARGET_PC
     s_battery_icon = lv_label_create(s_ui_container);
     lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
     lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
     lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
-    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_LEFT, 35, 12);  // Same row as volume
+    // Center horizontally above zone selector (zone is at y=50) - lowered to y=35 for visibility
+    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_MID, 0, 35);
 #endif
 
     // Zone label - clickable zone name, positioned below the arc edge
@@ -706,13 +707,6 @@ static void update_battery_display(void) {
     int percent = battery_get_percentage();
     bool charging = battery_is_charging();
 
-    if (percent < 0) {
-        lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
-        s_last_battery_level = -1;
-        s_last_battery_charging = false;
-        return;
-    }
-
     // Convert to 5 discrete levels (0-4) for stability
     int level = percent / 20;  // 0-19%=0, 20-39%=1, 40-59%=2, 60-79%=3, 80-100%=4
     if (level > 4) level = 4;
@@ -721,6 +715,7 @@ static void update_battery_display(void) {
     if (level == s_last_battery_level && charging == s_last_battery_charging) {
         return;
     }
+
     s_last_battery_level = level;
     s_last_battery_charging = charging;
 
@@ -1450,6 +1445,10 @@ void ui_set_controls_visible(bool visible) {
         // Restore artwork dimming for text contrast
         if (s_artwork_image) lv_obj_set_style_img_opa(s_artwork_image, LV_OPA_40, 0);
         ESP_LOGI(UI_TAG, "Controls shown");
+        // Force battery display update after showing controls (GH-86)
+        // Without this, hysteresis in update_battery_display() prevents the icon from reappearing
+        s_last_battery_level = -1;
+        update_battery_display();
     } else {
         // Hide controls for art mode - show only artwork and arcs
         if (s_btn_prev) lv_obj_add_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
