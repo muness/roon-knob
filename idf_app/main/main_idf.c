@@ -27,6 +27,9 @@
 
 static const char *TAG = "main";
 
+// UI task stack size (needs headroom for LVGL rendering + gzip decompression)
+#define UI_LOOP_STACK_SIZE 32768
+
 // UI task handle for display sleep management
 static TaskHandle_t g_ui_task_handle = NULL;
 
@@ -225,9 +228,9 @@ static void ui_loop_task(void *arg) {
             stack_check_counter = 0;
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             uint32_t free_bytes = hwm * sizeof(StackType_t);
-            uint32_t used_bytes = 32768 - free_bytes;  // 32KB total stack
+            uint32_t used_bytes = UI_LOOP_STACK_SIZE - free_bytes;
             ESP_LOGI(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
-                     (unsigned int)used_bytes, 32768, (unsigned int)free_bytes);
+                     (unsigned int)used_bytes, UI_LOOP_STACK_SIZE, (unsigned int)free_bytes);
         }
 
         // Process deferred operations (from WiFi event callback)
@@ -312,7 +315,7 @@ void app_main(void) {
 
     // Create UI loop task BEFORE starting WiFi (WiFi events need LVGL task running)
     ESP_LOGI(TAG, "Creating UI loop task");
-    xTaskCreate(ui_loop_task, "ui_loop", 32768, NULL, 2, &g_ui_task_handle);  // 32KB stack (LVGL + gzip decompression)
+    xTaskCreate(ui_loop_task, "ui_loop", UI_LOOP_STACK_SIZE, NULL, 2, &g_ui_task_handle);  // 32KB stack (LVGL + gzip decompression)
 
     // Initialize display sleep management now that UI task is created
     ESP_LOGI(TAG, "Initializing display sleep management");
