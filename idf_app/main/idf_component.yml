@@ -21,4 +21,3 @@ dependencies:
   esp_lcd_sh8601:
     version: '*'
     public: true
-  espressif/esp_new_jpeg: ^1.0.0

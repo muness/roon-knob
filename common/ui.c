@@ -1235,19 +1235,29 @@ void ui_set_artwork(const char *image_key) {
     ESP_LOGI(UI_TAG, "Artwork fetched: %zu bytes", img_len);
 
 #ifdef ESP_PLATFORM
-    // Decode JPEG into RGB565 buffer and LVGL descriptor
-    ui_jpeg_image_t new_img;
-    bool ok = ui_jpeg_decode_to_lvgl((const uint8_t *)img_data,
-                                     (int)img_len,
-                                     SCREEN_SIZE,
-                                     SCREEN_SIZE,
-                                     &new_img);
+    // Expect raw RGB565 data from bridge (format=rgb565)
+    // Expected size: width * height * 2 bytes
+    const size_t expected_rgb565_size = SCREEN_SIZE * SCREEN_SIZE * 2;
+    if (img_len != expected_rgb565_size) {
+        ESP_LOGW(UI_TAG, "Unexpected image size: %zu bytes (expected %zu for %dx%d RGB565)",
+                 img_len, expected_rgb565_size, SCREEN_SIZE, SCREEN_SIZE);
+        platform_http_free(img_data);
+        lv_obj_add_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
 
-    // HTTP buffer no longer needed
+    ESP_LOGI(UI_TAG, "Processing raw RGB565 format (%zu bytes)", img_len);
+
+    // Copy to global buffer (maintains ownership model)
+    ui_jpeg_image_t new_img;
+    bool ok = ui_rgb565_from_buffer((const uint8_t *)img_data,
+                                    SCREEN_SIZE, SCREEN_SIZE, &new_img);
+
+    // HTTP buffer no longer needed after copy
     platform_http_free(img_data);
 
     if (!ok) {
-        ESP_LOGW(UI_TAG, "JPEG decode failed");
+        ESP_LOGW(UI_TAG, "Failed to process RGB565 data");
         lv_obj_add_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
         return;
     }

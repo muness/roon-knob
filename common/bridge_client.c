@@ -1088,7 +1088,7 @@ const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int wid
     }
 
     snprintf(url_buf, buf_len,
-             "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d",
+             "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565",
              bridge_base, zone_id, width, height);
     unlock_state();
 
