@@ -362,6 +362,7 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
     lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
     lv_obj_align(s_battery_icon, LV_ALIGN_TOP_LEFT, 35, 12);  // Same row as volume
+    ESP_LOGI(UI_TAG, "Battery icon widget created (ptr=%p)", (void*)s_battery_icon);
 #endif
 
     // Zone label - clickable zone name, positioned below the arc edge
@@ -700,17 +701,13 @@ static bool s_last_battery_charging = false;  // Track charging state changes
 
 static void update_battery_display(void) {
 #ifdef ESP_PLATFORM
-    if (!s_battery_icon) return;
+    if (!s_battery_icon) {
+        ESP_LOGW(UI_TAG, "update_battery_display: icon widget is NULL!");
+        return;
+    }
 
     int percent = battery_get_percentage();
     bool charging = battery_is_charging();
-
-    if (percent < 0) {
-        lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
-        s_last_battery_level = -1;
-        s_last_battery_charging = false;
-        return;
-    }
 
     // Convert to 5 discrete levels (0-4) for stability
     int level = percent / 20;  // 0-19%=0, 20-39%=1, 40-59%=2, 60-79%=3, 80-100%=4
@@ -720,6 +717,10 @@ static void update_battery_display(void) {
     if (level == s_last_battery_level && charging == s_last_battery_charging) {
         return;
     }
+
+    ESP_LOGI(UI_TAG, "Battery display: %d%% (level %d/4) %s",
+             percent, level, charging ? "[CHARGING]" : "[ON BATTERY]");
+
     s_last_battery_level = level;
     s_last_battery_charging = charging;
 
