@@ -728,8 +728,14 @@ static void update_battery_display(void) {
     bool was_hidden = lv_obj_has_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     bool is_hidden = lv_obj_has_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
-    ESP_LOGI(UI_TAG, "Battery icon: was_hidden=%d, is_hidden=%d, parent_hidden=%d",
-             was_hidden, is_hidden, lv_obj_has_flag(s_ui_container, LV_OBJ_FLAG_HIDDEN));
+
+    // Force move to top and invalidate to ensure it's drawn (GH-86)
+    lv_obj_move_foreground(s_battery_icon);
+    lv_obj_invalidate(s_battery_icon);
+
+    ESP_LOGI(UI_TAG, "Battery icon: was_hidden=%d, is_hidden=%d, parent_hidden=%d, opa=%d",
+             was_hidden, is_hidden, lv_obj_has_flag(s_ui_container, LV_OBJ_FLAG_HIDDEN),
+             lv_obj_get_style_opa(s_battery_icon, LV_PART_MAIN));
     if (charging) {
         lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGE);
     } else if (level == 0) {
