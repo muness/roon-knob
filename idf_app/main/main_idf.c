@@ -219,13 +219,15 @@ static void ui_loop_task(void *arg) {
             check_ota_status();
         }
 
-        // Check stack usage periodically (every 5 seconds = 500 iterations at 10ms)
+        // Check stack usage periodically (every 60 seconds = 6000 iterations at 10ms)
         static uint32_t stack_check_counter = 0;
-        if (++stack_check_counter >= 500) {
+        if (++stack_check_counter >= 6000) {
             stack_check_counter = 0;
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-            ESP_LOGI(TAG, "ui_loop stack high water mark: %u bytes free",
-                     (unsigned int)(hwm * sizeof(StackType_t)));
+            uint32_t free_bytes = hwm * sizeof(StackType_t);
+            uint32_t used_bytes = 32768 - free_bytes;  // 32KB total stack
+            ESP_LOGI(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
+                     (unsigned int)used_bytes, 32768, (unsigned int)free_bytes);
         }
 
         // Process deferred operations (from WiFi event callback)
