@@ -725,7 +725,11 @@ static void update_battery_display(void) {
     s_last_battery_charging = charging;
 
     // Update battery icon based on state
+    bool was_hidden = lv_obj_has_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    bool is_hidden = lv_obj_has_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(UI_TAG, "Battery icon: was_hidden=%d, is_hidden=%d, parent_hidden=%d",
+             was_hidden, is_hidden, lv_obj_has_flag(s_ui_container, LV_OBJ_FLAG_HIDDEN));
     if (charging) {
         lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGE);
     } else if (level == 0) {
