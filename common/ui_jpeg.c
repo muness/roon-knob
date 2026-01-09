@@ -8,13 +8,11 @@
 
 static const char *TAG = "UI_RGB565";
 
-// Pre-allocated global artwork buffer with 20% safety margin
-// Base: 360x360x2 = 259,200 bytes
-// With 20% margin: 311,040 bytes (~304 KB)
+// Pre-allocated global artwork buffer for RGB565 display
+// RGB565 format: 360x360x2 = 259,200 bytes (exact size, no margin needed)
 #define ARTWORK_MAX_W  360
 #define ARTWORK_MAX_H  360
 #define ARTWORK_BPP    2
-#define ARTWORK_SAFETY_MARGIN  1.2f  // 20% extra for future larger images
 
 static uint8_t *s_artwork_buf = NULL;
 static size_t s_artwork_buf_size = 0;
@@ -26,9 +24,8 @@ static void ui_jpeg_buffer_init(void)
         return;  // Already initialized
     }
 
-    // Allocate with 20% safety margin for future larger images
-    size_t base_size = ARTWORK_MAX_W * ARTWORK_MAX_H * ARTWORK_BPP;
-    s_artwork_buf_size = (size_t)(base_size * ARTWORK_SAFETY_MARGIN);
+    // Allocate exactly what we need for RGB565 display
+    s_artwork_buf_size = ARTWORK_MAX_W * ARTWORK_MAX_H * ARTWORK_BPP;
 
     // Try PSRAM first
     s_artwork_buf = heap_caps_aligned_calloc(16, 1, s_artwork_buf_size,
