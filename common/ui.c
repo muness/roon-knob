@@ -354,15 +354,15 @@ static void build_layout(void) {
     lv_obj_set_style_border_width(s_status_dot, 0, 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
-    // Battery indicator - top left (same y-coordinate as zone)
+    // Battery indicator - centered above zone selector
     // Icon only - no numeric label needed with 5 discrete states
 #if !TARGET_PC
     s_battery_icon = lv_label_create(s_ui_container);
     lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
     lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
     lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
-    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_LEFT, 35, 12);  // Same row as volume
-    ESP_LOGI(UI_TAG, "Battery icon widget created (ptr=%p)", (void*)s_battery_icon);
+    // Center horizontally above zone selector (zone is at y=50) - lowered to y=35 for visibility
+    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_MID, 0, 35);
 #endif
 
     // Zone label - clickable zone name, positioned below the arc edge
@@ -701,10 +701,7 @@ static bool s_last_battery_charging = false;  // Track charging state changes
 
 static void update_battery_display(void) {
 #ifdef ESP_PLATFORM
-    if (!s_battery_icon) {
-        ESP_LOGW(UI_TAG, "update_battery_display: icon widget is NULL!");
-        return;
-    }
+    if (!s_battery_icon) return;
 
     int percent = battery_get_percentage();
     bool charging = battery_is_charging();
@@ -718,29 +715,11 @@ static void update_battery_display(void) {
         return;
     }
 
-    ESP_LOGI(UI_TAG, "Battery display: %d%% (level %d/4) %s",
-             percent, level, charging ? "[CHARGING]" : "[ON BATTERY]");
-
     s_last_battery_level = level;
     s_last_battery_charging = charging;
 
     // Update battery icon based on state
-    bool was_hidden = lv_obj_has_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
-    bool is_hidden = lv_obj_has_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
-
-    // Force move to top and invalidate to ensure it's drawn (GH-86)
-    lv_obj_move_foreground(s_battery_icon);
-    lv_obj_invalidate(s_battery_icon);
-
-    int x = (int)lv_obj_get_x(s_battery_icon);
-    int y = (int)lv_obj_get_y(s_battery_icon);
-    int w = (int)lv_obj_get_width(s_battery_icon);
-    int h = (int)lv_obj_get_height(s_battery_icon);
-    ESP_LOGI(UI_TAG, "Battery icon: was_hidden=%d, is_hidden=%d, parent_hidden=%d, opa=%d",
-             was_hidden, is_hidden, lv_obj_has_flag(s_ui_container, LV_OBJ_FLAG_HIDDEN),
-             lv_obj_get_style_opa(s_battery_icon, LV_PART_MAIN));
-    ESP_LOGI(UI_TAG, "Battery icon geometry: x=%d, y=%d, w=%d, h=%d", x, y, w, h);
     if (charging) {
         lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGE);
     } else if (level == 0) {
