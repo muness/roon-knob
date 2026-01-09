@@ -301,7 +301,7 @@ void app_main(void) {
 
     // Create UI loop task BEFORE starting WiFi (WiFi events need LVGL task running)
     ESP_LOGI(TAG, "Creating UI loop task");
-    xTaskCreate(ui_loop_task, "ui_loop", 8192, NULL, 2, &g_ui_task_handle);  // 8KB stack (LVGL theme needs more)
+    xTaskCreate(ui_loop_task, "ui_loop", 32768, NULL, 2, &g_ui_task_handle);  // 32KB stack (LVGL + gzip decompression)
 
     // Initialize display sleep management now that UI task is created
     ESP_LOGI(TAG, "Initializing display sleep management");

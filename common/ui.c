@@ -1223,7 +1223,7 @@ void ui_set_artwork(const char *image_key) {
     // Fetch image data (JPEG)
     char *img_data = NULL;
     size_t img_len = 0;
-    int ret = platform_http_get(url, &img_data, &img_len);
+    int ret = platform_http_get_image(url, &img_data, &img_len);
 
     if (ret != 0 || !img_data || img_len == 0) {
         ESP_LOGW(UI_TAG, "Failed to fetch artwork (ret=%d, len=%zu)", ret, img_len);
