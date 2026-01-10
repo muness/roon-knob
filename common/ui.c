@@ -355,10 +355,10 @@ static void build_layout(void) {
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
     // Battery indicator - centered above zone selector
-    // Icon only - no numeric label needed with 5 discrete states
+    // Icon only - no numeric label needed with 4 discrete states
 #if !TARGET_PC
     s_battery_icon = lv_label_create(s_ui_container);
-    lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
+    lv_label_set_text(s_battery_icon, ICON_BATTERY_6_BAR);
     lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
     lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
     // Center horizontally above zone selector (zone is at y=50) - lowered to y=35 for visibility

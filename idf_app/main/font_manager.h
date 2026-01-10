@@ -48,15 +48,11 @@ bool font_manager_has_icons(void);    // Icon fonts loaded?
 #define ICON_CAST           "\xEE\x8C\x87"  // U+E307
 #define ICON_SPEAKER        "\xEE\x8C\xAD"  // U+E32D
 
-// Battery (bar icons for intermediate levels, plus legacy icons)
-#define ICON_BATTERY_0_BAR  "\xEE\x9F\x9C"  // U+E7DC (empty)
-#define ICON_BATTERY_1_BAR  "\xEE\x9F\x9D"  // U+E7DD
-#define ICON_BATTERY_2_BAR  "\xEE\x9F\x9E"  // U+E7DE
-#define ICON_BATTERY_3_BAR  "\xEE\x9F\x9F"  // U+E7DF
-#define ICON_BATTERY_4_BAR  "\xEE\x9F\xA0"  // U+E7E0
-#define ICON_BATTERY_5_BAR  "\xEE\x9F\xA1"  // U+E7E1
-#define ICON_BATTERY_6_BAR  "\xEE\x9F\xA2"  // U+E7E2 (full)
-#define ICON_BATTERY_FULL   "\xEE\x86\xA4"  // U+E1A4 (legacy, kept for compatibility)
+// Battery (bar icons for 4-level display: 0/2/4/6 bars)
+#define ICON_BATTERY_0_BAR  "\xEE\xAF\x9C"  // U+EBDC (empty)
+#define ICON_BATTERY_2_BAR  "\xEE\xAF\xA0"  // U+EBE0
+#define ICON_BATTERY_4_BAR  "\xEE\xAF\xA2"  // U+EBE2
+#define ICON_BATTERY_6_BAR  "\xEE\xAF\x92"  // U+EBD2 (full)
 #define ICON_BATTERY_CHARGE "\xEE\x86\xA3"  // U+E1A3 (battery_charging_full)
 #define ICON_BATTERY_ALERT  "\xEE\x86\x9C"  // U+E19C (battery_alert - low battery)
 
