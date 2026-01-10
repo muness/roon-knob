@@ -192,6 +192,15 @@ static void ui_zone_name_cb(void *arg) {
     free(name);
 }
 
+static void ui_battery_cb(void *arg) {
+    (void)arg;
+    ui_update_battery();
+}
+
+static void post_ui_battery_update(void) {
+    platform_task_post_to_ui(ui_battery_cb, NULL);
+}
+
 static void default_now_playing(struct now_playing_state *state) {
     if (!state) {
         return;
@@ -696,12 +705,14 @@ static void bridge_poll_thread(void *arg) {
             s_last_is_playing = state.is_playing;
         }
 
-        // Check for config/zones changes and charging state (only when bridge is responding)
+        // Check for config/zones changes (only when bridge is responding)
         if (ok) {
             check_config_sha(state.config_sha);
             check_zones_sha(state.zones_sha);
-            check_charging_state_change();
         }
+
+        // Always check charging state (works in AP mode too)
+        check_charging_state_change();
 
         // Handle bridge connection status (mirrors WiFi retry pattern)
         if (ok) {
@@ -1448,6 +1459,9 @@ static void check_charging_state_change(void) {
              s_last_charging_state ? "charging" : "battery",
              current_charging ? "charging" : "battery");
         s_last_charging_state = current_charging;
+
+        // Update battery indicator immediately (thread-safe post to UI task)
+        post_ui_battery_update();
 
         // Reapply config with new charging state
         lock_state();

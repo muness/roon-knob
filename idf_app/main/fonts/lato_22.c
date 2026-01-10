@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 22 px
  * Bpp: 4
- * Opts: --bpp 4 --size 22 --font /Users/muness1/src/roon-knob/idf_app/spiffs_data/Lato-Regular.ttf --range 0x20-0x7F,0xA0-0xFF,0x100-0x17F,0x180-0x24F,0x370-0x3FF,0x400-0x4FF,0x2010-0x2027 --format lvgl --no-compress --no-prefilter -o /Users/muness1/src/roon-knob/idf_app/main/fonts/lato_22.c
+ * Opts: --bpp 4 --size 22 --font Lato-Regular.ttf --range 0x20-0x7F,0xA0-0xFF,0x100-0x17F,0x180-0x24F,0x370-0x3FF,0x400-0x4FF,0x2010-0x2027 --format lvgl --no-compress --no-prefilter -o lato_22.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

@@ -23,6 +23,7 @@ set(SRC_FILES
     "fonts/material_icons_28.c"
     "fonts/material_icons_44.c"
     "fonts/material_icons_60.c"
+    "fonts/lucide_battery_22.c"
     "../../common/app_main.c"
     "../../common/bridge_client.c"
     "../../common/ui.c"
