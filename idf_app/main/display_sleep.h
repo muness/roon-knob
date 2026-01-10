@@ -80,6 +80,18 @@ display_state_t display_get_state(void);
 bool display_is_touch_suppressed(void);
 
 /**
+ * @brief Check if encoder input should be suppressed
+ * @return true if within 500ms after deep sleep wake (the wake event itself)
+ */
+bool display_is_encoder_suppressed(void);
+
+/**
+ * @brief Check if device woke from deep sleep
+ * @return true if this boot was triggered by deep sleep wakeup
+ */
+bool display_woke_from_deep_sleep(void);
+
+/**
  * @brief Process pending display state changes
  * Call this from the UI loop to safely handle timer-triggered state changes
  */
