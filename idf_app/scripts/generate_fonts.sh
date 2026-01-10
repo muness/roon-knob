@@ -90,6 +90,14 @@ echo "Fixing LVGL include paths..."
 sed -i.bak 's|#include "lvgl/lvgl.h"|#include "lvgl.h"|g' "$OUTPUT_DIR"/*.c
 rm -f "$OUTPUT_DIR"/*.bak
 
+# Sanitize absolute paths from generated files (removes developer-local paths from Opts: header)
+echo "Sanitizing absolute paths..."
+for file in "$OUTPUT_DIR"/*.c; do
+    # Replace absolute paths with just filenames in the Opts: comment line
+    sed -i.bak -E 's|--font [^ ]+/([^/ ]+\.ttf)|--font \1|g; s|-o [^ ]+/([^/ ]+\.c)|-o \1|g' "$file"
+done
+rm -f "$OUTPUT_DIR"/*.bak
+
 # Set up font fallback: Lato/Noto Sans -> Material Symbols (for icons in text)
 echo "Setting up font fallback (Lato/Noto Sans -> Material Symbols)..."
 
