@@ -168,6 +168,7 @@ static void zone_list_item_event_cb(lv_event_t *e);
 static void show_status_message(const char *message);
 static void clear_status_message_timer_cb(lv_timer_t *timer);
 static void update_battery_display(void);
+static void battery_poll_timer_cb(lv_timer_t *timer);
 static void reset_volume_emphasis_timer_cb(lv_timer_t *timer);
 static void emphasize_volume_label(void);
 
@@ -222,6 +223,14 @@ void ui_init(void) {
         lv_timer_set_repeat_count(poll_timer, -1);
     } else {
         ESP_LOGE(UI_TAG, "FAILED to create poll_pending timer!");
+    }
+
+    // Poll battery state every 30 seconds to catch charging changes
+    lv_timer_t *battery_timer = lv_timer_create(battery_poll_timer_cb, 30000, NULL);
+    if (battery_timer) {
+        lv_timer_set_repeat_count(battery_timer, -1);
+    } else {
+        ESP_LOGE(UI_TAG, "FAILED to create battery poll timer!");
     }
 }
 
@@ -744,6 +753,11 @@ static void update_battery_display(void) {
         lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);
     }
 #endif
+}
+
+static void battery_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    update_battery_display();
 }
 
 // ============================================================================
