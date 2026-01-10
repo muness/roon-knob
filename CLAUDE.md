@@ -87,6 +87,7 @@ git commit -m "Description of change"
 
 # 3. Push the branch and create a PR
 git push -u origin fix/short-description
+sg review pr          # for significant changes
 gh pr create --fill   # or with custom title/body
 
 # 4. Wait for CI to pass, then merge

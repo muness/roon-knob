@@ -2,11 +2,13 @@
 
 ## Tools
 
-| Tool | Binary | Purpose |
-|------|--------|---------|
+| Tool | Binary/Skill | Purpose |
+|------|--------------|---------|
 | **Beads** | `bd` | Task tracking |
 | **Superego** | `sg` | Metacognitive review |
 | **Working Memory** | `wm` | Cross-session knowledge |
+| **Open Horizons** | MCP tools | Strategic endeavor tracking |
+| **Miranda** | `/miranda:*` | Workflow automation |
 
 First time after clone? Run `bd init --quiet`.
 
@@ -15,6 +17,8 @@ First time after clone? Run `bd init --quiet`.
 **Beads (`bd`)** — Track what you're working on.
 - `bd ready` before starting
 - `bd sync` at end of session (after closing tasks)
+- Task types: `feature`, `bug`, `task`, `chore`, `epic` (priority 0-4, lower = higher)
+- Use `--deps parent-child:bd-XX` to nest subtasks under epics
 
 **Superego (`sg`)** — Second opinion at decision points.
 - Before committing to a plan or architecture
@@ -23,8 +27,20 @@ First time after clone? Run `bd init --quiet`.
 - Before merging PRs (`sg review pr`)
 
 **Working Memory (`wm`)** — Capture context across sessions.
-- `wm dive-prep` before complex work spanning multiple areas (e.g., OTA touching firmware + sidecar + WiFi)
-- Hooks capture learnings automatically; invoke manually for focused dives
+- Hooks auto-extract learnings from sessions into `.wm/` on sync
+- `wm dive-prep` before complex work — aggregates relevant context from past sessions
+- Use for work spanning multiple areas (e.g., OTA touching firmware + sidecar + WiFi)
+
+**Open Horizons** — Track strategic goals and learnings via MCP.
+- `oh_get_endeavors` to see missions/aims/initiatives/tasks
+- `oh_log_decision` to capture strategic decisions
+- `oh_create_metis_candidate` when you discover a reusable pattern
+- `oh_create_guardrail_candidate` for constraints that should be enforced
+
+**Miranda** — Automate common workflows.
+- `/miranda:mouse` — Work a beads task end-to-end, create PR for review
+- `/miranda:drummer` — Batch review and merge open PRs
+- `/miranda:notes` — Address PR review comments
 
 ## Workflow
 
