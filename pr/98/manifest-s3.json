@@ -1,0 +1,12 @@
+{
+  "name": "Roon Knob (PR #98 Preview)",
+  "version": "pr-98",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [{
+      "path": "roon_knob_merged.bin",
+      "offset": 0
+    }]
+  }]
+}
