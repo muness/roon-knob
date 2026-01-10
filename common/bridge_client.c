@@ -192,6 +192,15 @@ static void ui_zone_name_cb(void *arg) {
     free(name);
 }
 
+static void ui_battery_cb(void *arg) {
+    (void)arg;
+    ui_update_battery();
+}
+
+static void post_ui_battery_update(void) {
+    platform_task_post_to_ui(ui_battery_cb, NULL);
+}
+
 static void default_now_playing(struct now_playing_state *state) {
     if (!state) {
         return;
@@ -1451,8 +1460,8 @@ static void check_charging_state_change(void) {
              current_charging ? "charging" : "battery");
         s_last_charging_state = current_charging;
 
-        // Update battery indicator immediately
-        ui_update_battery();
+        // Update battery indicator immediately (thread-safe post to UI task)
+        post_ui_battery_update();
 
         // Reapply config with new charging state
         lock_state();
