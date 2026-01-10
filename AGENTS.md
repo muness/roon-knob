@@ -1,155 +1,56 @@
+# Roon-Knob Agent Guide
 
-Roon-Knob Agent Guide
+## Tools
 
-Purpose
+| Tool | Binary/Skill | Purpose |
+|------|--------------|---------|
+| **Beads** | `bd` | Task tracking |
+| **Superego** | `sg` | Metacognitive review |
+| **Working Memory** | `wm` | Cross-session knowledge |
+| **Open Horizons** | MCP tools | Strategic endeavor tracking |
+| **Miranda** | `/miranda:*` | Workflow automation |
 
-This project uses Beads (bd) for all issue and task management — nothing else.
-It tracks design tasks, firmware milestones, simulator features, and sidecar bugs in one place.
+First time after clone? Run `bd init --quiet`.
 
-Beads is lightweight, git-integrated, and agent-friendly. We only use it for task tracking, not code style, linting, or test enforcement.
+## When to Use Each
 
-⸻
+**Beads (`bd`)** — Track what you're working on.
+- `bd ready` before starting
+- `bd sync` at end of session (after closing tasks)
+- Task types: `feature`, `bug`, `task`, `chore`, `epic` (priority 0-4, lower = higher)
+- Use `--deps parent-child:bd-XX` to nest subtasks under epics
 
-Quick Start
+**Superego (`sg`)** — Second opinion at decision points.
+- Before committing to a plan or architecture
+- When choosing between approaches
+- Before significant implementations
+- Before merging PRs (`sg review pr`)
 
-Initialize
+**Working Memory (`wm`)** — Capture context across sessions.
+- Hooks auto-extract learnings from sessions into `.wm/` on sync
+- `wm dive-prep` before complex work — aggregates relevant context from past sessions
+- Use for work spanning multiple areas (e.g., OTA touching firmware + sidecar + WiFi)
 
-If you see database not found:
+**Open Horizons** — Track strategic goals and learnings via MCP.
+- `oh_get_endeavors` to see missions/aims/initiatives/tasks
+- `oh_log_decision` to capture strategic decisions
+- `oh_create_metis_candidate` when you discover a reusable pattern
+- `oh_create_guardrail_candidate` for constraints that should be enforced
 
-bd init --quiet
+**Miranda** — Automate common workflows.
+- `/miranda:mouse` — Work a beads task end-to-end, create PR for review
+- `/miranda:drummer` — Batch review and merge open PRs
+- `/miranda:notes` — Address PR review comments
 
-This sets up a local .beads/ database linked to git.
-Do this once per clone of the repo.
+## Workflow
 
-Core Commands
+1. `bd ready` — see what's available
+2. Claim a task, do the work
+3. `sg review` before committing if the change is significant
+4. `bd sync` at end of session
 
-bd ready            # list unblocked issues
-bd create "Add mDNS discovery" -t feature -p 1 --json
-bd update bd-12 --status in_progress
-bd close bd-12 --reason "done"
-bd sync             # force export/import/push immediately
+## Principles
 
-Each commit automatically syncs .beads/issues.jsonl.
-
-⸻
-
-Task Types
-	•	feature – new capability (e.g., OTA, zone picker)
-	•	bug – broken behavior
-	•	task – supporting work (refactor, docs)
-	•	chore – maintenance or CI fixes
-	•	epic – parent issue grouping subtasks
-
-Priorities
-	•	0 critical
-	•	1 high
-	•	2 normal
-	•	3 low
-	•	4 backlog / idea
-
-⸻
-
-Workflow for Contributors & Agents
-	1.	Check for open work
-
-bd ready --json
-
-
-	2.	Claim a task
-
-bd update bd-42 --status in_progress
-
-
-	3.	Do the work.
-	4.	If you discover a new need or idea:
-
-bd create "Add volume debounce" -p 2 --deps discovered-from:bd-42
-
-
-	5.	Finish and close
-
-bd close bd-42 --reason "implemented"
-
-
-	6.	Sync to push all updates
-
-bd sync
-
-
-
-⸻
-
-Recommended Structure
-
-Use Beads to plan and track:
-
-Category	Examples
-Firmware	LVGL layout, OTA updates, Wi-Fi provisioning
-Simulator	SDL key map, round mask visuals, mock data
-Sidecar	mDNS advertisement, /image proxy, volume rate limit
-Infra	CI build scripts, Homebrew setup, Mac install docs
-
-
-⸻
-
-Multi-Agent Use
-
-Multiple people or AIs can work in parallel — Beads handles merging automatically.
-	•	Always run bd sync at the end of a session.
-	•	To avoid collisions, check bd ready before starting new work.
-	•	Optionally use Agent Mail for real-time coordination, but it’s not required for Roon-Knob.
-
-⸻
-
-Issue Relationships
-
-Link work contextually:
-	•	discovered-from – a task uncovered during another
-	•	blocks – one task must finish before another
-	•	parent-child – epic/subtask hierarchy
-
-Example:
-
-bd create "Add OTA download" -t feature -p 1
-bd create "Validate OTA rollback" -t task -p 2 --deps parent-child:bd-17
-
-
-⸻
-
-Planning Docs
-
-Store planning material (designs, mockups, notes) in history/ instead of the repo root.
-
-history/
-  2025-11-setup-notes.md
-  ui-wireframe.png
-
-They are optional and can be ignored by git.
-
-⸻
-
-Good Habits
-	•	✅ One source of truth: Beads issues.
-	•	✅ Always close finished work and sync.
-	•	✅ Use --json for machine interactions.
-	•	✅ Keep commit messages brief and reference the issue (bd-42).
-	•	❌ No Markdown TODOs.
-	•	❌ No external trackers.
-
-☑ Beads Troubleshooting
-	•	When `bd sync` says JSONL is newer than the database, run `bd import` (or `bd import -i .beads/issues.jsonl`) before another sync so the files align. Don’t manually delete `.beads/` entries unless you know what you’re doing (always regenerate via `bd init` if needed).
-	•	If the database disappears or the snapshot becomes invalid, run `bd init --quiet` to recreate it, then `bd import` before the next `bd sync`.
-	•	Errors about stale snapshots usually mean git pulled new JSONL; rerun `bd import` (or export from the JSONL you just pulled) to reconcile before resyncing.
-
-⸻
-
-End of Session
-
-When you finish:
-
-bd sync
-git pull --rebase
-git push
-
-That ensures .beads/issues.jsonl is consistent with git and everyone else’s view of the project.
-
+- Beads is the source of truth for tasks (no Markdown TODOs)
+- Superego catches strategic mistakes — invoke before committing to an approach
+- If `bd sync` complains about JSONL being newer, run `bd import` first
