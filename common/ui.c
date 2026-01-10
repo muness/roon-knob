@@ -225,7 +225,7 @@ void ui_init(void) {
         ESP_LOGE(UI_TAG, "FAILED to create poll_pending timer!");
     }
 
-    // Poll battery state every 30 seconds to catch charging changes
+    // Periodic battery check for percentage drift (charging state changes trigger immediate updates)
     lv_timer_t *battery_timer = lv_timer_create(battery_poll_timer_cb, 30000, NULL);
     if (battery_timer) {
         lv_timer_set_repeat_count(battery_timer, -1);
@@ -363,12 +363,12 @@ static void build_layout(void) {
     lv_obj_set_style_border_width(s_status_dot, 0, 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
-    // Battery indicator - centered above zone selector
+    // Battery indicator - centered above zone selector (horizontal Lucide style)
     // Icon only - no numeric label needed with 4 discrete states
 #if !TARGET_PC
     s_battery_icon = lv_label_create(s_ui_container);
-    lv_label_set_text(s_battery_icon, ICON_BATTERY_6_BAR);
-    lv_obj_set_style_text_font(s_battery_icon, font_icon_small(), 0);
+    lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
+    lv_obj_set_style_text_font(s_battery_icon, font_manager_get_lucide_battery(), 0);
     lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
     // Center horizontally above zone selector (zone is at y=50) - lowered to y=35 for visibility
     lv_obj_align(s_battery_icon, LV_ALIGN_TOP_MID, 0, 35);
@@ -732,17 +732,16 @@ static void update_battery_display(void) {
     s_last_battery_level = level;
     s_last_battery_charging = charging;
 
-    // Update battery icon based on state
-    // Uses consistent 0/2/4/6-bar progression for clear visual distinction
+    // Update battery icon based on state (Lucide horizontal icons)
     lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     if (charging) {
-        lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGE);
+        lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGING);
     } else {
         switch (level) {
-            case 0:  lv_label_set_text(s_battery_icon, ICON_BATTERY_0_BAR); break;  // Critical
-            case 1:  lv_label_set_text(s_battery_icon, ICON_BATTERY_2_BAR); break;  // Low
-            case 2:  lv_label_set_text(s_battery_icon, ICON_BATTERY_4_BAR); break;  // Medium
-            default: lv_label_set_text(s_battery_icon, ICON_BATTERY_6_BAR); break;  // High
+            case 0:  lv_label_set_text(s_battery_icon, ICON_BATTERY_WARNING); break;  // Critical
+            case 1:  lv_label_set_text(s_battery_icon, ICON_BATTERY_LOW); break;      // Low
+            case 2:  lv_label_set_text(s_battery_icon, ICON_BATTERY_MEDIUM); break;   // Medium
+            default: lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL); break;     // High
         }
     }
 
@@ -757,6 +756,11 @@ static void update_battery_display(void) {
 
 static void battery_poll_timer_cb(lv_timer_t *timer) {
     (void)timer;
+    update_battery_display();
+}
+
+// Public API for immediate battery refresh (called on USB connect/disconnect)
+void ui_update_battery(void) {
     update_battery_display();
 }
 

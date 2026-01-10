@@ -56,6 +56,9 @@ void ui_set_controls_visible(bool visible);  // Show/hide UI controls for art mo
 // Network status banner (persistent, doesn't auto-clear)
 void ui_set_network_status(const char *status);  // Show persistent network status (NULL to clear)
 
+// Battery indicator
+void ui_update_battery(void);  // Force battery display refresh (call on USB connect/disconnect)
+
 #ifdef __cplusplus
 }
 #endif

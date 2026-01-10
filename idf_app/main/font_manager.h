@@ -48,13 +48,17 @@ bool font_manager_has_icons(void);    // Icon fonts loaded?
 #define ICON_CAST           "\xEE\x8C\x87"  // U+E307
 #define ICON_SPEAKER        "\xEE\x8C\xAD"  // U+E32D
 
-// Battery (bar icons for 4-level display: 0/2/4/6 bars)
-#define ICON_BATTERY_0_BAR  "\xEE\xAF\x9C"  // U+EBDC (empty)
-#define ICON_BATTERY_2_BAR  "\xEE\xAF\xA0"  // U+EBE0
-#define ICON_BATTERY_4_BAR  "\xEE\xAF\xA2"  // U+EBE2
-#define ICON_BATTERY_6_BAR  "\xEE\xAF\x92"  // U+EBD2 (full)
-#define ICON_BATTERY_CHARGE "\xEE\x86\xA3"  // U+E1A3 (battery_charging_full)
-#define ICON_BATTERY_ALERT  "\xEE\x86\x9C"  // U+E19C (battery_alert - low battery)
+// Battery icons (Lucide horizontal style)
+// From lucide.ttf - horizontal battery matches UI aesthetic
+#define ICON_BATTERY_EMPTY    "\xEE\x81\x93"  // U+E053 battery (empty outline)
+#define ICON_BATTERY_CHARGING "\xEE\x81\x94"  // U+E054 battery-charging
+#define ICON_BATTERY_FULL     "\xEE\x81\x95"  // U+E055 battery-full
+#define ICON_BATTERY_LOW      "\xEE\x81\x96"  // U+E056 battery-low
+#define ICON_BATTERY_MEDIUM   "\xEE\x81\x97"  // U+E057 battery-medium
+#define ICON_BATTERY_WARNING  "\xEE\x8E\xAC"  // U+E3AC battery-warning
+
+// Lucide battery font (horizontal icons)
+const lv_font_t *font_manager_get_lucide_battery(void);
 
 // Status
 #define ICON_CHECK          "\xEE\x97\x8A"  // U+E5CA

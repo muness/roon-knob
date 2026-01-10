@@ -23,6 +23,7 @@ extern const lv_font_t material_icons_22;
 extern const lv_font_t material_icons_28;
 extern const lv_font_t material_icons_44;
 extern const lv_font_t material_icons_60;
+extern const lv_font_t lucide_battery_22;
 
 static bool s_initialized = false;
 
@@ -64,6 +65,11 @@ const lv_font_t *font_manager_get_icon_normal(void) {
 
 const lv_font_t *font_manager_get_icon_large(void) {
     return &material_icons_60;  // Increased from 48px to match 80px play button
+}
+
+// Lucide battery font getter (horizontal battery icons)
+const lv_font_t *font_manager_get_lucide_battery(void) {
+    return &lucide_battery_22;
 }
 
 bool font_manager_has_unicode(void) {

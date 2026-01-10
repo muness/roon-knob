@@ -1449,6 +1449,9 @@ static void check_charging_state_change(void) {
              current_charging ? "charging" : "battery");
         s_last_charging_state = current_charging;
 
+        // Update battery indicator immediately
+        ui_update_battery();
+
         // Reapply config with new charging state
         lock_state();
         rk_cfg_t cfg_copy = s_state.cfg;
