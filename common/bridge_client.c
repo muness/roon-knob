@@ -696,12 +696,14 @@ static void bridge_poll_thread(void *arg) {
             s_last_is_playing = state.is_playing;
         }
 
-        // Check for config/zones changes and charging state (only when bridge is responding)
+        // Check for config/zones changes (only when bridge is responding)
         if (ok) {
             check_config_sha(state.config_sha);
             check_zones_sha(state.zones_sha);
-            check_charging_state_change();
         }
+
+        // Always check charging state (works in AP mode too)
+        check_charging_state_change();
 
         // Handle bridge connection status (mirrors WiFi retry pattern)
         if (ok) {
