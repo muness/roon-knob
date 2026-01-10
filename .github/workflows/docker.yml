@@ -185,6 +185,7 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
