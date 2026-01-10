@@ -697,7 +697,7 @@ static void poll_pending(lv_timer_t *timer) {
     }
 }
 
-static int s_last_battery_level = -1;  // 0-4 bars for hysteresis
+static int s_last_battery_level = -1;  // 0-3 levels for hysteresis
 static bool s_last_battery_charging = false;  // Track charging state changes
 
 static void update_battery_display(void) {
@@ -707,9 +707,13 @@ static void update_battery_display(void) {
     int percent = battery_get_percentage();
     bool charging = battery_is_charging();
 
-    // Convert to 5 discrete levels (0-4) for stability
-    int level = percent / 20;  // 0-19%=0, 20-39%=1, 40-59%=2, 60-79%=3, 80-100%=4
-    if (level > 4) level = 4;
+    // Convert to 4 discrete levels for stability (precision matches fidelity)
+    // Critical: ≤10%, Low: 11-25%, Medium: 26-60%, High: ≥61%
+    int level;
+    if (percent <= 10) level = 0;       // Critical
+    else if (percent <= 25) level = 1;  // Low
+    else if (percent <= 60) level = 2;  // Medium
+    else level = 3;                     // High
 
     // Only update display if level or charging state changed (prevents flicker)
     if (level == s_last_battery_level && charging == s_last_battery_charging) {
@@ -720,17 +724,21 @@ static void update_battery_display(void) {
     s_last_battery_charging = charging;
 
     // Update battery icon based on state
+    // Uses consistent 0/2/4/6-bar progression for clear visual distinction
     lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     if (charging) {
         lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGE);
-    } else if (level == 0) {
-        lv_label_set_text(s_battery_icon, ICON_BATTERY_ALERT);
     } else {
-        lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
+        switch (level) {
+            case 0:  lv_label_set_text(s_battery_icon, ICON_BATTERY_0_BAR); break;  // Critical
+            case 1:  lv_label_set_text(s_battery_icon, ICON_BATTERY_2_BAR); break;  // Low
+            case 2:  lv_label_set_text(s_battery_icon, ICON_BATTERY_4_BAR); break;  // Medium
+            default: lv_label_set_text(s_battery_icon, ICON_BATTERY_6_BAR); break;  // High
+        }
     }
 
-    // Warning color for low battery, subtle grey otherwise
-    if (level == 0 && !charging) {
+    // Warning color for critical/low battery, neutral grey otherwise
+    if (level <= 1 && !charging) {
         lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0xff0000), 0);
     } else {
         lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);
