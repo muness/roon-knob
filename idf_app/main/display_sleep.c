@@ -350,6 +350,20 @@ static void enter_deep_sleep(void) {
     esp_wifi_stop();
 
     // Configure wake sources: encoder pins (GPIO7 and GPIO8, both RTC-capable)
+    // Keep RTC_PERIPH powered so RTC pull-ups remain active during deep sleep
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+
+    // Configure RTC GPIO input with pull-ups for reliable wakeup
+    // (digital GPIO pull-ups are lost in deep sleep)
+    rtc_gpio_init(ENCODER_GPIO_A);
+    rtc_gpio_init(ENCODER_GPIO_B);
+    rtc_gpio_set_direction(ENCODER_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_set_direction(ENCODER_GPIO_B, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pullup_en(ENCODER_GPIO_A);
+    rtc_gpio_pullup_en(ENCODER_GPIO_B);
+    rtc_gpio_pulldown_dis(ENCODER_GPIO_A);
+    rtc_gpio_pulldown_dis(ENCODER_GPIO_B);
+
     // Encoder pins are pulled HIGH, going LOW on rotation
     uint64_t wake_gpio_mask = (1ULL << ENCODER_GPIO_A) | (1ULL << ENCODER_GPIO_B);
 
@@ -392,8 +406,12 @@ void display_process_pending(void) {
     }
     if (s_pending_deep_sleep) {
         s_pending_deep_sleep = false;
-        // Only enter deep sleep from soft sleep state
-        if (s_display_state == DISPLAY_STATE_SLEEP) {
+        // Check state under lock to avoid race with wake transitions
+        bool should_sleep = false;
+        LOCK_DISPLAY_STATE();
+        should_sleep = (s_display_state == DISPLAY_STATE_SLEEP);
+        UNLOCK_DISPLAY_STATE();
+        if (should_sleep) {
             enter_deep_sleep();
         }
     }
