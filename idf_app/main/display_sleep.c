@@ -376,6 +376,9 @@ static void enter_deep_sleep(void) {
 
     ESP_LOGI(TAG, "Entering deep sleep (wake on encoder rotation)...");
 
+    // Brief delay to ensure log is flushed before power cut
+    vTaskDelay(pdMS_TO_TICKS(50));
+
     // Enter deep sleep - this does NOT return
     // Device will reset and run app_main() on wake
     esp_deep_sleep_start();
