@@ -215,12 +215,12 @@ void display_sleep(void) {
         s_display_state = DISPLAY_STATE_SLEEP;
         ESP_LOGI(TAG, "Display sleeping");
 
-        // Start deep sleep timer (only if enabled and not charging)
-        if (s_deep_sleep_timer != NULL && s_deep_sleep_timeout_ms > 0 && !battery_is_charging()) {
+        // Start deep sleep timer (if enabled - timeout already accounts for charging state)
+        if (s_deep_sleep_timer != NULL && s_deep_sleep_timeout_ms > 0) {
             esp_timer_stop(s_deep_sleep_timer);
             esp_timer_start_once(s_deep_sleep_timer, s_deep_sleep_timeout_ms * 1000ULL);
-            ESP_LOGI(TAG, "Deep sleep timer started (%lu minutes)",
-                     s_deep_sleep_timeout_ms / 60000);
+            ESP_LOGI(TAG, "Deep sleep timer started (%lu sec)",
+                     s_deep_sleep_timeout_ms / 1000);
         }
     }
     UNLOCK_DISPLAY_STATE();
@@ -603,8 +603,8 @@ void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging) {
             esp_timer_start_once(s_sleep_timer, s_sleep_timeout_ms * 1000ULL);
         }
     } else if (current_state == DISPLAY_STATE_SLEEP) {
-        // Restart deep sleep timer with new timeout (if enabled and not charging)
-        if (s_deep_sleep_timeout_ms > 0 && s_deep_sleep_timer != NULL && !battery_is_charging()) {
+        // Restart deep sleep timer with new timeout (if enabled)
+        if (s_deep_sleep_timeout_ms > 0 && s_deep_sleep_timer != NULL) {
             esp_timer_start_once(s_deep_sleep_timer, s_deep_sleep_timeout_ms * 1000ULL);
         }
     }
