@@ -3,11 +3,16 @@
 #include "platform/platform_display.h"
 #include "bridge_client.h"
 #include "wifi_manager.h"
+#include "battery.h"
 #include "esp_timer.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_pm.h"
+#include "esp_sleep.h"
+#include "esp_wifi.h"
 #include "driver/ledc.h"
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "ui.h"
@@ -18,6 +23,14 @@ static const char *TAG = "display_sleep";
 #define PIN_NUM_BK_LIGHT    ((gpio_num_t)47)
 #define LEDC_CHANNEL        LEDC_CHANNEL_0
 #define LEDC_SPEED_MODE     LEDC_LOW_SPEED_MODE
+
+// Encoder GPIOs for deep sleep wake (RTC-capable on ESP32-S3)
+#define ENCODER_GPIO_A      GPIO_NUM_8
+#define ENCODER_GPIO_B      GPIO_NUM_7
+
+// Deep sleep configuration
+#define DEFAULT_DEEP_SLEEP_TIMEOUT_MS (RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC * 1000)
+#define ENCODER_SUPPRESS_AFTER_WAKE_MS 500      // Ignore encoder ticks for 500ms after wake
 
 // Default timeout configuration (use charging defaults for cold start - more generous during setup)
 #define DEFAULT_ART_MODE_TIMEOUT_MS (RK_DEFAULT_ART_MODE_CHARGING_TIMEOUT_SEC * 1000)
@@ -45,14 +58,18 @@ static TaskHandle_t s_lvgl_task_handle = NULL;
 static esp_timer_handle_t s_art_mode_timer = NULL;
 static esp_timer_handle_t s_dim_timer = NULL;
 static esp_timer_handle_t s_sleep_timer = NULL;
+static esp_timer_handle_t s_deep_sleep_timer = NULL;
 static SemaphoreHandle_t s_display_state_mutex = NULL;
 static display_state_t s_display_state = DISPLAY_STATE_NORMAL;
 static int64_t s_touch_suppress_until_ms = 0;  // Suppress widget touches after wake
+static int64_t s_encoder_suppress_until_ms = 0;  // Suppress encoder after deep sleep wake
+static bool s_woke_from_deep_sleep = false;  // Flag set on boot if woke from deep sleep
 
 // Current timeout values (in ms, 0 = disabled)
 static uint32_t s_art_mode_timeout_ms = DEFAULT_ART_MODE_TIMEOUT_MS;
 static uint32_t s_dim_timeout_ms = DEFAULT_DIM_TIMEOUT_MS;
 static uint32_t s_sleep_timeout_ms = DEFAULT_SLEEP_TIMEOUT_MS;
+static uint32_t s_deep_sleep_timeout_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
 
 // Power management settings
 static bool s_wifi_power_save_enabled = false;
@@ -197,6 +214,14 @@ void display_sleep(void) {
 
         s_display_state = DISPLAY_STATE_SLEEP;
         ESP_LOGI(TAG, "Display sleeping");
+
+        // Start deep sleep timer (if enabled - timeout already accounts for charging state)
+        if (s_deep_sleep_timer != NULL && s_deep_sleep_timeout_ms > 0) {
+            esp_timer_stop(s_deep_sleep_timer);
+            esp_timer_start_once(s_deep_sleep_timer, s_deep_sleep_timeout_ms * 1000ULL);
+            ESP_LOGI(TAG, "Deep sleep timer started (%lu sec)",
+                     s_deep_sleep_timeout_ms / 1000);
+        }
     }
     UNLOCK_DISPLAY_STATE();
 }
@@ -258,10 +283,11 @@ void display_wake(void) {
     // Reset timers outside of mutex to avoid deadlock
     // Sequential chain: start only the first enabled timer, each transition starts the next
     if (prev_state != DISPLAY_STATE_NORMAL) {
-        // Stop all timers first
+        // Stop all timers first (including deep sleep timer)
         if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
         if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
         if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
+        if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
 
         // Start the first enabled timer in the chain
         if (art_timeout > 0 && s_art_mode_timer != NULL) {
@@ -294,6 +320,98 @@ static void sleep_timer_callback(void *arg) {
     s_pending_sleep = true;  // Defer to UI loop
 }
 
+// Pending deep sleep flag
+static volatile bool s_pending_deep_sleep = false;
+
+// Timer callback for deep sleep
+static void deep_sleep_timer_callback(void *arg) {
+    s_pending_deep_sleep = true;  // Defer to UI loop
+}
+
+// Enter deep sleep - device will reset on wake
+static void enter_deep_sleep(void) {
+    ESP_LOGI(TAG, "Preparing for deep sleep...");
+
+    // Turn off backlight (GPIO47 is not RTC-capable, won't be held)
+    display_set_backlight(0);
+
+    // Turn off display panel
+    if (s_panel_handle != NULL) {
+        esp_lcd_panel_disp_on_off(s_panel_handle, false);
+    }
+
+    // Stop WiFi cleanly to reduce wake time on next boot
+    esp_wifi_stop();
+
+    // Configure wake sources: encoder pins (GPIO7 and GPIO8, both RTC-capable)
+    // Keep RTC_PERIPH powered so RTC pull-ups remain active during deep sleep
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+
+    // Configure RTC GPIO input with pull-ups for reliable wakeup
+    // (digital GPIO pull-ups are lost in deep sleep)
+    esp_err_t err;
+
+    err = rtc_gpio_init(ENCODER_GPIO_A);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_init(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_init(ENCODER_GPIO_B);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_init(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_set_direction(ENCODER_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_set_direction(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_set_direction(ENCODER_GPIO_B, RTC_GPIO_MODE_INPUT_ONLY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_set_direction(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pullup_en(ENCODER_GPIO_A);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pullup_en(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pullup_en(ENCODER_GPIO_B);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pullup_en(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pulldown_dis(ENCODER_GPIO_A);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pulldown_dis(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pulldown_dis(ENCODER_GPIO_B);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pulldown_dis(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Encoder pins are pulled HIGH, going LOW on rotation
+    uint64_t wake_gpio_mask = (1ULL << ENCODER_GPIO_A) | (1ULL << ENCODER_GPIO_B);
+
+    err = esp_sleep_enable_ext1_wakeup(wake_gpio_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure wake sources: %s", esp_err_to_name(err));
+        // Don't enter deep sleep if wake source config failed
+        return;
+    }
+
+    ESP_LOGI(TAG, "Entering deep sleep (wake on encoder rotation)...");
+
+    // Brief delay to ensure log is flushed before power cut
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Enter deep sleep - this does NOT return
+    // Device will reset and run app_main() on wake
+    esp_deep_sleep_start();
+}
+
 // Process pending display state changes (call from UI loop)
 void display_process_pending(void) {
     // Don't enter art mode during setup (captive portal active or bridge unreachable)
@@ -316,6 +434,17 @@ void display_process_pending(void) {
     if (s_pending_sleep) {
         s_pending_sleep = false;
         display_sleep();
+    }
+    if (s_pending_deep_sleep) {
+        s_pending_deep_sleep = false;
+        // Check state under lock to avoid race with wake transitions
+        bool should_sleep = false;
+        LOCK_DISPLAY_STATE();
+        should_sleep = (s_display_state == DISPLAY_STATE_SLEEP);
+        UNLOCK_DISPLAY_STATE();
+        if (should_sleep) {
+            enter_deep_sleep();
+        }
     }
 }
 
@@ -354,6 +483,22 @@ void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_t
     };
     ESP_ERROR_CHECK(esp_timer_create(&sleep_timer_args, &s_sleep_timer));
 
+    // Create deep sleep timer (triggers after soft sleep timeout)
+    const esp_timer_create_args_t deep_sleep_timer_args = {
+        .callback = &deep_sleep_timer_callback,
+        .name = "deep_sleep"
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&deep_sleep_timer_args, &s_deep_sleep_timer));
+
+    // Check if we woke from deep sleep and set up encoder suppression
+    esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
+    if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) {
+        s_woke_from_deep_sleep = true;
+        s_encoder_suppress_until_ms = esp_timer_get_time() / 1000 + ENCODER_SUPPRESS_AFTER_WAKE_MS;
+        ESP_LOGI(TAG, "Woke from deep sleep via encoder - suppressing input for %dms",
+                 ENCODER_SUPPRESS_AFTER_WAKE_MS);
+    }
+
     // Start the first enabled timer in the chain
     if (s_art_mode_timeout_ms > 0) {
         ESP_ERROR_CHECK(esp_timer_start_once(s_art_mode_timer, s_art_mode_timeout_ms * 1000ULL));
@@ -363,8 +508,8 @@ void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_t
         ESP_ERROR_CHECK(esp_timer_start_once(s_sleep_timer, s_sleep_timeout_ms * 1000ULL));
     }
 
-    ESP_LOGI(TAG, "Display sleep initialized (art: %lums, dim: %lums, sleep: %lums)",
-             s_art_mode_timeout_ms, s_dim_timeout_ms, s_sleep_timeout_ms);
+    ESP_LOGI(TAG, "Display sleep initialized (art: %lums, dim: %lums, sleep: %lums, deep: %lums)",
+             s_art_mode_timeout_ms, s_dim_timeout_ms, s_sleep_timeout_ms, s_deep_sleep_timeout_ms);
 }
 
 // Activity detected - reset timers and wake if needed
@@ -381,10 +526,11 @@ void display_activity_detected(void) {
     }
 
     // Reset timer chain for NORMAL state (only remaining case after wake check)
-    // Stop all timers first
+    // Stop all timers first (including deep sleep timer)
     if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
     if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
     if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
+    if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
 
     // From NORMAL state, start at beginning of timer chain
     if (art_timeout > 0 && s_art_mode_timer != NULL) {
@@ -407,46 +553,63 @@ bool display_is_touch_suppressed(void) {
     return now_ms < s_touch_suppress_until_ms;
 }
 
+// Check if encoder input should be suppressed (within 500ms after deep sleep wake)
+bool display_is_encoder_suppressed(void) {
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    return now_ms < s_encoder_suppress_until_ms;
+}
+
+// Check if device woke from deep sleep (for logging/diagnostics)
+bool display_woke_from_deep_sleep(void) {
+    return s_woke_from_deep_sleep;
+}
+
 // Update timeout values from config
 void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging) {
     uint32_t new_art_timeout_ms;
     uint32_t new_dim_timeout_ms;
     uint32_t new_sleep_timeout_ms;
+    uint32_t new_deep_sleep_timeout_ms;
 
     if (cfg != NULL) {
         // Get timeouts from config based on charging state (convert seconds to ms)
         new_art_timeout_ms = rk_cfg_get_art_mode_timeout(cfg, is_charging) * 1000;
         new_dim_timeout_ms = rk_cfg_get_dim_timeout(cfg, is_charging) * 1000;
         new_sleep_timeout_ms = rk_cfg_get_sleep_timeout(cfg, is_charging) * 1000;
+        new_deep_sleep_timeout_ms = rk_cfg_get_deep_sleep_timeout(cfg, is_charging) * 1000;
     } else {
-        // Use defaults from Kconfig
+        // Use defaults
         new_art_timeout_ms = DEFAULT_ART_MODE_TIMEOUT_MS;
         new_dim_timeout_ms = DEFAULT_DIM_TIMEOUT_MS;
         new_sleep_timeout_ms = DEFAULT_SLEEP_TIMEOUT_MS;
+        new_deep_sleep_timeout_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
     }
 
     // Check if any values changed
     if (new_art_timeout_ms == s_art_mode_timeout_ms &&
         new_dim_timeout_ms == s_dim_timeout_ms &&
-        new_sleep_timeout_ms == s_sleep_timeout_ms) {
+        new_sleep_timeout_ms == s_sleep_timeout_ms &&
+        new_deep_sleep_timeout_ms == s_deep_sleep_timeout_ms) {
         return;  // No change
     }
 
-    ESP_LOGI(TAG, "Updating display timeouts (art: %lums, dim: %lums, sleep: %lums)",
-             new_art_timeout_ms, new_dim_timeout_ms, new_sleep_timeout_ms);
+    ESP_LOGI(TAG, "Updating display timeouts (art: %lums, dim: %lums, sleep: %lums, deep: %lums)",
+             new_art_timeout_ms, new_dim_timeout_ms, new_sleep_timeout_ms, new_deep_sleep_timeout_ms);
 
     // Update stored values
     s_art_mode_timeout_ms = new_art_timeout_ms;
     s_dim_timeout_ms = new_dim_timeout_ms;
     s_sleep_timeout_ms = new_sleep_timeout_ms;
+    s_deep_sleep_timeout_ms = new_deep_sleep_timeout_ms;
 
     // Restart timer chain based on current state
     display_state_t current_state = display_get_state();
 
-    // Stop all timers
+    // Stop all timers (including deep sleep timer)
     if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
     if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
     if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
+    if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
 
     // Restart appropriate timer for current state
     if (current_state == DISPLAY_STATE_NORMAL) {
@@ -467,8 +630,12 @@ void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging) {
         if (s_sleep_timeout_ms > 0 && s_sleep_timer != NULL) {
             esp_timer_start_once(s_sleep_timer, s_sleep_timeout_ms * 1000ULL);
         }
+    } else if (current_state == DISPLAY_STATE_SLEEP) {
+        // Restart deep sleep timer with new timeout (if enabled)
+        if (s_deep_sleep_timeout_ms > 0 && s_deep_sleep_timer != NULL) {
+            esp_timer_start_once(s_deep_sleep_timer, s_deep_sleep_timeout_ms * 1000ULL);
+        }
     }
-    // DISPLAY_STATE_SLEEP: no timers to start
 }
 
 // Update power management settings from config

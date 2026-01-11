@@ -132,11 +132,8 @@ static void encoder_read_and_dispatch(void) {
         last_count = s_encoder.count_value;
 
         // Queue the delta - main loop will coalesce multiple deltas
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        xQueueSendFromISR(s_input_queue, &delta, &xHigherPriorityTaskWoken);
-        if (xHigherPriorityTaskWoken) {
-            portYIELD_FROM_ISR();
-        }
+        // Note: esp_timer callbacks run in task context, not ISR, so use xQueueSend
+        (void)xQueueSend(s_input_queue, &delta, 0);
     }
 }
 
@@ -212,6 +209,13 @@ void platform_input_process_events(void) {
 
     if (total_ticks != 0) {
         display_activity_detected();  // Wake display and reset sleep timers
+
+        // Suppress encoder events right after deep sleep wake
+        // (the encoder tick that woke us shouldn't change volume)
+        if (display_is_encoder_suppressed()) {
+            return;
+        }
+
         // Dispatch single volume rotation with coalesced tick count
         ui_handle_volume_rotation(total_ticks);
     }

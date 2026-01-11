@@ -28,6 +28,13 @@
 #define RK_DEFAULT_SLEEP_BATTERY_ENABLED 1
 #define RK_DEFAULT_SLEEP_BATTERY_TIMEOUT_SEC 60
 
+// Deep sleep defaults (after soft sleep, enter deep sleep for max power saving)
+// Defaults to disabled when charging (device on USB power), but configurable
+#define RK_DEFAULT_DEEP_SLEEP_CHARGING_ENABLED 0
+#define RK_DEFAULT_DEEP_SLEEP_CHARGING_TIMEOUT_SEC 0
+#define RK_DEFAULT_DEEP_SLEEP_BATTERY_ENABLED 1
+#define RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC 1200  // 20 minutes after soft sleep
+
 // Power management defaults (disabled until proven stable)
 #define RK_DEFAULT_WIFI_POWER_SAVE_ENABLED 0
 #define RK_DEFAULT_CPU_FREQ_SCALING_ENABLED 0
@@ -67,6 +74,12 @@ typedef struct {
     uint8_t sleep_battery_enabled;
     uint16_t sleep_battery_timeout_sec;
 
+    // Deep sleep settings (after soft sleep, enter deep sleep for max power saving)
+    uint8_t deep_sleep_charging_enabled;
+    uint16_t deep_sleep_charging_timeout_sec;
+    uint8_t deep_sleep_battery_enabled;
+    uint16_t deep_sleep_battery_timeout_sec;
+
     // Power management (V2 addition)
     uint8_t wifi_power_save_enabled;     // Enable WiFi modem sleep when display sleeping
     uint8_t cpu_freq_scaling_enabled;    // Enable CPU frequency reduction when idle
@@ -100,6 +113,10 @@ static inline void rk_cfg_set_display_defaults(rk_cfg_t *cfg) {
     cfg->sleep_charging_timeout_sec = RK_DEFAULT_SLEEP_CHARGING_TIMEOUT_SEC;
     cfg->sleep_battery_enabled = RK_DEFAULT_SLEEP_BATTERY_ENABLED;
     cfg->sleep_battery_timeout_sec = RK_DEFAULT_SLEEP_BATTERY_TIMEOUT_SEC;
+    cfg->deep_sleep_charging_enabled = RK_DEFAULT_DEEP_SLEEP_CHARGING_ENABLED;
+    cfg->deep_sleep_charging_timeout_sec = RK_DEFAULT_DEEP_SLEEP_CHARGING_TIMEOUT_SEC;
+    cfg->deep_sleep_battery_enabled = RK_DEFAULT_DEEP_SLEEP_BATTERY_ENABLED;
+    cfg->deep_sleep_battery_timeout_sec = RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC;
     cfg->wifi_power_save_enabled = RK_DEFAULT_WIFI_POWER_SAVE_ENABLED;
     cfg->cpu_freq_scaling_enabled = RK_DEFAULT_CPU_FREQ_SCALING_ENABLED;
     cfg->sleep_poll_stopped_sec = RK_DEFAULT_SLEEP_POLL_STOPPED_SEC;
@@ -145,4 +162,15 @@ static inline uint16_t rk_cfg_get_sleep_timeout(const rk_cfg_t *cfg, bool is_cha
     return cfg->sleep_battery_enabled ? cfg->sleep_battery_timeout_sec : 0;
 }
 
-_Static_assert(sizeof(rk_cfg_t) == 366, "rk_cfg_t size changed - update RK_CFG_V1_SIZE if needed");
+// Get effective deep sleep timeout based on charging state (0 = disabled)
+static inline uint16_t rk_cfg_get_deep_sleep_timeout(const rk_cfg_t *cfg, bool is_charging) {
+    if (!cfg) {
+        return is_charging ? RK_DEFAULT_DEEP_SLEEP_CHARGING_TIMEOUT_SEC : RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC;
+    }
+    if (is_charging) {
+        return cfg->deep_sleep_charging_enabled ? cfg->deep_sleep_charging_timeout_sec : 0;
+    }
+    return cfg->deep_sleep_battery_enabled ? cfg->deep_sleep_battery_timeout_sec : 0;
+}
+
+_Static_assert(sizeof(rk_cfg_t) == 374, "rk_cfg_t size changed - update RK_CFG_V1_SIZE if needed");
