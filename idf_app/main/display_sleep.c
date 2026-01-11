@@ -349,19 +349,53 @@ static void enter_deep_sleep(void) {
 
     // Configure RTC GPIO input with pull-ups for reliable wakeup
     // (digital GPIO pull-ups are lost in deep sleep)
-    rtc_gpio_init(ENCODER_GPIO_A);
-    rtc_gpio_init(ENCODER_GPIO_B);
-    rtc_gpio_set_direction(ENCODER_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
-    rtc_gpio_set_direction(ENCODER_GPIO_B, RTC_GPIO_MODE_INPUT_ONLY);
-    rtc_gpio_pullup_en(ENCODER_GPIO_A);
-    rtc_gpio_pullup_en(ENCODER_GPIO_B);
-    rtc_gpio_pulldown_dis(ENCODER_GPIO_A);
-    rtc_gpio_pulldown_dis(ENCODER_GPIO_B);
+    esp_err_t err;
+
+    err = rtc_gpio_init(ENCODER_GPIO_A);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_init(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_init(ENCODER_GPIO_B);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_init(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_set_direction(ENCODER_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_set_direction(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_set_direction(ENCODER_GPIO_B, RTC_GPIO_MODE_INPUT_ONLY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_set_direction(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pullup_en(ENCODER_GPIO_A);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pullup_en(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pullup_en(ENCODER_GPIO_B);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pullup_en(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pulldown_dis(ENCODER_GPIO_A);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pulldown_dis(A) failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = rtc_gpio_pulldown_dis(ENCODER_GPIO_B);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rtc_gpio_pulldown_dis(B) failed: %s", esp_err_to_name(err));
+        return;
+    }
 
     // Encoder pins are pulled HIGH, going LOW on rotation
     uint64_t wake_gpio_mask = (1ULL << ENCODER_GPIO_A) | (1ULL << ENCODER_GPIO_B);
 
-    esp_err_t err = esp_sleep_enable_ext1_wakeup(wake_gpio_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+    err = esp_sleep_enable_ext1_wakeup(wake_gpio_mask, ESP_EXT1_WAKEUP_ANY_LOW);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure wake sources: %s", esp_err_to_name(err));
         // Don't enter deep sleep if wake source config failed
