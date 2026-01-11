@@ -330,12 +330,6 @@ static void deep_sleep_timer_callback(void *arg) {
 
 // Enter deep sleep - device will reset on wake
 static void enter_deep_sleep(void) {
-    // Don't deep sleep if charging (device is on USB power anyway)
-    if (battery_is_charging()) {
-        ESP_LOGI(TAG, "Skipping deep sleep - device is charging");
-        return;
-    }
-
     ESP_LOGI(TAG, "Preparing for deep sleep...");
 
     // Turn off backlight (GPIO47 is not RTC-capable, won't be held)
