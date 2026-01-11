@@ -363,78 +363,101 @@ static void build_layout(void) {
     lv_obj_set_style_border_width(s_status_dot, 0, 0);
     lv_obj_align(s_status_dot, LV_ALIGN_TOP_RIGHT, -35, 35);
 
-    // Battery indicator - centered above zone selector (horizontal Lucide style)
-    // Icon only - no numeric label needed with 4 discrete states
+    // ========================================================================
+    // Header group - battery + zone at top (flex column, explicit position)
+    // ========================================================================
+    lv_obj_t *header = lv_obj_create(s_ui_container);
+    lv_obj_set_size(header, SCREEN_SIZE - 60, 95);  // Tall tap zone extending toward volume
+    lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(header, 0, 0);
+    lv_obj_set_style_pad_all(header, 0, 0);
+    lv_obj_set_layout(header, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);  // Content at top, tap zone extends down
+    lv_obj_set_style_pad_row(header, 0, 0);  // Tight - battery and zone close together
+    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 28);  // Explicit position at top
+
 #if !TARGET_PC
-    s_battery_icon = lv_label_create(s_ui_container);
+    s_battery_icon = lv_label_create(header);
     lv_label_set_text(s_battery_icon, ICON_BATTERY_FULL);
     lv_obj_set_style_text_font(s_battery_icon, font_manager_get_lucide_battery(), 0);
-    lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);  // Subtle grey
-    // Center horizontally above zone selector (zone is at y=50) - lowered to y=35 for visibility
-    lv_obj_align(s_battery_icon, LV_ALIGN_TOP_MID, 0, 35);
+    lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);
 #endif
 
-    // Zone label - clickable zone name, positioned below the arc edge
-    s_zone_label = lv_label_create(s_ui_container);
-    lv_label_set_text(s_zone_label, s_pending.zone_name);
-    lv_obj_set_style_text_font(s_zone_label, font_normal(), 0);  // Normal font for readability
-    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xbbbbbb), 0);  // Light grey, visible
-    lv_obj_set_width(s_zone_label, SCREEN_SIZE - 120);  // Limit width for circular display
-    lv_obj_set_style_text_align(s_zone_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_zone_label, LV_LABEL_LONG_DOT);  // Truncate with ... if too long
-    lv_obj_align(s_zone_label, LV_ALIGN_TOP_MID, 0, 50);  // Move down to avoid arc edge
-    lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_pad_ver(s_zone_label, 12, 0);  // Expand tap area vertically (GH-90)
-    lv_obj_add_event_cb(s_zone_label, zone_label_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(s_zone_label, zone_label_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
+    // Make entire header tappable for zone selection
+    lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(header, zone_label_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(header, zone_label_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
+    // Visual feedback on press
+    lv_obj_set_style_bg_color(header, lv_color_hex(0x333333), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(header, LV_OPA_50, LV_STATE_PRESSED);
 
-    // Add press state visual feedback
-    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xfafafa), LV_STATE_PRESSED);
+    s_zone_label = lv_label_create(header);
+    lv_label_set_text(s_zone_label, s_pending.zone_name);
+    lv_obj_set_style_text_font(s_zone_label, font_small(), 0);
+    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xbbbbbb), 0);
+    lv_obj_set_width(s_zone_label, SCREEN_SIZE - 120);
+    lv_obj_set_style_text_align(s_zone_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_zone_label, LV_LABEL_LONG_DOT);
+
+    // ========================================================================
+    // Now Playing group - volume, artist, track, controls (flex column, centered)
+    // ========================================================================
+    lv_obj_t *now_playing = lv_obj_create(s_ui_container);
+    lv_obj_set_size(now_playing, SCREEN_SIZE - 80, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(now_playing, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(now_playing, 0, 0);
+    lv_obj_set_style_pad_all(now_playing, 0, 0);
+    lv_obj_set_layout(now_playing, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(now_playing, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(now_playing, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(now_playing, 6, 0);
+    lv_obj_align(now_playing, LV_ALIGN_CENTER, 0, 20);  // Centered with slight down offset
 
     // Volume display - large and prominent (primary use case)
-    // Positioned between zone and artist, using larger font
-    // Emphasis handled by emphasize_volume_label() when volume changes
-    s_volume_label_large = lv_label_create(s_ui_container);
+    s_volume_label_large = lv_label_create(now_playing);
     lv_label_set_text(s_volume_label_large, "-- dB");
-    lv_obj_set_style_text_font(s_volume_label_large, font_normal(), 0);  // Larger than before
-    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0xfafafa), 0);  // Prominent white
-    lv_obj_align(s_volume_label_large, LV_ALIGN_TOP_MID, 0, 85);
+    lv_obj_set_style_text_font(s_volume_label_large, font_normal(), 0);
+    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0xfafafa), 0);
+    lv_obj_set_style_margin_bottom(s_volume_label_large, 4, 0);  // Extra gap below volume
 
-    // Track name - positioned just above media controls (buttons are at CENTER + 80)
-    // Place track at CENTER - 20 to sit nicely above the buttons
-    s_track_label = lv_label_create(s_background);
-    lv_obj_set_width(s_track_label, SCREEN_SIZE - 80);
-    lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
-    lv_obj_set_style_text_align(s_track_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(s_track_label, lv_color_hex(0xfafafa), 0);  // Off-white for primary text
-    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Horizontal circular scroll
-    lv_obj_set_style_anim_time(s_track_label, 25000, LV_PART_MAIN);  // Scroll speed
-    lv_obj_align(s_track_label, LV_ALIGN_CENTER, 0, -20);  // Just above media controls
-    lv_label_set_text(s_track_label, s_pending.line1);
-
-    // Artist - positioned above track name with smaller font
-    s_artist_label = lv_label_create(s_background);
-    lv_obj_set_width(s_artist_label, SCREEN_SIZE - 80);
+    // Artist label - smaller font, secondary text
+    s_artist_label = lv_label_create(now_playing);
+    lv_obj_set_width(s_artist_label, SCREEN_SIZE - 100);
     lv_obj_set_style_text_font(s_artist_label, font_small(), 0);
     lv_obj_set_style_text_align(s_artist_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(s_artist_label, lv_color_hex(0xaaaaaa), 0);  // Light grey for secondary text
-    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);  // Horizontal circular scroll
-    lv_obj_set_style_anim_time(s_artist_label, 25000, LV_PART_MAIN);  // Scroll speed
-    lv_obj_align(s_artist_label, LV_ALIGN_CENTER, 0, -55);  // Above track name
+    lv_obj_set_style_text_color(s_artist_label, lv_color_hex(0xaaaaaa), 0);
+    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_anim_time(s_artist_label, 25000, LV_PART_MAIN);
     lv_label_set_text(s_artist_label, s_pending.line2);
 
-    // Media control buttons - Blue Knob style (3 circular buttons)
-    int btn_y = 80;  // Offset from center - moved lower for better ergonomics
-    int btn_spacing = 75;  // Space between buttons (adjusted for larger sizes)
+    // Track label - larger font, primary text
+    s_track_label = lv_label_create(now_playing);
+    lv_obj_set_width(s_track_label, SCREEN_SIZE - 100);
+    lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+    lv_obj_set_style_text_align(s_track_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(s_track_label, lv_color_hex(0xfafafa), 0);
+    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_anim_time(s_track_label, 25000, LV_PART_MAIN);
+    lv_label_set_text(s_track_label, s_pending.line1);
 
-    // Previous button (left) - use lv_btn_create for proper button widget
-    s_btn_prev = lv_btn_create(s_background);
-    lv_obj_set_size(s_btn_prev, 60, 60);  // Increased from 50x50 for easier tapping
+    // Controls row - flex row for transport buttons
+    lv_obj_t *controls = lv_obj_create(now_playing);
+    lv_obj_set_size(controls, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(controls, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(controls, 0, 0);
+    lv_obj_set_style_pad_all(controls, 0, 0);
+    lv_obj_set_layout(controls, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(controls, 14, 0);  // Spacing between buttons
+    lv_obj_set_style_margin_top(controls, 8, 0);   // Extra gap above controls
+
+    // Previous button
+    s_btn_prev = lv_btn_create(controls);
+    lv_obj_set_size(s_btn_prev, 60, 60);
     lv_obj_add_style(s_btn_prev, &style_button_secondary, 0);
-    lv_obj_align(s_btn_prev, LV_ALIGN_CENTER, -btn_spacing, btn_y);
     lv_obj_add_event_cb(s_btn_prev, btn_prev_event_cb, LV_EVENT_CLICKED, NULL);
-
-    // Override ALL states to prevent theme colors
     lv_obj_set_style_bg_color(s_btn_prev, lv_color_hex(0x1a1a1a), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_prev, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_prev, COLOR_GREY, LV_STATE_DEFAULT);
@@ -452,13 +475,10 @@ static void build_layout(void) {
     lv_obj_center(prev_label);
 
     // Play/Pause button (center, larger)
-    s_btn_play = lv_btn_create(s_background);
-    lv_obj_set_size(s_btn_play, 80, 80);  // Increased from 70x70 for easier tapping
+    s_btn_play = lv_btn_create(controls);
+    lv_obj_set_size(s_btn_play, 80, 80);
     lv_obj_add_style(s_btn_play, &style_button_primary, 0);
-    lv_obj_align(s_btn_play, LV_ALIGN_CENTER, 0, btn_y);
     lv_obj_add_event_cb(s_btn_play, btn_play_event_cb, LV_EVENT_CLICKED, NULL);
-
-    // Override ALL states to prevent theme colors
     lv_obj_set_style_bg_color(s_btn_play, lv_color_hex(0x2c2c2c), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_play, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_play, lv_color_hex(0x5a9fd4), LV_STATE_DEFAULT);
@@ -475,14 +495,11 @@ static void build_layout(void) {
     lv_obj_add_style(s_play_icon, &style_button_label, 0);
     lv_obj_center(s_play_icon);
 
-    // Next button (right)
-    s_btn_next = lv_btn_create(s_background);
-    lv_obj_set_size(s_btn_next, 60, 60);  // Increased from 50x50 for easier tapping
+    // Next button
+    s_btn_next = lv_btn_create(controls);
+    lv_obj_set_size(s_btn_next, 60, 60);
     lv_obj_add_style(s_btn_next, &style_button_secondary, 0);
-    lv_obj_align(s_btn_next, LV_ALIGN_CENTER, btn_spacing, btn_y);
     lv_obj_add_event_cb(s_btn_next, btn_next_event_cb, LV_EVENT_CLICKED, NULL);
-
-    // Override ALL states to prevent theme colors
     lv_obj_set_style_bg_color(s_btn_next, lv_color_hex(0x1a1a1a), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_next, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_next, COLOR_GREY, LV_STATE_DEFAULT);
