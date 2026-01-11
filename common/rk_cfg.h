@@ -29,8 +29,7 @@
 #define RK_DEFAULT_SLEEP_BATTERY_TIMEOUT_SEC 60
 
 // Deep sleep defaults (after soft sleep, enter deep sleep for max power saving)
-// Note: Deep sleep is hard-disabled when charging in rk_cfg_get_deep_sleep_timeout()
-// The charging fields exist for struct consistency but are ignored
+// Defaults to disabled when charging (device on USB power), but configurable
 #define RK_DEFAULT_DEEP_SLEEP_CHARGING_ENABLED 0
 #define RK_DEFAULT_DEEP_SLEEP_CHARGING_TIMEOUT_SEC 0
 #define RK_DEFAULT_DEEP_SLEEP_BATTERY_ENABLED 1
@@ -164,14 +163,12 @@ static inline uint16_t rk_cfg_get_sleep_timeout(const rk_cfg_t *cfg, bool is_cha
 }
 
 // Get effective deep sleep timeout based on charging state (0 = disabled)
-// Deep sleep is always disabled when charging - no point sleeping on USB power
 static inline uint16_t rk_cfg_get_deep_sleep_timeout(const rk_cfg_t *cfg, bool is_charging) {
-    // Hard-disable deep sleep when charging (device on USB power anyway)
-    if (is_charging) {
-        return 0;
-    }
     if (!cfg) {
-        return RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC;
+        return is_charging ? RK_DEFAULT_DEEP_SLEEP_CHARGING_TIMEOUT_SEC : RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC;
+    }
+    if (is_charging) {
+        return cfg->deep_sleep_charging_enabled ? cfg->deep_sleep_charging_timeout_sec : 0;
     }
     return cfg->deep_sleep_battery_enabled ? cfg->deep_sleep_battery_timeout_sec : 0;
 }
