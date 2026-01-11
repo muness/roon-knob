@@ -1408,6 +1408,32 @@ static bool fetch_knob_config(void) {
         }
     }
 
+    // deep_sleep_charging
+    cJSON *deep_sleep_charging = cJSON_GetObjectItem(config_obj, "deep_sleep_charging");
+    if (cJSON_IsObject(deep_sleep_charging)) {
+        cJSON *enabled = cJSON_GetObjectItem(deep_sleep_charging, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->deep_sleep_charging_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(deep_sleep_charging, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->deep_sleep_charging_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
+    // deep_sleep_battery
+    cJSON *deep_sleep_battery = cJSON_GetObjectItem(config_obj, "deep_sleep_battery");
+    if (cJSON_IsObject(deep_sleep_battery)) {
+        cJSON *enabled = cJSON_GetObjectItem(deep_sleep_battery, "enabled");
+        if (cJSON_IsBool(enabled)) {
+            cfg->deep_sleep_battery_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+        }
+        cJSON *timeout = cJSON_GetObjectItem(deep_sleep_battery, "timeout_sec");
+        if (cJSON_IsNumber(timeout)) {
+            cfg->deep_sleep_battery_timeout_sec = (uint16_t)timeout->valueint;
+        }
+    }
+
     // Power management settings
     cJSON *wifi_ps = cJSON_GetObjectItem(config_obj, "wifi_power_save_enabled");
     if (cJSON_IsBool(wifi_ps)) {
@@ -1423,14 +1449,16 @@ static bool fetch_knob_config(void) {
     }
 
     // Log parsed config values
-    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds",
+    LOGI("Config parsed: rot=%d/%d art=%d/%ds|%d/%ds dim=%d/%ds|%d/%ds sleep=%d/%ds|%d/%ds deep=%d/%ds|%d/%ds",
          cfg->rotation_charging, cfg->rotation_not_charging,
          cfg->art_mode_charging_enabled, cfg->art_mode_charging_timeout_sec,
          cfg->art_mode_battery_enabled, cfg->art_mode_battery_timeout_sec,
          cfg->dim_charging_enabled, cfg->dim_charging_timeout_sec,
          cfg->dim_battery_enabled, cfg->dim_battery_timeout_sec,
          cfg->sleep_charging_enabled, cfg->sleep_charging_timeout_sec,
-         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec);
+         cfg->sleep_battery_enabled, cfg->sleep_battery_timeout_sec,
+         cfg->deep_sleep_charging_enabled, cfg->deep_sleep_charging_timeout_sec,
+         cfg->deep_sleep_battery_enabled, cfg->deep_sleep_battery_timeout_sec);
     LOGI("Power config: wifi_ps=%d cpu_scale=%d sleep_poll_stopped=%ds",
          cfg->wifi_power_save_enabled, cfg->cpu_freq_scaling_enabled,
          cfg->sleep_poll_stopped_sec);
