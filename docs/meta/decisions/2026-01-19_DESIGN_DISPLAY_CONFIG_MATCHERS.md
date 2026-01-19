@@ -228,9 +228,9 @@ Extended response:
   "line2": "Track Title",
   "volume": 45,
   "display_config": {
-    "line1_size": "small",
-    "line2_size": "large",
-    "volume_text": true
+    "volume_text": {"visibility": "always", "size": "large", "color": "#fafafa"},
+    "line1": {"visibility": "always", "size": "small", "color": "#aaaaaa"},
+    "line2": {"visibility": "always", "size": "large", "color": "#fafafa"}
   }
 }
 ```

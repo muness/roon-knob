@@ -149,11 +149,11 @@ static void parse_text_element(const cJSON *json, text_element_config_t *out, co
         parse_color(color->valuestring, &out->color);
     }
 
-    // Parse fade timeout
+    // Parse fade timeout (0 means "use default", so only apply non-zero values)
     cJSON *timeout = cJSON_GetObjectItem(json, "fade_timeout_ms");
     if (cJSON_IsNumber(timeout)) {
         int val = (int)timeout->valuedouble;
-        if (val >= 0 && val <= 0xFFFF) {
+        if (val > 0 && val <= 0xFFFF) {
             out->fade_timeout_ms = (uint16_t)val;
         }
     }
@@ -179,11 +179,11 @@ static void parse_arc_element(const cJSON *json, arc_element_config_t *out, cons
         parse_color(color->valuestring, &out->color);
     }
 
-    // Parse fade timeout
+    // Parse fade timeout (0 means "use default", so only apply non-zero values)
     cJSON *timeout = cJSON_GetObjectItem(json, "fade_timeout_ms");
     if (cJSON_IsNumber(timeout)) {
         int val = (int)timeout->valuedouble;
-        if (val >= 0 && val <= 0xFFFF) {
+        if (val > 0 && val <= 0xFFFF) {
             out->fade_timeout_ms = (uint16_t)val;
         }
     }
@@ -191,6 +191,7 @@ static void parse_arc_element(const cJSON *json, arc_element_config_t *out, cons
 
 bool display_config_parse_json(const cJSON *json, display_config_t *out) {
     if (!json || !out) return false;
+    if (!cJSON_IsObject(json)) return false;
 
     // Start with a copy of defaults
     display_config_t cfg = s_default_config;

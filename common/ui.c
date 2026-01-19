@@ -228,13 +228,15 @@ static void apply_text_config(lv_obj_t *label, const text_element_config_t *cfg)
     // Color
     lv_obj_set_style_text_color(label, lv_color_hex(cfg->color), 0);
 
-    // Visibility (for VIS_NEVER - on_change handled by fade logic)
+    // Visibility
     if (cfg->visibility == VIS_NEVER) {
         lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
     } else if (cfg->visibility == VIS_ALWAYS) {
         lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+    } else if (cfg->visibility == VIS_ON_CHANGE) {
+        // Start hidden - event triggers will show, fade logic will hide after timeout
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
     }
-    // VIS_ON_CHANGE: don't change visibility here - fade logic handles it
 }
 
 static void apply_arc_config(lv_obj_t *arc, const arc_element_config_t *cfg) {
@@ -248,8 +250,10 @@ static void apply_arc_config(lv_obj_t *arc, const arc_element_config_t *cfg) {
         lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
     } else if (cfg->visibility == VIS_ALWAYS) {
         lv_obj_clear_flag(arc, LV_OBJ_FLAG_HIDDEN);
+    } else if (cfg->visibility == VIS_ON_CHANGE) {
+        // Start hidden - event triggers will show, fade logic will hide after timeout
+        lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
     }
-    // VIS_ON_CHANGE: don't change visibility here - fade logic handles it
 }
 
 static void check_fade_timeouts(void) {
