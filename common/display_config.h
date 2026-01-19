@@ -30,7 +30,7 @@ typedef struct {
 typedef struct {
     visibility_mode_t visibility;
     uint32_t color;              // Indicator color
-    uint16_t fade_timeout_ms;    // For VIS_ON_CHANGE
+    uint16_t fade_timeout_ms;    // For VIS_ON_CHANGE (0 = use default 3000ms)
 } arc_element_config_t;
 
 // Complete display config

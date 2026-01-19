@@ -306,13 +306,15 @@ typedef struct {
 ### Default Config (Matches Current Behavior)
 
 ```c
+#define DEFAULT_FADE_TIMEOUT_MS 3000
+
 static display_config_t s_display_config = {
-    .volume_text = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .color = 0xfafafa, .fade_timeout_ms = 0 },
-    .line1       = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .color = 0xaaaaaa, .fade_timeout_ms = 0 },
-    .line2       = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .color = 0xfafafa, .fade_timeout_ms = 0 },
-    .zone        = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .color = 0xbbbbbb, .fade_timeout_ms = 0 },
-    .volume_arc  = { .visibility = VIS_ALWAYS, .color = 0x5a9fd4, .fade_timeout_ms = 0 },
-    .progress_arc= { .visibility = VIS_ALWAYS, .color = 0x7bb9e8, .fade_timeout_ms = 0 },
+    .volume_text = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .color = 0xfafafa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .line1       = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .color = 0xaaaaaa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .line2       = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .color = 0xfafafa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .zone        = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .color = 0xbbbbbb, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .volume_arc  = { .visibility = VIS_ALWAYS, .color = 0x5a9fd4, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .progress_arc= { .visibility = VIS_ALWAYS, .color = 0x7bb9e8, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
 };
 ```
 

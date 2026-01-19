@@ -152,8 +152,8 @@ static void parse_text_element(const cJSON *json, text_element_config_t *out, co
     // Parse fade timeout (0 means "use default", so only apply non-zero values)
     cJSON *timeout = cJSON_GetObjectItem(json, "fade_timeout_ms");
     if (cJSON_IsNumber(timeout)) {
-        int val = (int)timeout->valuedouble;
-        if (val > 0 && val <= 0xFFFF) {
+        double val = timeout->valuedouble;
+        if (val > 0.0 && val <= 65535.0) {
             out->fade_timeout_ms = (uint16_t)val;
         }
     }
@@ -182,8 +182,8 @@ static void parse_arc_element(const cJSON *json, arc_element_config_t *out, cons
     // Parse fade timeout (0 means "use default", so only apply non-zero values)
     cJSON *timeout = cJSON_GetObjectItem(json, "fade_timeout_ms");
     if (cJSON_IsNumber(timeout)) {
-        int val = (int)timeout->valuedouble;
-        if (val > 0 && val <= 0xFFFF) {
+        double val = timeout->valuedouble;
+        if (val > 0.0 && val <= 65535.0) {
             out->fade_timeout_ms = (uint16_t)val;
         }
     }

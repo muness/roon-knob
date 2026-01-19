@@ -277,21 +277,21 @@ static void check_fade_timeouts(void) {
         }
     }
 
-    // Line1 (artist) fade
-    if (s_current_config.line1.visibility == VIS_ON_CHANGE && s_artist_label) {
+    // Line1 fade (s_track_label displays line1 data)
+    if (s_current_config.line1.visibility == VIS_ON_CHANGE && s_track_label) {
         uint16_t timeout = s_current_config.line1.fade_timeout_ms;
         if (timeout == 0) timeout = 3000;
         if (now - s_track_change_time > timeout) {
-            lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
-    // Line2 (track) fade
-    if (s_current_config.line2.visibility == VIS_ON_CHANGE && s_track_label) {
+    // Line2 fade (s_artist_label displays line2 data)
+    if (s_current_config.line2.visibility == VIS_ON_CHANGE && s_artist_label) {
         uint16_t timeout = s_current_config.line2.fade_timeout_ms;
         if (timeout == 0) timeout = 3000;
         if (now - s_track_change_time > timeout) {
-            lv_obj_add_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
@@ -1124,9 +1124,10 @@ void ui_apply_display_config(const display_config_t *config) {
     s_current_config = *config;
 
     // Apply to text elements
+    // Note: s_track_label displays line1, s_artist_label displays line2 (see build_layout)
     apply_text_config(s_volume_label_large, &config->volume_text);
-    apply_text_config(s_artist_label, &config->line1);
-    apply_text_config(s_track_label, &config->line2);
+    apply_text_config(s_track_label, &config->line1);
+    apply_text_config(s_artist_label, &config->line2);
     apply_text_config(s_zone_label, &config->zone);
 
     // Apply to arc elements
@@ -1150,11 +1151,12 @@ void ui_on_track_change(void) {
     s_track_change_time = lv_tick_get();
 
     // Show elements with VIS_ON_CHANGE
-    if (s_current_config.line1.visibility == VIS_ON_CHANGE && s_artist_label) {
-        lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (s_current_config.line2.visibility == VIS_ON_CHANGE && s_track_label) {
+    // Note: s_track_label displays line1, s_artist_label displays line2
+    if (s_current_config.line1.visibility == VIS_ON_CHANGE && s_track_label) {
         lv_obj_clear_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_current_config.line2.visibility == VIS_ON_CHANGE && s_artist_label) {
+        lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
