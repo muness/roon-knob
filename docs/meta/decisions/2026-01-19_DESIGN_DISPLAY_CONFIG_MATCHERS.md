@@ -40,13 +40,13 @@ The bridge knows:
 - Playback state
 
 Example matcher:
-```
+```clojure
 {:when {:source-type :radio}
  :display {...}}
 ```
 
 More specific:
-```
+```clojure
 {:when {:source-type :radio
         :station-name "WNYC"}
  :display {...}}
@@ -114,7 +114,7 @@ Each UI element can be configured with visibility, appearance, and behavior.
 User says: *"When listening to radio, show station name big, program small, hide volume text. Show track info briefly on change then fade."*
 
 Context from bridge:
-```
+```clojure
 {:source-type :radio
  :station "WNYC"
  :program "All Things Considered"
@@ -123,7 +123,7 @@ Context from bridge:
 ```
 
 Matcher:
-```
+```clojure
 {:when {:source-type :radio}
  :display {:volume_text {:visibility :never}
            :line1 {:from :station :size :large :visibility :on_change :fade_timeout_ms 5000}
@@ -153,7 +153,7 @@ Device receives (JSON):
 User says: *"For Tidal/Qobuz, always show artist small on top, track big below, volume on change only."*
 
 Context from bridge:
-```
+```clojure
 {:source-type :streaming
  :service :tidal
  :artist "Radiohead"
@@ -162,7 +162,7 @@ Context from bridge:
 ```
 
 Matcher:
-```
+```clojure
 {:when {:source-type #{:tidal :qobuz :streaming}}
  :display {:volume_text {:visibility :on_change :fade_timeout_ms 3000}
            :line1 {:from :artist :size :small :visibility :always}
@@ -190,7 +190,7 @@ Device receives (JSON):
 ### Example 3: Default
 
 Catch-all matching current behavior:
-```
+```clojure
 {:when :default
  :display {:volume_text {:visibility :always :size :large :color "#fafafa"}
            :line1 {:from :line1 :visibility :always :size :small :color "#aaaaaa"}
