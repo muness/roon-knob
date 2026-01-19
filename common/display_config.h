@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "cJSON.h"
+#include <cJSON.h>
 
 // Visibility modes
 typedef enum {
