@@ -34,7 +34,7 @@ typedef struct {
 } arc_element_config_t;
 
 // Complete display config
-typedef struct {
+typedef struct display_config {
     text_element_config_t volume_text;
     text_element_config_t line1;
     text_element_config_t line2;

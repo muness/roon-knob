@@ -26,6 +26,7 @@ set(SRC_FILES
     "fonts/lucide_battery_22.c"
     "../../common/app_main.c"
     "../../common/bridge_client.c"
+    "../../common/display_config.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
     "../../common/platform/platform_log.c"

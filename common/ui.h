@@ -59,6 +59,12 @@ void ui_set_network_status(const char *status);  // Show persistent network stat
 // Battery indicator
 void ui_update_battery(void);  // Force battery display refresh (call on USB connect/disconnect)
 
+// Display config
+#include "display_config.h"
+void ui_apply_display_config(const display_config_t *config);  // Apply config to all UI elements
+void ui_on_volume_change(void);   // Call when volume changes (triggers VIS_ON_CHANGE elements)
+void ui_on_track_change(void);    // Call when track changes (triggers VIS_ON_CHANGE elements)
+
 #ifdef __cplusplus
 }
 #endif

@@ -13,6 +13,7 @@
 #include "lvgl.h"
 #include "ui.h"
 #include "bridge_client.h"
+#include "display_config.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -97,6 +98,14 @@ static int s_zone_picker_current = -1;     // Currently active zone (no-op if se
 static lv_obj_t *s_update_btn;             // Update notification button
 static char s_update_version[32] = "";     // Available update version
 static int s_update_progress = -1;         // Update download progress (-1 = not updating)
+
+// Display config state
+static display_config_t s_current_config;
+static bool s_config_initialized = false;
+
+// Fade/visibility tracking
+static uint32_t s_volume_change_time = 0;
+static uint32_t s_track_change_time = 0;
 
 // State management
 static os_mutex_t s_state_lock = OS_MUTEX_INITIALIZER;
@@ -206,12 +215,96 @@ static inline int calculate_volume_percentage(float volume, float volume_min, fl
 }
 
 // ============================================================================
+// Display Config Application Helpers
+// ============================================================================
+
+static void apply_text_config(lv_obj_t *label, const text_element_config_t *cfg) {
+    if (!label || !cfg) return;
+
+    // Font size
+    lv_obj_set_style_text_font(label,
+        cfg->size == FONT_LARGE ? font_normal() : font_small(), 0);
+
+    // Color
+    lv_obj_set_style_text_color(label, lv_color_hex(cfg->color), 0);
+
+    // Visibility (for VIS_NEVER - on_change handled by fade logic)
+    if (cfg->visibility == VIS_NEVER) {
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    } else if (cfg->visibility == VIS_ALWAYS) {
+        lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+    }
+    // VIS_ON_CHANGE: don't change visibility here - fade logic handles it
+}
+
+static void apply_arc_config(lv_obj_t *arc, const arc_element_config_t *cfg) {
+    if (!arc || !cfg) return;
+
+    // Color (indicator)
+    lv_obj_set_style_arc_color(arc, lv_color_hex(cfg->color), LV_PART_INDICATOR);
+
+    // Visibility
+    if (cfg->visibility == VIS_NEVER) {
+        lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
+    } else if (cfg->visibility == VIS_ALWAYS) {
+        lv_obj_clear_flag(arc, LV_OBJ_FLAG_HIDDEN);
+    }
+    // VIS_ON_CHANGE: don't change visibility here - fade logic handles it
+}
+
+static void check_fade_timeouts(void) {
+    uint32_t now = lv_tick_get();
+
+    // Volume text fade
+    if (s_current_config.volume_text.visibility == VIS_ON_CHANGE && s_volume_label_large) {
+        uint16_t timeout = s_current_config.volume_text.fade_timeout_ms;
+        if (timeout == 0) timeout = 3000;  // default
+        if (now - s_volume_change_time > timeout) {
+            lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Volume arc fade
+    if (s_current_config.volume_arc.visibility == VIS_ON_CHANGE && s_volume_arc) {
+        uint16_t timeout = s_current_config.volume_arc.fade_timeout_ms;
+        if (timeout == 0) timeout = 3000;
+        if (now - s_volume_change_time > timeout) {
+            lv_obj_add_flag(s_volume_arc, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Line1 (artist) fade
+    if (s_current_config.line1.visibility == VIS_ON_CHANGE && s_artist_label) {
+        uint16_t timeout = s_current_config.line1.fade_timeout_ms;
+        if (timeout == 0) timeout = 3000;
+        if (now - s_track_change_time > timeout) {
+            lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Line2 (track) fade
+    if (s_current_config.line2.visibility == VIS_ON_CHANGE && s_track_label) {
+        uint16_t timeout = s_current_config.line2.fade_timeout_ms;
+        if (timeout == 0) timeout = 3000;
+        if (now - s_track_change_time > timeout) {
+            lv_obj_add_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+// ============================================================================
 // UI Initialization
 // ============================================================================
 
 void ui_init(void) {
     // Don't use theme - it causes ugly color overrides
     // We'll style everything manually for full control
+
+    // Initialize display config with defaults
+    if (!s_config_initialized) {
+        s_current_config = *display_config_get_default();
+        s_config_initialized = true;
+    }
 
     ESP_LOGI(UI_TAG, "Using ESP_NEW_JPEG software decoder for artwork");
 
@@ -1021,6 +1114,46 @@ bool ui_zone_picker_is_current_selection(void) {
 // Public API
 // ============================================================================
 
+void ui_apply_display_config(const display_config_t *config) {
+    if (!config) return;
+
+    s_current_config = *config;
+
+    // Apply to text elements
+    apply_text_config(s_volume_label_large, &config->volume_text);
+    apply_text_config(s_artist_label, &config->line1);
+    apply_text_config(s_track_label, &config->line2);
+    apply_text_config(s_zone_label, &config->zone);
+
+    // Apply to arc elements
+    apply_arc_config(s_volume_arc, &config->volume_arc);
+    apply_arc_config(s_progress_arc, &config->progress_arc);
+}
+
+void ui_on_volume_change(void) {
+    s_volume_change_time = lv_tick_get();
+
+    // Show elements with VIS_ON_CHANGE
+    if (s_current_config.volume_text.visibility == VIS_ON_CHANGE && s_volume_label_large) {
+        lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_current_config.volume_arc.visibility == VIS_ON_CHANGE && s_volume_arc) {
+        lv_obj_clear_flag(s_volume_arc, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void ui_on_track_change(void) {
+    s_track_change_time = lv_tick_get();
+
+    // Show elements with VIS_ON_CHANGE
+    if (s_current_config.line1.visibility == VIS_ON_CHANGE && s_artist_label) {
+        lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_current_config.line2.visibility == VIS_ON_CHANGE && s_track_label) {
+        lv_obj_clear_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void ui_loop_iter(void) {
     lv_task_handler();
     lv_timer_handler();
@@ -1029,6 +1162,9 @@ void ui_loop_iter(void) {
 
     // Check for pending UI updates (poll_pending inline - no timer needed)
     poll_pending(NULL);
+
+    // Check for fade timeouts on VIS_ON_CHANGE elements
+    check_fade_timeouts();
 }
 
 void ui_set_track(const char *line1, const char *line2) {
