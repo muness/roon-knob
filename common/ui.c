@@ -86,7 +86,7 @@ static lv_timer_t *s_status_timer;     // Timer to clear status messages
 static lv_obj_t *s_zone_picker_overlay;    // Dark background overlay
 static lv_obj_t *s_zone_list;              // List widget for zone selection
 static bool s_zone_picker_visible = false;
-#define MAX_ZONE_PICKER_ZONES 16
+#define MAX_ZONE_PICKER_ZONES 64
 #define MAX_ZONE_ID_LEN 48
 static char s_zone_picker_ids[MAX_ZONE_PICKER_ZONES][MAX_ZONE_ID_LEN];  // Store zone IDs
 static int s_zone_picker_count = 0;
