@@ -66,7 +66,9 @@ static lv_obj_t *s_zone_label;         // Zone name
 static lv_obj_t *s_btn_prev;           // Previous track button
 static lv_obj_t *s_btn_play;           // Play/pause button (center, large)
 static lv_obj_t *s_btn_next;           // Next track button
+static lv_obj_t *s_prev_icon;          // Previous track icon label
 static lv_obj_t *s_play_icon;          // Play/pause icon label
+static lv_obj_t *s_next_icon;          // Next track icon label
 static lv_obj_t *s_background;         // Light background container
 
 // Artwork layers
@@ -87,7 +89,7 @@ static lv_timer_t *s_status_timer;     // Timer to clear status messages
 static lv_obj_t *s_zone_picker_overlay;    // Dark background overlay
 static lv_obj_t *s_zone_list;              // List widget for zone selection
 static bool s_zone_picker_visible = false;
-#define MAX_ZONE_PICKER_ZONES 16
+#define MAX_ZONE_PICKER_ZONES 64
 #define MAX_ZONE_ID_LEN 48
 static char s_zone_picker_ids[MAX_ZONE_PICKER_ZONES][MAX_ZONE_ID_LEN];  // Store zone IDs
 static int s_zone_picker_count = 0;
@@ -221,12 +223,21 @@ static inline int calculate_volume_percentage(float volume, float volume_min, fl
 static void apply_text_config(lv_obj_t *label, const text_element_config_t *cfg) {
     if (!label || !cfg) return;
 
-    // Font size
+    // Font by family and size
     lv_obj_set_style_text_font(label,
-        cfg->size == FONT_LARGE ? font_normal() : font_small(), 0);
+        font_manager_get_font(cfg->family, cfg->size), 0);
 
     // Color
     lv_obj_set_style_text_color(label, lv_color_hex(cfg->color), 0);
+
+    // Text alignment
+    lv_text_align_t lv_align = LV_TEXT_ALIGN_CENTER;
+    if (cfg->align == TEXT_ALIGN_LEFT) {
+        lv_align = LV_TEXT_ALIGN_LEFT;
+    } else if (cfg->align == TEXT_ALIGN_RIGHT) {
+        lv_align = LV_TEXT_ALIGN_RIGHT;
+    }
+    lv_obj_set_style_text_align(label, lv_align, 0);
 
     // Visibility
     if (cfg->visibility == VIS_NEVER) {
@@ -245,6 +256,10 @@ static void apply_arc_config(lv_obj_t *arc, const arc_element_config_t *cfg) {
     // Color (indicator)
     lv_obj_set_style_arc_color(arc, lv_color_hex(cfg->color), LV_PART_INDICATOR);
 
+    // Width (0 = use default 6px)
+    uint8_t width = cfg->width > 0 ? cfg->width : 6;
+    lv_obj_set_style_arc_width(arc, width, LV_PART_INDICATOR);
+
     // Visibility
     if (cfg->visibility == VIS_NEVER) {
         lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
@@ -253,6 +268,36 @@ static void apply_arc_config(lv_obj_t *arc, const arc_element_config_t *cfg) {
     } else if (cfg->visibility == VIS_ON_CHANGE) {
         // Start hidden - event triggers will show, fade logic will hide after timeout
         lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void apply_button_config(lv_obj_t *btn, lv_obj_t *icon, const button_config_t *cfg) {
+    if (!btn || !cfg) return;
+
+    // Background color
+    lv_obj_set_style_bg_color(btn, lv_color_hex(cfg->bg_color), LV_STATE_DEFAULT);
+
+    // Border color
+    lv_obj_set_style_border_color(btn, lv_color_hex(cfg->border_color), LV_STATE_DEFAULT);
+
+    // Icon color
+    if (icon) {
+        lv_obj_set_style_text_color(icon, lv_color_hex(cfg->icon_color), 0);
+
+#if !TARGET_PC
+        // Icon size (only on device - PC uses built-in symbols)
+        const lv_font_t *icon_font = (cfg->icon_size == ICON_SIZE_LARGE)
+            ? font_icon_large()
+            : font_icon_normal();
+        lv_obj_set_style_text_font(icon, icon_font, 0);
+#endif
+    }
+
+    // Button visibility
+    if (cfg->visibility == VIS_NEVER) {
+        lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    } else if (cfg->visibility == VIS_ALWAYS) {
+        lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -560,16 +605,16 @@ static void build_layout(void) {
     lv_obj_set_style_border_color(s_btn_prev, COLOR_GREY, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_btn_prev, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
 
-    lv_obj_t *prev_label = lv_label_create(s_btn_prev);
+    s_prev_icon = lv_label_create(s_btn_prev);
 #if !TARGET_PC
-    lv_label_set_text(prev_label, ICON_SKIP_PREV);
-    lv_obj_set_style_text_font(prev_label, font_icon_normal(), 0);
+    lv_label_set_text(s_prev_icon, ICON_SKIP_PREV);
+    lv_obj_set_style_text_font(s_prev_icon, font_icon_normal(), 0);
 #else
-    lv_label_set_text(prev_label, LV_SYMBOL_PREV);
-    lv_obj_set_style_text_font(prev_label, &lv_font_montserrat_28, 0);
+    lv_label_set_text(s_prev_icon, LV_SYMBOL_PREV);
+    lv_obj_set_style_text_font(s_prev_icon, &lv_font_montserrat_28, 0);
 #endif
-    lv_obj_add_style(prev_label, &style_button_label, 0);
-    lv_obj_center(prev_label);
+    lv_obj_add_style(s_prev_icon, &style_button_label, 0);
+    lv_obj_center(s_prev_icon);
 
     // Play/Pause button (center, larger)
     s_btn_play = lv_btn_create(controls);
@@ -602,16 +647,16 @@ static void build_layout(void) {
     lv_obj_set_style_border_color(s_btn_next, COLOR_GREY, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_btn_next, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
 
-    lv_obj_t *next_label = lv_label_create(s_btn_next);
+    s_next_icon = lv_label_create(s_btn_next);
 #if !TARGET_PC
-    lv_label_set_text(next_label, ICON_SKIP_NEXT);
-    lv_obj_set_style_text_font(next_label, font_icon_normal(), 0);
+    lv_label_set_text(s_next_icon, ICON_SKIP_NEXT);
+    lv_obj_set_style_text_font(s_next_icon, font_icon_normal(), 0);
 #else
-    lv_label_set_text(next_label, LV_SYMBOL_NEXT);
-    lv_obj_set_style_text_font(next_label, &lv_font_montserrat_28, 0);
+    lv_label_set_text(s_next_icon, LV_SYMBOL_NEXT);
+    lv_obj_set_style_text_font(s_next_icon, &lv_font_montserrat_28, 0);
 #endif
-    lv_obj_add_style(next_label, &style_button_label, 0);
-    lv_obj_center(next_label);
+    lv_obj_add_style(s_next_icon, &style_button_label, 0);
+    lv_obj_center(s_next_icon);
 
     // Status bar at bottom - for transient messages like "Bridge: Connected"
     s_status_bar = lv_label_create(s_ui_container);
@@ -1133,6 +1178,11 @@ void ui_apply_display_config(const display_config_t *config) {
     // Apply to arc elements
     apply_arc_config(s_volume_arc, &config->volume_arc);
     apply_arc_config(s_progress_arc, &config->progress_arc);
+
+    // Apply to transport buttons
+    apply_button_config(s_btn_prev, s_prev_icon, &config->prev_button);
+    apply_button_config(s_btn_play, s_play_icon, &config->play_button);
+    apply_button_config(s_btn_next, s_next_icon, &config->next_button);
 }
 
 void ui_on_volume_change(void) {

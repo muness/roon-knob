@@ -82,7 +82,9 @@ Each UI element can be configured with visibility, appearance, and behavior.
 | Property | Values | Notes |
 |----------|--------|-------|
 | `visibility` | `always` / `never` / `on_change` | When to show |
-| `size` | `small` / `large` | 22px or 28px |
+| `size` | `small` / `medium` / `large` | 22px, 25px, or 28px |
+| `family` | `lato` / `notosans` | Font family |
+| `align` | `center` / `left` / `right` | Text alignment |
 | `color` | hex color | e.g., `#fafafa` |
 | `fade_timeout_ms` | milliseconds | For `on_change` mode (0 = default) |
 
@@ -92,7 +94,18 @@ Each UI element can be configured with visibility, appearance, and behavior.
 |----------|--------|-------|
 | `visibility` | `always` / `never` / `on_change` | When to show |
 | `color` | hex color | Indicator color |
+| `width` | pixels | Arc/ring thickness (0 = default 6px) |
 | `fade_timeout_ms` | milliseconds | For `on_change` mode |
+
+**Button elements** (prev_button, play_button, next_button):
+
+| Property | Values | Notes |
+|----------|--------|-------|
+| `visibility` | `always` / `never` | When to show (on_change not supported) |
+| `icon_color` | hex color | Icon/glyph color (e.g., `#fafafa`) |
+| `bg_color` | hex color | Button background color |
+| `border_color` | hex color | Button border color |
+| `icon_size` | `normal` / `large` | 44px or 60px Material Icons |
 
 **Metadata routing** (bridge resolves these before sending):
 
@@ -230,7 +243,10 @@ Extended response:
   "display_config": {
     "volume_text": {"visibility": "always", "size": "large", "color": "#fafafa"},
     "line1": {"visibility": "always", "size": "small", "color": "#aaaaaa"},
-    "line2": {"visibility": "always", "size": "large", "color": "#fafafa"}
+    "line2": {"visibility": "always", "size": "large", "color": "#fafafa"},
+    "prev_button": {"visibility": "always", "icon_color": "#fafafa", "bg_color": "#1a1a1a", "border_color": "#4a4a4a", "icon_size": "normal"},
+    "play_button": {"visibility": "always", "icon_color": "#fafafa", "bg_color": "#2c2c2c", "border_color": "#5a9fd4", "icon_size": "large"},
+    "next_button": {"visibility": "always", "icon_color": "#fafafa", "bg_color": "#1a1a1a", "border_color": "#4a4a4a", "icon_size": "normal"}
   }
 }
 ```
@@ -271,16 +287,32 @@ typedef enum {
     VIS_ON_CHANGE = 2,  // Show on event, fade after timeout
 } visibility_mode_t;
 
-// Font sizes (only two available)
+// Font sizes (three available)
 typedef enum {
-    FONT_SMALL = 0,     // 22px (lato_22)
-    FONT_LARGE = 1,     // 28px (notosans_28)
+    FONT_SMALL = 0,     // 22px
+    FONT_MEDIUM = 1,    // 25px
+    FONT_LARGE = 2,     // 28px
 } font_size_t;
+
+// Font families
+typedef enum {
+    FONT_LATO = 0,      // Lato (current default for small)
+    FONT_NOTOSANS = 1,  // Noto Sans (current default for large)
+} font_family_t;
+
+// Text alignment
+typedef enum {
+    TEXT_ALIGN_CENTER = 0,  // Center (default)
+    TEXT_ALIGN_LEFT = 1,    // Left aligned
+    TEXT_ALIGN_RIGHT = 2,   // Right aligned
+} text_align_t;
 
 // Config for text elements (volume_text, line1, line2, zone)
 typedef struct {
     visibility_mode_t visibility;
     font_size_t size;
+    font_family_t family;        // Font family (lato or notosans)
+    text_align_t align;          // Text alignment (center, left, right)
     uint32_t color;              // RGB hex (0xfafafa)
     uint16_t fade_timeout_ms;    // For VIS_ON_CHANGE (0 = use default 3000ms)
 } text_element_config_t;
@@ -289,8 +321,24 @@ typedef struct {
 typedef struct {
     visibility_mode_t visibility;
     uint32_t color;              // Indicator color
-    uint16_t fade_timeout_ms;    // For VIS_ON_CHANGE
+    uint8_t width;               // Arc width in pixels (0 = use default 6px)
+    uint16_t fade_timeout_ms;    // For VIS_ON_CHANGE (0 = use default 3000ms)
 } arc_element_config_t;
+
+// Icon sizes for buttons (Material Icons font sizes)
+typedef enum {
+    ICON_SIZE_NORMAL = 0,   // 44px (for secondary buttons)
+    ICON_SIZE_LARGE = 1,    // 60px (for primary play/pause button)
+} icon_size_t;
+
+// Config for transport buttons (prev_button, play_button, next_button)
+typedef struct {
+    visibility_mode_t visibility;
+    uint32_t icon_color;         // Icon color (0xfafafa default)
+    uint32_t bg_color;           // Background color
+    uint32_t border_color;       // Border color
+    icon_size_t icon_size;       // Icon font size (normal=44px, large=60px)
+} button_config_t;
 
 // Complete display config
 typedef struct {
@@ -300,6 +348,9 @@ typedef struct {
     text_element_config_t zone;
     arc_element_config_t volume_arc;
     arc_element_config_t progress_arc;
+    button_config_t prev_button;
+    button_config_t play_button;
+    button_config_t next_button;
 } display_config_t;
 ```
 
@@ -307,14 +358,18 @@ typedef struct {
 
 ```c
 #define DEFAULT_FADE_TIMEOUT_MS 3000
+#define DEFAULT_ARC_WIDTH 6
 
 static display_config_t s_display_config = {
-    .volume_text = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .color = 0xfafafa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
-    .line1       = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .color = 0xaaaaaa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
-    .line2       = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .color = 0xfafafa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
-    .zone        = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .color = 0xbbbbbb, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
-    .volume_arc  = { .visibility = VIS_ALWAYS, .color = 0x5a9fd4, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
-    .progress_arc= { .visibility = VIS_ALWAYS, .color = 0x7bb9e8, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .volume_text = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .family = FONT_NOTOSANS, .align = TEXT_ALIGN_CENTER, .color = 0xfafafa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .line1       = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .family = FONT_LATO, .align = TEXT_ALIGN_CENTER, .color = 0xaaaaaa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .line2       = { .visibility = VIS_ALWAYS, .size = FONT_LARGE, .family = FONT_NOTOSANS, .align = TEXT_ALIGN_CENTER, .color = 0xfafafa, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .zone        = { .visibility = VIS_ALWAYS, .size = FONT_SMALL, .family = FONT_LATO, .align = TEXT_ALIGN_CENTER, .color = 0xbbbbbb, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .volume_arc  = { .visibility = VIS_ALWAYS, .color = 0x5a9fd4, .width = DEFAULT_ARC_WIDTH, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .progress_arc= { .visibility = VIS_ALWAYS, .color = 0x7bb9e8, .width = DEFAULT_ARC_WIDTH, .fade_timeout_ms = DEFAULT_FADE_TIMEOUT_MS },
+    .prev_button = { .visibility = VIS_ALWAYS, .icon_color = 0xfafafa, .bg_color = 0x1a1a1a, .border_color = 0x4a4a4a, .icon_size = ICON_SIZE_NORMAL },
+    .play_button = { .visibility = VIS_ALWAYS, .icon_color = 0xfafafa, .bg_color = 0x2c2c2c, .border_color = 0x5a9fd4, .icon_size = ICON_SIZE_LARGE },
+    .next_button = { .visibility = VIS_ALWAYS, .icon_color = 0xfafafa, .bg_color = 0x1a1a1a, .border_color = 0x4a4a4a, .icon_size = ICON_SIZE_NORMAL },
 };
 ```
 
@@ -360,13 +415,18 @@ static display_config_t s_display_config = {
 
 - Call `ui_on_volume_change()` when volume adjusts
 
-### Font Constraints
+### Font System
 
-Only two text sizes available:
-- `lato_22` (small) - via `font_small()`
-- `notosans_28` (normal/large) - via `font_normal()`
+Two font families at three sizes each (6 fonts total):
 
-Binary choice: small or large. No medium option without generating new fonts (~1.5MB each).
+| Family | Small (22px) | Medium (25px) | Large (28px) |
+|--------|-------------|---------------|--------------|
+| Lato | `lato_22` | `lato_25` | `lato_28` |
+| Noto Sans | `notosans_22` | `notosans_25` | `notosans_28` |
+
+Each text font has a corresponding Material Icons fallback at the same size for icon rendering.
+
+**API**: `font_manager_get_font(family, size)` returns the correct font for any family/size combination.
 
 ### Testing Strategy
 
@@ -378,17 +438,19 @@ Binary choice: small or large. No medium option without generating new fonts (~1
 
 ### In Scope
 - All text element visibility (always/never/on_change)
-- All text element font size (small/large)
+- All text element font size (small/medium/large: 22/25/28px)
+- All text element font family (lato/notosans)
+- All text element alignment (center/left/right)
 - All text element color
 - All arc element visibility
 - All arc element color
+- All arc element width (ring thickness)
 - Fade timeout per element
 - JSON parsing from bridge response
 - Backward compatibility (no config = current behavior)
 
 ### Out of Scope (Future)
 - Position/spacing overrides
-- Additional font sizes (would need font generation)
 - User-authored matchers via device UI
 - Per-zone matcher overrides
 - Opacity levels (just show/hide for now)

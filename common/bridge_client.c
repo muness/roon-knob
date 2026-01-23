@@ -32,7 +32,7 @@ static void check_charging_state_change(void);
 
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
-#define MAX_ZONES 32
+#define MAX_ZONES 64
 #define POLL_DELAY_AWAKE_CHARGING_MS 2000   // 2 seconds when charging and display on
 #define POLL_DELAY_AWAKE_BATTERY_MS 5000   // 5 seconds on battery to save power
 #define POLL_DELAY_SLEEPING_MS 30000       // 30 seconds when display is sleeping
