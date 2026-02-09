@@ -25,49 +25,42 @@ See [AGENTS.md](AGENTS.md) for complete instructions on working with this projec
 
 ## Key Points
 
-- This project uses **Beads (bd)** for all task and issue management
-- Initialize once per clone: `bd init --quiet`
-- Core workflow: check `bd ready`, claim tasks, sync when done
-- Always run `bd sync` at the end of a session
-- No external trackers, no Markdown TODOs
+- This project uses **GitHub Issues** for all task and issue management
+- No Markdown TODOs — create GitHub issues instead
 
 ## Roadmap-Driven Development
 
 The [README.md](README.md#roadmap) contains the project roadmap with release blockers and future improvements. When starting work:
 
 1. **Check the roadmap** in README.md to understand priorities
-2. **Check beads** for existing tasks: `bd ready`
-3. **Create beads tasks** for roadmap items if they don't exist yet
-4. **Break down large features** into fine-grained subtasks using beads parent-child relationships
+2. **Check GitHub Issues** for existing tasks: `gh issue list`
+3. **Create GitHub issues** for roadmap items if they don't exist yet
+4. **Break down large features** into subtasks (use task lists in the parent issue)
 5. **Update roadmap status** in README.md when features are completed
 
 ### Example Workflow
 
 ```bash
 # Check what's ready to work on
-bd ready
+gh issue list
 
-# If implementing a roadmap feature, create parent task first
-bd create "WiFi Provisioning (SoftAP)" -t epic -p 0 --json
+# If implementing a roadmap feature, create a tracking issue
+gh issue create --title "WiFi Provisioning (SoftAP)" --body "Tracking issue for WiFi provisioning"
 
-# Break into subtasks
-bd create "Add SoftAP mode to wifi_manager" -t task -p 1 --deps parent-child:bd-XX
-bd create "Create captive portal HTML" -t task -p 1 --deps parent-child:bd-XX
-bd create "Add provisioning timeout logic" -t task -p 1 --deps parent-child:bd-XX
+# Create subtask issues
+gh issue create --title "Add SoftAP mode to wifi_manager"
+gh issue create --title "Create captive portal HTML"
+gh issue create --title "Add provisioning timeout logic"
 
-# Claim and work on a subtask
-bd update bd-YY --status in_progress
-
-# Complete and sync
-bd close bd-YY --reason "implemented"
-bd sync
+# Work on a subtask, then close when done
+gh issue close <number> -c "Implemented in #<PR>"
 ```
 
 ### Keeping Roadmap in Sync
 
 - When a roadmap feature is **fully complete**, update its status in README.md from "Not started" to "Complete"
 - When work is **in progress**, update to "In progress"
-- Beads is the source of truth for task details; README roadmap is the high-level view
+- GitHub Issues is the source of truth for task details; README roadmap is the high-level view
 
 ## Git Workflow (MANDATORY)
 

@@ -4,21 +4,18 @@
 
 | Tool | Binary/Skill | Purpose |
 |------|--------------|---------|
-| **Beads** | `bd` | Task tracking |
+| **GitHub Issues** | `gh` | Task tracking |
 | **Superego** | `sg` | Metacognitive review |
 | **Working Memory** | `wm` | Cross-session knowledge |
 | **Open Horizons** | MCP tools | Strategic endeavor tracking |
 | **Miranda** | `/miranda:*` | Workflow automation |
 
-First time after clone? Run `bd init --quiet`.
-
 ## When to Use Each
 
-**Beads (`bd`)** — Track what you're working on.
-- `bd ready` before starting
-- `bd sync` at end of session (after closing tasks)
-- Task types: `feature`, `bug`, `task`, `chore`, `epic` (priority 0-4, lower = higher)
-- Use `--deps parent-child:bd-XX` to nest subtasks under epics
+**GitHub Issues** — Track what you're working on.
+- `gh issue list` before starting
+- Create issues for new work, close them when done
+- Use task lists in parent issues to break down large features
 
 **Superego (`sg`)** — Second opinion at decision points.
 - Before committing to a plan or architecture
@@ -38,19 +35,18 @@ First time after clone? Run `bd init --quiet`.
 - `oh_create_guardrail_candidate` for constraints that should be enforced
 
 **Miranda** — Automate common workflows.
-- `/miranda:mouse` — Work a beads task end-to-end, create PR for review
-- `/miranda:drummer` — Batch review and merge open PRs
-- `/miranda:notes` — Address PR review comments
+- `/miranda:oh-task` — Work a GitHub issue end-to-end, create PR for review
+- `/miranda:oh-merge` — Batch review and merge open PRs for GitHub issues
+- `/miranda:oh-notes` — Address PR review comments
 
 ## Workflow
 
-1. `bd ready` — see what's available
-2. Claim a task, do the work
+1. `gh issue list` — see what's available
+2. Claim an issue, do the work
 3. `sg review` before committing if the change is significant
-4. `bd sync` at end of session
+4. Close the issue when done
 
 ## Principles
 
-- Beads is the source of truth for tasks (no Markdown TODOs)
+- GitHub Issues is the source of truth for tasks (no Markdown TODOs)
 - Superego catches strategic mistakes — invoke before committing to an approach
-- If `bd sync` complains about JSONL being newer, run `bd import` first
