@@ -265,30 +265,45 @@ Build-time defaults in `idf_app/main/Kconfig.projbuild`:
 
 These are applied when NVS has no saved configuration.
 
-## Troubleshooting
+## Troubleshooting FAQ
 
-### Device doesn't create setup network
+### I connected to `roon-knob-setup` but nothing happened — where do I enter my WiFi details?
 
-- Check if credentials are already saved (may be connecting to old network)
-- Reset WiFi: long-press zone label → Settings → Forget WiFi
+The device runs a captive portal that *should* pop up automatically, but some phones don't detect it. Here's what to do:
 
-### Captive portal doesn't auto-open
+1. **Turn off mobile data** on your phone (this is the most common fix — with cellular on, your phone bypasses the captive portal detection)
+2. Connect to the `roon-knob-setup` WiFi network
+3. If the portal still doesn't pop up, **open a browser and go to `http://192.168.4.1`**
+4. You'll see a form asking for your WiFi SSID and password — fill it in and submit
+5. The device will reboot and connect to your home network
 
-- Manually browse to `http://192.168.4.1`
-- Some phones need a few seconds after connecting
-- Try disabling mobile data temporarily
+**Tip:** Wait a few seconds after connecting before opening the browser. Some phones need a moment to settle onto the new network.
 
-### Can't connect after provisioning
+### The captive portal page won't load
 
-- Verify SSID and password are correct
-- Check if your router blocks new devices
-- Device will retry 5 times then return to AP mode
+- Make sure you're still connected to `roon-knob-setup` (some phones auto-disconnect from networks without internet)
+- Double-check mobile data is off
+- Try `http://192.168.4.1` in a private/incognito browser window (avoids cached redirects)
+- On iPhone, try opening Safari specifically — the built-in captive portal browser can be finicky
 
-### Bridge not found after WiFi connects
+### I don't see the `roon-knob-setup` network at all
 
-- Bridge URL is optional - mDNS discovers it automatically
-- Ensure bridge is running on the same network
-- If mDNS fails, enter bridge URL manually in settings
+- The device only creates the setup network when it has no saved WiFi credentials (first boot) or after 5 failed connection attempts
+- If it previously connected to a network, it may be trying to reconnect — wait about 30 seconds for it to give up and switch to AP mode
+- To force it back to setup mode: long-press the zone label → Settings → Forget WiFi
+
+### I entered my WiFi details but the device won't connect
+
+- Double-check the SSID and password are exactly right (passwords are case-sensitive)
+- Make sure your router is running on 2.4 GHz — the device does not support 5 GHz networks
+- Some routers block new devices by default (check your router's MAC filtering or client approval settings)
+- The device will retry 5 times, then return to AP mode so you can try again
+
+### The device connected to WiFi but can't find the bridge
+
+- The bridge URL is optional — the device discovers it automatically via mDNS
+- Make sure the [bridge](https://github.com/cloud-atlas-ai/unified-hifi-control) is running on the same network as the knob
+- If mDNS discovery isn't working, you can enter the bridge URL manually in settings
 
 ## Implementation Files
 
