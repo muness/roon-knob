@@ -111,11 +111,10 @@ See [board overview](../esp/hw-reference/board.md) for pin mappings.
 
 ## Task Management
 
-We use [Beads](https://github.com/anthropics/beads) for task tracking:
+We use [GitHub Issues](https://github.com/muness/roon-knob/issues) for task tracking:
 
 ```bash
-bd ready              # List unblocked tasks
-bd update roon-knob-XX --status in_progress
-bd close roon-knob-XX -r "Implemented in v1.2.6"
-bd sync               # Push/pull with git
+gh issue list                          # List open issues
+gh issue create --title "Description"  # Create a new issue
+gh issue close <number> -c "Done"      # Close when complete
 ```

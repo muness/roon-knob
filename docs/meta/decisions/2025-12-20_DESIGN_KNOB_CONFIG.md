@@ -248,4 +248,4 @@ Prerequisite for Phase 3. Options:
 - ADC voltage threshold (VBUS presence)
 - For USB-only setups: assume always charging
 
-This is covered by existing beads task `roon-knob-13q`.
+This is tracked as a GitHub issue.
