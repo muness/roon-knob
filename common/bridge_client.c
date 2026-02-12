@@ -1065,7 +1065,11 @@ void bridge_client_handle_volume_rotation(int ticks) {
     if (ticks == 0) return;
 
     // Block volume changes until device is fully operational (WiFi + zones loaded)
-    if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+    lock_state();
+    bool is_operational = (s_device_state == DEVICE_STATE_OPERATIONAL);
+    unlock_state();
+
+    if (!is_operational) {
         post_ui_message("Connecting...");
         return;
     }
@@ -1111,6 +1115,8 @@ void bridge_client_handle_volume_rotation(int ticks) {
 
 void bridge_client_set_network_ready(bool ready) {
     s_network_ready = ready;
+
+    lock_state();
     if (ready) {
         LOGI("Device state: %s -> CONNECTED (network ready)", device_state_name(s_device_state));
         s_device_state = DEVICE_STATE_CONNECTED;  // Transition: WiFi connected, zones not yet loaded
@@ -1123,6 +1129,7 @@ void bridge_client_set_network_ready(bool ready) {
         LOGI("Device state: %s -> %s (network lost)", device_state_name(s_device_state), device_state_name(new_state));
         s_device_state = new_state;
     }
+    unlock_state();
 }
 
 const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height) {
