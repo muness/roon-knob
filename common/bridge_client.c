@@ -593,6 +593,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
         if (s_device_state != DEVICE_STATE_OPERATIONAL) {
             LOGI("Device state: %s -> OPERATIONAL (zones loaded)", device_state_name(s_device_state));
             s_device_state = DEVICE_STATE_OPERATIONAL;
+            ui_set_network_status(NULL);  // Clear status banner when ready
         }
         success = should_sync && zone_label_copy[0] != '\0';
     }
@@ -929,6 +930,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
                     if (s_device_state != DEVICE_STATE_OPERATIONAL) {
                         LOGI("Device state: %s -> OPERATIONAL (zone selected)", device_state_name(s_device_state));
                         s_device_state = DEVICE_STATE_OPERATIONAL;
+                        ui_set_network_status(NULL);  // Clear status banner when ready
                     }
                     s_trigger_poll = true;
                     s_force_artwork_refresh = true;  // Force artwork reload for new zone
@@ -1120,6 +1122,7 @@ void bridge_client_set_network_ready(bool ready) {
     if (ready) {
         LOGI("Device state: %s -> CONNECTED (network ready)", device_state_name(s_device_state));
         s_device_state = DEVICE_STATE_CONNECTED;  // Transition: WiFi connected, zones not yet loaded
+        ui_set_network_status("Loading zones...");
         s_trigger_poll = true;  // Trigger immediate poll when network becomes ready
     } else {
         // Transition to RECONNECTING if we were operational, otherwise back to BOOT
@@ -1128,6 +1131,7 @@ void bridge_client_set_network_ready(bool ready) {
             : DEVICE_STATE_BOOT;
         LOGI("Device state: %s -> %s (network lost)", device_state_name(s_device_state), device_state_name(new_state));
         s_device_state = new_state;
+        ui_set_network_status(new_state == DEVICE_STATE_RECONNECTING ? "Reconnecting..." : "Connecting...");
     }
     unlock_state();
 }
