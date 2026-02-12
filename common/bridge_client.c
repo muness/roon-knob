@@ -62,6 +62,26 @@ struct zone_entry {
     char name[MAX_ZONE_NAME];
 };
 
+// Device operational state for safe volume control
+typedef enum {
+    DEVICE_STATE_BOOT,        // Hardware ready, no network
+    DEVICE_STATE_CONNECTING,  // WiFi attempting
+    DEVICE_STATE_CONNECTED,   // Network ready, zones unknown
+    DEVICE_STATE_OPERATIONAL, // Zones loaded, fully ready
+    DEVICE_STATE_RECONNECTING // Was operational, lost connection
+} device_state_t;
+
+static const char* device_state_name(device_state_t state) {
+    switch (state) {
+        case DEVICE_STATE_BOOT: return "BOOT";
+        case DEVICE_STATE_CONNECTING: return "CONNECTING";
+        case DEVICE_STATE_CONNECTED: return "CONNECTED";
+        case DEVICE_STATE_OPERATIONAL: return "OPERATIONAL";
+        case DEVICE_STATE_RECONNECTING: return "RECONNECTING";
+        default: return "UNKNOWN";
+    }
+}
+
 struct bridge_state {
     rk_cfg_t cfg;
     struct zone_entry zones[MAX_ZONES];
@@ -77,6 +97,7 @@ static bool s_running;
 static bool s_trigger_poll;
 static bool s_last_net_ok;
 static bool s_network_ready;
+static device_state_t s_device_state = DEVICE_STATE_BOOT;  // Initial state
 static bool s_force_artwork_refresh;  // Force artwork reload on zone change
 static float s_last_known_volume = 0.0f;   // Cached volume for optimistic UI updates
 static float s_last_known_volume_min = -80.0f;  // Cached volume min for clamping
@@ -569,6 +590,10 @@ static bool refresh_zone_label(bool prefer_zone_id) {
             should_sync = true;
         }
         s_state.zone_resolved = true;
+        if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+            LOGI("Device state: %s -> OPERATIONAL (zones loaded)", device_state_name(s_device_state));
+            s_device_state = DEVICE_STATE_OPERATIONAL;
+        }
         success = should_sync && zone_label_copy[0] != '\0';
     }
     unlock_state();
@@ -901,6 +926,10 @@ void bridge_client_handle_input(ui_input_event_t event) {
                     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
                     strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
                     s_state.zone_resolved = true;
+                    if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+                        LOGI("Device state: %s -> OPERATIONAL (zone selected)", device_state_name(s_device_state));
+                        s_device_state = DEVICE_STATE_OPERATIONAL;
+                    }
                     s_trigger_poll = true;
                     s_force_artwork_refresh = true;  // Force artwork reload for new zone
                     updated = true;
@@ -1035,6 +1064,12 @@ void bridge_client_handle_input(ui_input_event_t event) {
 void bridge_client_handle_volume_rotation(int ticks) {
     if (ticks == 0) return;
 
+    // Block volume changes until device is fully operational (WiFi + zones loaded)
+    if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+        post_ui_message("Connecting...");
+        return;
+    }
+
     // Determine velocity multiplier (applied to zone's step)
     int abs_ticks = ticks < 0 ? -ticks : ticks;
     int step_multiplier;
@@ -1077,10 +1112,16 @@ void bridge_client_handle_volume_rotation(int ticks) {
 void bridge_client_set_network_ready(bool ready) {
     s_network_ready = ready;
     if (ready) {
-        LOGI("Network ready - HTTP requests enabled");
+        LOGI("Device state: %s -> CONNECTED (network ready)", device_state_name(s_device_state));
+        s_device_state = DEVICE_STATE_CONNECTED;  // Transition: WiFi connected, zones not yet loaded
         s_trigger_poll = true;  // Trigger immediate poll when network becomes ready
     } else {
-        LOGI("Network not ready - HTTP requests disabled");
+        // Transition to RECONNECTING if we were operational, otherwise back to BOOT
+        device_state_t new_state = (s_device_state == DEVICE_STATE_OPERATIONAL)
+            ? DEVICE_STATE_RECONNECTING
+            : DEVICE_STATE_BOOT;
+        LOGI("Device state: %s -> %s (network lost)", device_state_name(s_device_state), device_state_name(new_state));
+        s_device_state = new_state;
     }
 }
 
