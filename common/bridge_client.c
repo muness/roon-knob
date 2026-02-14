@@ -9,6 +9,7 @@
 #include "platform/platform_time.h"
 #include "os_mutex.h"
 #include "ui.h"
+#include "display_config.h"
 
 #ifdef ESP_PLATFORM
 #include "display_sleep.h"
@@ -108,6 +109,8 @@ static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 static bool s_last_charging_state = true;  // Track charging state for config reapply
 static bool s_last_is_playing = false;     // Track play state for extended sleep polling
 static char s_last_zones_sha[9] = {0};     // Track zones SHA for zone list change detection
+static char s_prev_line1[MAX_LINE] = {0};  // Previous track line1 for change detection
+static char s_prev_line2[MAX_LINE] = {0};  // Previous track line2 for change detection
 #define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
@@ -513,6 +516,29 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         extract_json_string(zones_sha_key, "\"zones_sha\"", state->zones_sha, sizeof(state->zones_sha));
     } else {
         state->zones_sha[0] = '\0';
+    }
+
+    // Parse display_config from bridge response (if present)
+    // Uses cJSON for nested object parsing; backward compatible if missing
+    cJSON *root = cJSON_Parse(resp);
+    if (root) {
+        cJSON *display_config_json = cJSON_GetObjectItem(root, "display_config");
+        if (display_config_json) {
+            display_config_t config;
+            if (display_config_parse_json(display_config_json, &config)) {
+                ui_apply_display_config(&config);
+            }
+        }
+        cJSON_Delete(root);
+    }
+
+    // Detect track changes (line1 or line2 changed)
+    if (strcmp(state->line1, s_prev_line1) != 0 || strcmp(state->line2, s_prev_line2) != 0) {
+        strncpy(s_prev_line1, state->line1, sizeof(s_prev_line1) - 1);
+        s_prev_line1[sizeof(s_prev_line1) - 1] = '\0';
+        strncpy(s_prev_line2, state->line2, sizeof(s_prev_line2) - 1);
+        s_prev_line2[sizeof(s_prev_line2) - 1] = '\0';
+        ui_on_track_change();
     }
 
     // Note: Don't parse zones from now_playing response - it doesn't have zone_name
@@ -1008,6 +1034,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
             s_state.cfg.zone_id, predicted_down);
         unlock_state();
         ui_show_volume_change(predicted_down, s_last_known_volume_step);
+        ui_on_volume_change();
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
@@ -1024,6 +1051,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
             s_state.cfg.zone_id, predicted_up);
         unlock_state();
         ui_show_volume_change(predicted_up, s_last_known_volume_step);
+        ui_on_volume_change();
         if (!send_control_json(body)) {
             post_ui_message("Volume change failed");
         }
@@ -1109,6 +1137,7 @@ void bridge_client_handle_volume_rotation(int ticks) {
 
     // Show volume overlay immediately with predicted value (optimistic UI)
     ui_show_volume_change(predicted_vol, s_last_known_volume_step);
+    ui_on_volume_change();
 
     if (!send_control_json(body)) {
         post_ui_message("Volume change failed");

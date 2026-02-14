@@ -17,15 +17,22 @@ set(SRC_FILES
     "font_manager.c"
     # Generated bitmap fonts (run scripts/generate_fonts.sh to regenerate)
     # Typography: Lato for metadata, Noto Sans for content (matches Roon's design)
+    # Each family at three sizes: small (22px), medium (25px), large (28px)
     "fonts/lato_22.c"
+    "fonts/lato_25.c"
+    "fonts/lato_28.c"
+    "fonts/notosans_22.c"
+    "fonts/notosans_25.c"
     "fonts/notosans_28.c"
     "fonts/material_icons_22.c"
+    "fonts/material_icons_25.c"
     "fonts/material_icons_28.c"
     "fonts/material_icons_44.c"
     "fonts/material_icons_60.c"
     "fonts/lucide_battery_22.c"
     "../../common/app_main.c"
     "../../common/bridge_client.c"
+    "../../common/display_config.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
     "../../common/platform/platform_log.c"
