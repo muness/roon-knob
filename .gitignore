@@ -19,3 +19,4 @@ idf_app/sdkconfig.override
 .claude/
 .superego/
 .wm/
+.cache/
