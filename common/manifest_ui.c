@@ -931,3 +931,77 @@ bool manifest_ui_zone_picker_is_current_selection(void) {
   // Return false to always allow selection (bridge_client does its own check).
   return false;
 }
+
+#if USE_MANIFEST
+// ── Compatibility shims ──────────────────────────────────────────────────────
+// When USE_MANIFEST=1, ui.c is not linked. Other files (ui_network.c, etc.)
+// call ui_* functions directly. Provide thin forwards to manifest_ui_*.
+
+void ui_init(void) { manifest_ui_init(); }
+void ui_set_status(bool online) { manifest_ui_set_status(online); }
+void ui_set_message(const char *msg) { manifest_ui_set_message(msg); }
+void ui_set_zone_name(const char *name) { manifest_ui_set_zone_name(name); }
+void ui_set_network_status(const char *status) {
+  manifest_ui_set_network_status(status);
+}
+void ui_set_artwork(const char *key) { manifest_ui_set_artwork(key); }
+void ui_show_volume_change(float v, float s) {
+  manifest_ui_show_volume_change(v, s);
+}
+void ui_set_input_handler(ui_input_cb_t h) { manifest_ui_set_input_handler(h); }
+void ui_update(const char *l1, const char *l2, bool p, float v, float vn,
+               float vx, float vs, int sp, int le) {
+  (void)l2;
+  (void)p;
+  (void)v;
+  (void)vn;
+  (void)vx;
+  (void)vs;
+  (void)sp;
+  (void)le;
+  manifest_ui_set_message(l1);
+}
+void ui_dispatch_input(ui_input_event_t ev) {
+  if (s_input_cb)
+    s_input_cb(ev);
+}
+void ui_handle_volume_rotation(int ticks) {
+  if (manifest_ui_is_zone_picker_visible()) {
+    manifest_ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
+  }
+  // Volume rotation handled by bridge_client directly
+}
+void ui_loop_iter(void) {
+  lv_task_handler();
+  lv_timer_handler();
+}
+void ui_show_zone_picker(const char **n, const char **i, int c, int s) {
+  (void)n;
+  (void)i;
+  (void)c;
+  (void)s;
+  manifest_ui_show_zone_picker();
+}
+void ui_hide_zone_picker(void) { manifest_ui_hide_zone_picker(); }
+bool ui_is_zone_picker_visible(void) {
+  return manifest_ui_is_zone_picker_visible();
+}
+void ui_zone_picker_scroll(int d) { manifest_ui_zone_picker_scroll(d); }
+void ui_zone_picker_get_selected_id(char *o, size_t l) {
+  manifest_ui_zone_picker_get_selected_id(o, l);
+}
+bool ui_zone_picker_is_current_selection(void) {
+  return manifest_ui_zone_picker_is_current_selection();
+}
+int ui_zone_picker_get_selected(void) { return 0; }
+void ui_update_battery(void) { /* no-op in manifest mode */ }
+void ui_set_controls_visible(bool v) { (void)v; }
+void ui_test_pattern(void) {}
+void ui_set_update_available(const char *ver) { (void)ver; }
+void ui_set_update_progress(int pct) { (void)pct; }
+void ui_trigger_update(void) {}
+void ui_set_progress(int seek, int len) {
+  (void)seek;
+  (void)len;
+}
+#endif /* USE_MANIFEST */

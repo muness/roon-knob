@@ -1,6 +1,7 @@
 #include "platform/platform_input.h"
 #include "ui.h"
 #if USE_MANIFEST
+#include "bridge_client.h"
 #include "manifest_ui.h"
 #endif
 #include "display_sleep.h"

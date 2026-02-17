@@ -16,9 +16,9 @@ extern "C" {
 
 // ── Limits ──────────────────────────────────────────────────────────────────
 
-#define MANIFEST_MAX_SCREENS 8
+#define MANIFEST_MAX_SCREENS 4
 #define MANIFEST_MAX_LINES 4
-#define MANIFEST_MAX_LIST_ITEMS 64
+#define MANIFEST_MAX_LIST_ITEMS 16
 #define MANIFEST_MAX_TEXT 128
 #define MANIFEST_MAX_ID 32
 #define MANIFEST_MAX_URL 256

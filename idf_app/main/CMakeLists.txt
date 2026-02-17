@@ -26,7 +26,6 @@ set(SRC_FILES
     "fonts/lucide_battery_22.c"
     "../../common/app_main.c"
     "../../common/bridge_client.c"
-    "../../common/ui.c"
     "../../common/ui_jpeg.c"
     "../../common/manifest_parse.c"
     "../../common/manifest_ui.c"
@@ -72,6 +71,9 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 
+# Force -O3 for our code (override IDF default)
+target_compile_options(${COMPONENT_LIB} PRIVATE -O3)
+
 # Manifest-driven UI (ADR-0003). Set to 1 to use manifest protocol.
 # Default OFF = existing hardcoded UI.
 option(USE_MANIFEST "Use manifest-driven knob UI" OFF)
@@ -79,5 +81,6 @@ if(USE_MANIFEST)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_MANIFEST=1)
 else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_MANIFEST=0)
+    target_sources(${COMPONENT_LIB} PRIVATE "../../common/ui.c")
 endif()
 
