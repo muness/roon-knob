@@ -12,8 +12,8 @@
 
 #ifdef ESP_PLATFORM
 #include "display_sleep.h"
-#include "lwip/sockets.h"
 #include "lwip/netdb.h"
+#include "lwip/sockets.h"
 #endif
 
 #if USE_MANIFEST
@@ -1068,11 +1068,9 @@ static void bridge_poll_thread(void *arg) {
         if (manifest) {
           memset(manifest, 0, sizeof(manifest_t));
           manifest->version = 1;
-          strncpy(manifest->sha, s_manifest_sha,
-                  sizeof(manifest->sha) - 1);
+          strncpy(manifest->sha, s_manifest_sha, sizeof(manifest->sha) - 1);
           manifest->screen_count = 0; // No screen updates
-          manifest->fast.is_playing =
-              (udp_resp.flags & UDP_FLAG_PLAYING) != 0;
+          manifest->fast.is_playing = (udp_resp.flags & UDP_FLAG_PLAYING) != 0;
           manifest->fast.transport.play =
               (udp_resp.flags & UDP_FLAG_PLAY_OK) != 0;
           manifest->fast.transport.pause =
@@ -1092,8 +1090,21 @@ static void bridge_poll_thread(void *arg) {
       }
     }
 
+    // Log transport method (every 30th poll to avoid spam)
+    static int s_udp_poll_count = 0;
+    if (udp_ok) {
+      s_udp_poll_count++;
+      if (s_udp_poll_count == 1 || s_udp_poll_count % 30 == 0) {
+        LOGI("UDP fast-path OK (poll #%d, sha_changed=%d, vol=%.0f)",
+             s_udp_poll_count, sha_changed, udp_resp.volume);
+      }
+    } else {
+      s_udp_poll_count = 0;
+    }
+
     if (!ok) {
       // UDP failed or unavailable — fall back to HTTP
+      LOGI("UDP unavailable, falling back to HTTP");
       manifest = fetch_manifest();
       ok = (manifest != NULL);
     }
