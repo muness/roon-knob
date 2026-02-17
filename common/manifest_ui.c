@@ -1425,9 +1425,148 @@ void ui_set_controls_visible(bool v) {
   }
 }
 void ui_test_pattern(void) {}
-void ui_set_update_available(const char *ver) { (void)ver; }
-void ui_set_update_progress(int pct) { (void)pct; }
-void ui_trigger_update(void) {}
+// ── OTA Update UI ───────────────────────────────────────────────────────────
+
+#ifdef ESP_PLATFORM
+#include "ota_update.h"
+#endif
+
+/// OTA overlay widgets — created on first use, hidden/shown as needed.
+static struct {
+  lv_obj_t *overlay;   // Full-screen semi-transparent background
+  lv_obj_t *arc;       // Download progress arc
+  lv_obj_t *label;     // Status text
+  lv_obj_t *pct_label; // Percentage text inside arc
+  bool updating;       // True once download starts (disables dismiss)
+} s_ota;
+
+static void ota_overlay_clicked(lv_event_t *e) {
+  (void)e;
+  if (!s_ota.updating) {
+    ui_trigger_update();
+  }
+}
+
+static void build_ota_overlay(void) {
+  if (s_ota.overlay)
+    return;
+  if (!s_chrome.screen_root)
+    return;
+
+  s_ota.overlay = lv_obj_create(s_chrome.screen_root);
+  lv_obj_set_size(s_ota.overlay, SCREEN_SIZE, SCREEN_SIZE);
+  lv_obj_center(s_ota.overlay);
+  lv_obj_set_style_bg_color(s_ota.overlay, COLOR_BG, 0);
+  lv_obj_set_style_bg_opa(s_ota.overlay, LV_OPA_80, 0);
+  lv_obj_set_style_border_width(s_ota.overlay, 0, 0);
+  lv_obj_set_style_pad_all(s_ota.overlay, 0, 0);
+  lv_obj_remove_flag(s_ota.overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Progress arc (reuse progress screen style)
+  s_ota.arc = lv_arc_create(s_ota.overlay);
+  lv_obj_set_size(s_ota.arc, 180, 180);
+  lv_obj_align(s_ota.arc, LV_ALIGN_CENTER, 0, -10);
+  lv_arc_set_range(s_ota.arc, 0, 100);
+  lv_arc_set_value(s_ota.arc, 0);
+  lv_arc_set_bg_angles(s_ota.arc, 0, 359);
+  lv_arc_set_rotation(s_ota.arc, 270);
+  lv_arc_set_mode(s_ota.arc, LV_ARC_MODE_NORMAL);
+  lv_obj_remove_flag(s_ota.arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_arc_width(s_ota.arc, 8, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(s_ota.arc, COLOR_STATUS_GREEN, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(s_ota.arc, 8, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(s_ota.arc, COLOR_ARC_BG, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_ota.arc, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_add_flag(s_ota.arc, LV_OBJ_FLAG_HIDDEN);
+
+  // Percentage inside arc
+  s_ota.pct_label = lv_label_create(s_ota.overlay);
+  lv_obj_align(s_ota.pct_label, LV_ALIGN_CENTER, 0, -10);
+  lv_obj_set_style_text_font(s_ota.pct_label, font_large(), 0);
+  lv_obj_set_style_text_color(s_ota.pct_label, COLOR_TEXT_PRIMARY, 0);
+  lv_label_set_text(s_ota.pct_label, "");
+  lv_obj_add_flag(s_ota.pct_label, LV_OBJ_FLAG_HIDDEN);
+
+  // Status label below arc
+  s_ota.label = lv_label_create(s_ota.overlay);
+  lv_obj_align(s_ota.label, LV_ALIGN_CENTER, 0, 70);
+  lv_obj_set_style_text_font(s_ota.label, font_small(), 0);
+  lv_obj_set_style_text_color(s_ota.label, COLOR_TEXT_SECONDARY, 0);
+  lv_obj_set_style_text_align(s_ota.label, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(s_ota.label, "");
+
+  lv_obj_add_flag(s_ota.overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_ota.overlay, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(s_ota.overlay, ota_overlay_clicked, LV_EVENT_CLICKED,
+                      NULL);
+}
+
+// ── OTA UI thread callbacks ─
+
+typedef struct {
+  char version[32];
+} ota_version_data_t;
+
+static void ui_cb_ota_available(void *arg) {
+  ota_version_data_t *d = (ota_version_data_t *)arg;
+  build_ota_overlay();
+
+  if (d->version[0]) {
+    char text[64];
+    snprintf(text, sizeof(text), "Update %s\nPress to install", d->version);
+    lv_label_set_text(s_ota.label, text);
+    lv_obj_add_flag(s_ota.arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_ota.pct_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_ota.overlay, LV_OBJ_FLAG_HIDDEN);
+    s_ota.updating = false;
+  } else {
+    // NULL/empty = hide
+    if (s_ota.overlay)
+      lv_obj_add_flag(s_ota.overlay, LV_OBJ_FLAG_HIDDEN);
+    s_ota.updating = false;
+  }
+  free(d);
+}
+
+static void ui_cb_ota_progress(void *arg) {
+  int pct = (int)(uintptr_t)arg;
+  build_ota_overlay();
+
+  if (pct >= 0 && pct <= 100) {
+    lv_arc_set_value(s_ota.arc, pct);
+    lv_obj_clear_flag(s_ota.arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_ota.pct_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_ota.overlay, LV_OBJ_FLAG_HIDDEN);
+    char text[8];
+    snprintf(text, sizeof(text), "%d%%", pct);
+    lv_label_set_text(s_ota.pct_label, text);
+    lv_label_set_text(s_ota.label, "Updating...");
+    s_ota.updating = true;
+  } else {
+    if (s_ota.overlay)
+      lv_obj_add_flag(s_ota.overlay, LV_OBJ_FLAG_HIDDEN);
+    s_ota.updating = false;
+  }
+}
+
+void ui_set_update_available(const char *ver) {
+  ota_version_data_t *d = calloc(1, sizeof(*d));
+  if (!d)
+    return;
+  if (ver && ver[0])
+    strncpy(d->version, ver, sizeof(d->version) - 1);
+  platform_task_post_to_ui(ui_cb_ota_available, d);
+}
+
+void ui_set_update_progress(int pct) {
+  platform_task_post_to_ui(ui_cb_ota_progress, (void *)(uintptr_t)pct);
+}
+
+void ui_trigger_update(void) {
+#ifdef ESP_PLATFORM
+  ota_start_update();
+#endif
+}
 void ui_set_progress(int seek, int len) {
   (void)seek;
   (void)len;
