@@ -984,9 +984,6 @@ void manifest_ui_update(const manifest_t *manifest) {
   if (!manifest)
     return;
 
-  LOGI("manifest_ui_update: screen_count=%d sha=%s", manifest->screen_count,
-       manifest->sha);
-
   // Always apply fast state (volume, seek, transport)
   update_media_fast(&manifest->fast);
 
