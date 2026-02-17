@@ -204,7 +204,7 @@ static struct {
 
 // ── Arc animation state ─────────────────────────────────────────────────────
 
-#define ARC_ANIM_DURATION_MS 300 // Smooth transition time
+#define ARC_ANIM_DURATION_MS 500 // Smooth transition time
 
 static struct {
   int volume_pct;   // Current displayed volume %
@@ -235,7 +235,7 @@ static void animate_arc(lv_obj_t *arc, int from, int to, int duration_ms,
   lv_anim_set_values(&a, from, to);
   lv_anim_set_duration(&a, duration_ms);
   lv_anim_set_exec_cb(&a, cb);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
   lv_anim_start(&a);
 }
 
@@ -328,7 +328,7 @@ static void format_volume_text(char *buf, size_t len, float vol, float vol_min,
     }
   } else {
     // Percentage mode
-    snprintf(buf, len, "%d", (int)vol);
+    snprintf(buf, len, "%d%%", (int)vol);
   }
 }
 
