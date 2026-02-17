@@ -74,9 +74,9 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 # Force -O3 for our code (override IDF default)
 target_compile_options(${COMPONENT_LIB} PRIVATE -O3)
 
-# Manifest-driven UI (ADR-0003). Set to 1 to use manifest protocol.
+# Manifest-driven UI (ADR-0003). Set to OFF to use legacy hardcoded UI.
 # Default OFF = existing hardcoded UI.
-option(USE_MANIFEST "Use manifest-driven knob UI" OFF)
+option(USE_MANIFEST "Use manifest-driven knob UI" ON)
 if(USE_MANIFEST)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_MANIFEST=1)
 else()
