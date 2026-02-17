@@ -32,7 +32,8 @@
   manifest_ui_zone_picker_get_selected_id(o, l)
 #define UI_ZONE_PICKER_IS_CURRENT()                                            \
   manifest_ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le) manifest_ui_set_message(l1)
+#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le) /* noop in manifest mode   \
+                                                     */
 #else
 #define UI_SET_STATUS(o) ui_set_status(o)
 #define UI_SET_MESSAGE(m) ui_set_message(m)
@@ -613,6 +614,8 @@ static manifest_t *fetch_manifest(void) {
     return NULL;
 
   char url[384];
+  // Send SHA for fast-path: bridge returns only fast state when screens
+  // unchanged
   if (s_manifest_sha[0]) {
     snprintf(url, sizeof(url), "%s/knob/manifest?zone_id=%s&sha=%s",
              bridge_base, zone_id, s_manifest_sha);
@@ -620,16 +623,10 @@ static manifest_t *fetch_manifest(void) {
     snprintf(url, sizeof(url), "%s/knob/manifest?zone_id=%s", bridge_base,
              zone_id);
   }
-
   char *resp = NULL;
   size_t resp_len = 0;
   int ret = platform_http_get(url, &resp, &resp_len);
-
-  // 304 Not Modified — screens unchanged, but we still need fast state.
-  // The bridge doesn't return a body on 304, so re-fetch without sha.
-  // (Alternative: cache the last full manifest and re-apply fast only.
-  //  For now, keep it simple — 304 means skip.)
-  if (ret == 304 || (!resp && ret == 0)) {
+  if (ret != 0 || !resp || resp_len == 0) {
     platform_http_free(resp);
     return NULL;
   }
@@ -646,7 +643,6 @@ static manifest_t *fetch_manifest(void) {
   }
 
   if (!manifest_parse(resp, resp_len, m)) {
-    LOGI("fetch_manifest: parse failed");
     free(m);
     platform_http_free(resp);
     return NULL;
@@ -679,23 +675,22 @@ static void ui_manifest_cb(void *arg) {
   for (int i = 0; i < m->screen_count; i++) {
     if (m->screens[i].type == SCREEN_TYPE_MEDIA) {
       const char *key = m->screens[i].data.media.image_key;
+      const char *url = m->screens[i].data.media.image_url;
       bool force = s_force_artwork_refresh;
       if (force) {
         s_force_artwork_refresh = false;
         last_image_key[0] = '\0';
       }
-      if (key[0] && (force || strcmp(key, last_image_key) != 0)) {
-        manifest_ui_set_artwork(key);
+      if (key[0] && url[0] && (force || strcmp(key, last_image_key) != 0)) {
+        manifest_ui_set_artwork(url);
         strncpy(last_image_key, key, sizeof(last_image_key) - 1);
         last_image_key[sizeof(last_image_key) - 1] = '\0';
       }
       break;
     }
   }
-
   free(m);
 }
-
 static void post_manifest_update(manifest_t *m) {
   platform_task_post_to_ui(ui_manifest_cb, m);
 }
@@ -1318,7 +1313,8 @@ void bridge_client_handle_volume_rotation(int ticks) {
     step_multiplier = 1; // Slow rotation (fine-grained control)
   }
 
-  // Calculate optimistic new volume with clamping (inside lock for consistency)
+  // Calculate optimistic new volume with clamping (inside lock for
+  // consistency)
   lock_state();
   float delta = step_multiplier * s_last_known_volume_step;
   float predicted_vol = s_last_known_volume + (ticks > 0 ? delta : -delta);
@@ -1332,8 +1328,8 @@ void bridge_client_handle_volume_rotation(int ticks) {
   // Update cached volume immediately for next rotation (optimistic tracking)
   s_last_known_volume = predicted_vol;
 
-  // Send volume request to Roon (absolute value for exact match with optimistic
-  // UI)
+  // Send volume request to Roon (absolute value for exact match with
+  // optimistic UI)
   char body[256];
   snprintf(body, sizeof(body),
            "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.1f}",
@@ -1360,7 +1356,8 @@ void bridge_client_set_network_ready(bool ready) {
     UI_SET_NETWORK_STATUS("Loading zones...");
     s_trigger_poll = true; // Trigger immediate poll when network becomes ready
   } else {
-    // Transition to RECONNECTING if we were operational, otherwise back to BOOT
+    // Transition to RECONNECTING if we were operational, otherwise back to
+    // BOOT
     device_state_t new_state = (s_device_state == DEVICE_STATE_OPERATIONAL)
                                    ? DEVICE_STATE_RECONNECTING
                                    : DEVICE_STATE_BOOT;
@@ -1375,26 +1372,31 @@ void bridge_client_set_network_ready(bool ready) {
 }
 
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
-                                          int width, int height) {
+                                          int width, int height,
+                                          int clip_radius) {
   if (!url_buf || buf_len < 256) {
     return NULL;
   }
-
   lock_state();
   const char *bridge_base = s_state.cfg.bridge_base;
   const char *zone_id = s_state.cfg.zone_id;
-
   if (!bridge_base || !bridge_base[0] || !zone_id || !zone_id[0]) {
     unlock_state();
     return NULL;
   }
-
-  snprintf(url_buf, buf_len,
-           "%s/now_playing/"
-           "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565",
-           bridge_base, zone_id, width, height);
+  if (clip_radius > 0) {
+    snprintf(url_buf, buf_len,
+             "%s/now_playing/"
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565&clip_"
+             "radius=%d",
+             bridge_base, zone_id, width, height, clip_radius);
+  } else {
+    snprintf(url_buf, buf_len,
+             "%s/now_playing/"
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565",
+             bridge_base, zone_id, width, height);
+  }
   unlock_state();
-
   return url_buf;
 }
 
