@@ -202,6 +202,43 @@ static struct {
   lv_obj_t *message_label;
 } s_status;
 
+// ── Arc animation state ─────────────────────────────────────────────────────
+
+#define ARC_ANIM_DURATION_MS 300 // Smooth transition time
+
+static struct {
+  int volume_pct;   // Current displayed volume %
+  int progress_pct; // Current displayed progress %
+} s_arc_state;
+
+/// LVGL animation callback: set arc value during animation.
+static void arc_anim_cb(void *obj, int32_t value) {
+  lv_arc_set_value((lv_obj_t *)obj, value);
+}
+
+/// LVGL animation callback: set arc value + update volume gradient color.
+static void volume_arc_anim_cb(void *obj, int32_t value) {
+  lv_arc_set_value((lv_obj_t *)obj, value);
+  lv_obj_set_style_arc_color((lv_obj_t *)obj, volume_gradient_color(value),
+                             LV_PART_INDICATOR);
+  s_arc_state.volume_pct = value;
+}
+
+/// Animate an arc from its current value to a target value.
+static void animate_arc(lv_obj_t *arc, int from, int to, int duration_ms,
+                        lv_anim_exec_xcb_t cb) {
+  if (from == to || !arc)
+    return;
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, arc);
+  lv_anim_set_values(&a, from, to);
+  lv_anim_set_duration(&a, duration_ms);
+  lv_anim_set_exec_cb(&a, cb);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
+}
+
 // Input callback (same pattern as ui.c)
 static ui_input_cb_t s_input_cb = NULL;
 
@@ -803,9 +840,8 @@ static void update_media_fast(const manifest_fast_t *fast) {
   // Volume arc
   int vol_pct = calculate_volume_percentage(fast->volume, fast->volume_min,
                                             fast->volume_max);
-  lv_arc_set_value(s_media.volume_arc, vol_pct);
-  lv_obj_set_style_arc_color(s_media.volume_arc, volume_gradient_color(vol_pct),
-                             LV_PART_INDICATOR);
+  animate_arc(s_media.volume_arc, s_arc_state.volume_pct, vol_pct,
+              ARC_ANIM_DURATION_MS, volume_arc_anim_cb);
 
   // Volume label
   char vol_text[16];
@@ -820,9 +856,12 @@ static void update_media_fast(const manifest_fast_t *fast) {
       progress_pct = 100;
     if (progress_pct < 0)
       progress_pct = 0;
-    lv_arc_set_value(s_media.progress_arc, progress_pct);
+    animate_arc(s_media.progress_arc, s_arc_state.progress_pct, progress_pct,
+                ARC_ANIM_DURATION_MS, arc_anim_cb);
+    s_arc_state.progress_pct = progress_pct;
     lv_obj_clear_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
   } else {
+    s_arc_state.progress_pct = 0;
     lv_arc_set_value(s_media.progress_arc, 0);
     lv_obj_add_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
   }
@@ -906,8 +945,10 @@ static void update_progress_screen(const manifest_progress_t *progress) {
   if (pct > 100)
     pct = 100;
 
-  if (s_progress.arc)
-    lv_arc_set_value(s_progress.arc, pct);
+  if (s_progress.arc) {
+    int from = lv_arc_get_value(s_progress.arc);
+    animate_arc(s_progress.arc, from, pct, ARC_ANIM_DURATION_MS, arc_anim_cb);
+  }
 
   if (s_progress.label)
     lv_label_set_text(s_progress.label, progress->label);
@@ -1173,6 +1214,7 @@ static void ui_cb_show_volume(void *arg) {
     lv_arc_set_value(s_media.volume_arc, pct);
     lv_obj_set_style_arc_color(s_media.volume_arc, volume_gradient_color(pct),
                                LV_PART_INDICATOR);
+    s_arc_state.volume_pct = pct; // Sync tracked state
   }
   free(vals);
 }
