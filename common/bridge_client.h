@@ -36,6 +36,22 @@ bool bridge_client_is_bridge_mdns(
 #define UDP_REQUEST_SIZE 54
 #define UDP_RESPONSE_SIZE 48
 
+#define UDP_CMD_PLAY_PAUSE  1
+#define UDP_CMD_NEXT        2
+#define UDP_CMD_PREV        3
+#define UDP_CMD_STOP        4
+#define UDP_CMD_VOLUME_SET  5
+#define UDP_CMD_SIZE        36
+#define UDP_CMD_VOL_SIZE    40
+
+typedef struct __attribute__((packed)) {
+    uint16_t magic;       // 0x524B LE
+    uint8_t  cmd;         // command code
+    uint8_t  _pad;        // reserved
+    char     zone_id[32]; // null-terminated
+    float    value;       // f32 LE (for volume)
+} udp_command_t;
+
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
     uint8_t  sha[20];     // manifest SHA (null-terminated in 20-byte field)

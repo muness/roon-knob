@@ -726,6 +726,55 @@ static bool udp_poll_fast_state(udp_fast_response_t *resp_out) {
   return true;
 }
 
+/// Send a volume command via UDP (non-blocking fire-and-forget).
+/// Returns true on success, false if UDP unavailable (caller should fall back to
+/// HTTP).
+static bool udp_send_volume(float volume) {
+  if (s_udp_sock < 0)
+    return false;
+
+  char bridge_base[128];
+  char zone_id[64];
+  lock_state();
+  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
+  bridge_base[sizeof(bridge_base) - 1] = '\0';
+  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
+  zone_id[sizeof(zone_id) - 1] = '\0';
+  unlock_state();
+
+  if (bridge_base[0] == '\0' || zone_id[0] == '\0')
+    return false;
+
+  char host[64];
+  uint16_t bridge_port = 8088;
+  if (!parse_bridge_host_port(bridge_base, host, sizeof(host), &bridge_port))
+    return false;
+  uint16_t udp_port = bridge_port + UDP_FAST_PORT_OFFSET;
+
+  struct sockaddr_in dest;
+  memset(&dest, 0, sizeof(dest));
+  dest.sin_family = AF_INET;
+  dest.sin_port = htons(udp_port);
+
+  if (inet_aton(host, &dest.sin_addr) == 0) {
+    struct hostent *he = gethostbyname(host);
+    if (!he)
+      return false;
+    memcpy(&dest.sin_addr, he->h_addr_list[0], sizeof(dest.sin_addr));
+  }
+
+  udp_command_t cmd;
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.magic = UDP_FAST_MAGIC;
+  cmd.cmd = UDP_CMD_VOLUME_SET;
+  strncpy(cmd.zone_id, zone_id, sizeof(cmd.zone_id) - 1);
+  cmd.value = volume;
+
+  ssize_t sent = sendto(s_udp_sock, &cmd, sizeof(cmd), 0,
+                        (struct sockaddr *)&dest, sizeof(dest));
+  return (sent == sizeof(cmd));
+}
+
 /// Fetch manifest from bridge. Returns heap-allocated manifest_t on success.
 /// Caller must free the returned pointer.
 static manifest_t *fetch_manifest(void) {
@@ -1416,8 +1465,10 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id, predicted_down);
     unlock_state();
     UI_SHOW_VOLUME_CHANGE(predicted_down, s_last_known_volume_step);
-    if (!send_control_json(body)) {
-      post_ui_message("Volume change failed");
+    if (!udp_send_volume(predicted_down)) {
+      if (!send_control_json(body)) {
+        post_ui_message("Volume change failed");
+      }
     }
     break;
   }
@@ -1433,8 +1484,10 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id, predicted_up);
     unlock_state();
     UI_SHOW_VOLUME_CHANGE(predicted_up, s_last_known_volume_step);
-    if (!send_control_json(body)) {
-      post_ui_message("Volume change failed");
+    if (!udp_send_volume(predicted_up)) {
+      if (!send_control_json(body)) {
+        post_ui_message("Volume change failed");
+      }
     }
     break;
   }
@@ -1528,8 +1581,10 @@ void bridge_client_handle_volume_rotation(int ticks) {
   // Show volume overlay immediately with predicted value (optimistic UI)
   UI_SHOW_VOLUME_CHANGE(predicted_vol, s_last_known_volume_step);
 
-  if (!send_control_json(body)) {
-    post_ui_message("Volume change failed");
+  if (!udp_send_volume(predicted_vol)) {
+    if (!send_control_json(body)) {
+      post_ui_message("Volume change failed");
+    }
   }
 }
 

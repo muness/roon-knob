@@ -205,10 +205,6 @@ static struct {
 // ── Arc animation state ─────────────────────────────────────────────────────
 
 #define ARC_ANIM_DURATION_MS 550 // Smooth transition time
-#define VOLUME_GUARD_MS                                                        \
-  1500 // Suppress polled volume updates after optimistic change
-
-static uint32_t s_volume_guard_until = 0; // lv_tick_get() timestamp
 
 static struct {
   int volume_pct;   // Current displayed volume %
@@ -841,18 +837,16 @@ static void show_screen(int nav_index) {
 // ── Update functions ───────────────────────────────────────────────────────
 
 static void update_media_fast(const manifest_fast_t *fast) {
-  // Volume arc — skip if optimistic update is still fresh
-  bool volume_guarded = lv_tick_get() < s_volume_guard_until;
-  if (!volume_guarded) {
-    int vol_pct = calculate_volume_percentage(fast->volume, fast->volume_min,
-                                              fast->volume_max);
-    animate_arc(s_media.volume_arc, s_arc_state.volume_pct, vol_pct,
-                ARC_ANIM_DURATION_MS, volume_arc_anim_cb);
-    char vol_text[16];
-    format_volume_text(vol_text, sizeof(vol_text), fast->volume,
-                       fast->volume_min, fast->volume_step);
-    lv_label_set_text(s_media.volume_label, vol_text);
-  }
+  // Volume arc
+  int vol_pct = calculate_volume_percentage(fast->volume, fast->volume_min,
+                                            fast->volume_max);
+  animate_arc(s_media.volume_arc, s_arc_state.volume_pct, vol_pct,
+              ARC_ANIM_DURATION_MS, volume_arc_anim_cb);
+  // Volume label
+  char vol_text[16];
+  format_volume_text(vol_text, sizeof(vol_text), fast->volume, fast->volume_min,
+                     fast->volume_step);
+  lv_label_set_text(s_media.volume_label, vol_text);
 
   // Progress arc — only visible when track has duration
   if (fast->length > 0) {
@@ -1217,7 +1211,6 @@ static void ui_cb_show_volume(void *arg) {
     lv_obj_set_style_arc_color(s_media.volume_arc, volume_gradient_color(pct),
                                LV_PART_INDICATOR);
     s_arc_state.volume_pct = pct; // Sync tracked state
-    s_volume_guard_until = lv_tick_get() + VOLUME_GUARD_MS;
   }
   free(vals);
 }
