@@ -12,6 +12,8 @@
 
 #ifdef ESP_PLATFORM
 #include "display_sleep.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
 #endif
 
 #if USE_MANIFEST
@@ -599,6 +601,130 @@ static bool fetch_now_playing(struct now_playing_state *state) {
 // ── Manifest fetch ──────────────────────────────────────────────────────────
 
 static char s_manifest_sha[9] = {0}; // Cached SHA for 304 support
+static int s_udp_sock = -1; // Persistent UDP socket for fast-path polling
+
+/// Parse host and port from bridge_base URL (e.g. "http://192.168.50.225:8088")
+/// Returns true on success, writing host (null-terminated) and port.
+static bool parse_bridge_host_port(const char *bridge_base, char *host_out,
+                                   size_t host_len, uint16_t *port_out) {
+  if (!bridge_base || !bridge_base[0])
+    return false;
+  const char *hp = bridge_base;
+  const char *scheme = strstr(bridge_base, "://");
+  if (scheme)
+    hp = scheme + 3;
+  // Find end of host (colon or slash or NUL)
+  const char *colon = NULL;
+  const char *end = hp;
+  while (*end && *end != '/' && *end != '\0') {
+    if (*end == ':' && !colon)
+      colon = end;
+    end++;
+  }
+  if (colon) {
+    size_t hlen = (size_t)(colon - hp);
+    if (hlen >= host_len)
+      hlen = host_len - 1;
+    memcpy(host_out, hp, hlen);
+    host_out[hlen] = '\0';
+    *port_out = (uint16_t)atoi(colon + 1);
+  } else {
+    size_t hlen = (size_t)(end - hp);
+    if (hlen >= host_len)
+      hlen = host_len - 1;
+    memcpy(host_out, hp, hlen);
+    host_out[hlen] = '\0';
+    *port_out = 8088; // default
+  }
+  return host_out[0] != '\0';
+}
+
+/// Try UDP fast-path poll. Returns true if we got a valid response and
+/// populated *resp_out. On failure, caller should fall back to HTTP.
+static bool udp_poll_fast_state(udp_fast_response_t *resp_out) {
+  if (!resp_out)
+    return false;
+
+  // Get bridge_base and zone_id under lock
+  char bridge_base[128];
+  char zone_id[64];
+  lock_state();
+  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
+  bridge_base[sizeof(bridge_base) - 1] = '\0';
+  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
+  zone_id[sizeof(zone_id) - 1] = '\0';
+  unlock_state();
+
+  if (bridge_base[0] == '\0' || zone_id[0] == '\0')
+    return false;
+
+  // Parse host and port from bridge_base
+  char host[64];
+  uint16_t bridge_port = 8088;
+  if (!parse_bridge_host_port(bridge_base, host, sizeof(host), &bridge_port))
+    return false;
+  uint16_t udp_port = bridge_port + UDP_FAST_PORT_OFFSET;
+
+  // Create socket once, reuse across polls
+  if (s_udp_sock < 0) {
+    s_udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s_udp_sock < 0) {
+      LOGW("UDP: socket creation failed");
+      return false;
+    }
+    // Set 500ms receive timeout
+    struct timeval tv = {.tv_sec = 0, .tv_usec = 500000};
+    setsockopt(s_udp_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  }
+
+  // Resolve host to IP
+  struct sockaddr_in dest;
+  memset(&dest, 0, sizeof(dest));
+  dest.sin_family = AF_INET;
+  dest.sin_port = htons(udp_port);
+
+  // Try direct IP parse first, then DNS
+  if (inet_aton(host, &dest.sin_addr) == 0) {
+    struct hostent *he = gethostbyname(host);
+    if (!he) {
+      LOGW("UDP: DNS resolve failed for %s", host);
+      return false;
+    }
+    memcpy(&dest.sin_addr, he->h_addr_list[0], sizeof(dest.sin_addr));
+  }
+
+  // Build request
+  udp_fast_request_t req;
+  memset(&req, 0, sizeof(req));
+  req.magic = UDP_FAST_MAGIC; // LE native on ESP32
+  strncpy((char *)req.sha, s_manifest_sha, sizeof(req.sha) - 1);
+  strncpy(req.zone_id, zone_id, sizeof(req.zone_id) - 1);
+
+  // Send
+  ssize_t sent = sendto(s_udp_sock, &req, sizeof(req), 0,
+                        (struct sockaddr *)&dest, sizeof(dest));
+  if (sent != sizeof(req)) {
+    LOGW("UDP: sendto failed (%d)", (int)sent);
+    return false;
+  }
+
+  // Receive
+  udp_fast_response_t resp;
+  ssize_t recvd = recvfrom(s_udp_sock, &resp, sizeof(resp), 0, NULL, NULL);
+  if (recvd != sizeof(resp)) {
+    // Timeout or wrong size — not an error, bridge may not support UDP yet
+    return false;
+  }
+
+  // Validate
+  if (resp.magic != UDP_FAST_MAGIC || resp.version != 1) {
+    LOGW("UDP: bad magic=0x%04X or version=%d", resp.magic, resp.version);
+    return false;
+  }
+
+  *resp_out = resp;
+  return true;
+}
 
 /// Fetch manifest from bridge. Returns heap-allocated manifest_t on success.
 /// Caller must free the returned pointer.
@@ -916,18 +1042,70 @@ static void bridge_poll_thread(void *arg) {
       refresh_zone_label(true);
     }
 #if USE_MANIFEST
-    manifest_t *manifest = fetch_manifest();
-    bool ok = (manifest != NULL);
+    // ── UDP fast-path: try lightweight poll first ──
+    udp_fast_response_t udp_resp;
+    bool udp_ok = udp_poll_fast_state(&udp_resp);
+    bool sha_changed = false;
+    manifest_t *manifest = NULL;
+    bool ok = false;
+
+    if (udp_ok) {
+      // Check if SHA changed — need full HTTP manifest for screens
+      char udp_sha[MANIFEST_SHA_LEN];
+      memset(udp_sha, 0, sizeof(udp_sha));
+      memcpy(udp_sha, udp_resp.sha,
+             sizeof(udp_resp.sha) < sizeof(udp_sha) ? sizeof(udp_resp.sha)
+                                                    : sizeof(udp_sha) - 1);
+      sha_changed = (strcmp(udp_sha, s_manifest_sha) != 0);
+
+      if (sha_changed) {
+        // SHA changed — fetch full manifest via HTTP for screen updates
+        manifest = fetch_manifest();
+        ok = (manifest != NULL);
+      } else {
+        // SHA same — build fast-only manifest from UDP response
+        manifest = malloc(sizeof(manifest_t));
+        if (manifest) {
+          memset(manifest, 0, sizeof(manifest_t));
+          manifest->version = 1;
+          strncpy(manifest->sha, s_manifest_sha,
+                  sizeof(manifest->sha) - 1);
+          manifest->screen_count = 0; // No screen updates
+          manifest->fast.is_playing =
+              (udp_resp.flags & UDP_FLAG_PLAYING) != 0;
+          manifest->fast.transport.play =
+              (udp_resp.flags & UDP_FLAG_PLAY_OK) != 0;
+          manifest->fast.transport.pause =
+              (udp_resp.flags & UDP_FLAG_PAUSE_OK) != 0;
+          manifest->fast.transport.next =
+              (udp_resp.flags & UDP_FLAG_NEXT_OK) != 0;
+          manifest->fast.transport.prev =
+              (udp_resp.flags & UDP_FLAG_PREV_OK) != 0;
+          manifest->fast.volume = udp_resp.volume;
+          manifest->fast.volume_min = udp_resp.volume_min;
+          manifest->fast.volume_max = udp_resp.volume_max;
+          manifest->fast.volume_step = udp_resp.volume_step;
+          manifest->fast.seek_position = udp_resp.seek_position;
+          manifest->fast.length = (int)udp_resp.length;
+          ok = true;
+        }
+      }
+    }
+
+    if (!ok) {
+      // UDP failed or unavailable — fall back to HTTP
+      manifest = fetch_manifest();
+      ok = (manifest != NULL);
+    }
+
     post_ui_status(ok);
 
     if (ok) {
       s_last_is_playing = manifest->fast.is_playing;
     }
-
     // Note: config_sha and zones_sha are not in the manifest response.
     // TODO: Add these to manifest fast state, or keep a parallel /now_playing
     // call.
-
     check_charging_state_change();
 
     if (ok) {

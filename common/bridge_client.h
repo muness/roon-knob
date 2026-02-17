@@ -26,3 +26,38 @@ bool bridge_client_get_bridge_url(char *buf,
 bool bridge_client_is_bridge_connected(void);  // True if bridge is responding
 bool bridge_client_is_bridge_mdns(
     void); // True if bridge was discovered via mDNS (persisted)
+
+// ── UDP fast-path wire format ───────────────────────────────────────────────
+
+#include <stdint.h>
+
+#define UDP_FAST_MAGIC 0x524B
+#define UDP_FAST_PORT_OFFSET 1 // bridge_port + 1
+#define UDP_REQUEST_SIZE 54
+#define UDP_RESPONSE_SIZE 48
+
+typedef struct __attribute__((packed)) {
+    uint16_t magic;       // 0x524B LE
+    uint8_t  sha[20];     // manifest SHA (null-terminated in 20-byte field)
+    char     zone_id[32]; // zone_id (null-terminated)
+} udp_fast_request_t;
+
+typedef struct __attribute__((packed)) {
+    uint16_t magic;          // 0x524B LE
+    uint8_t  version;        // 1
+    uint8_t  flags;          // bit 0: playing, 1-4: transport
+    uint8_t  sha[20];        // current SHA
+    float    volume;         // LE
+    float    volume_min;     // LE
+    float    volume_max;     // LE
+    float    volume_step;    // LE
+    int32_t  seek_position;  // -1 = unknown
+    uint32_t length;         // 0 = unknown
+} udp_fast_response_t;
+
+// Flag bit positions
+#define UDP_FLAG_PLAYING  (1 << 0)
+#define UDP_FLAG_PLAY_OK  (1 << 1)
+#define UDP_FLAG_PAUSE_OK (1 << 2)
+#define UDP_FLAG_NEXT_OK  (1 << 3)
+#define UDP_FLAG_PREV_OK  (1 << 4)
