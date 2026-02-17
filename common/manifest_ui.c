@@ -204,7 +204,7 @@ static struct {
 
 // ── Arc animation state ─────────────────────────────────────────────────────
 
-#define ARC_ANIM_DURATION_MS 500 // Smooth transition time
+#define ARC_ANIM_DURATION_MS 550 // Smooth transition time
 
 static struct {
   int volume_pct;   // Current displayed volume %
