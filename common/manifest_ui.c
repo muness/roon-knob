@@ -373,11 +373,11 @@ void manifest_ui_init(void) {
   // Start on media screen
   s_mgr.current_screen = 0;
   show_screen(0);
-
-  // Force full-screen redraw — SH8601 OLED retains old GRAM content across
-  // reset. Without this, the first LVGL flush may not cover the entire display
-  // and stale pixels from the previous session remain visible.
+  // Force full-screen redraw — flush happens in ui_loop_iter via
+  // lv_task_handler
   lv_obj_invalidate(screen);
+  LOGI("manifest_ui_init complete: screen_root=%p media=%p",
+       (void *)s_chrome.screen_root, (void *)s_media.container);
 }
 
 // ── Chrome (header + status — shared across screens) ───────────────────────
@@ -1251,6 +1251,9 @@ void manifest_ui_show_volume_change(float vol, float vol_step) {
 }
 static void ui_cb_set_network_status(void *arg) {
   char *status = arg;
+  LOGI("network_status: '%s' screen_root=%p banner=%p",
+       status ? status : "(null)", (void *)s_chrome.screen_root,
+       (void *)s_chrome.network_banner);
 
   if (!s_chrome.screen_root) {
     free(status);
