@@ -373,6 +373,11 @@ void manifest_ui_init(void) {
   // Start on media screen
   s_mgr.current_screen = 0;
   show_screen(0);
+
+  // Force full-screen redraw — SH8601 OLED retains old GRAM content across
+  // reset. Without this, the first LVGL flush may not cover the entire display
+  // and stale pixels from the previous session remain visible.
+  lv_obj_invalidate(screen);
 }
 
 // ── Chrome (header + status — shared across screens) ───────────────────────
