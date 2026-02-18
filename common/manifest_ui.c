@@ -171,8 +171,7 @@ static struct {
   lv_obj_t *status_dot;
   lv_obj_t *status_bar;     // Transient message at bottom
   lv_obj_t *network_banner; // Persistent network status
-  lv_obj_t *wifi_bars[4];   // Signal strength indicator
-  lv_obj_t *wifi_container; // Container for WiFi bars
+  lv_obj_t *wifi_dot;       // Signal strength color dot
 } s_chrome;
 
 /// LVGL widget pointers — list screen.
@@ -441,26 +440,15 @@ static void build_chrome(lv_obj_t *parent) {
   lv_obj_set_style_radius(s_chrome.status_bar, 8, 0);
   lv_obj_align(s_chrome.status_bar, LV_ALIGN_BOTTOM_MID, 0, -25);
 
-  // WiFi signal strength — horizontal bars, fan shape (widest at top)
-  // 4 bars: 2px tall, widths 4/8/12/16, centered, spaced 2px apart
-  s_chrome.wifi_container = lv_obj_create(parent);
-  lv_obj_set_size(s_chrome.wifi_container, 16, 14);
-  lv_obj_set_style_bg_opa(s_chrome.wifi_container, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(s_chrome.wifi_container, 0, 0);
-  lv_obj_set_style_pad_all(s_chrome.wifi_container, 0, 0);
-  lv_obj_remove_flag(s_chrome.wifi_container, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_align(s_chrome.wifi_container, LV_ALIGN_TOP_MID, -78, 36);
-  static const int bar_w[] = {16, 12, 8, 4}; // top (widest) to bottom
-  for (int i = 0; i < 4; i++) {
-    s_chrome.wifi_bars[i] = lv_obj_create(s_chrome.wifi_container);
-    lv_obj_set_size(s_chrome.wifi_bars[i], bar_w[i], 2);
-    lv_obj_set_style_radius(s_chrome.wifi_bars[i], 0, 0);
-    lv_obj_set_style_border_width(s_chrome.wifi_bars[i], 0, 0);
-    lv_obj_set_style_bg_color(s_chrome.wifi_bars[i], COLOR_ARC_BG, 0);
-    lv_obj_set_style_bg_opa(s_chrome.wifi_bars[i], LV_OPA_COVER, 0);
-    lv_obj_align(s_chrome.wifi_bars[i], LV_ALIGN_TOP_MID, 0, i * 4);
-  }
-  lv_obj_add_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
+  // WiFi signal strength — colored dot at top center
+  s_chrome.wifi_dot = lv_obj_create(parent);
+  lv_obj_set_size(s_chrome.wifi_dot, 8, 8);
+  lv_obj_set_style_radius(s_chrome.wifi_dot, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(s_chrome.wifi_dot, 1, 0);
+  lv_obj_set_style_border_color(s_chrome.wifi_dot, COLOR_BG, 0);
+  lv_obj_set_style_bg_opa(s_chrome.wifi_dot, LV_OPA_COVER, 0);
+  lv_obj_align(s_chrome.wifi_dot, LV_ALIGN_TOP_MID, 0, 18);
+  lv_obj_add_flag(s_chrome.wifi_dot, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ── Media screen builder ───────────────────────────────────────────────────
@@ -1438,37 +1426,30 @@ void ui_handle_volume_rotation(int ticks) {
   // Volume rotation handled by bridge_client directly
 }
 
-// Map RSSI to number of active bars (0-4)
-// ESP32 antennas report ~10dB lower than phones/laptops
-static int rssi_to_bars(int rssi) {
+// Map RSSI to dot color: blue (excellent), green (good), yellow (fair), red
+// (weak)
+static lv_color_t rssi_to_color(int rssi) {
   if (rssi >= -55)
-    return 4;
+    return lv_color_hex(0x5a9fd4); // blue
   if (rssi >= -65)
-    return 3;
+    return lv_color_hex(0x2ecc71); // green
   if (rssi >= -75)
-    return 2;
-  if (rssi >= -85)
-    return 1;
-  return 0;
+    return lv_color_hex(0xf1c40f); // yellow
+  return lv_color_hex(0xe74c3c);   // red
 }
-
 static void update_wifi_indicator(void) {
-  if (!s_chrome.wifi_container)
+  if (!s_chrome.wifi_dot)
     return;
 #if TARGET_PC
-  return; // No WiFi on PC build
+  return;
 #else
   int rssi = platform_wifi_get_rssi();
   if (rssi == 0) {
-    lv_obj_add_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_chrome.wifi_dot, LV_OBJ_FLAG_HIDDEN);
     return;
   }
-  lv_obj_clear_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
-  int bars = rssi_to_bars(rssi);
-  for (int i = 0; i < 4; i++) {
-    lv_color_t c = (i >= 4 - bars) ? COLOR_TEXT_PRIMARY : COLOR_ARC_BG;
-    lv_obj_set_style_bg_color(s_chrome.wifi_bars[i], c, 0);
-  }
+  lv_obj_clear_flag(s_chrome.wifi_dot, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_bg_color(s_chrome.wifi_dot, rssi_to_color(rssi), 0);
 #endif
 }
 void ui_loop_iter(void) {
@@ -1541,8 +1522,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_add_flag(s_chrome.status_bar, LV_OBJ_FLAG_HIDDEN);
     if (s_chrome.network_banner)
       lv_obj_add_flag(s_chrome.network_banner, LV_OBJ_FLAG_HIDDEN);
-    if (s_chrome.wifi_container)
-      lv_obj_add_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
+    if (s_chrome.wifi_dot)
+      lv_obj_add_flag(s_chrome.wifi_dot, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_arc)
       lv_obj_add_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
