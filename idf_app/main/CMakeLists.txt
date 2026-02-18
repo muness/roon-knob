@@ -14,6 +14,7 @@ set(SRC_FILES
     "platform_input_idf.c"
     "battery.c"
     "ota_update.c"
+    "platform_wifi_idf.c"
     "font_manager.c"
     # Generated bitmap fonts (run scripts/generate_fonts.sh to regenerate)
     # Typography: Lato for metadata, Noto Sans for content (matches Roon's design)

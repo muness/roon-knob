@@ -13,6 +13,9 @@
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_task.h"
+#if !TARGET_PC
+#include "platform/platform_wifi.h"
+#endif
 #include "ui_jpeg.h"
 
 #include <lvgl.h>
@@ -168,6 +171,8 @@ static struct {
   lv_obj_t *status_dot;
   lv_obj_t *status_bar;     // Transient message at bottom
   lv_obj_t *network_banner; // Persistent network status
+  lv_obj_t *wifi_bars[4];   // Signal strength indicator
+  lv_obj_t *wifi_container; // Container for WiFi bars
 } s_chrome;
 
 /// LVGL widget pointers — list screen.
@@ -435,6 +440,29 @@ static void build_chrome(lv_obj_t *parent) {
   lv_obj_set_style_pad_hor(s_chrome.status_bar, 12, 0);
   lv_obj_set_style_radius(s_chrome.status_bar, 8, 0);
   lv_obj_align(s_chrome.status_bar, LV_ALIGN_BOTTOM_MID, 0, -25);
+
+  // WiFi signal strength bars (top-left, inside the visible circle)
+  // 4 bars: 3px wide, heights 4/7/10/13, spaced 2px apart
+  s_chrome.wifi_container = lv_obj_create(parent);
+  lv_obj_set_size(s_chrome.wifi_container, 22, 16);
+  lv_obj_set_style_bg_opa(s_chrome.wifi_container, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(s_chrome.wifi_container, 0, 0);
+  lv_obj_set_style_pad_all(s_chrome.wifi_container, 0, 0);
+  lv_obj_remove_flag(s_chrome.wifi_container, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_align(s_chrome.wifi_container, LV_ALIGN_TOP_MID, -80, 35);
+
+  static const int bar_h[] = {4, 7, 10, 13};
+  for (int i = 0; i < 4; i++) {
+    s_chrome.wifi_bars[i] = lv_obj_create(s_chrome.wifi_container);
+    lv_obj_set_size(s_chrome.wifi_bars[i], 3, bar_h[i]);
+    lv_obj_set_style_radius(s_chrome.wifi_bars[i], 1, 0);
+    lv_obj_set_style_border_width(s_chrome.wifi_bars[i], 0, 0);
+    lv_obj_set_style_bg_color(s_chrome.wifi_bars[i], COLOR_ARC_BG, 0);
+    lv_obj_set_style_bg_opa(s_chrome.wifi_bars[i], LV_OPA_COVER, 0);
+    lv_obj_align(s_chrome.wifi_bars[i], LV_ALIGN_BOTTOM_LEFT, i * 5, 0);
+  }
+  lv_obj_add_flag(s_chrome.wifi_container,
+                  LV_OBJ_FLAG_HIDDEN); // shown once RSSI updates
 }
 
 // ── Media screen builder ───────────────────────────────────────────────────
@@ -1411,10 +1439,50 @@ void ui_handle_volume_rotation(int ticks) {
   }
   // Volume rotation handled by bridge_client directly
 }
+
+// Map RSSI to number of active bars (0-4)
+static int rssi_to_bars(int rssi) {
+  if (rssi >= -50)
+    return 4;
+  if (rssi >= -60)
+    return 3;
+  if (rssi >= -70)
+    return 2;
+  if (rssi >= -80)
+    return 1;
+  return 0;
+}
+
+static void update_wifi_indicator(void) {
+  if (!s_chrome.wifi_container)
+    return;
+#if TARGET_PC
+  return; // No WiFi on PC build
+#else
+  int rssi = platform_wifi_get_rssi();
+  if (rssi == 0) {
+    lv_obj_add_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_clear_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
+  int bars = rssi_to_bars(rssi);
+  for (int i = 0; i < 4; i++) {
+    lv_color_t c = (i < bars) ? COLOR_TEXT_PRIMARY : COLOR_ARC_BG;
+    lv_obj_set_style_bg_color(s_chrome.wifi_bars[i], c, 0);
+  }
+#endif
+}
 void ui_loop_iter(void) {
   platform_task_run_pending();
   lv_task_handler();
   lv_timer_handler();
+
+  // Update WiFi indicator every ~2s (200 iterations at 10ms)
+  static uint32_t wifi_counter = 0;
+  if (++wifi_counter >= 200) {
+    wifi_counter = 0;
+    update_wifi_indicator();
+  }
 }
 void ui_show_zone_picker(const char **n, const char **i, int c, int s) {
   (void)n;
@@ -1474,6 +1542,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_add_flag(s_chrome.status_bar, LV_OBJ_FLAG_HIDDEN);
     if (s_chrome.network_banner)
       lv_obj_add_flag(s_chrome.network_banner, LV_OBJ_FLAG_HIDDEN);
+    if (s_chrome.wifi_container)
+      lv_obj_add_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_arc)
       lv_obj_add_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
