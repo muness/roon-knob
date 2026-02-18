@@ -483,14 +483,13 @@ void wifi_mgr_start(void) {
 
   ESP_ERROR_CHECK(esp_wifi_start());
 
-  // Reduce WiFi TX power for battery operation (11 dBm instead of 20 dBm)
-  // This reduces peak current from ~500mA to ~200mA during WiFi transmission
-  // Units are 0.25 dBm, so 44 = 11 dBm
-  // Note: May fail if WiFi not fully started (AP mode), so don't use
-  // ESP_ERROR_CHECK
-  esp_err_t tx_err = esp_wifi_set_max_tx_power(44);
+  // Reduce WiFi TX power from default 20 dBm to 17 dBm
+  // Improves reliability on boards with poor PCB antennas (PA saturation)
+  // and reduces peak current with negligible battery impact (~1-2mA avg)
+  // Units are 0.25 dBm, so 68 = 17 dBm
+  esp_err_t tx_err = esp_wifi_set_max_tx_power(68);
   if (tx_err == ESP_OK) {
-    ESP_LOGI(TAG, "WiFi TX power reduced to 11 dBm for battery compatibility");
+    ESP_LOGI(TAG, "WiFi TX power set to 17 dBm");
   } else {
     ESP_LOGW(TAG, "Could not set WiFi TX power: %s (will use default)",
              esp_err_to_name(tx_err));
@@ -629,6 +628,9 @@ void wifi_mgr_stop_ap(void) {
   // Switch to STA mode
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   ESP_ERROR_CHECK(esp_wifi_start());
+
+  // Reduce TX power for STA mode (same as initial STA start)
+  esp_wifi_set_max_tx_power(68); // 17 dBm
 
   s_ap_mode = false;
   s_sta_fail_count = 0;

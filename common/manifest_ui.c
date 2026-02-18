@@ -13,6 +13,7 @@
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_task.h"
+#include "platform/platform_time.h"
 #if !TARGET_PC
 #include "platform/platform_wifi.h"
 #endif
@@ -212,6 +213,14 @@ static struct {
   int volume_pct;   // Current displayed volume %
   int progress_pct; // Current displayed progress %
 } s_arc_state;
+
+/// Seek interpolation state — bridge sends snapshots, we tick locally.
+static struct {
+  int last_seek; // Last seek_position from bridge (seconds)
+  int length;    // Track length (seconds)
+  bool is_playing;
+  uint32_t update_ms; // platform_millis() at last bridge update
+} s_seek;
 
 /// LVGL animation callback: set arc value during animation.
 static void arc_anim_cb(void *obj, int32_t value) {
@@ -865,16 +874,14 @@ static void update_media_fast(const manifest_fast_t *fast) {
                      fast->volume_step);
   lv_label_set_text(s_media.volume_label, vol_text);
 
-  // Progress arc — only visible when track has duration
+  // Store seek snapshot for local interpolation
+  s_seek.last_seek = fast->seek_position;
+  s_seek.length = fast->length;
+  s_seek.is_playing = fast->is_playing;
+  s_seek.update_ms = (uint32_t)platform_millis();
+
+  // Progress arc — rendered from interpolated seek in tick_progress()
   if (fast->length > 0) {
-    int progress_pct = (fast->seek_position * 100) / fast->length;
-    if (progress_pct > 100)
-      progress_pct = 100;
-    if (progress_pct < 0)
-      progress_pct = 0;
-    animate_arc(s_media.progress_arc, s_arc_state.progress_pct, progress_pct,
-                ARC_ANIM_DURATION_MS, arc_anim_cb);
-    s_arc_state.progress_pct = progress_pct;
     lv_obj_clear_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
   } else {
     s_arc_state.progress_pct = 0;
@@ -1452,10 +1459,39 @@ static void update_wifi_indicator(void) {
   lv_obj_set_style_bg_color(s_chrome.wifi_dot, rssi_to_color(rssi), 0);
 #endif
 }
+
+// Interpolate seek position locally and update progress arc.
+// Called every ~1s from ui_loop_iter.
+static void tick_progress(void) {
+  if (s_seek.length <= 0)
+    return;
+  int seek = s_seek.last_seek;
+  if (s_seek.is_playing) {
+    uint32_t elapsed_ms = (uint32_t)platform_millis() - s_seek.update_ms;
+    seek += (int)(elapsed_ms / 1000);
+  }
+  if (seek > s_seek.length)
+    seek = s_seek.length;
+  if (seek < 0)
+    seek = 0;
+  int pct = (seek * 100) / s_seek.length;
+  if (pct != s_arc_state.progress_pct) {
+    animate_arc(s_media.progress_arc, s_arc_state.progress_pct, pct,
+                ARC_ANIM_DURATION_MS, arc_anim_cb);
+    s_arc_state.progress_pct = pct;
+  }
+}
 void ui_loop_iter(void) {
   platform_task_run_pending();
   lv_task_handler();
   lv_timer_handler();
+
+  // Tick progress arc every ~1s (100 iterations at 10ms)
+  static uint32_t progress_counter = 0;
+  if (++progress_counter >= 100) {
+    progress_counter = 0;
+    tick_progress();
+  }
 
   // Update WiFi indicator every ~2s (200 iterations at 10ms)
   static uint32_t wifi_counter = 0;
