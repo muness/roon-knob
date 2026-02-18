@@ -1,6 +1,7 @@
 #include "captive_portal.h"
 #include "dns_server.h"
 #include "platform/platform_storage.h"
+#include "rk_cfg.h"
 #include "ui.h"
 #include "wifi_manager.h"
 
@@ -180,12 +181,14 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
 
   // Load current config, update WiFi credentials, save
   rk_cfg_t cfg = {0};
-  platform_storage_load(&cfg);
-
+  if (!platform_storage_load(&cfg) || !rk_cfg_is_valid(&cfg)) {
+    // Fresh device — apply display defaults (rotation, timeouts, etc.)
+    rk_cfg_set_display_defaults(&cfg);
+  }
   strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
   strncpy(cfg.pass, pass, sizeof(cfg.pass) - 1);
   // Bridge URL will be discovered via mDNS or configured in Settings
-  cfg.cfg_ver = 1; // Mark as configured
+  cfg.cfg_ver = RK_CFG_CURRENT_VER;
 
   bool save_ok = platform_storage_save(&cfg);
 
