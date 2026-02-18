@@ -389,18 +389,25 @@ static void apply_evt_async(void *data) {
   wifi_mgr_get_ssid(ssid, sizeof(ssid));
 
   switch (msg->evt) {
-  case RK_NET_EVT_CONNECTING:
+  case RK_NET_EVT_CONNECTING: {
     set_status_text("Connecting...");
     set_ip_text("");
-    // Show on main screen with SSID
+    int attempt = wifi_mgr_get_retry_count();
+    int max_ret = wifi_mgr_get_retry_max();
+    // Show on main screen with SSID and attempt count
     if (ssid[0]) {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "WiFi: %s...", ssid);
+      char buf[80];
+      if (attempt > 0) {
+        snprintf(buf, sizeof(buf), "WiFi: %s\nAttempt %d/%d", ssid, attempt + 1,
+                 max_ret);
+      } else {
+        snprintf(buf, sizeof(buf), "WiFi: Connecting...\n%s", ssid);
+      }
       ui_set_network_status(buf);
     } else {
       ui_set_network_status("WiFi: Connecting...");
     }
-    break;
+  } break;
   case RK_NET_EVT_GOT_IP:
     set_status_text("Online");
     set_ip_text(msg->ip);
@@ -438,13 +445,24 @@ static void apply_evt_async(void *data) {
     set_status_text("Auth timeout");
     ui_set_network_status("WiFi: Auth timeout");
     break;
-  case RK_NET_EVT_AP_STARTED:
+  case RK_NET_EVT_AP_STARTED: {
     set_status_text("Setup: roon-knob-setup");
     set_ip_text("192.168.4.1");
-    // Show setup instructions on main screen
-    ui_set_network_status("WiFi Setup\n\nConnect to:\nroon-knob-setup\n\nThen "
-                          "open:\n192.168.4.1");
-    break;
+    // Distinguish first-time setup from fallback after failed connection
+    int retries = wifi_mgr_get_retry_count();
+    if (retries > 0 && ssid[0]) {
+      char buf[128];
+      snprintf(buf, sizeof(buf),
+               "Could not connect to\n%s\n\nConnect "
+               "to:\nroon-knob-setup\n\nThen open:\n192.168.4.1",
+               ssid);
+      ui_set_network_status(buf);
+    } else {
+      ui_set_network_status(
+          "WiFi Setup\n\nConnect to:\nroon-knob-setup\n\nThen "
+          "open:\n192.168.4.1");
+    }
+  }
   case RK_NET_EVT_AP_STOPPED:
     set_status_text("Connecting...");
     set_ip_text("");
