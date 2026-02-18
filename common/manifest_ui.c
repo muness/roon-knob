@@ -1446,8 +1446,7 @@ void ui_set_controls_visible(bool v) {
       lv_obj_clear_flag(s_chrome.status_dot, LV_OBJ_FLAG_HIDDEN);
     if (s_chrome.status_bar)
       lv_obj_clear_flag(s_chrome.status_bar, LV_OBJ_FLAG_HIDDEN);
-    if (s_chrome.network_banner)
-      lv_obj_clear_flag(s_chrome.network_banner, LV_OBJ_FLAG_HIDDEN);
+    // network_banner manages its own visibility via set_network_status
     if (s_media.volume_arc)
       lv_obj_clear_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
