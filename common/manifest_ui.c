@@ -884,6 +884,14 @@ static void update_media_screen(const manifest_media_t *media) {
   }
 }
 
+static void list_item_click_cb(lv_event_t *e) {
+  lv_obj_t *btn = lv_event_get_target(e);
+  int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
+  s_list.selected = idx;
+  if (s_input_cb)
+    s_input_cb(UI_INPUT_PLAY_PAUSE);
+}
+
 static void update_list_screen(const manifest_list_t *list) {
   lv_label_set_text(s_list.title_label, list->title);
 
@@ -904,6 +912,7 @@ static void update_list_screen(const manifest_list_t *list) {
 
     // Store index as user data for event handling
     lv_obj_set_user_data(btn, (void *)(intptr_t)i);
+    lv_obj_add_event_cb(btn, list_item_click_cb, LV_EVENT_CLICKED, NULL);
   }
 }
 
