@@ -449,7 +449,7 @@ static void build_chrome(lv_obj_t *parent) {
   lv_obj_set_style_border_width(s_chrome.wifi_container, 0, 0);
   lv_obj_set_style_pad_all(s_chrome.wifi_container, 0, 0);
   lv_obj_remove_flag(s_chrome.wifi_container, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_align(s_chrome.wifi_container, LV_ALIGN_TOP_MID, -80, 35);
+  lv_obj_align(s_chrome.wifi_container, LV_ALIGN_TOP_MID, -80, 38);
   static const int bar_w[] = {16, 12, 8, 4}; // top (widest) to bottom
   for (int i = 0; i < 4; i++) {
     s_chrome.wifi_bars[i] = lv_obj_create(s_chrome.wifi_container);
