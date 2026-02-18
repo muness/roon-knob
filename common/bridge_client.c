@@ -414,6 +414,12 @@ static void maybe_update_bridge_base(void) {
     return; // Bridge URL already configured - don't overwrite with mDNS
   }
 
+  // Don't attempt mDNS queries before init completes — ESP_ERR_INVALID_STATE
+  // burns through the fail counter before the service is even running.
+  if (!platform_mdns_is_ready()) {
+    return;
+  }
+
   // Bridge is empty - try mDNS discovery
   char discovered[sizeof(s_state.cfg.bridge_base)];
   bool mdns_ok =
@@ -727,8 +733,8 @@ static bool udp_poll_fast_state(udp_fast_response_t *resp_out) {
 }
 
 /// Send a volume command via UDP (non-blocking fire-and-forget).
-/// Returns true on success, false if UDP unavailable (caller should fall back to
-/// HTTP).
+/// Returns true on success, false if UDP unavailable (caller should fall back
+/// to HTTP).
 static bool udp_send_volume(float volume) {
   if (s_udp_sock < 0)
     return false;
