@@ -49,7 +49,7 @@ jobs:
           pip install esptool
           esptool --chip esp32s3 merge-bin \
             -o roon_knob_merged.bin \
-            --flash-mode dio --flash-freq 80m --flash-size 8MB \
+            --flash-mode dio --flash-freq 80m --flash-size 16MB \
             0x0 idf_app/build/bootloader/bootloader.bin \
             0x8000 idf_app/build/partition_table/partition-table.bin \
             0xd000 idf_app/build/ota_data_initial.bin \
