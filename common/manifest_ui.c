@@ -1579,7 +1579,7 @@ static void ui_cb_ota_available(void *arg) {
 
   if (d->version[0]) {
     char text[64];
-    snprintf(text, sizeof(text), "Update %s\nPress to install", d->version);
+    snprintf(text, sizeof(text), "Update %s\nTap to install", d->version);
     lv_label_set_text(s_ota.label, text);
     lv_obj_add_flag(s_ota.arc, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_ota.pct_label, LV_OBJ_FLAG_HIDDEN);
