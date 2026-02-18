@@ -402,6 +402,73 @@ static void strip_trailing_slashes(char *url) {
   }
 }
 
+/// Try to discover the bridge via UDP broadcast.
+/// Sends a poll packet to 255.255.255.255:8089 and extracts the source IP
+/// from the response. Returns true if bridge was discovered and saved.
+static bool udp_broadcast_discover(void) {
+#ifdef ESP_PLATFORM
+  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sock < 0)
+    return false;
+
+  // Enable broadcast and set short timeout
+  int one = 1;
+  setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+  struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+  // Build discovery poll with empty zone_id and SHA
+  udp_fast_request_t req;
+  memset(&req, 0, sizeof(req));
+  req.magic = UDP_FAST_MAGIC;
+
+  struct sockaddr_in dest;
+  memset(&dest, 0, sizeof(dest));
+  dest.sin_family = AF_INET;
+  dest.sin_port = htons(8088 + UDP_FAST_PORT_OFFSET);
+  dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+  ssize_t sent = sendto(sock, &req, sizeof(req), 0, (struct sockaddr *)&dest,
+                        sizeof(dest));
+  if (sent != sizeof(req)) {
+    close(sock);
+    return false;
+  }
+
+  // Wait for response. Source address is the bridge.
+  udp_fast_response_t resp;
+  struct sockaddr_in from;
+  socklen_t from_len = sizeof(from);
+  ssize_t recvd = recvfrom(sock, &resp, sizeof(resp), 0,
+                           (struct sockaddr *)&from, &from_len);
+  close(sock);
+
+  if (recvd != sizeof(resp))
+    return false;
+  if (resp.magic != UDP_FAST_MAGIC || resp.version != 1)
+    return false;
+
+  // Extract bridge IP from response source address
+  char ip[16];
+  uint32_t addr = ntohl(from.sin_addr.s_addr);
+  snprintf(ip, sizeof(ip), "%d.%d.%d.%d", (int)((addr >> 24) & 0xFF),
+           (int)((addr >> 16) & 0xFF), (int)((addr >> 8) & 0xFF),
+           (int)(addr & 0xFF));
+  LOGI("UDP broadcast discovered bridge at %s", ip);
+
+  lock_state();
+  snprintf(s_state.cfg.bridge_base, sizeof(s_state.cfg.bridge_base),
+           "http://%s:8088", ip);
+  s_state.cfg.bridge_from_mdns = 1;
+  platform_storage_save(&s_state.cfg);
+  unlock_state();
+  post_ui_message("Bridge: Found");
+  return true;
+#else
+  return false;
+#endif
+}
+
 static void maybe_update_bridge_base(void) {
   // Only use mDNS when no bridge URL is configured.
   // This respects user-set URLs (via web config) and allows Clear to trigger
@@ -414,8 +481,14 @@ static void maybe_update_bridge_base(void) {
     return; // Bridge URL already configured - don't overwrite with mDNS
   }
 
-  // Don't attempt mDNS queries before init completes — ESP_ERR_INVALID_STATE
-  // burns through the fail counter before the service is even running.
+  // Try UDP broadcast first — works even when mDNS is broken.
+  // Sends a poll to 255.255.255.255:8089; bridge responds normally.
+  if (udp_broadcast_discover()) {
+    s_mdns_fail_count = 0;
+    return;
+  }
+
+  // Fall back to mDNS (skip if not initialized yet)
   if (!platform_mdns_is_ready()) {
     return;
   }
