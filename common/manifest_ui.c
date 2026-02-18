@@ -441,28 +441,26 @@ static void build_chrome(lv_obj_t *parent) {
   lv_obj_set_style_radius(s_chrome.status_bar, 8, 0);
   lv_obj_align(s_chrome.status_bar, LV_ALIGN_BOTTOM_MID, 0, -25);
 
-  // WiFi signal strength bars (top-left, inside the visible circle)
-  // 4 bars: 3px wide, heights 4/7/10/13, spaced 2px apart
+  // WiFi signal strength — horizontal bars, fan shape (widest at top)
+  // 4 bars: 2px tall, widths 4/8/12/16, centered, spaced 2px apart
   s_chrome.wifi_container = lv_obj_create(parent);
-  lv_obj_set_size(s_chrome.wifi_container, 22, 16);
+  lv_obj_set_size(s_chrome.wifi_container, 16, 14);
   lv_obj_set_style_bg_opa(s_chrome.wifi_container, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(s_chrome.wifi_container, 0, 0);
   lv_obj_set_style_pad_all(s_chrome.wifi_container, 0, 0);
   lv_obj_remove_flag(s_chrome.wifi_container, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_align(s_chrome.wifi_container, LV_ALIGN_TOP_MID, -80, 35);
-
-  static const int bar_h[] = {4, 7, 10, 13};
+  static const int bar_w[] = {16, 12, 8, 4}; // top (widest) to bottom
   for (int i = 0; i < 4; i++) {
     s_chrome.wifi_bars[i] = lv_obj_create(s_chrome.wifi_container);
-    lv_obj_set_size(s_chrome.wifi_bars[i], 3, bar_h[i]);
-    lv_obj_set_style_radius(s_chrome.wifi_bars[i], 1, 0);
+    lv_obj_set_size(s_chrome.wifi_bars[i], bar_w[i], 2);
+    lv_obj_set_style_radius(s_chrome.wifi_bars[i], 0, 0);
     lv_obj_set_style_border_width(s_chrome.wifi_bars[i], 0, 0);
     lv_obj_set_style_bg_color(s_chrome.wifi_bars[i], COLOR_ARC_BG, 0);
     lv_obj_set_style_bg_opa(s_chrome.wifi_bars[i], LV_OPA_COVER, 0);
-    lv_obj_align(s_chrome.wifi_bars[i], LV_ALIGN_BOTTOM_LEFT, i * 5, 0);
+    lv_obj_align(s_chrome.wifi_bars[i], LV_ALIGN_TOP_MID, 0, i * 4);
   }
-  lv_obj_add_flag(s_chrome.wifi_container,
-                  LV_OBJ_FLAG_HIDDEN); // shown once RSSI updates
+  lv_obj_add_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ── Media screen builder ───────────────────────────────────────────────────
@@ -1441,14 +1439,15 @@ void ui_handle_volume_rotation(int ticks) {
 }
 
 // Map RSSI to number of active bars (0-4)
+// ESP32 antennas report ~10dB lower than phones/laptops
 static int rssi_to_bars(int rssi) {
-  if (rssi >= -50)
+  if (rssi >= -55)
     return 4;
-  if (rssi >= -60)
+  if (rssi >= -65)
     return 3;
-  if (rssi >= -70)
+  if (rssi >= -75)
     return 2;
-  if (rssi >= -80)
+  if (rssi >= -85)
     return 1;
   return 0;
 }
