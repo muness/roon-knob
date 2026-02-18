@@ -1466,7 +1466,7 @@ static void update_wifi_indicator(void) {
   lv_obj_clear_flag(s_chrome.wifi_container, LV_OBJ_FLAG_HIDDEN);
   int bars = rssi_to_bars(rssi);
   for (int i = 0; i < 4; i++) {
-    lv_color_t c = (i < bars) ? COLOR_TEXT_PRIMARY : COLOR_ARC_BG;
+    lv_color_t c = (i >= 4 - bars) ? COLOR_TEXT_PRIMARY : COLOR_ARC_BG;
     lv_obj_set_style_bg_color(s_chrome.wifi_bars[i], c, 0);
   }
 #endif
