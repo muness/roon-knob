@@ -1235,9 +1235,51 @@ void manifest_ui_show_volume_change(float vol, float vol_step) {
   vals[3] = vol_max;
   platform_task_post_to_ui(ui_cb_show_volume, vals);
 }
+static void ui_cb_set_network_status(void *arg) {
+  char *status = arg;
+
+  if (!s_chrome.screen_root) {
+    free(status);
+    return;
+  }
+
+  // Create banner on first use — fullscreen overlay, centered text
+  if (!s_chrome.network_banner) {
+    s_chrome.network_banner = lv_obj_create(s_chrome.screen_root);
+    lv_obj_set_size(s_chrome.network_banner, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_center(s_chrome.network_banner);
+    lv_obj_set_style_bg_color(s_chrome.network_banner, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_chrome.network_banner, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_chrome.network_banner, 0, 0);
+    lv_obj_set_style_pad_all(s_chrome.network_banner, 40, 0);
+    lv_obj_remove_flag(s_chrome.network_banner, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *lbl = lv_label_create(s_chrome.network_banner);
+    lv_obj_set_style_text_font(lbl, font_small(), 0);
+    lv_obj_set_style_text_color(lbl, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(lbl, SCREEN_SIZE - 100);
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_center(lbl);
+  }
+
+  if (status && status[0]) {
+    // Show banner with message, on top of everything
+    lv_obj_t *lbl = lv_obj_get_child(s_chrome.network_banner, 0);
+    if (lbl)
+      lv_label_set_text(lbl, status);
+    lv_obj_clear_flag(s_chrome.network_banner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_to_index(s_chrome.network_banner, -1); // raise to top
+  } else {
+    // Clear — hide banner, normal UI resumes
+    lv_obj_add_flag(s_chrome.network_banner, LV_OBJ_FLAG_HIDDEN);
+  }
+  free(status);
+}
 void manifest_ui_set_network_status(const char *status) {
-  // TODO: Implement persistent network banner
-  (void)status;
+  char *copy = strdup(status ? status : "");
+  if (copy)
+    platform_task_post_to_ui(ui_cb_set_network_status, copy);
 }
 
 // Zone picker delegates — for now these are stubs.
@@ -1275,19 +1317,20 @@ bool manifest_ui_is_zone_picker_visible(void) {
 }
 
 void manifest_ui_zone_picker_scroll(int delta) {
-	s_list.selected += delta;
-	if (s_list.selected < 0)
-		s_list.selected = 0;
-	int max_idx = 0;
-	for (int i = 0; i < s_mgr.manifest.screen_count; i++) {
-		if (s_mgr.manifest.screens[i].type == SCREEN_TYPE_LIST) {
-			max_idx = s_mgr.manifest.screens[i].data.list.item_count - 1;
-			break;
-		}
-	}
-	if (max_idx < 0) max_idx = 0;
-	if (s_list.selected > max_idx)
-		s_list.selected = max_idx;
+  s_list.selected += delta;
+  if (s_list.selected < 0)
+    s_list.selected = 0;
+  int max_idx = 0;
+  for (int i = 0; i < s_mgr.manifest.screen_count; i++) {
+    if (s_mgr.manifest.screens[i].type == SCREEN_TYPE_LIST) {
+      max_idx = s_mgr.manifest.screens[i].data.list.item_count - 1;
+      break;
+    }
+  }
+  if (max_idx < 0)
+    max_idx = 0;
+  if (s_list.selected > max_idx)
+    s_list.selected = max_idx;
 }
 
 void manifest_ui_zone_picker_get_selected_id(char *out, size_t len) {
