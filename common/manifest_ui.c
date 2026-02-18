@@ -1251,9 +1251,6 @@ void manifest_ui_show_volume_change(float vol, float vol_step) {
 }
 static void ui_cb_set_network_status(void *arg) {
   char *status = arg;
-  LOGI("network_status: '%s' screen_root=%p banner=%p",
-       status ? status : "(null)", (void *)s_chrome.screen_root,
-       (void *)s_chrome.network_banner);
 
   if (!s_chrome.screen_root) {
     free(status);

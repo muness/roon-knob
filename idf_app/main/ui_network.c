@@ -387,7 +387,6 @@ static void apply_evt_async(void *data) {
   ui_net_evt_msg_t *msg = data;
   char ssid[33] = {0};
   wifi_mgr_get_ssid(ssid, sizeof(ssid));
-
   switch (msg->evt) {
   case RK_NET_EVT_CONNECTING: {
     set_status_text("Connecting...");
@@ -462,6 +461,7 @@ static void apply_evt_async(void *data) {
           "WiFi Setup\n\nConnect to:\nroon-knob-setup\n\nThen "
           "open:\n192.168.4.1");
     }
+    break;
   }
   case RK_NET_EVT_AP_STOPPED:
     set_status_text("Connecting...");

@@ -1687,9 +1687,11 @@ void bridge_client_set_network_ready(bool ready) {
     LOGI("Device state: %s -> %s (network lost)",
          device_state_name(s_device_state), device_state_name(new_state));
     s_device_state = new_state;
-    UI_SET_NETWORK_STATUS(new_state == DEVICE_STATE_RECONNECTING
-                              ? "Reconnecting..."
-                              : "Connecting...");
+    // Only set banner for RECONNECTING (was operational, lost network).
+    // During BOOT, the WiFi event handler owns the banner (AP setup, etc).
+    if (new_state == DEVICE_STATE_RECONNECTING) {
+      UI_SET_NETWORK_STATUS("Reconnecting...");
+    }
   }
   unlock_state();
 }
