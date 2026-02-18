@@ -34,11 +34,9 @@
 #define SCREEN_SIZE 240
 #endif
 
-// Artwork must cover the full circular display. A square inscribed in a
-// circle of diameter D has side D, but leaves crescent gaps at the cardinal
-// edges. To fully cover a circle of diameter D with a square image, the
-// square side must be D × √2. 360 × 1.414 ≈ 510 (even, RGB565-aligned).
-#define ART_SIZE 510
+// Artwork overflows the circular display slightly to avoid gaps at cardinal
+// edges. 10px overflow per side — just enough to bleed past the circle.
+#define ART_SIZE 336
 
 // Colors (exact values from ui.c build_layout)
 #define COLOR_BG lv_color_hex(0x000000)
