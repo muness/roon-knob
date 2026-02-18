@@ -1672,11 +1672,16 @@ void bridge_client_set_network_ready(bool ready) {
 
   lock_state();
   if (ready) {
-    LOGI("Device state: %s -> CONNECTED (network ready)",
-         device_state_name(s_device_state));
-    s_device_state = DEVICE_STATE_CONNECTED; // Transition: WiFi connected,
-                                             // zones not yet loaded
-    UI_SET_NETWORK_STATUS("Loading zones...");
+    if (s_device_state == DEVICE_STATE_OPERATIONAL) {
+      // Already operational — don't regress to CONNECTED on transient
+      // WiFi reconnect. Zones are already loaded.
+      LOGI("Device state: OPERATIONAL (network ready, no state change)");
+    } else {
+      LOGI("Device state: %s -> CONNECTED (network ready)",
+           device_state_name(s_device_state));
+      s_device_state = DEVICE_STATE_CONNECTED;
+      UI_SET_NETWORK_STATUS("Loading zones...");
+    }
     s_trigger_poll = true; // Trigger immediate poll when network becomes ready
   } else {
     // Transition to RECONNECTING if we were operational, otherwise back to
