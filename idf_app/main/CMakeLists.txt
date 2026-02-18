@@ -75,7 +75,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 target_compile_options(${COMPONENT_LIB} PRIVATE -O3)
 
 # Manifest-driven UI (ADR-0003). Set to OFF to use legacy hardcoded UI.
-# Default OFF = existing hardcoded UI.
+# Default ON = manifest-driven UI.
 option(USE_MANIFEST "Use manifest-driven knob UI" ON)
 if(USE_MANIFEST)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_MANIFEST=1)

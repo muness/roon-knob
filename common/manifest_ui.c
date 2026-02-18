@@ -990,6 +990,7 @@ void manifest_ui_update(const manifest_t *manifest) {
     s_mgr.manifest = *manifest;
     s_mgr.has_manifest = true;
     strncpy(s_mgr.sha, manifest->sha, sizeof(s_mgr.sha) - 1);
+    s_mgr.sha[MANIFEST_SHA_LEN - 1] = '\0';
 
     // Update each screen's content
     for (int i = 0; i < manifest->screen_count; i++) {
@@ -1018,10 +1019,16 @@ void manifest_ui_update(const manifest_t *manifest) {
     // Update screen count for navigation
     s_mgr.screen_count = manifest->nav.count;
 
-    // If current screen is invalid, go to default
+    // If current screen is invalid, find default in nav order
     if (s_mgr.current_screen >= s_mgr.screen_count) {
-      int def = find_screen_index(manifest->nav.default_screen);
-      s_mgr.current_screen = (def >= 0) ? def : 0;
+      int nav_idx = 0;
+      for (int i = 0; i < manifest->nav.count; i++) {
+        if (strcmp(manifest->nav.order[i], manifest->nav.default_screen) == 0) {
+          nav_idx = i;
+          break;
+        }
+      }
+      s_mgr.current_screen = nav_idx;
     }
     show_screen(s_mgr.current_screen);
   }
@@ -1268,10 +1275,19 @@ bool manifest_ui_is_zone_picker_visible(void) {
 }
 
 void manifest_ui_zone_picker_scroll(int delta) {
-  s_list.selected += delta;
-  if (s_list.selected < 0)
-    s_list.selected = 0;
-  // Clamp handled at render time
+	s_list.selected += delta;
+	if (s_list.selected < 0)
+		s_list.selected = 0;
+	int max_idx = 0;
+	for (int i = 0; i < s_mgr.manifest.screen_count; i++) {
+		if (s_mgr.manifest.screens[i].type == SCREEN_TYPE_LIST) {
+			max_idx = s_mgr.manifest.screens[i].data.list.item_count - 1;
+			break;
+		}
+	}
+	if (max_idx < 0) max_idx = 0;
+	if (s_list.selected > max_idx)
+		s_list.selected = max_idx;
 }
 
 void manifest_ui_zone_picker_get_selected_id(char *out, size_t len) {

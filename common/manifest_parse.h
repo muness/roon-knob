@@ -150,7 +150,8 @@ typedef struct {
 bool manifest_parse(const char *json, size_t json_len, manifest_t *out);
 
 /// Parse only the fast state from a manifest JSON response.
-/// Cheaper than full parse — use when SHA hasn't changed.
+/// JSON parsing cost is identical to manifest_parse; only C-struct population
+/// is cheaper (skips screen and nav parsing). Use when SHA hasn't changed.
 bool manifest_parse_fast(const char *json, size_t json_len,
                          manifest_fast_t *out);
 

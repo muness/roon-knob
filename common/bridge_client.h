@@ -54,7 +54,7 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
-    uint8_t  sha[20];     // manifest SHA (null-terminated in 20-byte field)
+    char     sha[20];     // manifest SHA — null-terminated hex text (8 chars + NUL, field sized for future expansion)
     char     zone_id[32]; // zone_id (null-terminated)
 } udp_fast_request_t;
 
@@ -62,7 +62,7 @@ typedef struct __attribute__((packed)) {
     uint16_t magic;          // 0x524B LE
     uint8_t  version;        // 1
     uint8_t  flags;          // bit 0: playing, 1-4: transport
-    uint8_t  sha[20];        // current SHA
+    char     sha[20];        // current SHA — null-terminated hex text (8 chars + NUL, field sized for future expansion)
     float    volume;         // LE
     float    volume_min;     // LE
     float    volume_max;     // LE
