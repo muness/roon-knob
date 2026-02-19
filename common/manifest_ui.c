@@ -1083,6 +1083,7 @@ static void update_media_screen(const manifest_media_t *media) {
         lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
         lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
         lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_color(s_chrome.zone_label, COLOR_ZONE_LABEL, 0);
       } else {
         // Light background — darker arc tracks, dark shadow on buttons
         lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
@@ -1094,6 +1095,7 @@ static void update_media_screen(const manifest_media_t *media) {
         lv_obj_set_style_text_color(s_media.track_label, lv_color_hex(0x1a1a1a), 0);
         lv_obj_set_style_text_color(s_media.volume_label, lv_color_hex(0x1a1a1a), 0);
         lv_obj_set_style_text_color(s_media.artist_label, lv_color_hex(0x444444), 0);
+        lv_obj_set_style_text_color(s_chrome.zone_label, lv_color_hex(0x555555), 0);
       }
       lv_obj_set_style_shadow_width(s_media.btn_prev, 6, 0);
       lv_obj_set_style_shadow_width(s_media.btn_play, 8, 0);
@@ -1133,6 +1135,7 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_color(s_chrome.zone_label, COLOR_ZONE_LABEL, 0);
 }
 }
 
