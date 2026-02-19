@@ -1070,16 +1070,30 @@ static void update_media_screen(const manifest_media_t *media) {
     if (sscanf(media->bg_color + 1, "%02x%02x%02x", &br, &bg_g, &bb) == 3) {
       int luma = (299 * br + 587 * bg_g + 114 * bb) / 1000;
       if (luma < 80) {
-        // Dark background — lighter arc tracks
+        // Dark background — lighter arc tracks, light glow on buttons
         lv_color_t arc_bg = lv_color_hex(0x5a5a5a);
         lv_color_t prog_bg = lv_color_hex(0x4a4a4a);
         lv_obj_set_style_arc_color(s_media.volume_arc, arc_bg, LV_PART_MAIN);
         lv_obj_set_style_arc_color(s_media.progress_arc, prog_bg, LV_PART_MAIN);
+        lv_color_t glow = lv_color_hex(0x666666);
+        lv_obj_set_style_shadow_color(s_media.btn_prev, glow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_play, glow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_next, glow, 0);
       } else {
-        // Light background — darker arc tracks
+        // Light background — darker arc tracks, dark shadow on buttons
         lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
         lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS_BG, LV_PART_MAIN);
+        lv_color_t shadow = lv_color_hex(0x111111);
+        lv_obj_set_style_shadow_color(s_media.btn_prev, shadow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_play, shadow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_next, shadow, 0);
       }
+      lv_obj_set_style_shadow_width(s_media.btn_prev, 6, 0);
+      lv_obj_set_style_shadow_width(s_media.btn_play, 8, 0);
+      lv_obj_set_style_shadow_width(s_media.btn_next, 6, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_40, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_40, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_40, 0);
     }
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
@@ -1104,6 +1118,10 @@ static void update_media_screen(const manifest_media_t *media) {
     // Reset arc track colors to defaults
     lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
     lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS_BG, LV_PART_MAIN);
+    // Reset button shadows
+    lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_TRANSP, 0);
 }
 }
 
