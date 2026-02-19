@@ -8,6 +8,7 @@
 #include "wifi_manager.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
 #include <esp_system.h>
@@ -17,48 +18,6 @@
 static const char *TAG = "config_server";
 
 static httpd_handle_t s_server = NULL;
-
-// HTML page for config
-// Format args: current_bridge, status_class, status_text, bridge_value
-static const char *HTML_CONFIG =
-    "<!DOCTYPE html>"
-    "<html><head>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>Roon Knob Config</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    ".info{color:#888;margin:10px 0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:400px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=url]{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{padding:12px 24px;margin-top:20px;background:#4fc3f7;color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".btn-clear{background:#ff7043;}"
-    ".btn-clear:hover{background:#ff5722;}"
-    ".current{background:#0f0f1a;padding:10px;border-radius:5px;margin:10px 0;font-family:monospace;}"
-    ".status{padding:10px;border-radius:5px;margin:10px 0;}"
-    ".status-ok{background:#1b5e20;}"
-    ".status-warn{background:#e65100;}"
-    ".status-err{background:#b71c1c;}"
-    ".hint{font-size:12px;color:#666;margin-top:4px;}"
-    ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
-    "</style></head><body>"
-    "<h1>Roon Knob</h1>"
-    "<p class='info'>Configure your Roon Knob settings</p>"
-    "<div class='current'>"
-    "<strong>Current Bridge:</strong> %s"
-    "</div>"
-    "<div class='status %s'>"
-    "<strong>Status:</strong> %s"
-    "</div>"
-    "<form method='POST' action='/config'>"
-    "<label>Bridge URL</label>"
-    "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088' value='%s'>"
-    "<p class='hint'>Leave empty for mDNS auto-discovery. Check the Roon Knob display for connection progress.</p>"
-    "<input type='submit' value='Save'>"
-    "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form></body></html>";
 
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
@@ -171,19 +130,15 @@ static void resolve_local_in_url(char *url, size_t url_len) {
 // Handler for GET / - serve the config form
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config page");
-
     rk_cfg_t cfg = {0};
     platform_storage_load(&cfg);
-
     const char *current = cfg.bridge_base[0] ? cfg.bridge_base : "(mDNS auto-discovery)";
-
     // Get bridge connection status
     const char *status_class;
     char status_text[64];
     bool bridge_connected = bridge_client_is_bridge_connected();
     int retry_count = bridge_client_get_bridge_retry_count();
     int retry_max = bridge_client_get_bridge_retry_max();
-
     if (bridge_connected) {
         status_class = "status-ok";
         snprintf(status_text, sizeof(status_text), "Connected");
@@ -201,15 +156,86 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
         snprintf(status_text, sizeof(status_text), "Connecting...");
     }
 
-    // Build HTML with current values and status
-    char *html = malloc(2560);
+    // Build WiFi list HTML
+    char wifi_html[1024] = "";
+    int pos = 0;
+    for (int i = 0; i < cfg.wifi_count && i < RK_MAX_WIFI; i++) {
+        pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
+            "<div class='wifi-entry'>"
+            "<span>%d. %s</span>"
+            "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;padding:0;'>"
+            "<input type='hidden' name='idx' value='%d'>"
+            "<input type='submit' value='Remove' class='btn-sm btn-clear'>"
+            "</form></div>",
+            i + 1, cfg.wifi[i].ssid, i);
+    }
+    if (cfg.wifi_count == 0) {
+        pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
+            "<div class='wifi-entry'><em>No saved networks</em></div>");
+    }
+
+    // Build full HTML
+    size_t html_size = 4096;
+    char *html = malloc(html_size);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 2560, HTML_CONFIG, current, status_class, status_text, cfg.bridge_base);
-
+    snprintf(html, html_size,
+        "<!DOCTYPE html>"
+        "<html><head>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Roon Knob Config</title>"
+        "<style>"
+        "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
+        "h1{color:#4fc3f7;margin-bottom:5px;}"
+        "h2{color:#aaa;font-size:16px;margin-top:20px;}"
+        ".info{color:#888;margin:10px 0;}"
+        "form{background:#16213e;padding:20px;border-radius:10px;max-width:400px;}"
+        "label{display:block;margin:15px 0 5px;color:#aaa;}"
+        "input[type=text],input[type=url],input[type=password]{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
+        "input[type=submit]{padding:12px 24px;margin-top:20px;background:#4fc3f7;color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
+        "input[type=submit]:hover{background:#29b6f6;}"
+        ".btn-clear{background:#ff7043;}"
+        ".btn-clear:hover{background:#ff5722;}"
+        ".btn-sm{padding:6px 12px;margin:0 0 0 10px;font-size:12px;}"
+        ".current{background:#0f0f1a;padding:10px;border-radius:5px;margin:10px 0;font-family:monospace;}"
+        ".status{padding:10px;border-radius:5px;margin:10px 0;}"
+        ".status-ok{background:#1b5e20;}"
+        ".status-warn{background:#e65100;}"
+        ".status-err{background:#b71c1c;}"
+        ".hint{font-size:12px;color:#666;margin-top:4px;}"
+        ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
+        ".section{max-width:400px;}"
+        "</style></head><body>"
+        "<h1>Roon Knob</h1>"
+        "<p class='info'>Configure your Roon Knob settings</p>"
+        "<div class='current'>"
+        "<strong>Current Bridge:</strong> %s"
+        "</div>"
+        "<div class='status %s'>"
+        "<strong>Status:</strong> %s"
+        "</div>"
+        "<h2>Saved WiFi Networks</h2>"
+        "<div class='section'>%s</div>"
+        "<form method='POST' action='/wifi-add'>"
+        "<h2>Add WiFi Network</h2>"
+        "<label>SSID</label>"
+        "<input type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
+        "<label>Password</label>"
+        "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
+        "<input type='submit' value='Add Network'>"
+        "</form>"
+        "<form method='POST' action='/config'>"
+        "<h2>Bridge Override</h2>"
+        "<label>Bridge URL</label>"
+        "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088' value='%s'>"
+        "<p class='hint'>Leave empty for mDNS auto-discovery.</p>"
+        "<input type='submit' value='Save'>"
+        "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
+        "</form></body></html>",
+        current, status_class, status_text, wifi_html, cfg.bridge_base);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
     free(html);
@@ -293,6 +319,81 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Handler for POST /wifi-add
+static esp_err_t wifi_add_handler(httpd_req_t *req) {
+    char buf[384] = {0};
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    char ssid[33] = {0};
+    char pass[65] = {0};
+    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || ssid[0] == '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
+        return ESP_FAIL;
+    }
+    get_form_field(buf, "pass", pass, sizeof(pass));
+
+    rk_cfg_t cfg = {0};
+    platform_storage_load(&cfg);
+    rk_cfg_add_wifi(&cfg, ssid, pass);
+    if (!platform_storage_save(&cfg)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Added WiFi: '%s' (now %d networks)", ssid, cfg.wifi_count);
+
+    // Redirect back to config page
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_sendstr(req, "Redirecting...");
+    return ESP_OK;
+}
+
+// Handler for POST /wifi-remove
+static esp_err_t wifi_remove_handler(httpd_req_t *req) {
+    char buf[64] = {0};
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    char idx_str[8] = {0};
+    if (!get_form_field(buf, "idx", idx_str, sizeof(idx_str))) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
+        return ESP_FAIL;
+    }
+    char *endp;
+    long idx_l = strtol(idx_str, &endp, 10);
+    if (endp == idx_str || *endp != '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
+        return ESP_FAIL;
+    }
+    int idx = (int)idx_l;
+    rk_cfg_t cfg = {0};
+    platform_storage_load(&cfg);
+    if (idx >= 0 && idx < cfg.wifi_count) {
+        ESP_LOGI(TAG, "Removing WiFi: '%s'", cfg.wifi[idx].ssid);
+        rk_cfg_remove_wifi(&cfg, idx);
+        if (!platform_storage_save(&cfg)) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save");
+            return ESP_FAIL;
+        }
+    }
+
+    // Redirect back to config page
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_sendstr(req, "Redirecting...");
+    return ESP_OK;
+}
+
 void config_server_start(void) {
     if (s_server) {
         ESP_LOGW(TAG, "Config server already running");
@@ -301,7 +402,7 @@ void config_server_start(void) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 4;
+    config.max_uri_handlers = 8;
     config.stack_size = 8192;  // Increased for mDNS resolution during config save
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
@@ -326,6 +427,20 @@ void config_server_start(void) {
         .handler = config_post_handler,
     };
     httpd_register_uri_handler(s_server, &config_post);
+
+    httpd_uri_t wifi_add = {
+        .uri = "/wifi-add",
+        .method = HTTP_POST,
+        .handler = wifi_add_handler,
+    };
+    httpd_register_uri_handler(s_server, &wifi_add);
+
+    httpd_uri_t wifi_remove = {
+        .uri = "/wifi-remove",
+        .method = HTTP_POST,
+        .handler = wifi_remove_handler,
+    };
+    httpd_register_uri_handler(s_server, &wifi_remove);
 
     ESP_LOGI(TAG, "Config server started");
 }

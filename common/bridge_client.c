@@ -1667,6 +1667,17 @@ void bridge_client_set_network_ready(bool ready) {
 
   lock_state();
   if (ready) {
+    // Clear auto-discovered bridge on network reconnect to force fresh
+    // discovery. This enables seamless location switching — if the knob
+    // connects to a different WiFi, it finds the local bridge instead of
+    // trying the stale one. Manually configured bridges are kept.
+    if (s_state.cfg.bridge_from_mdns) {
+      LOGI("Clearing mDNS-discovered bridge for fresh discovery");
+      s_state.cfg.bridge_base[0] = '\0';
+      s_state.cfg.bridge_from_mdns = 0;
+      s_state.zone_resolved = false;  // Force zone re-discovery
+      s_bridge_verified = false;      // Allow immediate mDNS/UDP
+    }
     if (s_device_state == DEVICE_STATE_OPERATIONAL) {
       // Already operational — don't regress to CONNECTED on transient
       // WiFi reconnect. Zones are already loaded.

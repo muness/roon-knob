@@ -68,43 +68,9 @@
 #define COLOR_STATUS_BAR_TEXT lv_color_hex(0x000000)
 #define COLOR_CARD_BG lv_color_hex(0x1a1a1a)
 
-// Volume arc gradient: blue → red as volume increases.
-// pct 0-100. Returns interpolated color.
-static lv_color_t volume_gradient_color(int pct) {
-  // 0%  = 0x5a9fd4 (calm blue)
-  // 50% = 0x8b5fd4 (purple)
-  // 100%= 0xd45a5a (red)
-  if (pct <= 0)
-    return lv_color_hex(0x5a9fd4);
-  if (pct >= 100)
-    return lv_color_hex(0xd45a5a);
-
-  uint8_t r0, g0, b0, r1, g1, b1;
-  int t;
-  if (pct <= 50) {
-    // blue → purple
-    r0 = 0x5a;
-    g0 = 0x9f;
-    b0 = 0xd4;
-    r1 = 0x8b;
-    g1 = 0x5f;
-    b1 = 0xd4;
-    t = pct * 2; // 0-100 over first half
-  } else {
-    // purple → red
-    r0 = 0x8b;
-    g0 = 0x5f;
-    b0 = 0xd4;
-    r1 = 0xd4;
-    g1 = 0x5a;
-    b1 = 0x5a;
-    t = (pct - 50) * 2; // 0-100 over second half
-  }
-  uint8_t r = (uint8_t)(r0 + (r1 - r0) * t / 100);
-  uint8_t g = (uint8_t)(g0 + ((int)g1 - (int)g0) * t / 100);
-  uint8_t b = (uint8_t)(b0 + ((int)b1 - (int)b0) * t / 100);
-  return lv_color_make(r, g, b);
-}
+// Current accent color for volume arc + buttons, derived from album art.
+static lv_color_t s_accent_color;
+static bool s_has_accent = false;
 
 // ── Font wrappers (same as ui.c) ──────────────────────────────────────────
 
@@ -160,6 +126,7 @@ static struct {
   lv_obj_t *container; // Root container for this screen
   lv_obj_t *artwork_image;
   lv_obj_t *volume_arc;
+  lv_obj_t *volume_gutter;
   lv_obj_t *progress_arc;
   lv_obj_t *progress_gutter;
   lv_obj_t *volume_label;
@@ -234,11 +201,9 @@ static void arc_anim_cb(void *obj, int32_t value) {
   lv_arc_set_value((lv_obj_t *)obj, value);
 }
 
-/// LVGL animation callback: set arc value + update volume gradient color.
+/// LVGL animation callback: set arc value for volume.
 static void volume_arc_anim_cb(void *obj, int32_t value) {
   lv_arc_set_value((lv_obj_t *)obj, value);
-  lv_obj_set_style_arc_color((lv_obj_t *)obj, volume_gradient_color(value),
-                             LV_PART_INDICATOR);
   s_arc_state.volume_pct = value;
 }
 
@@ -563,7 +528,7 @@ static void build_chrome(lv_obj_t *parent) {
   lv_obj_set_style_border_width(s_chrome.wifi_dot, 1, 0);
   lv_obj_set_style_border_color(s_chrome.wifi_dot, COLOR_BG, 0);
   lv_obj_set_style_bg_opa(s_chrome.wifi_dot, LV_OPA_COVER, 0);
-  lv_obj_align(s_chrome.wifi_dot, LV_ALIGN_TOP_MID, 0, 18);
+  lv_obj_align(s_chrome.wifi_dot, LV_ALIGN_TOP_MID, 0, 12);
   lv_obj_add_flag(s_chrome.wifi_dot, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -588,7 +553,24 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_add_flag(s_media.artwork_image, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_40, 0);
 
-  // Volume arc gutter — dark ring behind arc to mask artwork
+  // Volume arc gutter — black border behind volume arc
+  s_media.volume_gutter = lv_arc_create(s_media.container);
+  lv_obj_set_size(s_media.volume_gutter, SCREEN_SIZE - 6, SCREEN_SIZE - 6);
+  lv_obj_center(s_media.volume_gutter);
+  lv_arc_set_range(s_media.volume_gutter, 0, 100);
+  lv_arc_set_value(s_media.volume_gutter, 0);
+  lv_arc_set_bg_angles(s_media.volume_gutter, 0, 359);
+  lv_arc_set_rotation(s_media.volume_gutter, 270);
+  lv_arc_set_mode(s_media.volume_gutter, LV_ARC_MODE_NORMAL);
+  lv_obj_set_style_arc_width(s_media.volume_gutter, 12, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(s_media.volume_gutter, 12, LV_PART_INDICATOR);
+  lv_obj_remove_flag(s_media.volume_gutter, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(s_media.volume_gutter, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(s_media.volume_gutter, 0, LV_PART_KNOB);
+  lv_obj_set_style_arc_color(s_media.volume_gutter, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(s_media.volume_gutter, lv_color_black(), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_opa(s_media.volume_gutter, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_arc_opa(s_media.volume_gutter, LV_OPA_COVER, LV_PART_INDICATOR);
   // Volume arc (outer)
   s_media.volume_arc = lv_arc_create(s_media.container);
   lv_obj_set_size(s_media.volume_arc, SCREEN_SIZE - 10, SCREEN_SIZE - 10);
@@ -694,9 +676,10 @@ static void build_media_screen(lv_obj_t *parent) {
 
   // Transport controls row
   lv_obj_t *controls = lv_obj_create(np);
-  lv_obj_set_size(controls, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_size(controls, LV_SIZE_CONTENT, 84);
   lv_obj_set_style_bg_opa(controls, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(controls, 0, 0);
+  lv_obj_add_flag(controls, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
   lv_obj_set_style_pad_all(controls, 0, 0);
   lv_obj_set_layout(controls, LV_LAYOUT_FLEX);
   lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
@@ -714,6 +697,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(s_media.btn_prev, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
   lv_obj_set_style_border_width(s_media.btn_prev, 2, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
@@ -740,6 +724,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(s_media.btn_play, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
   lv_obj_set_style_border_width(s_media.btn_play, 3, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(s_media.btn_play, COLOR_BTN_BORDER_HL,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_play, COLOR_ARC_PROGRESS,
@@ -765,6 +750,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(s_media.btn_next, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
   lv_obj_set_style_border_width(s_media.btn_next, 2, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
@@ -1004,9 +990,9 @@ static void update_media_fast(const manifest_fast_t *fast) {
   lv_label_set_text(s_media.volume_label, vol_text);
 
   // Store seek snapshot for local interpolation.
-  // Only accept server seek if it's a large jump (track change/skip) or
-  // ahead of our local interpolation — prevents backward oscillation from
-  // server updates lagging behind local tick.
+  // Only accept server seek if: first update, server is ahead of local,
+  // or track/state changed. Never snap backward to a stale server value —
+  // local interpolation is more accurate than a server that doesn't update seek.
   int local_seek = s_seek.last_seek;
   if (s_seek.is_playing && s_seek.length > 0) {
     uint32_t elapsed_ms = (uint32_t)platform_millis() - s_seek.update_ms;
@@ -1014,11 +1000,9 @@ static void update_media_fast(const manifest_fast_t *fast) {
   }
   int server_seek = fast->seek_position;
   int diff = server_seek - local_seek;
-  // Accept if: large jump (>3s either direction), or server is ahead, or
-  // length/playing changed, or first update (last_seek < 0)
-  if (s_seek.last_seek < 0 || diff > 0 || diff < -3 ||
-      fast->length != s_seek.length ||
-      fast->is_playing != s_seek.is_playing) {
+  bool state_changed = (fast->length != s_seek.length ||
+                        fast->is_playing != s_seek.is_playing);
+  if (diff > 0 || state_changed) {
     s_seek.last_seek = server_seek;
     s_seek.update_ms = (uint32_t)platform_millis();
   }
@@ -1054,18 +1038,6 @@ static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
   return lv_color_make(r, g, b);
 }
 
-// Parse hex color with minimum brightness floor for visibility.
-// Each channel is clamped to at least `floor`.
-static lv_color_t parse_hex_color_bright(const char *hex, uint8_t floor,
-                                         lv_color_t fallback) {
-  if (!hex || hex[0] != '#' || strlen(hex) != 7) return fallback;
-  unsigned int r, g, b;
-  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3) return fallback;
-  if (r < floor) r = floor;
-  if (g < floor) g = floor;
-  if (b < floor) b = floor;
-  return lv_color_make(r, g, b);
-}
 
 static void update_media_screen(const manifest_media_t *media) {
   // Track (title — line[0])
@@ -1077,19 +1049,93 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_label_set_text(s_media.artist_label, media->lines[1].text);
   }
 
-  // Background color + progress arc from album art edge average
+  // Theme UI from album art edge color
   if (media->bg_color[0]) {
     lv_color_t bg = parse_hex_color(media->bg_color, COLOR_BG);
     lv_obj_set_style_bg_color(s_media.container, bg, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
-    // Progress indicator inherits edge color, floored for visibility
-    lv_color_t prog = parse_hex_color_bright(media->bg_color, 80, COLOR_ARC_PROGRESS);
-    lv_obj_set_style_arc_color(s_media.progress_arc, prog, LV_PART_INDICATOR);
+    lv_color_t accent = bg;
+    s_accent_color = accent;
+    s_has_accent = true;
+    lv_obj_set_style_arc_color(s_media.progress_arc, accent, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_media.volume_arc, accent, LV_PART_INDICATOR);
+    lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_PRESSED);
+    // Adapt arc track colors for contrast against background
+    // Perceived brightness: 0.299R + 0.587G + 0.114B
+    unsigned int br, bg_g, bb;
+    if (sscanf(media->bg_color + 1, "%02x%02x%02x", &br, &bg_g, &bb) == 3) {
+      int luma = (299 * br + 587 * bg_g + 114 * bb) / 1000;
+      if (luma < 80) {
+        // Dark background — lighter arc tracks, light glow on buttons
+        lv_color_t arc_bg = lv_color_hex(0x5a5a5a);
+        lv_color_t prog_bg = lv_color_hex(0x4a4a4a);
+        lv_obj_set_style_arc_color(s_media.volume_arc, arc_bg, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_media.progress_arc, prog_bg, LV_PART_MAIN);
+        lv_color_t glow = lv_color_hex(0x666666);
+        lv_obj_set_style_shadow_color(s_media.btn_prev, glow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_play, glow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_next, glow, 0);
+        lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_color(s_chrome.zone_label, COLOR_ZONE_LABEL, 0);
+      } else {
+        // Light background — darker arc tracks, dark shadow on buttons
+        lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS_BG, LV_PART_MAIN);
+        lv_color_t shadow = lv_color_hex(0x111111);
+        lv_obj_set_style_shadow_color(s_media.btn_prev, shadow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_play, shadow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_next, shadow, 0);
+        lv_obj_set_style_text_color(s_media.track_label, lv_color_hex(0x1a1a1a), 0);
+        lv_obj_set_style_text_color(s_media.volume_label, lv_color_hex(0x1a1a1a), 0);
+        lv_obj_set_style_text_color(s_media.artist_label, lv_color_hex(0x444444), 0);
+        lv_obj_set_style_text_color(s_chrome.zone_label, lv_color_hex(0x555555), 0);
+      }
+      lv_obj_set_style_shadow_width(s_media.btn_prev, 6, 0);
+      lv_obj_set_style_shadow_width(s_media.btn_play, 8, 0);
+      lv_obj_set_style_shadow_width(s_media.btn_next, 6, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_40, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_40, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_40, 0);
+    }
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
     lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS,
                                LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_VOLUME,
+                               LV_PART_INDICATOR);
+    s_has_accent = false;
+    lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_play, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_play, COLOR_ARC_PROGRESS,
+                                  LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_PRESSED);
+    // Reset arc track colors to defaults
+    lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS_BG, LV_PART_MAIN);
+    // Reset button shadows
+    lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_TRANSP, 0);
+    // Reset text colors to defaults
+    lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_set_style_text_color(s_chrome.zone_label, COLOR_ZONE_LABEL, 0);
   }
 }
 
@@ -1113,10 +1159,14 @@ static void update_list_screen(const manifest_list_t *list) {
     lv_obj_set_layout(btn, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(btn, 2, 0);
-    // Fix primary label width — flex column cross-axis doesn't auto-fill
+    // lv_list_add_btn sets flex_grow(1) + SCROLL_CIRCULAR on the label,
+    // which breaks in column flow. Reset to sane defaults.
     lv_obj_t *primary_label = lv_obj_get_child(btn, 0);
-    if (primary_label)
+    if (primary_label) {
+      lv_obj_set_flex_grow(primary_label, 0);
+      lv_label_set_long_mode(primary_label, LV_LABEL_LONG_DOT);
       lv_obj_set_width(primary_label, lv_pct(100));
+    }
     lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(btn, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(btn, font_small(), 0);
@@ -1445,9 +1495,7 @@ static void ui_cb_show_volume(void *arg) {
   if (s_media.volume_arc) {
     int pct = calculate_volume_percentage(vol, vol_min, vol_max);
     lv_arc_set_value(s_media.volume_arc, pct);
-    lv_obj_set_style_arc_color(s_media.volume_arc, volume_gradient_color(pct),
-                               LV_PART_INDICATOR);
-    s_arc_state.volume_pct = pct; // Sync tracked state
+    s_arc_state.volume_pct = pct;
   }
   free(vals);
 }
@@ -1742,6 +1790,8 @@ void ui_set_controls_visible(bool v) {
     // network_banner manages its own visibility via set_network_status
     if (s_media.volume_arc)
       lv_obj_clear_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.volume_gutter)
+      lv_obj_clear_flag(s_media.volume_gutter, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
       lv_obj_clear_flag(s_media.volume_label, LV_OBJ_FLAG_HIDDEN);
     if (s_media.track_label)
@@ -1773,6 +1823,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_add_flag(s_chrome.battery_icon, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_arc)
       lv_obj_add_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.volume_gutter)
+      lv_obj_add_flag(s_media.volume_gutter, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
       lv_obj_add_flag(s_media.volume_label, LV_OBJ_FLAG_HIDDEN);
     if (s_media.track_label)
