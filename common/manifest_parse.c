@@ -147,6 +147,10 @@ static bool parse_media_screen(cJSON *obj, manifest_media_t *out) {
   if (cJSON_IsString(item))
     safe_strcpy(out->image_key, item->valuestring, sizeof(out->image_key));
 
+  item = cJSON_GetObjectItem(obj, "background_color");
+  if (cJSON_IsString(item))
+    safe_strcpy(out->bg_color, item->valuestring, sizeof(out->bg_color));
+
   out->line_count = parse_text_lines(cJSON_GetObjectItem(obj, "lines"),
                                      out->lines, MANIFEST_MAX_LINES);
 
