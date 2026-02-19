@@ -676,7 +676,7 @@ static void build_media_screen(lv_obj_t *parent) {
 
   // Transport controls row
   lv_obj_t *controls = lv_obj_create(np);
-  lv_obj_set_size(controls, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_size(controls, LV_SIZE_CONTENT, 84);
   lv_obj_set_style_bg_opa(controls, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(controls, 0, 0);
   lv_obj_add_flag(controls, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
