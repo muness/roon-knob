@@ -293,7 +293,7 @@ static void zone_label_event_cb(lv_event_t *e) {
 static void zone_label_long_press_cb(lv_event_t *e) {
   (void)e;
   s_zone_long_pressed = true;
-  ui_show_settings();
+  if (ui_is_settings_visible()) ui_hide_settings(); else ui_show_settings();
 }
 
 static void btn_prev_event_cb(lv_event_t *e) {
