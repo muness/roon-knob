@@ -130,6 +130,7 @@ static void resolve_local_in_url(char *url, size_t url_len) {
 // Handler for GET / - serve the config form
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config page");
+    rk_cfg_t cfg = {0};
     platform_storage_load(&cfg);
     const char *current = cfg.bridge_base[0] ? cfg.bridge_base : "(mDNS auto-discovery)";
     // Get bridge connection status
@@ -138,6 +139,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     bool bridge_connected = bridge_client_is_bridge_connected();
     int retry_count = bridge_client_get_bridge_retry_count();
     int retry_max = bridge_client_get_bridge_retry_max();
+    if (bridge_connected) {
         status_class = "status-ok";
         snprintf(status_text, sizeof(status_text), "Connected");
     } else if (!cfg.bridge_base[0]) {
