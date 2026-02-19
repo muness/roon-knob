@@ -82,10 +82,20 @@ bool platform_storage_load(rk_cfg_t *out) {
 
   // Handle migration from older config versions
   if (stored_len == RK_CFG_V1_SIZE && out->cfg_ver == 1) {
-    ESP_LOGI(TAG, "Migrating config from v1 to v2");
+    ESP_LOGI(TAG, "Migrating config from v1 to v3");
     rk_cfg_set_display_defaults(out);
+    // Migrate v1 ssid/pass into wifi[0]
+    if (out->ssid[0]) {
+      rk_cfg_add_wifi(out, out->ssid, out->pass);
+    }
     out->cfg_ver = RK_CFG_CURRENT_VER;
-    // Save the migrated config (will be done by caller if needed)
+  } else if (stored_len == RK_CFG_V2_SIZE && out->cfg_ver == 2) {
+    ESP_LOGI(TAG, "Migrating config from v2 to v3");
+    // Migrate v2 ssid/pass into wifi[0]
+    if (out->ssid[0]) {
+      rk_cfg_add_wifi(out, out->ssid, out->pass);
+    }
+    out->cfg_ver = RK_CFG_CURRENT_VER;
   } else if (stored_len != sizeof(*out)) {
     ESP_LOGW(TAG,
              "Config size mismatch (stored=%d, expected=%d), applying defaults",

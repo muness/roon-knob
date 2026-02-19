@@ -185,9 +185,11 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
     // Fresh device — apply display defaults (rotation, timeouts, etc.)
     rk_cfg_set_display_defaults(&cfg);
   }
+  // Add to wifi list (or update if SSID already exists)
+  rk_cfg_add_wifi(&cfg, ssid, pass);
+  // Set active credentials for immediate connection
   strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
   strncpy(cfg.pass, pass, sizeof(cfg.pass) - 1);
-  // Bridge URL will be discovered via mDNS or configured in Settings
   cfg.cfg_ver = RK_CFG_CURRENT_VER;
 
   bool save_ok = platform_storage_save(&cfg);

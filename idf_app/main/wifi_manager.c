@@ -87,6 +87,7 @@ static char s_ip[16];
 static bool s_ap_mode;                   // true when in AP provisioning mode
 static int s_sta_fail_count;             // consecutive STA connection failures
 static char s_device_hostname[32] = {0}; // cached network hostname
+static int s_wifi_idx;                   // index into cfg.wifi[] currently being tried
 
 static void copy_str(char *dst, size_t dst_len, const char *src) {
   if (!dst || dst_len == 0) {
@@ -175,9 +176,18 @@ static void apply_wifi_defaults(rk_cfg_t *cfg) {
   if (!cfg) {
     return;
   }
-  copy_str(cfg->ssid, sizeof(cfg->ssid), CONFIG_RK_DEFAULT_SSID);
-  copy_str(cfg->pass, sizeof(cfg->pass), CONFIG_RK_DEFAULT_PASS);
-  // Don't set bridge_base here - mDNS discovery is the primary method
+  // Populate wifi[0] from Kconfig defaults
+  if (CONFIG_RK_DEFAULT_SSID[0] && cfg->wifi_count == 0) {
+    rk_cfg_add_wifi(cfg, CONFIG_RK_DEFAULT_SSID, CONFIG_RK_DEFAULT_PASS);
+  }
+  // Sync active ssid/pass from first wifi entry
+  if (cfg->wifi_count > 0) {
+    copy_str(cfg->ssid, sizeof(cfg->ssid), cfg->wifi[0].ssid);
+    copy_str(cfg->pass, sizeof(cfg->pass), cfg->wifi[0].pass);
+  } else {
+    cfg->ssid[0] = '\0';
+    cfg->pass[0] = '\0';
+  }
 }
 
 static void apply_full_defaults(rk_cfg_t *cfg) {
@@ -190,21 +200,34 @@ static void apply_full_defaults(rk_cfg_t *cfg) {
   cfg->zone_id[0] = '\0';
 }
 
+// Sync active ssid/pass from wifi[s_wifi_idx]
+static void sync_active_wifi(rk_cfg_t *cfg) {
+  if (s_wifi_idx < cfg->wifi_count && s_wifi_idx < RK_MAX_WIFI) {
+    copy_str(cfg->ssid, sizeof(cfg->ssid), cfg->wifi[s_wifi_idx].ssid);
+    copy_str(cfg->pass, sizeof(cfg->pass), cfg->wifi[s_wifi_idx].pass);
+  } else {
+    cfg->ssid[0] = '\0';
+    cfg->pass[0] = '\0';
+  }
+}
 static void ensure_cfg_loaded(void) {
   rk_cfg_t cfg = {0};
   bool load_ok = platform_storage_load(&cfg);
-  (void)load_ok; // Unused but kept for clarity
+  (void)load_ok;
   bool blob_exists = have_blob(&cfg);
-  bool has_wifi_creds = (cfg.ssid[0] != '\0');
-
   if (!blob_exists) {
     apply_full_defaults(&cfg);
     platform_storage_save(&cfg);
-  } else if (!has_wifi_creds) {
-    // Apply WiFi defaults when SSID is empty
+  } else if (cfg.wifi_count == 0 && cfg.ssid[0] == '\0') {
     apply_wifi_defaults(&cfg);
     platform_storage_save(&cfg);
+  } else if (cfg.wifi_count == 0 && cfg.ssid[0] != '\0') {
+    // Migrated config: ssid set but wifi[] empty — populate wifi[0]
+    rk_cfg_add_wifi(&cfg, cfg.ssid, cfg.pass);
+    platform_storage_save(&cfg);
   }
+  s_wifi_idx = 0;
+  sync_active_wifi(&cfg);
   s_cfg = cfg;
   s_cfg_loaded = true;
 }
@@ -287,10 +310,23 @@ static void schedule_retry_with_reason(uint8_t reason) {
   ESP_LOGW(TAG, "WiFi disconnected: %s (reason %d, attempt %d/%d)",
            s_last_error, reason, s_sta_fail_count, STA_FAIL_THRESHOLD);
 
-  // Switch to AP mode after too many failures
+  // After STA_FAIL_THRESHOLD failures, try next WiFi entry
   if (s_sta_fail_count >= STA_FAIL_THRESHOLD) {
+    s_wifi_idx++;
+    if (s_wifi_idx < s_cfg.wifi_count && s_wifi_idx < RK_MAX_WIFI) {
+      ESP_LOGW(TAG, "WiFi '%s' failed %d times, trying next: '%s'",
+               s_cfg.ssid, STA_FAIL_THRESHOLD,
+               s_cfg.wifi[s_wifi_idx].ssid);
+      s_sta_fail_count = 0;
+      reset_backoff();
+      sync_active_wifi(&s_cfg);
+      connect_now();
+      return;
+    }
+    // All entries exhausted — AP mode
     ESP_LOGW(TAG,
-             "Too many STA failures, switching to AP mode for provisioning");
+             "All %d WiFi networks failed, switching to AP mode for provisioning",
+             s_cfg.wifi_count);
     start_ap_mode();
     return;
   }
@@ -500,23 +536,18 @@ void wifi_mgr_reconnect(const rk_cfg_t *cfg) {
   if (!cfg) {
     return;
   }
-  if (!s_started) {
-    ESP_LOGW(TAG, "wifi_mgr_reconnect before start");
-    if (!platform_storage_save(cfg)) {
-      ESP_LOGW(TAG, "failed to persist cfg");
-    }
-    s_cfg = *cfg;
-    s_cfg_loaded = true;
-    return;
-  }
   s_cfg = *cfg;
   s_cfg_loaded = true;
+  s_wifi_idx = 0;
+  sync_active_wifi(&s_cfg);
   if (!platform_storage_save(&s_cfg)) {
     ESP_LOGW(TAG, "failed to persist cfg");
   }
   reset_backoff();
-  s_sta_fail_count = 0; // Reset failure count for new credentials
-
+  s_sta_fail_count = 0;
+  if (!s_started) {
+    return;
+  }
   // If in AP mode, stop it first before connecting
   if (s_ap_mode) {
     ESP_LOGI(TAG, "Stopping AP mode to connect with new credentials");
@@ -634,6 +665,8 @@ void wifi_mgr_stop_ap(void) {
 
   s_ap_mode = false;
   s_sta_fail_count = 0;
+  s_wifi_idx = 0;
+  sync_active_wifi(&s_cfg);
   s_ip[0] = '\0';
 
   rk_net_evt_cb(RK_NET_EVT_AP_STOPPED, NULL);
