@@ -679,6 +679,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_size(controls, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_style_bg_opa(controls, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(controls, 0, 0);
+  lv_obj_add_flag(controls, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
   lv_obj_set_style_pad_all(controls, 0, 0);
   lv_obj_set_layout(controls, LV_LAYOUT_FLEX);
   lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
