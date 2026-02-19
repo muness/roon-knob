@@ -41,7 +41,7 @@
 
 // Artwork overflows the circular display slightly to avoid gaps at cardinal
 // edges. 10px overflow per side — just enough to bleed past the circle.
-#define ART_SIZE 300
+#define ART_SIZE 280
 
 // Colors — intentional departures from legacy ui.c:
 // - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED
@@ -1005,6 +1005,13 @@ static void update_media_fast(const manifest_fast_t *fast) {
 #endif
 }
 
+static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
+  if (!hex || hex[0] != '#' || strlen(hex) != 7) return fallback;
+  unsigned int r, g, b;
+  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3) return fallback;
+  return lv_color_make(r, g, b);
+}
+
 static void update_media_screen(const manifest_media_t *media) {
   // Track (title — line[0])
   if (media->line_count > 0) {
@@ -1013,6 +1020,16 @@ static void update_media_screen(const manifest_media_t *media) {
   // Artist (subtitle — line[1])
   if (media->line_count > 1) {
     lv_label_set_text(s_media.artist_label, media->lines[1].text);
+  }
+
+  // Background color from album art edge average
+  if (media->bg_color[0]) {
+    lv_color_t bg = parse_hex_color(media->bg_color, COLOR_BG);
+    lv_obj_set_style_bg_color(s_media.container, bg, 0);
+    lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
+  } else {
+    lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
+    lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
   }
 }
 
