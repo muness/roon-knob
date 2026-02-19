@@ -41,7 +41,7 @@
 
 // Artwork overflows the circular display slightly to avoid gaps at cardinal
 // edges. 10px overflow per side — just enough to bleed past the circle.
-#define ART_SIZE 336
+#define ART_SIZE 320
 
 // Colors — intentional departures from legacy ui.c:
 // - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED longevity
