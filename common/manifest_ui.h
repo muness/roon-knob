@@ -67,7 +67,7 @@ void manifest_ui_set_status(bool online);
 void manifest_ui_set_message(const char *msg);
 
 /// Set album artwork by image key (triggers async fetch).
-void manifest_ui_set_artwork(const char *image_key);
+bool manifest_ui_set_artwork(const char *image_key);
 
 /// Show volume change overlay (optimistic UI during rotary input).
 void manifest_ui_show_volume_change(float vol, float vol_step);
