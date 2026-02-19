@@ -1290,12 +1290,16 @@ static void bridge_poll_thread(void *arg) {
       increment_bridge_fail_count();
       s_bridge_verified = false;
       char line1_msg[64];
+      char status_msg[96];
       snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
       UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
       UI_UPDATE(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
                 0);
-      UI_SET_NETWORK_STATUS("Bridge: Offline - retrying...");
+      snprintf(status_msg, sizeof(status_msg),
+               "Testing Bridge\nAttempt %d of %d...", s_bridge_fail_count,
+               BRIDGE_FAIL_THRESHOLD);
+      UI_SET_NETWORK_STATUS(status_msg);
     } else if (!ok && !s_last_net_ok) {
       // Still trying to connect - check if we have a bridge URL
       lock_state();
@@ -1332,7 +1336,8 @@ static void bridge_poll_thread(void *arg) {
                    s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
           UI_UPDATE(line1_msg, "Searching for Bridge", false, 0.0f, 0.0f,
                     100.0f, 1.0f, 0, 0);
-          snprintf(status_msg, sizeof(status_msg), "mDNS: %d/%d",
+          snprintf(status_msg, sizeof(status_msg),
+                   "Searching for Bridge\nAttempt %d of %d...",
                    s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
           UI_SET_NETWORK_STATUS(status_msg);
         }
@@ -1350,8 +1355,7 @@ static void bridge_poll_thread(void *arg) {
             snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
             snprintf(line2_msg, sizeof(line2_msg), "Update Bridge at:");
             snprintf(status_msg, sizeof(status_msg),
-                     "Bridge unreachable after %d attempts",
-                     BRIDGE_FAIL_THRESHOLD);
+                     "Bridge unreachable\nUpdate at http://%s", s_device_ip);
           } else {
             snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
             snprintf(line2_msg, sizeof(line2_msg), "Bridge Unreachable");
@@ -1370,7 +1374,8 @@ static void bridge_poll_thread(void *arg) {
           UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
           UI_UPDATE(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f,
                     1.0f, 0, 0);
-          snprintf(status_msg, sizeof(status_msg), "Bridge: Retry %d/%d",
+          snprintf(status_msg, sizeof(status_msg),
+                   "Testing Bridge\nAttempt %d of %d...",
                    s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
           UI_SET_NETWORK_STATUS(status_msg);
         }
