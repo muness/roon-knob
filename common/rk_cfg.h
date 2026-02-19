@@ -7,7 +7,7 @@
 #define RK_CFG_CURRENT_VER 3
 #define RK_CFG_V1_SIZE 291  // Size of v1 struct for migration
 #define RK_CFG_V2_SIZE 374  // Size of v2 struct for migration
-#define RK_MAX_WIFI 4
+#define RK_MAX_WIFI 2
 
 typedef struct {
     char ssid[33];
@@ -233,4 +233,4 @@ static inline void rk_cfg_remove_wifi(rk_cfg_t *cfg, int idx) {
     cfg->wifi_count--;
     memset(&cfg->wifi[cfg->wifi_count], 0, sizeof(rk_wifi_entry_t));
 }
-_Static_assert(sizeof(rk_cfg_t) == 766, "rk_cfg_t size changed - update migration sizes");
+_Static_assert(sizeof(rk_cfg_t) == 570, "rk_cfg_t size changed - update migration sizes");
