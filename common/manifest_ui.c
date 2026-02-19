@@ -25,8 +25,8 @@
 #include <string.h>
 
 #ifdef ESP_PLATFORM
-#include "font_manager.h"
 #include "battery.h"
+#include "font_manager.h"
 #endif
 
 #define TAG "manifest_ui"
@@ -41,10 +41,11 @@
 
 // Artwork overflows the circular display slightly to avoid gaps at cardinal
 // edges. 10px overflow per side — just enough to bleed past the circle.
-#define ART_SIZE 336
+#define ART_SIZE 300
 
 // Colors — intentional departures from legacy ui.c:
-// - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED longevity
+// - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED
+// longevity
 // - STATUS_RED: 0xe74c3c signals offline clearly vs legacy 0x5a5a5a grey
 // - Status bar message opacity uses LV_OPA_90 (less jarring than LV_OPA_COVER)
 #define COLOR_BG lv_color_hex(0x000000)
@@ -303,7 +304,10 @@ static void zone_label_event_cb(lv_event_t *e) {
 static void zone_label_long_press_cb(lv_event_t *e) {
   (void)e;
   s_zone_long_pressed = true;
-  ui_show_settings();
+  if (ui_is_settings_visible())
+    ui_hide_settings();
+  else
+    ui_show_settings();
 }
 
 static void btn_prev_event_cb(lv_event_t *e) {
@@ -1034,7 +1038,8 @@ static void update_list_screen(const manifest_list_t *list) {
     lv_obj_set_style_pad_row(btn, 2, 0);
     // Fix primary label width — flex column cross-axis doesn't auto-fill
     lv_obj_t *primary_label = lv_obj_get_child(btn, 0);
-    if (primary_label) lv_obj_set_width(primary_label, lv_pct(100));
+    if (primary_label)
+      lv_obj_set_width(primary_label, lv_pct(100));
     lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(btn, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(btn, font_small(), 0);
