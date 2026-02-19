@@ -1064,6 +1064,23 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_PRESSED);
+    // Adapt arc track colors for contrast against background
+    // Perceived brightness: 0.299R + 0.587G + 0.114B
+    unsigned int br, bg_g, bb;
+    if (sscanf(media->bg_color + 1, "%02x%02x%02x", &br, &bg_g, &bb) == 3) {
+      int luma = (299 * br + 587 * bg_g + 114 * bb) / 1000;
+      if (luma < 80) {
+        // Dark background — lighter arc tracks
+        lv_color_t arc_bg = lv_color_hex(0x5a5a5a);
+        lv_color_t prog_bg = lv_color_hex(0x4a4a4a);
+        lv_obj_set_style_arc_color(s_media.volume_arc, arc_bg, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_media.progress_arc, prog_bg, LV_PART_MAIN);
+      } else {
+        // Light background — darker arc tracks
+        lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS_BG, LV_PART_MAIN);
+      }
+    }
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
@@ -1084,6 +1101,9 @@ static void update_media_screen(const manifest_media_t *media) {
                                   LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
                                   LV_STATE_PRESSED);
+    // Reset arc track colors to defaults
+    lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS_BG, LV_PART_MAIN);
 }
 }
 
