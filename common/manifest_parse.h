@@ -85,6 +85,7 @@ typedef struct {
   char image_key[MANIFEST_MAX_TEXT];
   manifest_text_line_t lines[MANIFEST_MAX_LINES];
   int line_count;
+  char bg_color[8];   // "#rrggbb" hex string from bridge
 } manifest_media_t;
 
 /// List screen data (zone picker equivalent).
