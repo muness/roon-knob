@@ -1002,7 +1002,7 @@ static void update_media_fast(const manifest_fast_t *fast) {
   int diff = server_seek - local_seek;
   bool state_changed = (fast->length != s_seek.length ||
                         fast->is_playing != s_seek.is_playing);
-  if (s_seek.last_seek < 0 || diff > 0 || state_changed) {
+  if (diff > 0 || state_changed) {
     s_seek.last_seek = server_seek;
     s_seek.update_ms = (uint32_t)platform_millis();
   }
@@ -1136,7 +1136,7 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_color(s_chrome.zone_label, COLOR_ZONE_LABEL, 0);
-}
+  }
 }
 
 static void list_item_click_cb(lv_event_t *e) {
