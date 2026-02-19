@@ -1,0 +1,12 @@
+{
+  "name": "Roon Knob (PR #139 Preview)",
+  "version": "pr-139",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [{
+      "path": "roon_knob_merged.bin",
+      "offset": 0
+    }]
+  }]
+}
