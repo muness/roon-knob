@@ -1034,30 +1034,6 @@ static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
   return lv_color_make(r, g, b);
 }
 
-// Parse hex color, boosted to minimum brightness for visibility.
-// Scales the color uniformly so the brightest channel reaches at least `floor`,
-// preserving hue and saturation instead of clamping channels independently.
-static lv_color_t parse_hex_color_bright(const char *hex, uint8_t floor,
-                                         lv_color_t fallback) {
-  if (!hex || hex[0] != '#' || strlen(hex) != 7) return fallback;
-  unsigned int r, g, b;
-  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3) return fallback;
-  unsigned int max_ch = r;
-  if (g > max_ch) max_ch = g;
-  if (b > max_ch) max_ch = b;
-  if (max_ch > 0 && max_ch < floor) {
-    // Scale all channels so the brightest reaches `floor`
-    r = r * floor / max_ch;
-    g = g * floor / max_ch;
-    b = b * floor / max_ch;
-    if (r > 255) r = 255;
-    if (g > 255) g = 255;
-    if (b > 255) b = 255;
-  } else if (max_ch == 0) {
-    return fallback;
-  }
-  return lv_color_make(r, g, b);
-}
 
 static void update_media_screen(const manifest_media_t *media) {
   // Track (title — line[0])
@@ -1074,8 +1050,7 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_color_t bg = parse_hex_color(media->bg_color, COLOR_BG);
     lv_obj_set_style_bg_color(s_media.container, bg, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
-    // Accent color: edge color with brightness floor for visibility
-    lv_color_t accent = parse_hex_color_bright(media->bg_color, 180, COLOR_ARC_PROGRESS);
+    lv_color_t accent = bg;
     s_accent_color = accent;
     s_has_accent = true;
     lv_obj_set_style_arc_color(s_media.progress_arc, accent, LV_PART_INDICATOR);
