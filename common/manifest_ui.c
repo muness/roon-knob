@@ -1739,6 +1739,8 @@ void ui_set_controls_visible(bool v) {
     // network_banner manages its own visibility via set_network_status
     if (s_media.volume_arc)
       lv_obj_clear_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.volume_gutter)
+      lv_obj_clear_flag(s_media.volume_gutter, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
       lv_obj_clear_flag(s_media.volume_label, LV_OBJ_FLAG_HIDDEN);
     if (s_media.track_label)
@@ -1770,6 +1772,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_add_flag(s_chrome.battery_icon, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_arc)
       lv_obj_add_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.volume_gutter)
+      lv_obj_add_flag(s_media.volume_gutter, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
       lv_obj_add_flag(s_media.volume_label, LV_OBJ_FLAG_HIDDEN);
     if (s_media.track_label)
