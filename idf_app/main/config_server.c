@@ -157,7 +157,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     }
 
     // Build WiFi list HTML
-    char wifi_html[512] = "";
+    char wifi_html[1024] = "";
     int pos = 0;
     for (int i = 0; i < cfg.wifi_count && i < RK_MAX_WIFI; i++) {
         pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
@@ -321,7 +321,7 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
 
 // Handler for POST /wifi-add
 static esp_err_t wifi_add_handler(httpd_req_t *req) {
-    char buf[256] = {0};
+    char buf[384] = {0};
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
@@ -340,7 +340,10 @@ static esp_err_t wifi_add_handler(httpd_req_t *req) {
     rk_cfg_t cfg = {0};
     platform_storage_load(&cfg);
     rk_cfg_add_wifi(&cfg, ssid, pass);
-    platform_storage_save(&cfg);
+    if (!platform_storage_save(&cfg)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save");
+        return ESP_FAIL;
+    }
 
     ESP_LOGI(TAG, "Added WiFi: '%s' (now %d networks)", ssid, cfg.wifi_count);
 
@@ -366,14 +369,22 @@ static esp_err_t wifi_remove_handler(httpd_req_t *req) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
         return ESP_FAIL;
     }
-    int idx = atoi(idx_str);
-
+    char *endp;
+    long idx_l = strtol(idx_str, &endp, 10);
+    if (endp == idx_str || *endp != '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
+        return ESP_FAIL;
+    }
+    int idx = (int)idx_l;
     rk_cfg_t cfg = {0};
     platform_storage_load(&cfg);
     if (idx >= 0 && idx < cfg.wifi_count) {
         ESP_LOGI(TAG, "Removing WiFi: '%s'", cfg.wifi[idx].ssid);
         rk_cfg_remove_wifi(&cfg, idx);
-        platform_storage_save(&cfg);
+        if (!platform_storage_save(&cfg)) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save");
+            return ESP_FAIL;
+        }
     }
 
     // Redirect back to config page

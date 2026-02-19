@@ -193,5 +193,7 @@ void platform_storage_reset_wifi_only(rk_cfg_t *cfg) {
   }
   cfg->ssid[0] = '\0';
   cfg->pass[0] = '\0';
+  memset(cfg->wifi, 0, sizeof(cfg->wifi));
+  cfg->wifi_count = 0;
   platform_storage_save(cfg);
 }

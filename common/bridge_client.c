@@ -1675,6 +1675,8 @@ void bridge_client_set_network_ready(bool ready) {
       LOGI("Clearing mDNS-discovered bridge for fresh discovery");
       s_state.cfg.bridge_base[0] = '\0';
       s_state.cfg.bridge_from_mdns = 0;
+      s_state.zone_resolved = false;  // Force zone re-discovery
+      s_bridge_verified = false;      // Allow immediate mDNS/UDP
     }
     if (s_device_state == DEVICE_STATE_OPERATIONAL) {
       // Already operational — don't regress to CONNECTED on transient
