@@ -43,7 +43,10 @@
 // edges. 10px overflow per side — just enough to bleed past the circle.
 #define ART_SIZE 336
 
-// Colors (exact values from ui.c build_layout)
+// Colors — intentional departures from legacy ui.c:
+// - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED longevity
+// - STATUS_RED: 0xe74c3c signals offline clearly vs legacy 0x5a5a5a grey
+// - Status bar message opacity uses LV_OPA_90 (less jarring than LV_OPA_COVER)
 #define COLOR_BG lv_color_hex(0x000000)
 #define COLOR_TEXT_PRIMARY lv_color_hex(0xfafafa)
 #define COLOR_TEXT_SECONDARY lv_color_hex(0xaaaaaa)
@@ -337,16 +340,22 @@ static int calculate_volume_percentage(float vol, float vol_min,
 
 static void format_volume_text(char *buf, size_t len, float vol, float vol_min,
                                float vol_step) {
+  float step_abs = vol_step < 0.0f ? -vol_step : vol_step;
+  int step_is_fractional = (step_abs - (int)step_abs) > 0.01f;
   if (vol_min < 0) {
     // dB mode
-    if (vol_step < 1.0f) {
+    if (step_is_fractional) {
       snprintf(buf, len, "%.1f dB", (double)vol);
     } else {
       snprintf(buf, len, "%d dB", (int)vol);
     }
   } else {
     // Percentage mode
-    snprintf(buf, len, "%d%%", (int)vol);
+    if (step_is_fractional) {
+      snprintf(buf, len, "%.1f%%", (double)vol);
+    } else {
+      snprintf(buf, len, "%d%%", (int)vol);
+    }
   }
 }
 
@@ -703,7 +712,7 @@ static void build_media_screen(lv_obj_t *parent) {
                             LV_STATE_DEFAULT);
   lv_obj_set_style_bg_color(s_media.btn_play, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
-  lv_obj_set_style_border_width(s_media.btn_play, 2, 0);
+  lv_obj_set_style_border_width(s_media.btn_play, 3, 0);
   lv_obj_set_style_border_color(s_media.btn_play, COLOR_BTN_BORDER_HL,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_play, COLOR_ARC_PROGRESS,
