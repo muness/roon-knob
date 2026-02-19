@@ -26,6 +26,7 @@
 
 #ifdef ESP_PLATFORM
 #include "font_manager.h"
+#include "battery.h"
 #endif
 
 #define TAG "manifest_ui"
@@ -173,6 +174,7 @@ static struct {
   lv_obj_t *status_bar;     // Transient message at bottom
   lv_obj_t *network_banner; // Persistent network status
   lv_obj_t *wifi_dot;       // Signal strength color dot
+  lv_obj_t *battery_icon;   // Battery level icon
 } s_chrome;
 
 /// LVGL widget pointers — list screen.
@@ -271,6 +273,11 @@ static void update_status_screen(const manifest_status_t *status);
 
 static void show_screen(int index);
 static int find_screen_index(const char *screen_id);
+
+static void manifest_update_battery_display(void);
+#ifdef ESP_PLATFORM
+static void battery_poll_timer_cb(lv_timer_t *timer);
+#endif
 
 static int calculate_volume_percentage(float vol, float vol_min, float vol_max);
 static void format_volume_text(char *buf, size_t len, float vol, float vol_min,
@@ -389,9 +396,87 @@ void manifest_ui_init(void) {
   // Force full-screen redraw — flush happens in ui_loop_iter via
   // lv_task_handler
   lv_obj_invalidate(screen);
+  // Periodic battery poll (30s) + initial update
+#ifdef ESP_PLATFORM
+  lv_timer_t *battery_timer =
+      lv_timer_create(battery_poll_timer_cb, 30000, NULL);
+  if (battery_timer) {
+    lv_timer_set_repeat_count(battery_timer, -1);
+  }
+  manifest_update_battery_display();
+#endif
+
   LOGI("manifest_ui_init complete: screen_root=%p media=%p",
        (void *)s_chrome.screen_root, (void *)s_media.container);
 }
+
+#ifdef ESP_PLATFORM
+static int s_last_battery_level = -1;
+static bool s_last_battery_charging = false;
+
+static void manifest_update_battery_display(void) {
+  if (!s_chrome.battery_icon)
+    return;
+
+  int percent = battery_get_percentage();
+  bool charging = battery_is_charging();
+
+  // Convert to 4 discrete levels (matches ui.c thresholds)
+  int level;
+  if (percent <= 10)
+    level = 0; // Critical
+  else if (percent <= 25)
+    level = 1; // Low
+  else if (percent <= 60)
+    level = 2; // Medium
+  else
+    level = 3; // High
+
+  // Hysteresis: only update when level or charging state changes
+  if (level == s_last_battery_level && charging == s_last_battery_charging)
+    return;
+
+  s_last_battery_level = level;
+  s_last_battery_charging = charging;
+
+  // Icon selection (Lucide horizontal battery icons)
+  lv_obj_clear_flag(s_chrome.battery_icon, LV_OBJ_FLAG_HIDDEN);
+  if (charging) {
+    lv_label_set_text(s_chrome.battery_icon, ICON_BATTERY_CHARGING);
+  } else {
+    switch (level) {
+    case 0:
+      lv_label_set_text(s_chrome.battery_icon, ICON_BATTERY_WARNING);
+      break;
+    case 1:
+      lv_label_set_text(s_chrome.battery_icon, ICON_BATTERY_LOW);
+      break;
+    case 2:
+      lv_label_set_text(s_chrome.battery_icon, ICON_BATTERY_MEDIUM);
+      break;
+    default:
+      lv_label_set_text(s_chrome.battery_icon, ICON_BATTERY_FULL);
+      break;
+    }
+  }
+
+  // Red for critical/low, grey otherwise
+  if (level <= 1 && !charging) {
+    lv_obj_set_style_text_color(s_chrome.battery_icon, lv_color_hex(0xff0000),
+                                0);
+  } else {
+    lv_obj_set_style_text_color(s_chrome.battery_icon, lv_color_hex(0x888888),
+                                0);
+  }
+}
+
+static void battery_poll_timer_cb(lv_timer_t *timer) {
+  (void)timer;
+  manifest_update_battery_display();
+}
+#else
+static void manifest_update_battery_display(void) {}
+#endif
 
 // ── Chrome (header + status — shared across screens) ───────────────────────
 
@@ -416,6 +501,14 @@ static void build_chrome(lv_obj_t *parent) {
                       NULL);
   lv_obj_set_style_bg_color(header, lv_color_hex(0x333333), LV_STATE_PRESSED);
   lv_obj_set_style_bg_opa(header, LV_OPA_50, LV_STATE_PRESSED);
+
+#ifdef ESP_PLATFORM
+  s_chrome.battery_icon = lv_label_create(header);
+  lv_label_set_text(s_chrome.battery_icon, ICON_BATTERY_FULL);
+  lv_obj_set_style_text_font(s_chrome.battery_icon,
+                             font_manager_get_lucide_battery(), 0);
+  lv_obj_set_style_text_color(s_chrome.battery_icon, lv_color_hex(0x888888), 0);
+#endif
 
   s_chrome.zone_label = lv_label_create(header);
   lv_label_set_text(s_chrome.zone_label, "");
@@ -1519,7 +1612,7 @@ bool ui_zone_picker_is_current_selection(void) {
   return manifest_ui_zone_picker_is_current_selection();
 }
 int ui_zone_picker_get_selected(void) { return 0; }
-void ui_update_battery(void) { /* no-op in manifest mode */ }
+void ui_update_battery(void) { manifest_update_battery_display(); }
 void ui_set_controls_visible(bool v) {
   // Art mode: hide chrome + controls, show artwork at full opacity
   // Normal: restore chrome + controls, dim artwork for text contrast
@@ -1528,6 +1621,14 @@ void ui_set_controls_visible(bool v) {
       lv_obj_clear_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
     if (s_chrome.status_dot)
       lv_obj_clear_flag(s_chrome.status_dot, LV_OBJ_FLAG_HIDDEN);
+#ifdef ESP_PLATFORM
+    if (s_chrome.battery_icon) {
+      lv_obj_clear_flag(s_chrome.battery_icon, LV_OBJ_FLAG_HIDDEN);
+      // Reset hysteresis so icon reappears after art mode (GH-130)
+      s_last_battery_level = -1;
+      manifest_update_battery_display();
+    }
+#endif
     if (s_chrome.status_bar)
       lv_obj_clear_flag(s_chrome.status_bar, LV_OBJ_FLAG_HIDDEN);
     // network_banner manages its own visibility via set_network_status
@@ -1560,6 +1661,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_add_flag(s_chrome.network_banner, LV_OBJ_FLAG_HIDDEN);
     if (s_chrome.wifi_dot)
       lv_obj_add_flag(s_chrome.wifi_dot, LV_OBJ_FLAG_HIDDEN);
+    if (s_chrome.battery_icon)
+      lv_obj_add_flag(s_chrome.battery_icon, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_arc)
       lv_obj_add_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
     if (s_media.volume_label)
