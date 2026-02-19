@@ -39,9 +39,9 @@
 #define SCREEN_SIZE 240
 #endif
 
-// Artwork overflows the circular display slightly to avoid gaps at cardinal
-// edges. 10px overflow per side — just enough to bleed past the circle.
-#define ART_SIZE 280
+// Artwork sized to fit fully inside the progress ring.
+// Progress arc inner diameter = 322, max inscribed square = 322/√2 ≈ 228.
+#define ART_SIZE 228
 
 // Colors — intentional departures from legacy ui.c:
 // - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED
@@ -161,6 +161,7 @@ static struct {
   lv_obj_t *artwork_image;
   lv_obj_t *volume_arc;
   lv_obj_t *progress_arc;
+  lv_obj_t *progress_gutter;
   lv_obj_t *volume_label;
   lv_obj_t *track_label;  // line[0] = title
   lv_obj_t *artist_label; // line[1] = subtitle
@@ -582,6 +583,8 @@ static void build_media_screen(lv_obj_t *parent) {
   s_media.artwork_image = lv_img_create(s_media.container);
   lv_obj_set_size(s_media.artwork_image, ART_SIZE, ART_SIZE);
   lv_obj_center(s_media.artwork_image);
+  lv_obj_set_style_radius(s_media.artwork_image, 16, 0);
+  lv_obj_set_style_clip_corner(s_media.artwork_image, true, 0);
   lv_obj_add_flag(s_media.artwork_image, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_40, 0);
 
@@ -607,6 +610,25 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_arc_opa(s_media.volume_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
   // Progress arc (inner)
+  // Progress arc gutter — black border behind progress arc
+  s_media.progress_gutter = lv_arc_create(s_media.container);
+  lv_obj_set_size(s_media.progress_gutter, SCREEN_SIZE - 26, SCREEN_SIZE - 26);
+  lv_obj_center(s_media.progress_gutter);
+  lv_arc_set_range(s_media.progress_gutter, 0, 100);
+  lv_arc_set_value(s_media.progress_gutter, 0);
+  lv_arc_set_bg_angles(s_media.progress_gutter, 0, 359);
+  lv_arc_set_rotation(s_media.progress_gutter, 270);
+  lv_arc_set_mode(s_media.progress_gutter, LV_ARC_MODE_NORMAL);
+  lv_obj_set_style_arc_width(s_media.progress_gutter, 8, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(s_media.progress_gutter, 8, LV_PART_INDICATOR);
+  lv_obj_remove_flag(s_media.progress_gutter, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(s_media.progress_gutter, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(s_media.progress_gutter, 0, LV_PART_KNOB);
+  lv_obj_set_style_arc_color(s_media.progress_gutter, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(s_media.progress_gutter, lv_color_black(), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_opa(s_media.progress_gutter, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_arc_opa(s_media.progress_gutter, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_add_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   s_media.progress_arc = lv_arc_create(s_media.container);
   lv_obj_set_size(s_media.progress_arc, SCREEN_SIZE - 30, SCREEN_SIZE - 30);
   lv_obj_center(s_media.progress_arc);
@@ -989,10 +1011,12 @@ static void update_media_fast(const manifest_fast_t *fast) {
   // Progress arc — rendered from interpolated seek in tick_progress()
   if (fast->length > 0) {
     lv_obj_clear_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   } else {
     s_arc_state.progress_pct = 0;
     lv_arc_set_value(s_media.progress_arc, 0);
     lv_obj_add_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   }
 
   // Play/pause icon
@@ -1006,9 +1030,19 @@ static void update_media_fast(const manifest_fast_t *fast) {
 }
 
 static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
-  if (!hex || hex[0] != '#' || strlen(hex) != 7) return fallback;
+  if (!hex || hex[0] != '#' || strlen(hex) != 7)
+    return fallback;
   unsigned int r, g, b;
-  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3) return fallback;
+  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3)
+    return fallback;
+  return lv_color_make(r, g, b);
+}
+
+// Ensure minimum brightness for visibility on dark backgrounds.
+static lv_color_t brighten_floor(lv_color_t c, uint8_t floor) {
+  uint8_t r = LV_COLOR_GET_R(c) > floor ? LV_COLOR_GET_R(c) : floor;
+  uint8_t g = LV_COLOR_GET_G(c) > floor ? LV_COLOR_GET_G(c) : floor;
+  uint8_t b = LV_COLOR_GET_B(c) > floor ? LV_COLOR_GET_B(c) : floor;
   return lv_color_make(r, g, b);
 }
 
@@ -1022,14 +1056,19 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_label_set_text(s_media.artist_label, media->lines[1].text);
   }
 
-  // Background color from album art edge average
+  // Background color + progress arc from album art edge average
   if (media->bg_color[0]) {
     lv_color_t bg = parse_hex_color(media->bg_color, COLOR_BG);
     lv_obj_set_style_bg_color(s_media.container, bg, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
+    // Progress indicator inherits edge color, floored for visibility
+    lv_color_t prog = brighten_floor(bg, 80);
+    lv_obj_set_style_arc_color(s_media.progress_arc, prog, LV_PART_INDICATOR);
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
+    lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS,
+                               LV_PART_INDICATOR);
   }
 }
 
@@ -1319,13 +1358,9 @@ void manifest_ui_set_artwork(const char *image_url) {
     return;
   }
 
-  // Build full URL with circular clip at volume ring inner edge.
-  // Volume arc: diameter (SCREEN_SIZE-10)=350, width 8 → inner radius =
-  // (350-8)/2 = 171
+  // Build artwork URL (no circular clip — art is square inside ring)
   char url[512];
-  const int clip_r = (SCREEN_SIZE - 10 - 8) / 2;
-  if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE,
-                                     clip_r)) {
+  if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE, 0)) {
     LOGI("set_artwork: failed to build URL");
     return;
   }
@@ -1614,6 +1649,8 @@ static void tick_progress(void) {
   if (seek < 0)
     seek = 0;
   int pct = (seek * 100) / s_seek.length;
+  if (pct == 0 && s_seek.is_playing && seek > 0)
+    pct = 1;
   if (pct != s_arc_state.progress_pct) {
     animate_arc(s_media.progress_arc, s_arc_state.progress_pct, pct,
                 ARC_ANIM_DURATION_MS, arc_anim_cb);
