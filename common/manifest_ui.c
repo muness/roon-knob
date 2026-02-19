@@ -696,6 +696,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(s_media.btn_prev, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
   lv_obj_set_style_border_width(s_media.btn_prev, 2, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
@@ -722,6 +723,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(s_media.btn_play, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
   lv_obj_set_style_border_width(s_media.btn_play, 3, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(s_media.btn_play, COLOR_BTN_BORDER_HL,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_play, COLOR_ARC_PROGRESS,
@@ -747,6 +749,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(s_media.btn_next, COLOR_BTN_PRESSED,
                             LV_STATE_PRESSED);
   lv_obj_set_style_border_width(s_media.btn_next, 2, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER,
                                 LV_STATE_DEFAULT);
   lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
@@ -1058,6 +1061,9 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_PRESSED);
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
@@ -1072,6 +1078,12 @@ static void update_media_screen(const manifest_media_t *media) {
                                   LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
                                   LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_play, COLOR_ARC_PROGRESS,
+                                  LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_PRESSED);
 }
 }
 
