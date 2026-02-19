@@ -923,22 +923,12 @@ static void ui_manifest_cb(void *arg) {
 
   manifest_ui_update(m);
 
-  // Check artwork change
-  static char last_image_key[128] = "";
-  // Find media screen to get image_key
+  // Fetch artwork whenever screens are updated (SHA changed)
   for (int i = 0; i < m->screen_count; i++) {
     if (m->screens[i].type == SCREEN_TYPE_MEDIA) {
-      const char *key = m->screens[i].data.media.image_key;
       const char *url = m->screens[i].data.media.image_url;
-      bool force = s_force_artwork_refresh;
-      if (force) {
-        s_force_artwork_refresh = false;
-        last_image_key[0] = '\0';
-      }
-      if (key[0] && url[0] && (force || strcmp(key, last_image_key) != 0)) {
+      if (url[0]) {
         manifest_ui_set_artwork(url);
-        strncpy(last_image_key, key, sizeof(last_image_key) - 1);
-        last_image_key[sizeof(last_image_key) - 1] = '\0';
       }
       break;
     }

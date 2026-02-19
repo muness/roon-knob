@@ -161,6 +161,7 @@ static struct {
   lv_obj_t *artwork_image;
   lv_obj_t *volume_arc;
   lv_obj_t *progress_arc;
+  lv_obj_t *progress_gutter;
   lv_obj_t *volume_label;
   lv_obj_t *track_label;  // line[0] = title
   lv_obj_t *artist_label; // line[1] = subtitle
@@ -609,6 +610,26 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_arc_opa(s_media.volume_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
   // Progress arc (inner)
+  // Progress arc gutter — black border behind progress arc
+  s_media.progress_gutter = lv_arc_create(s_media.container);
+  lv_obj_set_size(s_media.progress_gutter, SCREEN_SIZE - 26, SCREEN_SIZE - 26);
+  lv_obj_center(s_media.progress_gutter);
+  lv_arc_set_range(s_media.progress_gutter, 0, 100);
+  lv_arc_set_value(s_media.progress_gutter, 0);
+  lv_arc_set_bg_angles(s_media.progress_gutter, 0, 359);
+  lv_arc_set_rotation(s_media.progress_gutter, 270);
+  lv_arc_set_mode(s_media.progress_gutter, LV_ARC_MODE_NORMAL);
+  lv_obj_set_style_arc_width(s_media.progress_gutter, 8, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(s_media.progress_gutter, 8, LV_PART_INDICATOR);
+  lv_obj_remove_flag(s_media.progress_gutter, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(s_media.progress_gutter, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(s_media.progress_gutter, 0, LV_PART_KNOB);
+  lv_obj_set_style_arc_color(s_media.progress_gutter, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(s_media.progress_gutter, lv_color_black(), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_opa(s_media.progress_gutter, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_arc_opa(s_media.progress_gutter, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_add_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
+
   s_media.progress_arc = lv_arc_create(s_media.container);
   lv_obj_set_size(s_media.progress_arc, SCREEN_SIZE - 30, SCREEN_SIZE - 30);
   lv_obj_center(s_media.progress_arc);
@@ -982,19 +1003,36 @@ static void update_media_fast(const manifest_fast_t *fast) {
                      fast->volume_step);
   lv_label_set_text(s_media.volume_label, vol_text);
 
-  // Store seek snapshot for local interpolation
-  s_seek.last_seek = fast->seek_position;
+  // Store seek snapshot for local interpolation.
+  // Only accept server seek if it's a large jump (track change/skip) or
+  // ahead of our local interpolation — prevents backward oscillation from
+  // server updates lagging behind local tick.
+  int local_seek = s_seek.last_seek;
+  if (s_seek.is_playing && s_seek.length > 0) {
+    uint32_t elapsed_ms = (uint32_t)platform_millis() - s_seek.update_ms;
+    local_seek += (int)(elapsed_ms / 1000);
+  }
+  int server_seek = fast->seek_position;
+  int diff = server_seek - local_seek;
+  // Accept if: large jump (>3s either direction), or server is ahead, or
+  // length/playing changed, or first update (last_seek < 0)
+  if (s_seek.last_seek < 0 || diff > 0 || diff < -3 ||
+      fast->length != s_seek.length ||
+      fast->is_playing != s_seek.is_playing) {
+    s_seek.last_seek = server_seek;
+    s_seek.update_ms = (uint32_t)platform_millis();
+  }
   s_seek.length = fast->length;
   s_seek.is_playing = fast->is_playing;
-  s_seek.update_ms = (uint32_t)platform_millis();
-
   // Progress arc — rendered from interpolated seek in tick_progress()
   if (fast->length > 0) {
     lv_obj_clear_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   } else {
     s_arc_state.progress_pct = 0;
     lv_arc_set_value(s_media.progress_arc, 0);
     lv_obj_add_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   }
 
   // Play/pause icon
@@ -1016,6 +1054,19 @@ static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
   return lv_color_make(r, g, b);
 }
 
+// Parse hex color with minimum brightness floor for visibility.
+// Each channel is clamped to at least `floor`.
+static lv_color_t parse_hex_color_bright(const char *hex, uint8_t floor,
+                                         lv_color_t fallback) {
+  if (!hex || hex[0] != '#' || strlen(hex) != 7) return fallback;
+  unsigned int r, g, b;
+  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3) return fallback;
+  if (r < floor) r = floor;
+  if (g < floor) g = floor;
+  if (b < floor) b = floor;
+  return lv_color_make(r, g, b);
+}
+
 static void update_media_screen(const manifest_media_t *media) {
   // Track (title — line[0])
   if (media->line_count > 0) {
@@ -1026,14 +1077,19 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_label_set_text(s_media.artist_label, media->lines[1].text);
   }
 
-  // Background color from album art edge average
+  // Background color + progress arc from album art edge average
   if (media->bg_color[0]) {
     lv_color_t bg = parse_hex_color(media->bg_color, COLOR_BG);
     lv_obj_set_style_bg_color(s_media.container, bg, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
+    // Progress indicator inherits edge color, floored for visibility
+    lv_color_t prog = parse_hex_color_bright(media->bg_color, 80, COLOR_ARC_PROGRESS);
+    lv_obj_set_style_arc_color(s_media.progress_arc, prog, LV_PART_INDICATOR);
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_media.container, LV_OPA_COVER, 0);
+    lv_obj_set_style_arc_color(s_media.progress_arc, COLOR_ARC_PROGRESS,
+                               LV_PART_INDICATOR);
   }
 }
 
@@ -1315,19 +1371,19 @@ void manifest_ui_set_message(const char *msg) {
 static ui_jpeg_image_t s_artwork_img;
 #endif
 
-void manifest_ui_set_artwork(const char *image_url) {
+bool manifest_ui_set_artwork(const char *image_url) {
 #ifdef ESP_PLATFORM
   if (!image_url || !image_url[0]) {
     if (s_media.artwork_image)
       lv_obj_add_flag(s_media.artwork_image, LV_OBJ_FLAG_HIDDEN);
-    return;
+    return false;
   }
 
   // Build artwork URL (no circular clip — art is square inside ring)
   char url[512];
   if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE, 0)) {
     LOGI("set_artwork: failed to build URL");
-    return;
+    return false;
   }
 
   char *img_data = NULL;
@@ -1337,14 +1393,14 @@ void manifest_ui_set_artwork(const char *image_url) {
   if (ret != 0 || !img_data || img_len == 0) {
     LOGI("Artwork fetch failed (ret=%d, len=%zu)", ret, img_len);
     platform_http_free(img_data);
-    return;
+    return false;
   }
 
   const size_t expected = ART_SIZE * ART_SIZE * 2;
   if (img_len != expected) {
-    LOGI("Artwork size mismatch: %zu vs %zu", img_len, expected);
+    LOGI("Artwork size mismatch: got %zu expected %zu (ART_SIZE=%d)", img_len, expected, ART_SIZE);
     platform_http_free(img_data);
-    return;
+    return false;
   }
 
   ui_jpeg_image_t new_img;
@@ -1354,7 +1410,7 @@ void manifest_ui_set_artwork(const char *image_url) {
 
   if (!ok) {
     LOGI("RGB565 processing failed");
-    return;
+    return false;
   }
 
   ui_jpeg_free(&s_artwork_img);
@@ -1368,8 +1424,10 @@ void manifest_ui_set_artwork(const char *image_url) {
     lv_obj_center(s_media.artwork_image);
     lv_obj_invalidate(s_media.artwork_image);
   }
+  return true;
 #else
   (void)image_url;
+  return false;
 #endif
 }
 
@@ -1466,6 +1524,7 @@ void manifest_ui_show_zone_picker(void) {
     int idx = find_screen_index(s_mgr.manifest.nav.order[i]);
     if (idx >= 0 && s_mgr.manifest.screens[idx].type == SCREEN_TYPE_LIST) {
       show_screen(i);
+      lv_obj_add_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
       return;
     }
   }
@@ -1479,6 +1538,7 @@ void manifest_ui_hide_zone_picker(void) {
     for (int i = 0; i < s_mgr.manifest.nav.count; i++) {
       if (find_screen_index(s_mgr.manifest.nav.order[i]) == def) {
         show_screen(i);
+        lv_obj_clear_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
         return;
       }
     }
