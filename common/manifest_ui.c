@@ -930,6 +930,9 @@ static void update_list_screen(const manifest_list_t *list) {
     lv_obj_set_layout(btn, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(btn, 2, 0);
+    // Fix primary label width — flex column cross-axis doesn't auto-fill
+    lv_obj_t *primary_label = lv_obj_get_child(btn, 0);
+    if (primary_label) lv_obj_set_width(primary_label, lv_pct(100));
     lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(btn, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(btn, font_small(), 0);
@@ -939,6 +942,7 @@ static void update_list_screen(const manifest_list_t *list) {
       lv_label_set_text(sub, item->sublabel);
       lv_obj_set_style_text_font(sub, font_small(), 0);
       lv_obj_set_style_text_color(sub, COLOR_TEXT_DIM, 0);
+      lv_obj_set_width(sub, lv_pct(100));
       lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
     }
 
