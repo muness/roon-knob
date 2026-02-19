@@ -39,9 +39,9 @@
 #define SCREEN_SIZE 240
 #endif
 
-// Artwork overflows the circular display slightly to avoid gaps at cardinal
-// edges. 10px overflow per side — just enough to bleed past the circle.
-#define ART_SIZE 280
+// Artwork sized to fit fully inside the progress ring.
+// Progress arc inner diameter = 322, max inscribed square = 322/√2 ≈ 228.
+#define ART_SIZE 228
 
 // Colors — intentional departures from legacy ui.c:
 // - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED
@@ -582,6 +582,8 @@ static void build_media_screen(lv_obj_t *parent) {
   s_media.artwork_image = lv_img_create(s_media.container);
   lv_obj_set_size(s_media.artwork_image, ART_SIZE, ART_SIZE);
   lv_obj_center(s_media.artwork_image);
+  lv_obj_set_style_radius(s_media.artwork_image, 16, 0);
+  lv_obj_set_style_clip_corner(s_media.artwork_image, true, 0);
   lv_obj_add_flag(s_media.artwork_image, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_40, 0);
 
@@ -1006,9 +1008,11 @@ static void update_media_fast(const manifest_fast_t *fast) {
 }
 
 static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
-  if (!hex || hex[0] != '#' || strlen(hex) != 7) return fallback;
+  if (!hex || hex[0] != '#' || strlen(hex) != 7)
+    return fallback;
   unsigned int r, g, b;
-  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3) return fallback;
+  if (sscanf(hex + 1, "%02x%02x%02x", &r, &g, &b) != 3)
+    return fallback;
   return lv_color_make(r, g, b);
 }
 
@@ -1319,13 +1323,9 @@ void manifest_ui_set_artwork(const char *image_url) {
     return;
   }
 
-  // Build full URL with circular clip at volume ring inner edge.
-  // Volume arc: diameter (SCREEN_SIZE-10)=350, width 8 → inner radius =
-  // (350-8)/2 = 171
+  // Build artwork URL (no circular clip — art is square inside ring)
   char url[512];
-  const int clip_r = (SCREEN_SIZE - 10 - 8) / 2;
-  if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE,
-                                     clip_r)) {
+  if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE, 0)) {
     LOGI("set_artwork: failed to build URL");
     return;
   }
@@ -1614,6 +1614,8 @@ static void tick_progress(void) {
   if (seek < 0)
     seek = 0;
   int pct = (seek * 100) / s_seek.length;
+  if (pct == 0 && s_seek.is_playing && seek > 0)
+    pct = 1;
   if (pct != s_arc_state.progress_pct) {
     animate_arc(s_media.progress_arc, s_arc_state.progress_pct, pct,
                 ARC_ANIM_DURATION_MS, arc_anim_cb);
