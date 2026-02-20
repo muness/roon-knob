@@ -137,13 +137,7 @@ static void wait_for_poll_interval(void);
 static void bridge_poll_thread(void *arg);
 static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
-static void post_ui_status(bool online);
-static void post_ui_zone_name(const char *name);
-static void post_ui_message(const char *msg);
-static void post_ui_message_copy(char *msg_copy);
 static void strip_trailing_slashes(char *url);
-static void post_ui_status_copy(bool *status_copy);
-static void post_ui_zone_name_copy(char *name_copy);
 static void reset_bridge_fail_count(void);
 static void increment_bridge_fail_count(void);
 
@@ -163,32 +157,6 @@ static bool host_is_valid(const char *url) {
   return (end > host);
 }
 
-static void ui_status_cb(void *arg) {
-  bool *online = arg;
-  if (!online) {
-    return;
-  }
-  manifest_ui_set_status(*online);
-  free(online);
-}
-
-static void ui_message_cb(void *arg) {
-  char *msg = arg;
-  if (!msg) {
-    return;
-  }
-  manifest_ui_set_message(msg);
-  free(msg);
-}
-
-static void ui_zone_name_cb(void *arg) {
-  char *name = arg;
-  if (!name) {
-    return;
-  }
-  manifest_ui_set_zone_name(name);
-  free(name);
-}
 
 static void ui_battery_cb(void *arg) {
   (void)arg;
@@ -201,48 +169,6 @@ static void post_ui_battery_update(void) {
 
 
 
-static void post_ui_status_copy(bool *status_copy) {
-  platform_task_post_to_ui(ui_status_cb, status_copy);
-}
-
-static void post_ui_status(bool online) {
-  bool *copy = malloc(sizeof(*copy));
-  if (!copy) {
-    return;
-  }
-  *copy = online;
-  post_ui_status_copy(copy);
-}
-
-static void post_ui_message_copy(char *msg_copy) {
-  platform_task_post_to_ui(ui_message_cb, msg_copy);
-}
-
-static void post_ui_message(const char *msg) {
-  if (!msg) {
-    return;
-  }
-  char *copy = strdup(msg);
-  if (!copy) {
-    return;
-  }
-  post_ui_message_copy(copy);
-}
-
-static void post_ui_zone_name_copy(char *name_copy) {
-  platform_task_post_to_ui(ui_zone_name_cb, name_copy);
-}
-
-static void post_ui_zone_name(const char *name) {
-  if (!name) {
-    return;
-  }
-  char *copy = strdup(name);
-  if (!copy) {
-    return;
-  }
-  post_ui_zone_name_copy(copy);
-}
 
 static void wait_for_poll_interval(void) {
   // Use longer delay when display is sleeping, on battery, or bridge
@@ -354,7 +280,7 @@ static bool udp_broadcast_discover(void) {
   s_state.cfg.bridge_from_mdns = 1;
   platform_storage_save(&s_state.cfg);
   unlock_state();
-  post_ui_message("Bridge: Found");
+  manifest_ui_set_message("Bridge: Found");
   return true;
 #else
   return false;
@@ -402,7 +328,7 @@ static void maybe_update_bridge_base(void) {
     s_state.cfg.bridge_from_mdns = 1; // Persist mDNS source
     platform_storage_save(&s_state.cfg);
     unlock_state();
-    post_ui_message("Bridge: Found");
+    manifest_ui_set_message("Bridge: Found");
     return;
   }
 
@@ -780,7 +706,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     LOGI("refresh_zone_label: Selected zone '%s', posting to UI",
          zone_label_copy);
     platform_storage_save(&s_state.cfg);
-    post_ui_zone_name(zone_label_copy);
+    manifest_ui_set_zone_name(zone_label_copy);
   } else {
     LOGI("refresh_zone_label: No zone selected (success=false)");
   }
@@ -974,7 +900,7 @@ static void bridge_poll_thread(void *arg) {
       ok = (manifest != NULL);
     }
 
-    post_ui_status(ok);
+    manifest_ui_set_status(ok);
 
     if (ok) {
       s_last_is_playing = manifest->fast.is_playing;
@@ -989,7 +915,7 @@ static void bridge_poll_thread(void *arg) {
       if (!s_last_net_ok) {
         // Just connected - clear status, restore zone name, mark verified
         reset_bridge_fail_count();
-        post_ui_message("Bridge: Connected");
+        manifest_ui_set_message("Bridge: Connected");
         manifest_ui_set_network_status(NULL);
         s_bridge_verified = true;
         // Restore zone name (was cleared during error display)
@@ -1194,8 +1120,8 @@ void bridge_client_handle_input(ui_input_event_t event) {
       manifest_ui_hide_zone_picker();
       if (updated) {
         platform_storage_save(&s_state.cfg);
-        post_ui_zone_name(label_copy);
-        post_ui_message("Loading zone...");
+        manifest_ui_set_zone_name(label_copy);
+        manifest_ui_set_message("Loading zone...");
       }
       return;
     }
@@ -1259,7 +1185,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
     manifest_ui_show_volume_change(predicted_down, s_last_known_volume_step);
     if (!udp_send_volume(predicted_down)) {
       if (!send_control_json(body)) {
-        post_ui_message("Volume change failed");
+        manifest_ui_set_message("Volume change failed");
       }
     }
     break;
@@ -1278,7 +1204,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
     manifest_ui_show_volume_change(predicted_up, s_last_known_volume_step);
     if (!udp_send_volume(predicted_up)) {
       if (!send_control_json(body)) {
-        post_ui_message("Volume change failed");
+        manifest_ui_set_message("Volume change failed");
       }
     }
     break;
@@ -1290,7 +1216,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id);
     unlock_state();
     if (!send_control_json(body)) {
-      post_ui_message("Play/pause failed");
+      manifest_ui_set_message("Play/pause failed");
     }
     break;
   case UI_INPUT_NEXT_TRACK:
@@ -1299,7 +1225,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id);
     unlock_state();
     if (!send_control_json(body)) {
-      post_ui_message("Next track failed");
+      manifest_ui_set_message("Next track failed");
     }
     break;
   case UI_INPUT_PREV_TRACK:
@@ -1308,7 +1234,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id);
     unlock_state();
     if (!send_control_json(body)) {
-      post_ui_message("Previous track failed");
+      manifest_ui_set_message("Previous track failed");
     }
     break;
   default:
@@ -1332,7 +1258,7 @@ void bridge_client_handle_volume_rotation(int ticks) {
   unlock_state();
 
   if (!is_operational) {
-    post_ui_message("Connecting...");
+    manifest_ui_set_message("Connecting...");
     return;
   }
 
@@ -1375,7 +1301,7 @@ void bridge_client_handle_volume_rotation(int ticks) {
 
   if (!udp_send_volume(predicted_vol)) {
     if (!send_control_json(body)) {
-      post_ui_message("Volume change failed");
+      manifest_ui_set_message("Volume change failed");
     }
   }
 }

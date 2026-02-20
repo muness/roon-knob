@@ -372,7 +372,7 @@ void manifest_ui_init(void) {
   s_mgr.current_screen = 0;
   show_screen(0);
   // Force full-screen redraw — flush happens in ui_loop_iter via
-  // lv_task_handler
+  // lv_timer_handler
   lv_obj_invalidate(screen);
   // Periodic battery poll (30s) + initial update
 #ifdef ESP_PLATFORM
@@ -1701,7 +1701,6 @@ static void tick_progress(void) {
 }
 void ui_loop_iter(void) {
   platform_task_run_pending();
-  lv_task_handler();
   lv_timer_handler();
 
   // Tick progress arc every ~1s (100 iterations at 10ms)
