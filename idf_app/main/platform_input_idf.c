@@ -1,9 +1,7 @@
 #include "platform/platform_input.h"
 #include "ui.h"
-#if USE_MANIFEST
 #include "bridge_client.h"
 #include "manifest_ui.h"
-#endif
 #include "display_sleep.h"
 
 #include "driver/gpio.h"
@@ -230,15 +228,11 @@ void platform_input_process_events(void) {
     }
 
     // Dispatch single volume rotation with coalesced tick count
-#if USE_MANIFEST
     if (manifest_ui_is_zone_picker_visible()) {
       manifest_ui_zone_picker_scroll(total_ticks > 0 ? 1 : -1);
     } else {
       bridge_client_handle_volume_rotation(total_ticks);
     }
-#else
-    ui_handle_volume_rotation(total_ticks);
-#endif
   }
 }
 

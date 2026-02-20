@@ -6,9 +6,7 @@
 #include "platform/platform_storage.h"
 #include "rk_cfg.h"
 #include "ui.h"
-#if USE_MANIFEST
 #include "manifest_ui.h"
-#endif
 
 #include <stdbool.h>
 
@@ -22,13 +20,8 @@ void app_entry(void) {
   }
 
   // Note: mDNS init moved to after WiFi connects (in main_idf.c)
-#if USE_MANIFEST
   manifest_ui_set_input_handler(bridge_client_handle_input);
   manifest_ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id
                                            : "Tap here to select zone");
-#else
-  ui_set_input_handler(bridge_client_handle_input);
-  ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "Tap here to select zone");
-#endif
   bridge_client_start(&cfg);
 }
