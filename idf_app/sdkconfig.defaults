@@ -89,4 +89,3 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 # Bluetooth disabled on S3 - Bluetooth functionality moved to ESP32 chip
 # See docs/DUAL_CHIP_ARCHITECTURE.md for the dual-chip Bluetooth architecture
 CONFIG_BT_ENABLED=n
-CONFIG_LWIP_NETIF_HOSTNAME=y

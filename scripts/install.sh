@@ -29,8 +29,6 @@ echo "Updated sdkconfig.local: SSID=$SSID BRIDGE_BASE=$BRIDGE_BASE"
 # Regenerate sdkconfig with credentials overlay
 export SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.local"
 rm -f sdkconfig
-idf.py reconfigure
-
 idf.py build
 idf.py -p "$PORT" -b 921600 flash
 echo "Flashed with: SSID=$SSID BRIDGE_BASE=$BRIDGE_BASE"
