@@ -902,6 +902,22 @@ static manifest_t *fetch_manifest(void) {
     return NULL;
   }
 
+  // Mark current zone as selected in the zones list screen
+  for (int i = 0; i < m->screen_count; i++) {
+    if (m->screens[i].type == SCREEN_TYPE_LIST &&
+        strcmp(m->screens[i].id, "zones") == 0) {
+      manifest_list_t *list = &m->screens[i].data.list;
+      for (int j = 0; j < list->item_count; j++) {
+        bool match = (strcmp(list->items[j].id, zone_id) == 0);
+        if (match) {
+          LOGI("Zone list: marking item %d '%s' as selected (zone_id='%s')",
+               j, list->items[j].label, zone_id);
+        }
+        list->items[j].selected = match;
+      }
+    }
+  }
+
   // Cache SHA for next request
   strncpy(s_manifest_sha, m->sha, sizeof(s_manifest_sha) - 1);
 
@@ -1431,17 +1447,18 @@ void bridge_client_handle_input(ui_input_event_t event) {
         return;
       }
 
-      // Check if user selected the same zone they started with (no-op)
-      if (UI_ZONE_PICKER_IS_CURRENT()) {
-        LOGI("Zone picker: Same zone selected (no-op)");
-        UI_HIDE_ZONE_PICKER();
-        return;
-      }
-
       // Zone selection
       char label_copy[MAX_ZONE_NAME] = {0};
       bool updated = false;
       lock_state();
+
+      // Check if user selected the same zone they started with (no-op)
+      if (strcmp(selected_id, s_state.cfg.zone_id) == 0) {
+        unlock_state();
+        LOGI("Zone picker: Same zone selected (no-op)");
+        UI_HIDE_ZONE_PICKER();
+        return;
+      }
       // Find the zone by ID to get its name
       for (int i = 0; i < s_state.zone_count; ++i) {
         struct zone_entry *entry = &s_state.zones[i];
