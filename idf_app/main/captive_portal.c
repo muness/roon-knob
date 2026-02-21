@@ -8,6 +8,7 @@
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <esp_system.h>
+#include <stdlib.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
@@ -136,11 +137,116 @@ static bool get_form_field(const char *data, const char *field, char *out,
   return true;
 }
 
-// Handler for GET / - serve the config form
+// Handler for GET /wifi-remove - remove a saved network
+static esp_err_t wifi_remove_handler(httpd_req_t *req) {
+  const char *query = strchr(req->uri, '?');
+  if (!query || !query[1]) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
+    return ESP_FAIL;
+  }
+  query++;
+  char idx_str[8] = {0};
+  if (!get_form_field(query, "idx", idx_str, sizeof(idx_str))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
+    return ESP_FAIL;
+  }
+  char *endp;
+  int idx = (int)strtol(idx_str, &endp, 10);
+  if (endp == idx_str || *endp != '\0') {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
+    return ESP_FAIL;
+  }
+  rk_cfg_t cfg = {0};
+  platform_storage_load(&cfg);
+  if (idx >= 0 && idx < cfg.wifi_count) {
+    ESP_LOGI(TAG, "Removing WiFi: '%s'", cfg.wifi[idx].ssid);
+    rk_cfg_remove_wifi(&cfg, idx);
+    platform_storage_save(&cfg);
+  }
+  // Redirect back to root
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+// Handler for GET / - serve the config form with saved networks
 static esp_err_t root_get_handler(httpd_req_t *req) {
   ESP_LOGI(TAG, "Serving config form");
+
+  // Build saved networks HTML
+  rk_cfg_t cfg = {0};
+  platform_storage_load(&cfg);
+
+  char wifi_html[512] = "";
+  int pos = 0;
+  for (int i = 0; i < cfg.wifi_count && i < RK_MAX_WIFI; i++) {
+    pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
+        "<div class='wifi-entry'>"
+        "<span>%s</span>"
+        "<a href='/wifi-remove?idx=%d' class='btn-rm'>Remove</a>"
+        "</div>",
+        cfg.wifi[i].ssid, i);
+  }
+
+  // Build full page with saved networks section
+  size_t html_size = 2048;
+  char *html = malloc(html_size);
+  if (!html) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, HTML_FORM, strlen(HTML_FORM));
+    return ESP_OK;
+  }
+
+  snprintf(html, html_size,
+    "<!DOCTYPE html>"
+    "<html><head>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Roon Knob Setup</title>"
+    "<style>"
+    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
+    "h1{color:#4fc3f7;margin-bottom:5px;}"
+    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
+    "p{color:#888;margin-top:0;}"
+    "form{background:#16213e;padding:20px;border-radius:10px;max-width:300px;}"
+    "label{display:block;margin:15px 0 5px;color:#aaa;}"
+    "input[type=text],input[type=password]{width:100%%;padding:10px;border:1px solid "
+    "#333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
+    "input[type=submit]{width:100%%;padding:12px;margin-top:20px;background:#4fc3f7;"
+    "color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
+    "input[type=submit]:hover{background:#29b6f6;}"
+    ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;"
+    "display:flex;justify-content:space-between;align-items:center;max-width:300px;}"
+    ".btn-rm{color:#ff7043;text-decoration:none;font-size:13px;}"
+    ".btn-rm:hover{color:#ff5722;}"
+    ".section{max-width:300px;}"
+    ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
+    "margin-top:20px;font-size:13px;}"
+    ".note a{color:#4fc3f7;}"
+    "</style></head><body>"
+    "<h1>Roon Knob</h1>"
+    "<p>WiFi Setup</p>"
+    "%s%s%s"
+    "<form method='GET' action='/configure'>"
+    "<h2>Connect to WiFi</h2>"
+    "<label>WiFi Network (SSID)</label>"
+    "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    "<label>Password</label>"
+    "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
+    "<input type='submit' value='Connect'>"
+    "</form>"
+    "<div class='note'>"
+    "<strong>Note:</strong> To use this with Roon, you'll need to set up the "
+    "Roon Bridge. See <a href='https://github.com/muness/roon-knob' "
+    "target='_blank'>github.com/muness/roon-knob</a> for details."
+    "</div></body></html>",
+    cfg.wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
+    wifi_html,
+    cfg.wifi_count > 0 ? "</div>" : "");
+
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, HTML_FORM, strlen(HTML_FORM));
+  httpd_resp_send(req, html, strlen(html));
+  free(html);
   return ESP_OK;
 }
 
@@ -298,6 +404,13 @@ void captive_portal_start(void) {
       .handler = configure_get_handler,
   };
   httpd_register_uri_handler(s_server, &configure);
+
+  httpd_uri_t wifi_remove = {
+      .uri = "/wifi-remove",
+      .method = HTTP_GET,
+      .handler = wifi_remove_handler,
+  };
+  httpd_register_uri_handler(s_server, &wifi_remove);
 
   // iOS captive portal detection endpoints
   httpd_uri_t ios_hotspot = {

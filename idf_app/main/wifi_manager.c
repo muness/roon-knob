@@ -273,17 +273,19 @@ static void connect_now(void) {
   if (s_retry_timer) {
     esp_timer_stop(s_retry_timer);
   }
+  // Disconnect first to put driver in clean state (avoids "sta is connecting,
+  // cannot set config" when switching between SSIDs during failover)
+  esp_err_t err = esp_wifi_disconnect();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
+      err != ESP_ERR_WIFI_NOT_INIT) {
+    ESP_LOGW(TAG, "disconnect failed: %s", esp_err_to_name(err));
+  }
   if (apply_wifi_config() != ESP_OK) {
     ESP_LOGE(TAG, "failed to apply Wi-Fi config");
     schedule_retry();
     return;
   }
   rk_net_evt_cb(RK_NET_EVT_CONNECTING, NULL);
-  esp_err_t err = esp_wifi_disconnect();
-  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
-      err != ESP_ERR_WIFI_NOT_INIT) {
-    ESP_LOGW(TAG, "disconnect failed: %s", esp_err_to_name(err));
-  }
   err = esp_wifi_connect();
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "connect failed: %s", esp_err_to_name(err));
