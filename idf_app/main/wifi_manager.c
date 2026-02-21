@@ -245,7 +245,14 @@ static esp_err_t apply_wifi_config(void) {
   return esp_wifi_set_config(WIFI_IF_STA, &cfg);
 }
 
-static void reset_backoff(void) { s_backoff_idx = 0; }
+static void reset_backoff(void) {
+  s_backoff_idx = 0;
+  // Cancel any pending retry timer — without this, a timer scheduled before
+  // GOT_IP can fire after connection succeeds and disconnect the working link.
+  if (s_retry_timer) {
+    esp_timer_stop(s_retry_timer);
+  }
+}
 
 static void schedule_retry_with_reason(uint8_t reason);
 static void schedule_retry(void);

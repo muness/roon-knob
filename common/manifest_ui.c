@@ -795,6 +795,9 @@ static void build_list_screen(lv_obj_t *parent) {
   lv_obj_set_style_bg_opa(s_list.list, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(s_list.list, 0, 0);
   lv_obj_set_style_pad_all(s_list.list, 0, 0);
+  // Extra vertical padding so items near the bezel edges aren't clipped
+  lv_obj_set_style_pad_top(s_list.list, 8, 0);
+  lv_obj_set_style_pad_bottom(s_list.list, 30, 0);
 }
 
 // ── Card screen builder ────────────────────────────────────────────────────
@@ -1183,6 +1186,8 @@ static void update_list_screen(const manifest_list_t *list) {
     if (item->selected) {
       lv_obj_set_style_bg_color(btn, lv_color_hex(0x2a4a6a), 0);
       lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+      s_list.selected = i;
+      lv_obj_scroll_to_view(btn, LV_ANIM_OFF);
     }
 
     // Store index as user data for event handling
@@ -1599,6 +1604,7 @@ bool manifest_ui_is_zone_picker_visible(void) {
 }
 
 void manifest_ui_zone_picker_scroll(int delta) {
+  int old_sel = s_list.selected;
   s_list.selected += delta;
   if (s_list.selected < 0)
     s_list.selected = 0;
@@ -1613,6 +1619,21 @@ void manifest_ui_zone_picker_scroll(int delta) {
     max_idx = 0;
   if (s_list.selected > max_idx)
     s_list.selected = max_idx;
+
+  if (s_list.selected == old_sel)
+    return;
+
+  // Move visual highlight: clear old, set new
+  lv_obj_t *old_btn = lv_obj_get_child(s_list.list, old_sel);
+  if (old_btn) {
+    lv_obj_set_style_bg_opa(old_btn, LV_OPA_TRANSP, 0);
+  }
+  lv_obj_t *new_btn = lv_obj_get_child(s_list.list, s_list.selected);
+  if (new_btn) {
+    lv_obj_set_style_bg_color(new_btn, lv_color_hex(0x2a4a6a), 0);
+    lv_obj_set_style_bg_opa(new_btn, LV_OPA_COVER, 0);
+    lv_obj_scroll_to_view(new_btn, LV_ANIM_ON);
+  }
 }
 
 void manifest_ui_zone_picker_get_selected_id(char *out, size_t len) {
@@ -1773,7 +1794,7 @@ void ui_set_controls_visible(bool v) {
   // Art mode: hide chrome + controls, show artwork at full opacity
   // Normal: restore chrome + controls, dim artwork for text contrast
   if (v) {
-    if (s_chrome.zone_label)
+    if (s_chrome.zone_label && !manifest_ui_is_zone_picker_visible())
       lv_obj_clear_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
     if (s_chrome.status_dot)
       lv_obj_clear_flag(s_chrome.status_dot, LV_OBJ_FLAG_HIDDEN);
