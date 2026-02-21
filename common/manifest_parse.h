@@ -20,7 +20,7 @@ extern "C" {
 #define MANIFEST_MAX_LINES 4
 #define MANIFEST_MAX_LIST_ITEMS 16
 #define MANIFEST_MAX_TEXT 128
-#define MANIFEST_MAX_ID 32
+#define MANIFEST_MAX_ID 64
 #define MANIFEST_MAX_URL 256
 #define MANIFEST_SHA_LEN 9 // 8 hex chars + null
 
@@ -85,7 +85,7 @@ typedef struct {
   char image_key[MANIFEST_MAX_TEXT];
   manifest_text_line_t lines[MANIFEST_MAX_LINES];
   int line_count;
-  char bg_color[8];   // "#rrggbb" hex string from bridge
+  char bg_color[8]; // "#rrggbb" hex string from bridge
 } manifest_media_t;
 
 /// List screen data (zone picker equivalent).
