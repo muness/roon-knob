@@ -137,16 +137,42 @@ static bool get_form_field(const char *data, const char *field, char *out,
   return true;
 }
 
-// Handler for GET /wifi-remove - remove a saved network
+// Escape HTML special characters to prevent XSS from rogue AP names
+static void html_escape(const char *src, char *dst, size_t dst_len) {
+  size_t j = 0;
+  for (size_t i = 0; src[i] && j < dst_len - 1; i++) {
+    const char *esc = NULL;
+    size_t esc_len = 0;
+    switch (src[i]) {
+    case '&': esc = "&amp;"; esc_len = 5; break;
+    case '<': esc = "&lt;"; esc_len = 4; break;
+    case '>': esc = "&gt;"; esc_len = 4; break;
+    case '"': esc = "&quot;"; esc_len = 6; break;
+    case '\'': esc = "&#39;"; esc_len = 5; break;
+    default: break;
+    }
+    if (esc && j + esc_len < dst_len) {
+      memcpy(dst + j, esc, esc_len);
+      j += esc_len;
+    } else if (!esc) {
+      dst[j++] = src[i];
+    }
+  }
+  dst[j] = '\0';
+}
+
+// Handler for POST /wifi-remove - remove a saved network
 static esp_err_t wifi_remove_handler(httpd_req_t *req) {
-  const char *query = strchr(req->uri, '?');
-  if (!query || !query[1]) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
+  char buf[64] = {0};
+  int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
     return ESP_FAIL;
   }
-  query++;
+  buf[received] = '\0';
+
   char idx_str[8] = {0};
-  if (!get_form_field(query, "idx", idx_str, sizeof(idx_str))) {
+  if (!get_form_field(buf, "idx", idx_str, sizeof(idx_str))) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
     return ESP_FAIL;
   }
@@ -181,12 +207,16 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   char wifi_html[512] = "";
   int pos = 0;
   for (int i = 0; i < cfg.wifi_count && i < RK_MAX_WIFI; i++) {
+    char escaped[128];
+    html_escape(cfg.wifi[i].ssid, escaped, sizeof(escaped));
     pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
         "<div class='wifi-entry'>"
         "<span>%s</span>"
-        "<a href='/wifi-remove?idx=%d' class='btn-rm'>Remove</a>"
-        "</div>",
-        cfg.wifi[i].ssid, i);
+        "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;'>"
+        "<input type='hidden' name='idx' value='%d'>"
+        "<button type='submit' class='btn-rm'>Remove</button>"
+        "</form></div>",
+        escaped, i);
   }
 
   // Build full page with saved networks section
@@ -407,7 +437,7 @@ void captive_portal_start(void) {
 
   httpd_uri_t wifi_remove = {
       .uri = "/wifi-remove",
-      .method = HTTP_GET,
+      .method = HTTP_POST,
       .handler = wifi_remove_handler,
   };
   httpd_register_uri_handler(s_server, &wifi_remove);

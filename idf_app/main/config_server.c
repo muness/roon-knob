@@ -35,6 +35,30 @@ static const char *HTML_SUCCESS =
     "<div class='info'>Device will reboot automatically to apply changes...</div>"
     "</body></html>";
 
+// Escape HTML special characters to prevent XSS from rogue AP names
+static void html_escape(const char *src, char *dst, size_t dst_len) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j < dst_len - 1; i++) {
+        const char *esc = NULL;
+        size_t esc_len = 0;
+        switch (src[i]) {
+        case '&': esc = "&amp;"; esc_len = 5; break;
+        case '<': esc = "&lt;"; esc_len = 4; break;
+        case '>': esc = "&gt;"; esc_len = 4; break;
+        case '"': esc = "&quot;"; esc_len = 6; break;
+        case '\'': esc = "&#39;"; esc_len = 5; break;
+        default: break;
+        }
+        if (esc && j + esc_len < dst_len) {
+            memcpy(dst + j, esc, esc_len);
+            j += esc_len;
+        } else if (!esc) {
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+}
+
 // URL decode a string in place
 static void url_decode(char *str) {
     char *src = str;
@@ -160,6 +184,8 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     char wifi_html[1024] = "";
     int pos = 0;
     for (int i = 0; i < cfg.wifi_count && i < RK_MAX_WIFI; i++) {
+        char escaped[128];
+        html_escape(cfg.wifi[i].ssid, escaped, sizeof(escaped));
         pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
             "<div class='wifi-entry'>"
             "<span>%d. %s</span>"
@@ -167,7 +193,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
             "<input type='hidden' name='idx' value='%d'>"
             "<input type='submit' value='Remove' class='btn-sm btn-clear'>"
             "</form></div>",
-            i + 1, cfg.wifi[i].ssid, i);
+            i + 1, escaped, i);
     }
     if (cfg.wifi_count == 0) {
         pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,

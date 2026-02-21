@@ -52,7 +52,8 @@ typedef struct __attribute__((packed)) {
     float    value;       // f32 LE (for volume)
 } udp_command_t;
 _Static_assert(sizeof(udp_command_t) == UDP_CMD_VOL_SIZE, "UDP command size mismatch");
-_Static_assert(sizeof(udp_command_t) - sizeof(float) == UDP_CMD_SIZE, "UDP command (no value) size mismatch");
+_Static_assert(sizeof(udp_command_t) - sizeof(float) == UDP_CMD_SIZE,
+    "UDP command (no value) size mismatch — assumes 'value' is the last field");
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
