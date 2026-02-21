@@ -33,7 +33,7 @@ bool bridge_client_is_bridge_mdns(
 
 #define UDP_FAST_MAGIC 0x524B
 #define UDP_FAST_PORT_OFFSET 1 // bridge_port + 1
-#define UDP_REQUEST_SIZE 54
+#define UDP_REQUEST_SIZE 86
 #define UDP_RESPONSE_SIZE 48
 
 #define UDP_CMD_PLAY_PAUSE  1
@@ -41,22 +41,26 @@ bool bridge_client_is_bridge_mdns(
 #define UDP_CMD_PREV        3
 #define UDP_CMD_STOP        4
 #define UDP_CMD_VOLUME_SET  5
-#define UDP_CMD_SIZE        36
-#define UDP_CMD_VOL_SIZE    40
+#define UDP_CMD_SIZE        68
+#define UDP_CMD_VOL_SIZE    72
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
     uint8_t  cmd;         // command code
     uint8_t  _pad;        // reserved
-    char     zone_id[32]; // null-terminated
+    char     zone_id[64]; // null-terminated (max ~54 chars for OpenHome UDNs)
     float    value;       // f32 LE (for volume)
 } udp_command_t;
+_Static_assert(sizeof(udp_command_t) == UDP_CMD_VOL_SIZE, "UDP command size mismatch");
+_Static_assert(sizeof(udp_command_t) - sizeof(float) == UDP_CMD_SIZE,
+    "UDP command (no value) size mismatch — assumes 'value' is the last field");
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
     char     sha[20];     // manifest SHA — null-terminated hex text (8 chars + NUL, field sized for future expansion)
-    char     zone_id[32]; // zone_id (null-terminated)
+    char     zone_id[64]; // zone_id (null-terminated, max ~54 chars for OpenHome UDNs)
 } udp_fast_request_t;
+_Static_assert(sizeof(udp_fast_request_t) == UDP_REQUEST_SIZE, "UDP request size mismatch");
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;          // 0x524B LE
@@ -70,6 +74,7 @@ typedef struct __attribute__((packed)) {
     int32_t  seek_position;  // -1 = unknown
     uint32_t length;         // 0 = unknown
 } udp_fast_response_t;
+_Static_assert(sizeof(udp_fast_response_t) == UDP_RESPONSE_SIZE, "UDP response size mismatch");
 
 // Flag bit positions
 #define UDP_FLAG_PLAYING  (1 << 0)
