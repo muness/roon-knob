@@ -2,9 +2,7 @@
 
 /// Manifest-driven knob UI — screen renderers and navigation.
 ///
-/// This is a fresh implementation alongside ui.c, selected via USE_MANIFEST.
-/// Style values (colors, fonts, spacing) are copied from ui.c for
-/// pixel-identical default rendering.
+/// Implements the knob UI with manifest-driven screen rendering.
 
 #include "manifest_parse.h"
 #include "ui.h"
@@ -19,7 +17,7 @@ extern "C" {
 /// Call once after lv_init() and display driver setup.
 void manifest_ui_init(void);
 
-/// Set the input handler callback (same as ui_set_input_handler).
+/// Set the input handler callback.
 void manifest_ui_set_input_handler(ui_input_cb_t handler);
 
 /// Apply manifest state to the UI.

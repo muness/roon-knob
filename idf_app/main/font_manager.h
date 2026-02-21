@@ -9,7 +9,7 @@
 #include <stdbool.h>
 
 // Initialize font manager
-// Call after lv_init() but before ui_init()
+// Call after lv_init() but before manifest_ui_init()
 bool font_manager_init(void);
 
 // Text fonts (Charis SIL) - for artist, track, album, metadata
