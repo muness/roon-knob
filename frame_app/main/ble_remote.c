@@ -319,11 +319,13 @@ static int ble_gap_listener_cb(struct ble_gap_event *event, void *arg) {
         break;
 
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
-        // Delete old bond and retry
         struct ble_gap_conn_desc desc;
-        ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
-        ble_store_util_delete_peer(&desc.peer_id_addr);
-        ESP_LOGI(TAG, "Repeat pairing — deleted old bond, retrying");
+        if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0) {
+            ble_store_util_delete_peer(&desc.peer_id_addr);
+            ESP_LOGI(TAG, "Repeat pairing — deleted old bond, retrying");
+        } else {
+            ESP_LOGW(TAG, "Repeat pairing — conn_find failed, retrying anyway");
+        }
         return BLE_GAP_REPEAT_PAIRING_RETRY;
     }
 

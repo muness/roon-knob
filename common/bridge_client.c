@@ -1823,6 +1823,7 @@ bool bridge_client_is_bridge_mdns(void) {
 }
 
 int bridge_client_get_zones(bridge_zone_t *out, int max) {
+  if (!out || max <= 0) return 0;
   lock_state();
   int count = s_state.zone_count < max ? s_state.zone_count : max;
   for (int i = 0; i < count; i++) {

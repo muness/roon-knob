@@ -202,6 +202,7 @@ static void render_artwork(void) {
     ESP_LOGI(TAG, "Downloading artwork (rgb565): %s", art_url);
     if (platform_http_get_image(art_url, &img_data, &img_len) != 0 || !img_data) {
         ESP_LOGE(TAG, "Artwork download failed");
+        platform_http_free(img_data);
         return;
     }
 

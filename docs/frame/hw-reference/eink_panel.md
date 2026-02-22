@@ -13,7 +13,7 @@ Hardware reference for the Waveshare ESP32-S3-PhotoPainter's e-ink display panel
 | Colors | 6: Black, White, Yellow, Red, Blue, Green |
 | Bits per pixel | 4 (2 pixels per byte in framebuffer) |
 | Framebuffer size | 192,000 bytes (800 x 480 / 2) |
-| Interface | 4-wire SPI (mode 0, CPOL=0, CPHL=0) |
+| Interface | 4-wire SPI (mode 0, CPOL=0, CPHA=0) |
 | Max SPI clock | 20 MHz (spec); we run 40 MHz (works in practice) |
 | Full refresh time | 12–30 seconds (temperature-dependent) |
 | Recommended min refresh interval | 180 seconds (per Waveshare) |

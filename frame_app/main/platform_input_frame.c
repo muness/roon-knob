@@ -122,6 +122,8 @@ void platform_input_init(void) {
     }
     if (esp_timer_start_periodic(s_btn_poll_timer, 10 * 1000) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start button poll timer");
+        esp_timer_delete(s_btn_poll_timer);
+        s_btn_poll_timer = NULL;
         return;
     }
 
