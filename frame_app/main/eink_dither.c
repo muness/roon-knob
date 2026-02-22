@@ -1,5 +1,5 @@
-// Floyd-Steinberg dithering for 4-color e-ink palette
-// Panel supports: Black, White, Yellow, Red
+// Floyd-Steinberg dithering for 6-color ACeP e-ink palette
+// Panel supports: Black, White, Yellow, Red, Blue, Green
 // Adapted from PhotoPainter imgdecode_app.cpp — rewritten as C
 
 #include "eink_dither.h"
@@ -10,13 +10,26 @@
 
 #define CLAMP(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
 
-// 4-color e-ink palette (RGB888)
-#define PALETTE_SIZE 4
+// 6-color ACeP e-ink palette (RGB888)
+#define PALETTE_SIZE 6
 static const uint8_t PALETTE[PALETTE_SIZE][3] = {
     {0,   0,   0  },  // 0 = Black
     {255, 255, 255},  // 1 = White
     {255, 255, 0  },  // 2 = Yellow
     {255, 0,   0  },  // 3 = Red
+    {0,   0,   255},  // 4 = Blue
+    {0,   255, 0  },  // 5 = Green
+};
+
+// Maps palette array index → panel hardware color index
+// Panel indices: Black=0, White=1, Yellow=2, Red=3, Blue=5, Green=6 (4 unused)
+static const uint8_t PALETTE_PANEL_INDEX[PALETTE_SIZE] = {
+    0,  // Black
+    1,  // White
+    2,  // Yellow
+    3,  // Red
+    5,  // Blue  (panel skips index 4)
+    6,  // Green
 };
 
 int eink_nearest_color(uint8_t r, uint8_t g, uint8_t b) {
@@ -33,6 +46,11 @@ int eink_nearest_color(uint8_t r, uint8_t g, uint8_t b) {
         }
     }
     return best;
+}
+
+uint8_t eink_palette_to_panel(int palette_idx) {
+    if (palette_idx < 0 || palette_idx >= PALETTE_SIZE) return 0;
+    return PALETTE_PANEL_INDEX[palette_idx];
 }
 
 void eink_dither_rgb888(const uint8_t *src, uint8_t *dst, int w, int h) {

@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// 7.3" 4-color e-ink panel: 800x480 landscape
+// 7.3" 6-color ACeP e-ink panel: 800x480 landscape
 // Mount device with long axis horizontal, USB port on right
 #define EINK_WIDTH   800
 #define EINK_HEIGHT  480
@@ -11,15 +11,15 @@
 // 4 bits per pixel, 2 pixels per byte
 #define EINK_FB_SIZE ((EINK_WIDTH * EINK_HEIGHT) / 2)  // 192000 bytes
 
-// 4-color palette indices (7.3" panel: black, white, yellow, red)
+// 6-color ACeP palette indices (panel hardware color values)
 enum {
     EINK_BLACK  = 0,
     EINK_WHITE  = 1,
     EINK_YELLOW = 2,
     EINK_RED    = 3,
-    // No blue or green on this panel
-    EINK_BLUE   = 0,  // Fallback to black
-    EINK_GREEN  = 2,  // Fallback to yellow
+    // Panel index 4 is unused
+    EINK_BLUE   = 5,
+    EINK_GREEN  = 6,
 };
 
 // Pin assignments for PhotoPainter board

@@ -134,7 +134,7 @@ static void render_artwork(void) {
         return;
     }
 
-    // Floyd-Steinberg dither to 4-color palette
+    // Floyd-Steinberg dither to 6-color ACeP palette
     ESP_LOGI(TAG, "Dithering %dx%d artwork...", ART_SIZE, ART_SIZE);
     eink_dither_rgb888(rgb888, dithered, ART_SIZE, ART_SIZE);
     heap_caps_free(rgb888);
@@ -151,7 +151,8 @@ static void render_artwork(void) {
             uint8_t r = dithered[idx + 0];
             uint8_t g = dithered[idx + 1];
             uint8_t b = dithered[idx + 2];
-            uint8_t color = eink_nearest_color(r, g, b);
+            // Map dithered RGB → palette index → panel hardware color
+            uint8_t color = eink_palette_to_panel(eink_nearest_color(r, g, b));
             if (s_art_cache) {
                 s_art_cache[y * ART_SIZE + x] = color;
             }
@@ -365,12 +366,10 @@ void eink_ui_set_artwork(const char *image_key) {
 }
 
 void eink_ui_show_volume_change(float vol, float vol_step) {
-    if (fabsf(s_ui.volume - vol) >= 1.0f) {
-        s_ui.volume = vol;
-        s_ui.volume_step = vol_step;
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
-    }
+    // Track volume state but don't trigger e-ink refresh — volume isn't displayed
+    // and a full ACeP refresh (~19s) for a volume knob turn is disruptive
+    s_ui.volume = vol;
+    s_ui.volume_step = vol_step;
 }
 
 void eink_ui_update(const char *line1, const char *line2, bool playing,
@@ -392,10 +391,8 @@ void eink_ui_update(const char *line1, const char *line2, bool playing,
         s_ui.playing = playing;
         changed = true;
     }
-    if (fabsf(s_ui.volume - volume) >= 1.0f) {
-        s_ui.volume = volume;
-        changed = true;
-    }
+    // Track volume but don't trigger refresh — volume isn't displayed on e-ink
+    s_ui.volume = volume;
 
     if (changed) {
         s_ui.dirty = true;

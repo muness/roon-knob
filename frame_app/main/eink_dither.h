@@ -8,8 +8,12 @@
 // The caller then maps each output pixel to a palette index.
 void eink_dither_rgb888(const uint8_t *src, uint8_t *dst, int w, int h);
 
-// Map RGB888 pixel to nearest 6-color palette index (0-6)
+// Map RGB888 pixel to nearest 6-color palette array index (0-5)
 int eink_nearest_color(uint8_t r, uint8_t g, uint8_t b);
+
+// Convert palette array index to panel hardware color index
+// (Panel uses: 0=Black, 1=White, 2=Yellow, 3=Red, 5=Blue, 6=Green)
+uint8_t eink_palette_to_panel(int palette_idx);
 
 // Scale RGB888 image using bilinear interpolation (fixed-point)
 void eink_scale_bilinear(const uint8_t *src, int src_w, int src_h,
