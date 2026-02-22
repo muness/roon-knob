@@ -84,7 +84,9 @@ static int http_perform(const char *url, const char *body, const char *content_t
     int status_code = esp_http_client_get_status_code(client);
     ESP_LOGD(TAG, "HTTP Status=%d, content_length=%d", status_code, content_length);
 
-    char *buffer = calloc(1, content_length + 1);
+    // Handle chunked transfer (content_length == 0) with dynamic buffering
+    size_t buf_size = (content_length > 0) ? (size_t)(content_length + 1) : 4096;
+    char *buffer = calloc(1, buf_size);
     if (!buffer) {
         ESP_LOGE(TAG, "Failed to allocate response buffer");
         esp_http_client_close(client);
@@ -92,19 +94,38 @@ static int http_perform(const char *url, const char *body, const char *content_t
         return -1;
     }
 
-    int data_read = esp_http_client_read_response(client, buffer, content_length);
-    if (data_read < 0) {
-        ESP_LOGE(TAG, "Failed to read response");
-        free(buffer);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return -1;
+    int total_read = 0;
+    while (1) {
+        if ((size_t)(total_read + 1024) > buf_size) {
+            size_t new_size = buf_size * 2;
+            char *new_buf = realloc(buffer, new_size);
+            if (!new_buf) {
+                ESP_LOGE(TAG, "Failed to grow response buffer");
+                free(buffer);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return -1;
+            }
+            buffer = new_buf;
+            buf_size = new_size;
+        }
+        int rlen = esp_http_client_read(client, buffer + total_read,
+                                         buf_size - total_read - 1);
+        if (rlen < 0) {
+            ESP_LOGE(TAG, "Failed to read response");
+            free(buffer);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            return -1;
+        }
+        if (rlen == 0) break;
+        total_read += rlen;
     }
 
-    buffer[data_read] = '\0';
+    buffer[total_read] = '\0';
     *out = buffer;
     if (out_len) {
-        *out_len = data_read;
+        *out_len = total_read;
     }
 
     esp_http_client_close(client);

@@ -242,25 +242,18 @@ static void draw_glyph_scaled(uint16_t x, uint16_t y, uint8_t ch,
     int bytes_per_row = (eink_font_16.width + 7) / 8;  // = 1 for 8px wide
     const uint8_t *glyph = eink_font_16.data + glyph_idx * bytes_per_row * eink_font_16.height;
 
-    int scale_x = font->width / eink_font_16.width;
-    int scale_y = font->height / eink_font_16.height;
-    if (scale_x < 1) scale_x = 1;
-    if (scale_y < 1) scale_y = 1;
-
-    for (int row = 0; row < eink_font_16.height; row++) {
-        uint8_t bits = glyph[row];
-        for (int col = 0; col < eink_font_16.width; col++) {
-            uint8_t color = (bits & (0x80 >> col)) ? fg : bg;
+    // Nearest-neighbor sampling to support non-integer scale factors (e.g. 12x24)
+    for (int py_off = 0; py_off < font->height; py_off++) {
+        int src_row = py_off * eink_font_16.height / font->height;
+        uint8_t bits = glyph[src_row];
+        for (int px_off = 0; px_off < font->width; px_off++) {
+            int src_col = px_off * eink_font_16.width / font->width;
+            uint8_t color = (bits & (0x80 >> src_col)) ? fg : bg;
             if (color == 0xFF) continue;  // Skip transparent background
-            // Draw scaled pixel
-            for (int sy = 0; sy < scale_y; sy++) {
-                for (int sx = 0; sx < scale_x; sx++) {
-                    uint16_t px = x + col * scale_x + sx;
-                    uint16_t py = y + row * scale_y + sy;
-                    if (px < EINK_WIDTH && py < EINK_HEIGHT) {
-                        eink_display_set_pixel(px, py, color);
-                    }
-                }
+            uint16_t px = x + px_off;
+            uint16_t py = y + py_off;
+            if (px < EINK_WIDTH && py < EINK_HEIGHT) {
+                eink_display_set_pixel(px, py, color);
             }
         }
     }

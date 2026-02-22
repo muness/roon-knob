@@ -372,6 +372,7 @@ static void scan_task(void *arg) {
         }
     }
 
+    s_scanning = false;  // Ensure flag is cleared even on timeout
     vTaskDelete(NULL);
 }
 

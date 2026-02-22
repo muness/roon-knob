@@ -6,6 +6,7 @@
 #include <lwip/netdb.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 
 static const char *TAG = "dns_server";
 
@@ -18,6 +19,7 @@ static const char *TAG = "dns_server";
 static int s_sock = -1;
 static TaskHandle_t s_task = NULL;
 static bool s_running = false;
+static SemaphoreHandle_t s_stop_sem = NULL;
 
 // Minimal DNS response - redirect everything to AP IP
 static int build_dns_response(const uint8_t *query, int query_len, uint8_t *response) {
@@ -49,6 +51,11 @@ static int build_dns_response(const uint8_t *query, int query_len, uint8_t *resp
 
     // Add answer section
     int ans_start = pos;
+
+    // Ensure answer record (16 bytes) fits within response buffer
+    if (ans_start + 16 > DNS_MAX_LEN) {
+        return -1;
+    }
 
     // Name pointer to question
     response[ans_start] = 0xC0;
@@ -109,7 +116,7 @@ static void dns_server_task(void *arg) {
                 for (int i = 0; i < label_len && qpos < len && dpos < 127; i++) {
                     domain[dpos++] = rx_buf[qpos++];
                 }
-                if (rx_buf[qpos] != 0) domain[dpos++] = '.';
+                if (qpos < len && rx_buf[qpos] != 0) domain[dpos++] = '.';
             }
             ESP_LOGI(TAG, "DNS query: %s -> 192.168.4.1", domain);
         }
@@ -122,6 +129,7 @@ static void dns_server_task(void *arg) {
     }
 
     ESP_LOGI(TAG, "DNS server task stopped");
+    if (s_stop_sem) xSemaphoreGive(s_stop_sem);
     vTaskDelete(NULL);
 }
 
@@ -150,6 +158,7 @@ void dns_server_start(void) {
     }
 
     s_running = true;
+    if (!s_stop_sem) s_stop_sem = xSemaphoreCreateBinary();
     xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &s_task);
     ESP_LOGI(TAG, "DNS server started on port %d", DNS_PORT);
 }
@@ -167,8 +176,10 @@ void dns_server_stop(void) {
         s_sock = -1;
     }
 
-    // Give task time to exit
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Wait for task to confirm exit
+    if (s_stop_sem) {
+        xSemaphoreTake(s_stop_sem, pdMS_TO_TICKS(500));
+    }
     s_task = NULL;
 
     ESP_LOGI(TAG, "DNS server stopped");

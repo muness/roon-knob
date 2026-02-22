@@ -55,6 +55,24 @@ static struct {
     bool initial_draw_done; // First render after boot
 } s_ui;
 
+// ── Artwork cache (persists between renders to survive framebuffer clear) ──
+
+static uint8_t *s_art_cache = NULL;  // Cached e-ink color indices, ART_SIZE*ART_SIZE bytes
+
+static void blit_art_cache(void) {
+    if (!s_art_cache) return;
+    for (int y = 0; y < ART_SIZE; y++) {
+        for (int x = 0; x < ART_SIZE; x++) {
+            uint8_t color = s_art_cache[y * ART_SIZE + x];
+            uint16_t px = ART_X + x;
+            uint16_t py = ART_Y + y;
+            if (px < EINK_WIDTH && py < EINK_HEIGHT) {
+                eink_display_set_pixel(px, py, color);
+            }
+        }
+    }
+}
+
 // ── Artwork download + dither ───────────────────────────────────────────────
 
 static void render_artwork(void) {
@@ -121,7 +139,12 @@ static void render_artwork(void) {
     eink_dither_rgb888(rgb888, dithered, ART_SIZE, ART_SIZE);
     heap_caps_free(rgb888);
 
-    // Write dithered pixels to framebuffer
+    // Allocate/reuse art cache for e-ink color indices
+    if (!s_art_cache) {
+        s_art_cache = heap_caps_malloc(ART_SIZE * ART_SIZE, MALLOC_CAP_SPIRAM);
+    }
+
+    // Write dithered pixels to framebuffer and cache
     for (int y = 0; y < ART_SIZE; y++) {
         for (int x = 0; x < ART_SIZE; x++) {
             int idx = (y * ART_SIZE + x) * 3;
@@ -129,6 +152,9 @@ static void render_artwork(void) {
             uint8_t g = dithered[idx + 1];
             uint8_t b = dithered[idx + 2];
             uint8_t color = eink_nearest_color(r, g, b);
+            if (s_art_cache) {
+                s_art_cache[y * ART_SIZE + x] = color;
+            }
             uint16_t px = ART_X + x;
             uint16_t py = ART_Y + y;
             if (px < EINK_WIDTH && py < EINK_HEIGHT) {
@@ -224,6 +250,9 @@ static void render_full_screen(void) {
     if (s_ui.art_dirty && s_ui.image_key[0]) {
         render_artwork();
         s_ui.art_dirty = false;
+    } else if (s_ui.image_key[0] && s_art_cache) {
+        // Re-blit cached artwork (framebuffer was cleared above)
+        blit_art_cache();
     } else if (!s_ui.image_key[0]) {
         // No artwork — draw thin border placeholder
         draw_hline(ART_X, ART_Y, ART_SIZE, EINK_BLACK);

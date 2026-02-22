@@ -229,6 +229,7 @@ void eink_display_clear(uint8_t color) {
 }
 
 void eink_display_set_pixel(uint16_t x, uint16_t y, uint8_t color) {
+    if (!s_fb) return;
     if (x >= EINK_WIDTH || y >= EINK_HEIGHT) return;
     uint32_t index = (y << 8) + (y << 7) + (y << 4) + (x >> 1);
     uint8_t px = s_fb[index];
@@ -240,6 +241,7 @@ void eink_display_set_pixel(uint16_t x, uint16_t y, uint8_t color) {
 }
 
 uint8_t eink_display_get_pixel(uint16_t x, uint16_t y) {
+    if (!s_fb) return EINK_WHITE;
     if (x >= EINK_WIDTH || y >= EINK_HEIGHT) return EINK_WHITE;
     uint32_t index = (y << 8) + (y << 7) + (y << 4) + (x >> 1);
     uint8_t px = s_fb[index];

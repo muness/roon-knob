@@ -78,7 +78,8 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
             ESP_LOGI(TAG, "Found base TXT: %s", url);
             found = true;
         }
-        if (!found && r->addr && r->port) {
+        if (!found && r->addr && r->port &&
+            r->addr->addr.type == ESP_IPADDR_TYPE_V4) {
             char ip_str[16];
             snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
             snprintf(url, sizeof(url), "http://%s:%u", ip_str, r->port);

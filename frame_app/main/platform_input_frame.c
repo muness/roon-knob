@@ -23,6 +23,7 @@ static const char *TAG = "input";
 
 static ui_input_cb_t s_input_cb = NULL;
 static QueueHandle_t s_event_queue = NULL;
+static esp_timer_handle_t s_btn_poll_timer = NULL;
 
 // Button state tracking
 typedef struct {
@@ -72,24 +73,33 @@ static void button_poll_cb(void *arg) {
 void platform_input_init(void) {
     s_event_queue = xQueueCreate(8, sizeof(ui_input_event_t));
 
-    // Configure button GPIOs as inputs with pull-up
+    // Active-low buttons (BOOT, GP4): pull-up, read 0 when pressed
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << BOOT_PIN) | (1ULL << GP4_PIN) | (1ULL << PWR_PIN),
+        .pin_bit_mask = (1ULL << BOOT_PIN) | (1ULL << GP4_PIN),
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     gpio_config(&io_conf);
+
+    // Active-high button (PWR): pull-down, read 1 when pressed
+    gpio_config_t pwr_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << PWR_PIN),
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+    };
+    gpio_config(&pwr_conf);
 
     // Timer to poll buttons every 10ms
     esp_timer_create_args_t timer_args = {
         .callback = button_poll_cb,
         .name = "btn_poll",
     };
-    esp_timer_handle_t timer = NULL;
-    esp_timer_create(&timer_args, &timer);
-    esp_timer_start_periodic(timer, 10 * 1000);  // 10ms in microseconds
+    esp_timer_create(&timer_args, &s_btn_poll_timer);
+    esp_timer_start_periodic(s_btn_poll_timer, 10 * 1000);  // 10ms in microseconds
 
     ESP_LOGI(TAG, "Button input initialized (BOOT=%d, GP4=%d, PWR=%d)",
              BOOT_PIN, GP4_PIN, PWR_PIN);
@@ -106,7 +116,15 @@ void platform_input_process_events(void) {
 }
 
 void platform_input_shutdown(void) {
-    // Nothing to clean up
+    if (s_btn_poll_timer) {
+        esp_timer_stop(s_btn_poll_timer);
+        esp_timer_delete(s_btn_poll_timer);
+        s_btn_poll_timer = NULL;
+    }
+    if (s_event_queue) {
+        vQueueDelete(s_event_queue);
+        s_event_queue = NULL;
+    }
 }
 
 // Called from app_main.c via ui_set_input_handler / eink_ui equivalent

@@ -57,7 +57,7 @@ bool platform_storage_load(rk_cfg_t *out) {
     }
 
     memset(out, 0, sizeof(*out));
-    size_t read_len = stored_len;
+    size_t read_len = sizeof(*out);  // Buffer capacity, not stored blob size
     err = nvs_get_blob(handle, KEY, out, &read_len);
     nvs_close(handle);
 
