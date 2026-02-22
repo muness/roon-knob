@@ -15,6 +15,7 @@ static const char *TAG = "eink";
 
 static spi_device_handle_t s_spi;
 static uint8_t *s_fb;  // Framebuffer in PSRAM
+static bool s_in_deep_sleep = false;
 
 // ── Low-level GPIO + SPI ────────────────────────────────────────────────────
 
@@ -108,6 +109,13 @@ static void panel_turn_on(void) {
     send_cmd(0x02);  // POWER_OFF
     send_data(0x00);
     wait_busy();
+
+    // Enter deep sleep to minimize power between refreshes (~µA)
+    // Exit requires hardware reset (panel_reset)
+    send_cmd(0x07);
+    send_data(0xA5);
+    s_in_deep_sleep = true;
+    ESP_LOGI(TAG, "Panel entered deep sleep");
 }
 
 void eink_display_init_panel(void) {
@@ -284,6 +292,13 @@ static void fb_rotate_180(uint8_t *buf) {
 void eink_display_refresh(void) {
     if (!s_fb) return;
     ESP_LOGI(TAG, "Refreshing e-ink display...");
+
+    // Wake panel from deep sleep — requires hardware reset + full re-init
+    if (s_in_deep_sleep) {
+        ESP_LOGI(TAG, "Waking panel from deep sleep...");
+        eink_display_init_panel();
+        s_in_deep_sleep = false;
+    }
 
     // Rotate 180 into a temp buffer so set_pixel coordinates stay normal
     uint8_t *rotated = heap_caps_malloc(EINK_FB_SIZE, MALLOC_CAP_SPIRAM);

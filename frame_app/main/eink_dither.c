@@ -120,6 +120,50 @@ void eink_dither_rgb888(const uint8_t *src, uint8_t *dst, int w, int h) {
     free(work);
 }
 
+void eink_dither_checkerboard(const uint8_t *src, uint8_t *dst, int w, int h) {
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int idx = (y * w + x) * 3;
+            uint8_t r = src[idx + 0];
+            uint8_t g = src[idx + 1];
+            uint8_t b = src[idx + 2];
+
+            // Find two nearest palette colors
+            int best = 0, second = 0;
+            int best_dist = 999999, second_dist = 999999;
+            for (int i = 0; i < PALETTE_SIZE; i++) {
+                int dr = (int)r - PALETTE[i][0];
+                int dg = (int)g - PALETTE[i][1];
+                int db = (int)b - PALETTE[i][2];
+                int dist = dr * dr + dg * dg + db * db;
+                if (dist < best_dist) {
+                    second_dist = best_dist;
+                    second = best;
+                    best_dist = dist;
+                    best = i;
+                } else if (dist < second_dist) {
+                    second_dist = dist;
+                    second = i;
+                }
+            }
+
+            // If pixel is close to the nearest color (< 25% of the way to
+            // second), just use nearest.  Otherwise checkerboard blend.
+            int ci;
+            int total = best_dist + second_dist;
+            if (total == 0 || best_dist * 4 < total) {
+                ci = best;
+            } else {
+                ci = ((x + y) & 1) ? second : best;
+            }
+
+            dst[idx + 0] = PALETTE[ci][0];
+            dst[idx + 1] = PALETTE[ci][1];
+            dst[idx + 2] = PALETTE[ci][2];
+        }
+    }
+}
+
 void eink_scale_bilinear(const uint8_t *src, int src_w, int src_h,
                          uint8_t *dst, int dst_w, int dst_h) {
     const int32_t scale_x = (src_w * 1024) / dst_w;

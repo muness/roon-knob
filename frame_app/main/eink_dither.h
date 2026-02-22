@@ -8,6 +8,11 @@
 // The caller then maps each output pixel to a palette index.
 void eink_dither_rgb888(const uint8_t *src, uint8_t *dst, int w, int h);
 
+// Checkerboard dither — alternates between two nearest palette colors.
+// Cleaner pattern than Floyd-Steinberg at 127 PPI where pixels are visible.
+// No work buffer needed (no error propagation), lower memory + faster.
+void eink_dither_checkerboard(const uint8_t *src, uint8_t *dst, int w, int h);
+
 // Map RGB888 pixel to nearest 6-color palette array index (0-5)
 int eink_nearest_color(uint8_t r, uint8_t g, uint8_t b);
 

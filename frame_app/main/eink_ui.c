@@ -30,8 +30,8 @@ static const char *TAG = "eink_ui";
 
 // Debounce: wait 3s after last state change before rendering
 #define RENDER_DEBOUNCE_MS 3000
-// Minimum 30s between refreshes (ACeP full refresh takes ~15-25s)
-#define RENDER_COOLDOWN_MS 30000
+// Minimum 180s between refreshes (Waveshare recommended minimum for panel longevity)
+#define RENDER_COOLDOWN_MS 180000
 
 static struct {
     char zone_name[64];
@@ -134,9 +134,10 @@ static void render_artwork(void) {
         return;
     }
 
-    // Floyd-Steinberg dither to 6-color ACeP palette
-    ESP_LOGI(TAG, "Dithering %dx%d artwork...", ART_SIZE, ART_SIZE);
-    eink_dither_rgb888(rgb888, dithered, ART_SIZE, ART_SIZE);
+    // Checkerboard dither to 6-color ACeP palette
+    // Cleaner pattern than Floyd-Steinberg at 127 PPI; no work buffer needed
+    ESP_LOGI(TAG, "Dithering %dx%d artwork (checkerboard)...", ART_SIZE, ART_SIZE);
+    eink_dither_checkerboard(rgb888, dithered, ART_SIZE, ART_SIZE);
     heap_caps_free(rgb888);
 
     // Allocate/reuse art cache for e-ink color indices
