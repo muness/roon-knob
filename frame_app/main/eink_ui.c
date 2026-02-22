@@ -28,10 +28,10 @@ static const char *TAG = "eink_ui";
 #define ART_Y            0   // Flush to top
 #define TEXT_Y         (EINK_HEIGHT - TEXT_BAR_H)       // Text bar at bottom
 
-// Debounce: wait 5s after last state change before rendering
-#define RENDER_DEBOUNCE_MS 5000
-// Minimum 180s between refreshes (Waveshare recommendation for this panel)
-#define RENDER_COOLDOWN_MS 180000
+// Debounce: wait 3s after last state change before rendering
+#define RENDER_DEBOUNCE_MS 3000
+// Minimum 30s between refreshes (ACeP full refresh takes ~15-25s)
+#define RENDER_COOLDOWN_MS 30000
 
 static struct {
     char zone_name[64];
@@ -421,9 +421,19 @@ void eink_ui_process(void) {
     // Debounce: wait for state to settle before refreshing
     if (now - s_ui.last_change < RENDER_DEBOUNCE_MS) return;
 
-    // Cooldown: don't refresh too often (e-ink is slow)
+    // Cooldown: don't refresh too often (e-ink full refresh takes ~15-25s)
     // Skip cooldown for the very first render after boot
-    if (s_ui.initial_draw_done && now - s_ui.last_render < RENDER_COOLDOWN_MS) return;
+    if (s_ui.initial_draw_done && now - s_ui.last_render < RENDER_COOLDOWN_MS) {
+        // Log once when cooldown is first hit (not every 50ms loop)
+        static uint64_t s_last_cooldown_log = 0;
+        if (now - s_last_cooldown_log > 10000) {
+            uint64_t remaining = RENDER_COOLDOWN_MS - (now - s_ui.last_render);
+            ESP_LOGI(TAG, "Render pending, cooldown %ds remaining",
+                     (int)(remaining / 1000));
+            s_last_cooldown_log = now;
+        }
+        return;
+    }
 
     s_ui.dirty = false;
     s_ui.initial_draw_done = true;

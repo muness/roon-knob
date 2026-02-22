@@ -537,7 +537,13 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     }
   }
 
-  pos += snprintf(html + pos, html_size - pos, "</div></body></html>");
+  pos += snprintf(html + pos, html_size - pos,
+    "</div>"
+    "<div class='card' style='margin-top:20px;'>"
+    "<form method='POST' action='/api/restart'>"
+    "<button type='submit' class='btn btn-danger'>Restart Device</button>"
+    "</form></div>"
+    "</body></html>");
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, pos);
@@ -667,7 +673,12 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   pos += snprintf(html + pos, html_size - pos,
     "<p class='status' style='margin-top:20px;font-size:12px;'>"
     "Put your BLE remote into pairing mode before scanning.</p>"
-    "</div></body></html>");
+    "</div>"
+    "<div class='card' style='margin-top:20px;'>"
+    "<form method='POST' action='/api/restart'>"
+    "<button type='submit' class='btn btn-danger'>Restart Device</button>"
+    "</form></div>"
+    "</body></html>");
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, pos);
@@ -727,6 +738,24 @@ static esp_err_t sta_ble_unpair_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+// ── STA-mode restart handler (POST /api/restart) ────────────────────────────
+
+static esp_err_t sta_restart_handler(httpd_req_t *req) {
+  ESP_LOGW(TAG, "Web UI: restart requested");
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req,
+    "<!DOCTYPE html><html><head>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<style>body{font-family:sans-serif;margin:40px;background:#1a1a2e;color:#eee;"
+    "text-align:center;}h1{color:#4fc3f7;}</style></head><body>"
+    "<h1>Restarting...</h1><p>The device will reconnect in a few seconds.</p>"
+    "</body></html>",
+    HTTPD_RESP_USE_STRLEN);
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  esp_restart();
+  return ESP_OK;  // unreachable
+}
+
 // ── STA-mode root redirect ──────────────────────────────────────────────────
 
 static esp_err_t sta_root_handler(httpd_req_t *req) {
@@ -775,6 +804,9 @@ void captive_portal_start_sta(void) {
 
   httpd_uri_t ble_unpair = {.uri = "/api/ble-unpair", .method = HTTP_POST, .handler = sta_ble_unpair_handler};
   httpd_register_uri_handler(s_server, &ble_unpair);
+
+  httpd_uri_t restart = {.uri = "/api/restart", .method = HTTP_POST, .handler = sta_restart_handler};
+  httpd_register_uri_handler(s_server, &restart);
 
   ESP_LOGI(TAG, "STA web server started (zone picker + BLE config)");
 }

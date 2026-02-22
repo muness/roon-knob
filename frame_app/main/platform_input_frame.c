@@ -1,13 +1,14 @@
 // platform_input.h implementation for PhotoPainter buttons
-// BOOT (GPIO0): short=prev track, long=WiFi setup AP mode
-// GP4  (GPIO4): short=play/pause
-// PWR  (GPIO5): short=next track, long=deep sleep
+// BOOT (GPIO0): long press=WiFi setup AP mode (only action)
+// GP4  (GPIO4): long press=restart
+// PWR  (GPIO5): unused
 
 #include "platform/platform_input.h"
 #include "ui.h"
 
 #include <driver/gpio.h>
 #include <esp_log.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -63,11 +64,28 @@ static void poll_button(button_state_t *btn, ui_input_event_t short_evt,
     }
 }
 
+// Track GP4 long-press for restart (handled outside the event queue)
+static volatile bool s_restart_pending = false;
+
 static void button_poll_cb(void *arg) {
     (void)arg;
-    poll_button(&s_boot, UI_INPUT_PREV_TRACK, UI_INPUT_MENU);
-    poll_button(&s_gp4,  UI_INPUT_PLAY_PAUSE, UI_INPUT_NONE);
-    poll_button(&s_pwr,  UI_INPUT_NEXT_TRACK, UI_INPUT_NONE);
+    // BOOT: long press only = WiFi AP setup
+    poll_button(&s_boot, UI_INPUT_NONE, UI_INPUT_MENU);
+    // GP4: long press triggers restart (handled below)
+    poll_button(&s_gp4,  UI_INPUT_NONE, UI_INPUT_NONE);
+    // PWR: unused
+    poll_button(&s_pwr,  UI_INPUT_NONE, UI_INPUT_NONE);
+
+    // Check GP4 for restart (long press detection directly)
+    bool gp4_pressed = is_pressed(&s_gp4);
+    if (gp4_pressed && s_gp4.pressed) {
+        uint64_t held = (esp_timer_get_time() / 1000) - s_gp4.press_time;
+        if (held >= LONG_PRESS_MS && !s_restart_pending) {
+            s_restart_pending = true;
+            ESP_LOGW("input", "GP4 long press — restarting...");
+            esp_restart();
+        }
+    }
 }
 
 void platform_input_init(void) {
