@@ -35,8 +35,8 @@
   eink_ui_zone_picker_get_selected_id(o, l)
 #define UI_ZONE_PICKER_IS_CURRENT()                                            \
   eink_ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le)                            \
-  eink_ui_update(l1, l2, p, v, vn, vx, vs, sp, le)
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
+  eink_ui_update(l1, l2, l3, p, v, vn, vx, vs, sp, le)
 #elif USE_MANIFEST
 #include "manifest_parse.h"
 #include "manifest_ui.h"
@@ -55,8 +55,8 @@
   manifest_ui_zone_picker_get_selected_id(o, l)
 #define UI_ZONE_PICKER_IS_CURRENT()                                            \
   manifest_ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le) /* noop in manifest mode   \
-                                                     */
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le) /* noop in manifest    \
+                                                        */
 #else
 #define UI_SET_STATUS(o) ui_set_status(o)
 #define UI_SET_MESSAGE(m) ui_set_message(m)
@@ -71,7 +71,7 @@
 #define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
   ui_zone_picker_get_selected_id(o, l)
 #define UI_ZONE_PICKER_IS_CURRENT() ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le)                            \
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
   ui_update(l1, l2, p, v, vn, vx, vs, sp, le)
 #endif
 
@@ -108,6 +108,7 @@ static void check_charging_state_change(void);
 struct now_playing_state {
   char line1[MAX_LINE];
   char line2[MAX_LINE];
+  char line3[MAX_LINE];  // Album name (optional from bridge)
   bool is_playing;
   float volume;
   float volume_min;
@@ -231,9 +232,9 @@ static void ui_update_cb(void *arg) {
   s_last_known_volume_min = state->volume_min;
   s_last_known_volume_max = state->volume_max;
   s_last_known_volume_step = state->volume_step;
-  UI_UPDATE(state->line1, state->line2, state->is_playing, state->volume,
-            state->volume_min, state->volume_max, state->volume_step,
-            state->seek_position, state->length);
+  UI_UPDATE(state->line1, state->line2, state->line3, state->is_playing,
+            state->volume, state->volume_min, state->volume_max,
+            state->volume_step, state->seek_position, state->length);
 
   // Update artwork if image_key changed or forced refresh
   static char last_image_key[128] = "";
@@ -308,6 +309,7 @@ static void default_now_playing(struct now_playing_state *state) {
   }
   snprintf(state->line1, sizeof(state->line1), "Idle");
   state->line2[0] = '\0';
+  state->line3[0] = '\0';
   state->is_playing = false;
   state->volume = 0.0f;
   state->volume_min = -80.0f;
@@ -609,6 +611,10 @@ static bool fetch_now_playing(struct now_playing_state *state) {
   const char *line2 = strstr(resp, "\"line2\"");
   if (line2) {
     extract_json_string(line2, "\"line2\"", state->line2, sizeof(state->line2));
+  }
+  const char *line3 = strstr(resp, "\"line3\"");
+  if (line3) {
+    extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
   }
   state->is_playing = strstr(resp, "\"is_playing\":true") != NULL;
 
@@ -1314,8 +1320,8 @@ static void bridge_poll_thread(void *arg) {
       snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
       UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
-      UI_UPDATE(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
-                0);
+      UI_UPDATE(line1_msg, "Testing Bridge", "", false, 0.0f, 0.0f, 100.0f,
+                1.0f, 0, 0);
       snprintf(status_msg, sizeof(status_msg),
                "Testing Bridge\nAttempt %d of %d...", s_bridge_fail_count,
                BRIDGE_FAIL_THRESHOLD);
@@ -1347,14 +1353,14 @@ static void bridge_poll_thread(void *arg) {
             snprintf(status_msg, sizeof(status_msg),
                      "mDNS failed. Configure Bridge in Settings.");
           }
-          UI_UPDATE(line1_msg, line2_msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
-                    0);
+          UI_UPDATE(line1_msg, line2_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f,
+                    0, 0);
           UI_SET_NETWORK_STATUS(status_msg);
         } else {
           // Still searching - show progress
           snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                    s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
-          UI_UPDATE(line1_msg, "Searching for Bridge", false, 0.0f, 0.0f,
+          UI_UPDATE(line1_msg, "Searching for Bridge", "", false, 0.0f, 0.0f,
                     100.0f, 1.0f, 0, 0);
           snprintf(status_msg, sizeof(status_msg),
                    "Searching for Bridge\nAttempt %d of %d...",
@@ -1383,8 +1389,8 @@ static void bridge_poll_thread(void *arg) {
                      "Bridge unreachable. Check Settings.");
           }
           UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
-          UI_UPDATE(line1_msg, line2_msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
-                    0);
+          UI_UPDATE(line1_msg, line2_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f,
+                    0, 0);
           UI_SET_NETWORK_STATUS(status_msg);
         } else {
           // Still retrying - show progress on main display
@@ -1392,8 +1398,8 @@ static void bridge_poll_thread(void *arg) {
           snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                    s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
           UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
-          UI_UPDATE(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f,
-                    1.0f, 0, 0);
+          UI_UPDATE(line1_msg, "Testing Bridge", "", false, 0.0f, 0.0f,
+                    100.0f, 1.0f, 0, 0);
           snprintf(status_msg, sizeof(status_msg),
                    "Testing Bridge\nAttempt %d of %d...",
                    s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);

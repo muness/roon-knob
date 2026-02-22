@@ -308,10 +308,13 @@ static void render_full_screen(void) {
     // ── Text bar at bottom ───────────────────────────────────────────────
     draw_hline(0, TEXT_Y, EINK_WIDTH, EINK_BLACK);
 
-    // "Track — Artist" left-aligned
+    // "Track  -  Artist  -  Album" left-aligned
     {
-        char text[256];
-        if (s_ui.track[0] && s_ui.artist[0]) {
+        char text[384];
+        if (s_ui.track[0] && s_ui.artist[0] && s_ui.album[0]) {
+            snprintf(text, sizeof(text), "%.100s  -  %.100s  -  %.100s",
+                     s_ui.track, s_ui.artist, s_ui.album);
+        } else if (s_ui.track[0] && s_ui.artist[0]) {
             snprintf(text, sizeof(text), "%.120s  -  %.120s", s_ui.track, s_ui.artist);
         } else if (s_ui.track[0]) {
             snprintf(text, sizeof(text), "%s", s_ui.track);
@@ -322,7 +325,7 @@ static void render_full_screen(void) {
         }
         // Truncate to fit (leave 40px right margin for status icons)
         int max_text_w = EINK_WIDTH - 50;
-        char trunc[200];
+        char trunc[300];
         truncate_to_fit(text, trunc, sizeof(trunc), max_text_w, &eink_font_16);
         eink_font_draw_string(5, TEXT_Y + 7, trunc, &eink_font_16, EINK_BLACK, 0xFF);
     }
@@ -419,9 +422,10 @@ void eink_ui_show_volume_change(float vol, float vol_step) {
     s_ui.volume_step = vol_step;
 }
 
-void eink_ui_update(const char *line1, const char *line2, bool playing,
-                    float volume, float volume_min, float volume_max,
-                    float volume_step, int seek_position, int length) {
+void eink_ui_update(const char *line1, const char *line2, const char *line3,
+                    bool playing, float volume, float volume_min,
+                    float volume_max, float volume_step, int seek_position,
+                    int length) {
     (void)volume_min; (void)volume_max; (void)volume_step; (void)seek_position; (void)length;
 
     bool changed = false;
@@ -432,6 +436,10 @@ void eink_ui_update(const char *line1, const char *line2, bool playing,
     }
     if (line2 && strcmp(s_ui.artist, line2) != 0) {
         snprintf(s_ui.artist, sizeof(s_ui.artist), "%s", line2);
+        changed = true;
+    }
+    if (line3 && strcmp(s_ui.album, line3) != 0) {
+        snprintf(s_ui.album, sizeof(s_ui.album), "%s", line3);
         changed = true;
     }
     if (s_ui.playing != playing) {

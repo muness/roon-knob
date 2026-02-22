@@ -27,9 +27,10 @@ void eink_ui_set_artwork(const char *image_key);
 void eink_ui_show_volume_change(float vol, float vol_step);
 
 // Now-playing state update (track info)
-void eink_ui_update(const char *line1, const char *line2, bool playing,
-                    float volume, float volume_min, float volume_max,
-                    float volume_step, int seek_position, int length);
+void eink_ui_update(const char *line1, const char *line2, const char *line3,
+                    bool playing, float volume, float volume_min,
+                    float volume_max, float volume_step, int seek_position,
+                    int length);
 
 // Zone picker (simplified for e-ink — just cycle zones with button)
 void eink_ui_show_zone_picker(void);
