@@ -76,34 +76,21 @@ static void blit_art_cache(void) {
 
 // ── Artwork download + dither ───────────────────────────────────────────────
 
-// Unpack 4-bit packed eink_acep6 data directly to framebuffer and cache.
+// Unpack 4-bit packed eink_acep6 data into the art cache (not framebuffer).
 // Each byte = 2 pixels: high nibble = left pixel, low nibble = right pixel.
 // Values are panel hardware color indices (0=Black,1=White,2=Yellow,3=Red,5=Blue,6=Green).
-static void blit_packed_artwork(const uint8_t *packed, int len) {
+// Caller (render_full_screen) blits cache to framebuffer after clearing.
+static void cache_packed_artwork(const uint8_t *packed, int len) {
     if (!s_art_cache) {
         s_art_cache = heap_caps_malloc(ART_W * ART_H, MALLOC_CAP_SPIRAM);
     }
+    if (!s_art_cache) return;
 
     int pixel = 0;
     for (int i = 0; i < len; i++) {
-        uint8_t hi = (packed[i] >> 4) & 0x0F;
-        uint8_t lo = packed[i] & 0x0F;
-
-        int y = pixel / ART_W;
-        int x = pixel % ART_W;
-        if (y < ART_H) {
-            if (s_art_cache) s_art_cache[pixel] = hi;
-            eink_display_set_pixel(ART_X + x, ART_Y + y, hi);
-        }
-        pixel++;
-
-        y = pixel / ART_W;
-        x = pixel % ART_W;
-        if (y < ART_H) {
-            if (s_art_cache) s_art_cache[pixel] = lo;
-            eink_display_set_pixel(ART_X + x, ART_Y + y, lo);
-        }
-        pixel++;
+        if (pixel + 1 >= ART_W * ART_H) break;
+        s_art_cache[pixel++] = (packed[i] >> 4) & 0x0F;
+        s_art_cache[pixel++] = packed[i] & 0x0F;
     }
 }
 
@@ -147,13 +134,13 @@ static void decode_rgb565_artwork(const uint8_t *img_data, size_t img_len) {
         s_art_cache = heap_caps_malloc(ART_W * ART_H, MALLOC_CAP_SPIRAM);
     }
 
+    // Populate cache only — render_full_screen blits to framebuffer after clearing
     for (int y = 0; y < ART_H; y++) {
         for (int x = 0; x < ART_W; x++) {
             int idx = (y * ART_W + x) * 3;
             uint8_t color = eink_palette_to_panel(
                 eink_nearest_color(dithered[idx], dithered[idx + 1], dithered[idx + 2]));
             if (s_art_cache) s_art_cache[y * ART_W + x] = color;
-            eink_display_set_pixel(ART_X + x, ART_Y + y, color);
         }
     }
 
@@ -177,7 +164,7 @@ static void render_artwork(void) {
             img_data && (int)img_len == expected_packed) {
             ESP_LOGI(TAG, "Blitting pre-processed %dx%d artwork (%d bytes)",
                      ART_W, ART_H, (int)img_len);
-            blit_packed_artwork((const uint8_t *)img_data, (int)img_len);
+            cache_packed_artwork((const uint8_t *)img_data, (int)img_len);
             platform_http_free(img_data);
             ESP_LOGI(TAG, "Artwork rendered to framebuffer");
             return;
