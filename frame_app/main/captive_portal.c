@@ -476,6 +476,7 @@ static const char *STA_CSS =
     ".status{color:#aaa;margin:10px 0;}"
     ".device{display:flex;justify-content:space-between;align-items:center;"
     "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;}"
+    ".device form{display:inline;margin:0;}"
     ;
 
 // ── STA-mode zone picker page (GET /zones) ─────────────────────────────────
