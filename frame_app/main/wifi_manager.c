@@ -1,0 +1,616 @@
+#include "wifi_manager.h"
+#include "captive_portal.h"
+
+#include <esp_err.h>
+#include <esp_event.h>
+#include <esp_log.h>
+#include <esp_mac.h>
+#include <esp_netif.h>
+#include <esp_system.h>
+#include <esp_timer.h>
+#include <esp_wifi.h>
+#include <nvs_flash.h>
+#include <string.h>
+
+#include "sdkconfig.h"
+
+#include "platform/platform_storage.h"
+
+static const char *TAG = "wifi_mgr";
+static const uint32_t s_backoff_ms[] = {500,  1000,  2000, 4000,
+                                        8000, 16000, 30000};
+static const char *s_last_error = NULL;
+
+static const char *get_disconnect_reason_str(uint8_t reason,
+                                             rk_net_evt_t *out_evt) {
+  rk_net_evt_t evt = RK_NET_EVT_FAIL;
+  const char *str;
+
+  switch (reason) {
+  case WIFI_REASON_NO_AP_FOUND:
+    str = "Network not found";
+    evt = RK_NET_EVT_NO_AP_FOUND;
+    break;
+  case WIFI_REASON_AUTH_FAIL:
+  case WIFI_REASON_MIC_FAILURE:
+  case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+  case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    str = "Wrong password";
+    evt = RK_NET_EVT_WRONG_PASSWORD;
+    break;
+  case WIFI_REASON_AUTH_EXPIRE:
+    str = "Auth expired";
+    evt = RK_NET_EVT_AUTH_TIMEOUT;
+    break;
+  case WIFI_REASON_ASSOC_FAIL:
+  case WIFI_REASON_ASSOC_EXPIRE:
+    str = "Association failed";
+    break;
+  case WIFI_REASON_BEACON_TIMEOUT:
+    str = "Beacon timeout (out of range?)";
+    break;
+  case WIFI_REASON_ASSOC_LEAVE:
+    str = "Disconnected by AP";
+    break;
+  case WIFI_REASON_CONNECTION_FAIL:
+    str = "Connection failed";
+    break;
+  case WIFI_REASON_AP_TSF_RESET:
+    str = "AP reset";
+    break;
+  default:
+    str = "Unknown error";
+    break;
+  }
+
+  if (out_evt) {
+    *out_evt = evt;
+  }
+  return str;
+}
+
+#define AP_SSID "hiphi-frame-setup"
+#define AP_MAX_CONNECTIONS 2
+#define STA_FAIL_THRESHOLD 5
+
+static rk_cfg_t s_cfg;
+static bool s_cfg_loaded;
+static esp_netif_t *s_sta_netif;
+static esp_netif_t *s_ap_netif;
+static esp_timer_handle_t s_retry_timer;
+static size_t s_backoff_idx;
+static bool s_started;
+static char s_ip[16];
+static bool s_ap_mode;
+static int s_sta_fail_count;
+static char s_device_hostname[32] = {0};
+static int s_wifi_idx;
+
+static void copy_str(char *dst, size_t dst_len, const char *src) {
+  if (!dst || dst_len == 0) {
+    return;
+  }
+  if (!src) {
+    src = "";
+  }
+  size_t in_len = strnlen(src, dst_len - 1);
+  memcpy(dst, src, in_len);
+  dst[in_len] = '\0';
+}
+
+static void sanitize_hostname(const char *input, char *output,
+                              size_t output_len) {
+  size_t j = 0;
+  for (size_t i = 0; input[i] && j < output_len - 1; i++) {
+    char c = input[i];
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+      output[j++] = c;
+    } else if (c >= 'A' && c <= 'Z') {
+      output[j++] = c + 32;
+    } else if (c == ' ' || c == '_') {
+      output[j++] = '-';
+    }
+  }
+  output[j] = '\0';
+
+  size_t start = 0;
+  while (output[start] == '-') {
+    start++;
+  }
+  if (start > 0) {
+    memmove(output, output + start, j - start + 1);
+    j -= start;
+  }
+
+  while (j > 0 && output[j - 1] == '-') {
+    output[--j] = '\0';
+  }
+
+  if (j == 0) {
+    snprintf(output, output_len, "hiphi-frame");
+  }
+}
+
+static const char *get_device_hostname(void) {
+  if (s_device_hostname[0] != '\0') {
+    return s_device_hostname;
+  }
+
+  if (s_cfg_loaded && s_cfg.knob_name[0] != '\0') {
+    sanitize_hostname(s_cfg.knob_name, s_device_hostname,
+                      sizeof(s_device_hostname));
+    ESP_LOGI(TAG, "Hostname from bridge config: %s", s_device_hostname);
+    return s_device_hostname;
+  }
+
+  uint8_t mac[6];
+  esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to read MAC for hostname: %s", esp_err_to_name(err));
+    snprintf(s_device_hostname, sizeof(s_device_hostname), "hiphi-frame");
+    return s_device_hostname;
+  }
+
+  snprintf(s_device_hostname, sizeof(s_device_hostname),
+           "hiphi-frame-%02x%02x%02x", mac[3], mac[4], mac[5]);
+  ESP_LOGI(TAG, "Generated MAC-based hostname: %s", s_device_hostname);
+  return s_device_hostname;
+}
+
+static bool have_blob(const rk_cfg_t *cfg) { return cfg && cfg->cfg_ver != 0; }
+
+static void apply_wifi_defaults(rk_cfg_t *cfg) {
+  if (!cfg) {
+    return;
+  }
+  if (CONFIG_RK_DEFAULT_SSID[0] && cfg->wifi_count == 0) {
+    rk_cfg_add_wifi(cfg, CONFIG_RK_DEFAULT_SSID, CONFIG_RK_DEFAULT_PASS);
+  }
+  if (cfg->wifi_count > 0) {
+    copy_str(cfg->ssid, sizeof(cfg->ssid), cfg->wifi[0].ssid);
+    copy_str(cfg->pass, sizeof(cfg->pass), cfg->wifi[0].pass);
+  } else {
+    cfg->ssid[0] = '\0';
+    cfg->pass[0] = '\0';
+  }
+}
+
+static void apply_full_defaults(rk_cfg_t *cfg) {
+  if (!cfg) {
+    return;
+  }
+  apply_wifi_defaults(cfg);
+  cfg->zone_id[0] = '\0';
+}
+
+static void sync_active_wifi(rk_cfg_t *cfg) {
+  if (s_wifi_idx < cfg->wifi_count && s_wifi_idx < RK_MAX_WIFI) {
+    copy_str(cfg->ssid, sizeof(cfg->ssid), cfg->wifi[s_wifi_idx].ssid);
+    copy_str(cfg->pass, sizeof(cfg->pass), cfg->wifi[s_wifi_idx].pass);
+  } else {
+    cfg->ssid[0] = '\0';
+    cfg->pass[0] = '\0';
+  }
+}
+
+static void ensure_cfg_loaded(void) {
+  rk_cfg_t cfg = {0};
+  bool load_ok = platform_storage_load(&cfg);
+  (void)load_ok;
+  bool blob_exists = have_blob(&cfg);
+  if (!blob_exists) {
+    apply_full_defaults(&cfg);
+    platform_storage_save(&cfg);
+  } else if (cfg.wifi_count == 0 && cfg.ssid[0] == '\0') {
+    apply_wifi_defaults(&cfg);
+    platform_storage_save(&cfg);
+  } else if (cfg.wifi_count == 0 && cfg.ssid[0] != '\0') {
+    rk_cfg_add_wifi(&cfg, cfg.ssid, cfg.pass);
+    platform_storage_save(&cfg);
+  }
+  s_wifi_idx = 0;
+  sync_active_wifi(&cfg);
+  s_cfg = cfg;
+  s_cfg_loaded = true;
+}
+
+static esp_err_t apply_wifi_config(void) {
+  if (!s_cfg_loaded) {
+    ensure_cfg_loaded();
+  }
+  wifi_config_t cfg = {0};
+  copy_str((char *)cfg.sta.ssid, sizeof(cfg.sta.ssid), s_cfg.ssid);
+  copy_str((char *)cfg.sta.password, sizeof(cfg.sta.password), s_cfg.pass);
+  cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+  cfg.sta.pmf_cfg.capable = true;
+  cfg.sta.pmf_cfg.required = false;
+  return esp_wifi_set_config(WIFI_IF_STA, &cfg);
+}
+
+static void reset_backoff(void) { s_backoff_idx = 0; }
+
+static void schedule_retry_with_reason(uint8_t reason);
+static void schedule_retry(void);
+static void start_ap_mode(void);
+
+static void connect_now(void) {
+  if (s_ap_mode) {
+    return;
+  }
+  if (!s_cfg_loaded) {
+    ensure_cfg_loaded();
+  }
+  if (s_cfg.ssid[0] == '\0') {
+    ESP_LOGW(TAG, "SSID empty; starting AP mode for provisioning");
+    start_ap_mode();
+    return;
+  }
+  const char *hostname = get_device_hostname();
+  esp_netif_set_hostname(s_sta_netif, hostname);
+  vTaskDelay(pdMS_TO_TICKS(100));
+
+  ESP_LOGI(TAG, "Connecting to WiFi SSID: '%s'", s_cfg.ssid);
+  if (s_retry_timer) {
+    esp_timer_stop(s_retry_timer);
+  }
+  esp_err_t err = esp_wifi_disconnect();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
+      err != ESP_ERR_WIFI_NOT_INIT) {
+    ESP_LOGW(TAG, "disconnect failed: %s", esp_err_to_name(err));
+  }
+  if (apply_wifi_config() != ESP_OK) {
+    ESP_LOGE(TAG, "failed to apply Wi-Fi config");
+    schedule_retry();
+    return;
+  }
+  rk_net_evt_cb(RK_NET_EVT_CONNECTING, NULL);
+  err = esp_wifi_connect();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "connect failed: %s", esp_err_to_name(err));
+    schedule_retry();
+  }
+}
+
+static void retry_timer_cb(void *arg) {
+  (void)arg;
+  connect_now();
+}
+
+static void schedule_retry_with_reason(uint8_t reason) {
+  if (s_ap_mode) {
+    return;
+  }
+  s_sta_fail_count++;
+
+  rk_net_evt_t evt = RK_NET_EVT_FAIL;
+  s_last_error = get_disconnect_reason_str(reason, &evt);
+
+  ESP_LOGW(TAG, "WiFi disconnected: %s (reason %d, attempt %d/%d)",
+           s_last_error, reason, s_sta_fail_count, STA_FAIL_THRESHOLD);
+
+  if (s_sta_fail_count >= STA_FAIL_THRESHOLD) {
+    s_wifi_idx++;
+    if (s_wifi_idx < s_cfg.wifi_count && s_wifi_idx < RK_MAX_WIFI) {
+      ESP_LOGW(TAG, "WiFi '%s' failed %d times, trying next: '%s'",
+               s_cfg.ssid, STA_FAIL_THRESHOLD,
+               s_cfg.wifi[s_wifi_idx].ssid);
+      s_sta_fail_count = 0;
+      reset_backoff();
+      sync_active_wifi(&s_cfg);
+      connect_now();
+      return;
+    }
+    ESP_LOGW(TAG,
+             "All %d WiFi networks failed, switching to AP mode for provisioning",
+             s_cfg.wifi_count);
+    start_ap_mode();
+    return;
+  }
+
+  uint32_t delay = s_backoff_ms[s_backoff_idx];
+  if (s_backoff_idx + 1 < (sizeof(s_backoff_ms) / sizeof(s_backoff_ms[0]))) {
+    s_backoff_idx++;
+  }
+  if (s_retry_timer) {
+    esp_timer_stop(s_retry_timer);
+    esp_err_t err = esp_timer_start_once(s_retry_timer, delay * 1000);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "retry timer start failed: %s", esp_err_to_name(err));
+    }
+  } else {
+    ESP_LOGW(TAG, "retry timer missing; reconnect immediately");
+    connect_now();
+  }
+  rk_net_evt_cb(evt, s_last_error);
+}
+
+static void schedule_retry(void) {
+  schedule_retry_with_reason(0);
+}
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data) {
+  (void)arg;
+  if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    reset_backoff();
+    s_last_error = NULL;
+    connect_now();
+  } else if (event_base == WIFI_EVENT &&
+             event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    wifi_event_sta_disconnected_t *disconn =
+        (wifi_event_sta_disconnected_t *)event_data;
+    uint8_t reason = disconn ? disconn->reason : 0;
+    schedule_retry_with_reason(reason);
+  }
+}
+
+static void ip_event_handler(void *arg, esp_event_base_t event_base,
+                             int32_t event_id, void *event_data) {
+  (void)arg;
+  if (event_base != IP_EVENT || event_id != IP_EVENT_STA_GOT_IP) {
+    return;
+  }
+
+  const ip_event_got_ip_t *evt = (const ip_event_got_ip_t *)event_data;
+  esp_ip4_addr_t ip = evt->ip_info.ip;
+  esp_ip4addr_ntoa(&ip, s_ip, sizeof(s_ip));
+
+  const char *check_hostname = NULL;
+  esp_netif_get_hostname(s_sta_netif, &check_hostname);
+  ESP_LOGI(TAG, "Connected to WiFi SSID: '%s', IP: %s, hostname: %s",
+           s_cfg.ssid, s_ip, check_hostname ? check_hostname : "NULL");
+
+  const char *hostname = get_device_hostname();
+  esp_err_t err = esp_netif_set_hostname(s_sta_netif, hostname);
+  if (err == ESP_OK) {
+    ESP_LOGI(TAG, "Re-asserted hostname after IP acquisition: %s", hostname);
+  }
+
+  reset_backoff();
+  s_sta_fail_count = 0;
+  s_last_error = NULL;
+  rk_net_evt_cb(RK_NET_EVT_GOT_IP, s_ip);
+}
+
+static void start_ap_mode(void) {
+  if (s_ap_mode) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Starting AP mode for provisioning (SSID: %s)", AP_SSID);
+
+  s_ap_mode = true;
+  esp_wifi_stop();
+
+  if (!s_ap_netif) {
+    s_ap_netif = esp_netif_create_default_wifi_ap();
+    const char *hostname = get_device_hostname();
+    esp_err_t err = esp_netif_set_hostname(s_ap_netif, hostname);
+    if (err == ESP_OK) {
+      ESP_LOGI(TAG, "AP mode hostname set: %s", hostname);
+    }
+  }
+
+  wifi_config_t ap_config = {
+      .ap =
+          {
+              .ssid = AP_SSID,
+              .ssid_len = strlen(AP_SSID),
+              .channel = 6,
+              .password = "",
+              .max_connection = AP_MAX_CONNECTIONS,
+              .authmode = WIFI_AUTH_OPEN,
+              .beacon_interval = 100,
+          },
+  };
+
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+  ESP_ERROR_CHECK(esp_wifi_start());
+
+  esp_err_t tx_err = esp_wifi_set_max_tx_power(80);
+  if (tx_err == ESP_OK) {
+    ESP_LOGI(TAG, "AP mode: TX power set to 20 dBm");
+  }
+
+  s_sta_fail_count = 0;
+
+  captive_portal_start();
+
+  rk_net_evt_cb(RK_NET_EVT_AP_STARTED, "192.168.4.1");
+}
+
+void wifi_mgr_start(void) {
+  if (s_started) {
+    return;
+  }
+  s_started = true;
+
+  ensure_cfg_loaded();
+
+  esp_err_t err = esp_netif_init();
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
+    return;
+  }
+  err = esp_event_loop_create_default();
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "event loop init failed: %s", esp_err_to_name(err));
+    return;
+  }
+  if (!s_sta_netif) {
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+    const char *hostname = get_device_hostname();
+    esp_err_t nerr = esp_netif_set_hostname(s_sta_netif, hostname);
+    if (nerr == ESP_OK) {
+      ESP_LOGI(TAG, "DHCP hostname set: %s", hostname);
+    }
+  }
+
+  wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_cfg));
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+  ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                             &wifi_event_handler, NULL));
+  ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                             &ip_event_handler, NULL));
+
+  const esp_timer_create_args_t retry_args = {
+      .callback = &retry_timer_cb,
+      .name = "wifi_retry",
+  };
+  ESP_ERROR_CHECK(esp_timer_create(&retry_args, &s_retry_timer));
+
+  ESP_ERROR_CHECK(esp_wifi_start());
+
+  esp_err_t tx_err = esp_wifi_set_max_tx_power(68);
+  if (tx_err == ESP_OK) {
+    ESP_LOGI(TAG, "WiFi TX power set to 17 dBm");
+  }
+}
+
+void wifi_mgr_reconnect(const rk_cfg_t *cfg) {
+  if (!cfg) {
+    return;
+  }
+  s_cfg = *cfg;
+  s_cfg_loaded = true;
+  s_wifi_idx = 0;
+  sync_active_wifi(&s_cfg);
+  if (!platform_storage_save(&s_cfg)) {
+    ESP_LOGW(TAG, "failed to persist cfg");
+  }
+  reset_backoff();
+  s_sta_fail_count = 0;
+  if (!s_started) {
+    return;
+  }
+  if (s_ap_mode) {
+    ESP_LOGI(TAG, "Stopping AP mode to connect with new credentials");
+    wifi_mgr_stop_ap();
+  } else {
+    connect_now();
+  }
+}
+
+void wifi_mgr_forget_wifi(void) {
+  ESP_LOGW(TAG, "Factory reset requested - erasing NVS and rebooting");
+
+  if (s_started) {
+    esp_wifi_stop();
+  }
+
+  esp_err_t err = nvs_flash_erase();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "NVS erase failed: %s", esp_err_to_name(err));
+  }
+
+  ESP_LOGI(TAG, "Rebooting...");
+  esp_restart();
+}
+
+bool wifi_mgr_get_ip(char *buf, size_t n) {
+  if (!buf || n == 0) {
+    return false;
+  }
+  if (s_ip[0] == '\0') {
+    buf[0] = '\0';
+    return false;
+  }
+  copy_str(buf, n, s_ip);
+  return true;
+}
+
+void wifi_mgr_get_ssid(char *buf, size_t n) {
+  if (!buf || n == 0) {
+    return;
+  }
+  if (!s_cfg_loaded) {
+    ensure_cfg_loaded();
+  }
+  copy_str(buf, n, s_cfg.ssid);
+}
+
+bool wifi_mgr_is_ap_mode(void) { return s_ap_mode; }
+
+const char *wifi_mgr_get_last_error(void) { return s_last_error; }
+
+int wifi_mgr_get_retry_count(void) { return s_sta_fail_count; }
+
+int wifi_mgr_get_retry_max(void) { return STA_FAIL_THRESHOLD; }
+
+void wifi_mgr_stop(void) {
+  if (!s_started) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Stopping WiFi completely");
+
+  esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                               &wifi_event_handler);
+  esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                               &ip_event_handler);
+
+  if (s_retry_timer) {
+    esp_timer_stop(s_retry_timer);
+  }
+
+  captive_portal_stop();
+
+  esp_wifi_stop();
+  esp_wifi_deinit();
+
+  s_started = false;
+  s_ap_mode = false;
+  s_sta_fail_count = 0;
+  s_ip[0] = '\0';
+
+  ESP_LOGI(TAG, "WiFi stopped");
+}
+
+void wifi_mgr_stop_ap(void) {
+  if (!s_ap_mode) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Stopping AP mode, switching to STA");
+
+  captive_portal_stop();
+
+  esp_wifi_stop();
+
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_start());
+
+  esp_wifi_set_max_tx_power(68);
+
+  s_ap_mode = false;
+  s_sta_fail_count = 0;
+  s_wifi_idx = 0;
+  sync_active_wifi(&s_cfg);
+  s_ip[0] = '\0';
+
+  rk_net_evt_cb(RK_NET_EVT_AP_STOPPED, NULL);
+}
+
+void wifi_mgr_set_power_save(bool enable) {
+  if (!s_started || s_ap_mode) {
+    return;
+  }
+
+  wifi_ps_type_t ps_type = enable ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE;
+  esp_err_t err = esp_wifi_set_ps(ps_type);
+  if (err == ESP_OK) {
+    ESP_LOGI(TAG, "WiFi power save %s",
+             enable ? "enabled (modem sleep)" : "disabled");
+  }
+}
+
+__attribute__((weak)) void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
+  (void)evt;
+  (void)ip_opt;
+}
+
+const char *wifi_mgr_get_hostname(void) { return get_device_hostname(); }

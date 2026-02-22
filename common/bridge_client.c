@@ -11,12 +11,33 @@
 #include "ui.h"
 
 #ifdef ESP_PLATFORM
+#if !USE_EINK
 #include "display_sleep.h"
+#endif
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #endif
 
-#if USE_MANIFEST
+#if USE_EINK
+#include "eink_ui.h"
+// Dispatch macros: route ui_* calls to eink_ui_* for e-ink frame display
+#define UI_SET_STATUS(o) eink_ui_set_status(o)
+#define UI_SET_MESSAGE(m) eink_ui_set_message(m)
+#define UI_SET_ZONE_NAME(n) eink_ui_set_zone_name(n)
+#define UI_SET_NETWORK_STATUS(s) eink_ui_set_network_status(s)
+#define UI_SET_ARTWORK(k) eink_ui_set_artwork(k)
+#define UI_SHOW_VOLUME_CHANGE(v, s) eink_ui_show_volume_change(v, s)
+#define UI_SHOW_ZONE_PICKER(n, i, c, s) eink_ui_show_zone_picker()
+#define UI_HIDE_ZONE_PICKER() eink_ui_hide_zone_picker()
+#define UI_IS_ZONE_PICKER_VISIBLE() eink_ui_is_zone_picker_visible()
+#define UI_ZONE_PICKER_SCROLL(d) eink_ui_zone_picker_scroll(d)
+#define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
+  eink_ui_zone_picker_get_selected_id(o, l)
+#define UI_ZONE_PICKER_IS_CURRENT()                                            \
+  eink_ui_zone_picker_is_current_selection()
+#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le)                            \
+  eink_ui_update(l1, l2, p, v, vn, vx, vs, sp, le)
+#elif USE_MANIFEST
 #include "manifest_parse.h"
 #include "manifest_ui.h"
 // Dispatch macros: route ui_* calls to manifest_ui_* in manifest mode
@@ -939,6 +960,15 @@ static void post_manifest_update(manifest_t *m) {
   platform_task_post_to_ui(ui_manifest_cb, m);
 }
 #endif /* USE_MANIFEST */
+
+#if !USE_MANIFEST
+// Stub: UDP fast-path is manifest-only; fall back to HTTP for volume
+static bool udp_send_volume(float volume) {
+  (void)volume;
+  return false;
+}
+#endif
+
 static bool refresh_zone_label(bool prefer_zone_id) {
   LOGI("refresh_zone_label: Called (prefer_zone_id=%s)",
        prefer_zone_id ? "true" : "false");
@@ -1807,7 +1837,7 @@ static void apply_config_on_ui_thread(void *arg) {
 
   platform_display_set_rotation(data->rotation);
 
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !USE_EINK
   display_update_timeouts(&data->cfg, data->is_charging);
   display_update_power_settings(&data->cfg);
 #endif
