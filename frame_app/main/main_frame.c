@@ -1,5 +1,5 @@
 // main_frame.c — hiphi frame entry point
-// Boot sequence: NVS → e-ink display → PMIC → eink_ui_init → input → UI loop → app_entry → WiFi
+// Boot sequence: NVS → PMIC → e-ink display → eink_ui_init → input → UI loop → app_entry → WiFi
 
 #include "app.h"
 #include "ble_remote.h"
@@ -140,17 +140,18 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(err);
 
+  // Initialize PMIC first — enables ALDO power rails needed by e-ink panel
+  ESP_LOGI(TAG, "Initializing PMIC...");
+  if (!pmic_init()) {
+    ESP_LOGW(TAG, "PMIC init failed, continuing without battery monitoring");
+  }
+  vTaskDelay(pdMS_TO_TICKS(100));  // Let power rails stabilize
+
   // Initialize e-ink display hardware
   ESP_LOGI(TAG, "Initializing e-ink display...");
   if (!eink_display_init()) {
     ESP_LOGE(TAG, "E-ink display init failed!");
     return;
-  }
-
-  // Initialize PMIC (battery monitoring)
-  ESP_LOGI(TAG, "Initializing PMIC...");
-  if (!pmic_init()) {
-    ESP_LOGW(TAG, "PMIC init failed, continuing without battery monitoring");
   }
 
   // Initialize e-ink UI (draws boot screen)

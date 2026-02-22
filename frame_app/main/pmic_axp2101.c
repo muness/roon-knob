@@ -22,6 +22,16 @@ static const char *TAG = "pmic";
 #define AXP2101_VBAT_L        0x35
 #define AXP2101_BAT_PERCENT   0xA4
 
+// Power output control registers
+#define AXP2101_DC_ONOFF      0x80   // DCDC on/off control
+#define AXP2101_LDO_ONOFF0    0x90   // ALDO1-4, BLDO1-2 on/off
+#define AXP2101_LDO_ONOFF1    0x91   // DLDO1-2, CPUSLDO on/off
+#define AXP2101_DC1_VOL       0x82   // DCDC1 voltage
+#define AXP2101_ALDO1_VOL     0x92   // ALDO1 voltage
+#define AXP2101_ALDO2_VOL     0x93   // ALDO2 voltage
+#define AXP2101_ALDO3_VOL     0x94   // ALDO3 voltage
+#define AXP2101_ALDO4_VOL     0x95   // ALDO4 voltage
+
 static i2c_master_bus_handle_t s_bus = NULL;
 static i2c_master_dev_handle_t s_dev = NULL;
 static bool s_initialized = false;
@@ -78,6 +88,24 @@ bool pmic_init(void) {
 
     // Set charge current to 200mA
     pmic_write_reg(0x62, 0x04);  // ICC = 200mA
+
+    // Configure power outputs (matching original PhotoPainter firmware)
+    // DC1 = 3.3V: (3300 - 1500) / 100 = 18 = 0x12
+    pmic_write_reg(AXP2101_DC1_VOL, 0x12);
+
+    // ALDO1-4 = 3.3V each: (3300 - 500) / 100 = 28 = 0x1C
+    pmic_write_reg(AXP2101_ALDO1_VOL, 0x1C);
+    pmic_write_reg(AXP2101_ALDO2_VOL, 0x1C);
+    pmic_write_reg(AXP2101_ALDO3_VOL, 0x1C);
+    pmic_write_reg(AXP2101_ALDO4_VOL, 0x1C);
+
+    // Enable ALDO1-4 (bits 0-3 of register 0x90)
+    uint8_t ldo_ctrl;
+    pmic_read_reg(AXP2101_LDO_ONOFF0, &ldo_ctrl);
+    ldo_ctrl |= 0x0F;  // Enable ALDO1-4
+    pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl);
+
+    ESP_LOGI(TAG, "Power outputs configured: DC1=3.3V, ALDO1-4=3.3V (LDO ctrl=0x%02x)", ldo_ctrl);
 
     s_initialized = true;
     ESP_LOGI(TAG, "AXP2101 PMIC initialized (status=0x%02x)", status);

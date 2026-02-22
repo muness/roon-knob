@@ -24,7 +24,7 @@ static void set_dc(uint8_t level)  { gpio_set_level(EINK_PIN_DC, level ? 1 : 0);
 static int  get_busy(void)         { return gpio_get_level(EINK_PIN_BUSY); }
 
 static void wait_busy(void) {
-    int timeout_ms = 30000;  // 30s max (full refresh takes ~1.5s)
+    int timeout_ms = 30000;
     while (!get_busy()) {
         vTaskDelay(pdMS_TO_TICKS(10));
         timeout_ms -= 10;
@@ -93,16 +93,17 @@ static void panel_turn_on(void) {
     send_cmd(0x04);  // POWER_ON
     wait_busy();
 
-    // Booster soft-start
     send_cmd(0x06);
     send_data(0x6F);
     send_data(0x1F);
     send_data(0x17);
     send_data(0x49);
 
+    ESP_LOGI(TAG, "DISPLAY_REFRESH — waiting for panel...");
     send_cmd(0x12);  // DISPLAY_REFRESH
     send_data(0x00);
     wait_busy();
+    ESP_LOGI(TAG, "Panel refresh complete");
 
     send_cmd(0x02);  // POWER_OFF
     send_data(0x00);
@@ -252,11 +253,54 @@ uint8_t *eink_display_get_fb(void) {
     return s_fb;
 }
 
+// Rotate framebuffer 180 degrees in-place
+// Each byte has two 4-bit pixels: swap nibbles and reverse byte order per row,
+// then reverse row order.  Matching original EPD_Rotate180_Fast.
+static void fb_rotate_180(uint8_t *buf) {
+    const int bytes_per_row = EINK_WIDTH >> 1;  // 400
+    for (int y = 0; y < EINK_HEIGHT / 2; y++) {
+        uint8_t *top = buf + y * bytes_per_row;
+        uint8_t *bot = buf + (EINK_HEIGHT - 1 - y) * bytes_per_row;
+        for (int x = 0; x < bytes_per_row; x++) {
+            uint8_t t = top[x];
+            uint8_t b = bot[bytes_per_row - 1 - x];
+            // Swap nibbles (pixel order within byte)
+            top[x] = (b << 4) | (b >> 4);
+            bot[bytes_per_row - 1 - x] = (t << 4) | (t >> 4);
+        }
+    }
+    // If odd height, handle middle row
+    if (EINK_HEIGHT & 1) {
+        uint8_t *mid = buf + (EINK_HEIGHT / 2) * bytes_per_row;
+        for (int x = 0; x < bytes_per_row / 2; x++) {
+            uint8_t t = mid[x];
+            uint8_t b = mid[bytes_per_row - 1 - x];
+            mid[x] = (b << 4) | (b >> 4);
+            mid[bytes_per_row - 1 - x] = (t << 4) | (t >> 4);
+        }
+    }
+}
+
 void eink_display_refresh(void) {
     if (!s_fb) return;
     ESP_LOGI(TAG, "Refreshing e-ink display...");
-    send_cmd(0x10);  // Write image data
-    send_buffer(s_fb, EINK_FB_SIZE);
+
+    // Rotate 180 into a temp buffer so set_pixel coordinates stay normal
+    uint8_t *rotated = heap_caps_malloc(EINK_FB_SIZE, MALLOC_CAP_SPIRAM);
+    if (rotated) {
+        memcpy(rotated, s_fb, EINK_FB_SIZE);
+        fb_rotate_180(rotated);
+        send_cmd(0x10);
+        send_buffer(rotated, EINK_FB_SIZE);
+        heap_caps_free(rotated);
+    } else {
+        // Fallback: rotate in-place, send, rotate back
+        fb_rotate_180(s_fb);
+        send_cmd(0x10);
+        send_buffer(s_fb, EINK_FB_SIZE);
+        fb_rotate_180(s_fb);
+    }
+
     panel_turn_on();
     ESP_LOGI(TAG, "E-ink refresh complete");
 }
