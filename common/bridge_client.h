@@ -12,7 +12,8 @@ void bridge_client_handle_volume_rotation(
 void bridge_client_set_network_ready(bool ready);
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
                                           int width, int height,
-                                          int clip_radius);
+                                          int clip_radius,
+                                          const char *format);
 bool bridge_client_is_ready_for_art_mode(void);
 
 // Bridge connection status (mirrors WiFi retry pattern for consistent UX)

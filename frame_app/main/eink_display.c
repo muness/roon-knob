@@ -156,10 +156,7 @@ void eink_display_init_panel(void) {
 
     send_cmd(0x04);  // POWER_ON
     wait_busy();
-
-    // Don't refresh here — let eink_ui_init() draw the boot screen
-    // and do the first refresh with actual content.
-    eink_display_clear(EINK_WHITE);
+    // Don't clear or refresh — caller owns the framebuffer contents.
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -226,7 +223,10 @@ bool eink_display_init(void) {
 
     ESP_LOGI(TAG, "E-ink display initialized (800x480, 6-color, %d KB FB)", EINK_FB_SIZE / 1024);
 
-    // Initialize panel registers and clear to white
+    // Clear framebuffer to white (calloc gives zeros = black)
+    eink_display_clear(EINK_WHITE);
+
+    // Initialize panel registers (does NOT touch the framebuffer)
     eink_display_init_panel();
 
     return true;

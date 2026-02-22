@@ -1739,10 +1739,12 @@ void bridge_client_set_network_ready(bool ready) {
 
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
                                           int width, int height,
-                                          int clip_radius) {
+                                          int clip_radius,
+                                          const char *format) {
   if (!url_buf || buf_len < 256) {
     return NULL;
   }
+  if (!format || !format[0]) format = "rgb565";
   lock_state();
   const char *bridge_base = s_state.cfg.bridge_base;
   const char *zone_id = s_state.cfg.zone_id;
@@ -1753,14 +1755,14 @@ const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
   if (clip_radius > 0) {
     snprintf(url_buf, buf_len,
              "%s/now_playing/"
-             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565&clip_"
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s&clip_"
              "radius=%d",
-             bridge_base, zone_id, width, height, clip_radius);
+             bridge_base, zone_id, width, height, format, clip_radius);
   } else {
     snprintf(url_buf, buf_len,
              "%s/now_playing/"
-             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565",
-             bridge_base, zone_id, width, height);
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s",
+             bridge_base, zone_id, width, height, format);
   }
   unlock_state();
   return url_buf;

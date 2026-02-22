@@ -1359,7 +1359,7 @@ void ui_set_artwork(const char *image_key) {
   // With PSRAM enabled, we can handle the full display resolution
   char url[512];
   if (!bridge_client_get_artwork_url(url, sizeof(url), SCREEN_SIZE, SCREEN_SIZE,
-                                     0)) {
+                                     0, "rgb565")) {
     ESP_LOGW(UI_TAG, "Failed to build artwork URL");
     return;
   }

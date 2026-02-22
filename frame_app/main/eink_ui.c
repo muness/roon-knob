@@ -21,10 +21,11 @@ static const char *TAG = "eink_ui";
 // ── UI state ────────────────────────────────────────────────────────────────
 
 // Art-forward layout: 800 wide x 480 tall
-// Large centered artwork, slim text bar at bottom
-#define ART_SIZE       450   // Artwork square size
+// Full-width artwork, slim text bar at bottom
 #define TEXT_BAR_H      30   // Text bar height at bottom
-#define ART_X          ((EINK_WIDTH - ART_SIZE) / 2)   // Centered horizontally (175px margin)
+#define ART_W          EINK_WIDTH                       // Full panel width
+#define ART_H          (EINK_HEIGHT - TEXT_BAR_H)       // Fill above text bar
+#define ART_X            0   // Flush left
 #define ART_Y            0   // Flush to top
 #define TEXT_Y         (EINK_HEIGHT - TEXT_BAR_H)       // Text bar at bottom
 
@@ -57,13 +58,13 @@ static struct {
 
 // ── Artwork cache (persists between renders to survive framebuffer clear) ──
 
-static uint8_t *s_art_cache = NULL;  // Cached e-ink color indices, ART_SIZE*ART_SIZE bytes
+static uint8_t *s_art_cache = NULL;  // Cached e-ink color indices, ART_W*ART_H bytes
 
 static void blit_art_cache(void) {
     if (!s_art_cache) return;
-    for (int y = 0; y < ART_SIZE; y++) {
-        for (int x = 0; x < ART_SIZE; x++) {
-            uint8_t color = s_art_cache[y * ART_SIZE + x];
+    for (int y = 0; y < ART_H; y++) {
+        for (int x = 0; x < ART_W; x++) {
+            uint8_t color = s_art_cache[y * ART_W + x];
             uint16_t px = ART_X + x;
             uint16_t py = ART_Y + y;
             if (px < EINK_WIDTH && py < EINK_HEIGHT) {
@@ -75,44 +76,51 @@ static void blit_art_cache(void) {
 
 // ── Artwork download + dither ───────────────────────────────────────────────
 
-static void render_artwork(void) {
-    if (!s_ui.image_key[0]) return;
-
-    // Build artwork URL from bridge
-    char url[256];
-    const char *art_url = bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE, 0);
-    if (!art_url || !art_url[0]) {
-        ESP_LOGW(TAG, "No artwork URL available");
-        return;
+// Unpack 4-bit packed eink_acep6 data directly to framebuffer and cache.
+// Each byte = 2 pixels: high nibble = left pixel, low nibble = right pixel.
+// Values are panel hardware color indices (0=Black,1=White,2=Yellow,3=Red,5=Blue,6=Green).
+static void blit_packed_artwork(const uint8_t *packed, int len) {
+    if (!s_art_cache) {
+        s_art_cache = heap_caps_malloc(ART_W * ART_H, MALLOC_CAP_SPIRAM);
     }
 
-    ESP_LOGI(TAG, "Downloading artwork: %s", art_url);
+    int pixel = 0;
+    for (int i = 0; i < len; i++) {
+        uint8_t hi = (packed[i] >> 4) & 0x0F;
+        uint8_t lo = packed[i] & 0x0F;
 
-    // Download RGB565 image
-    char *img_data = NULL;
-    size_t img_len = 0;
-    if (platform_http_get_image(art_url, &img_data, &img_len) != 0 || !img_data) {
-        ESP_LOGE(TAG, "Artwork download failed");
-        return;
+        int y = pixel / ART_W;
+        int x = pixel % ART_W;
+        if (y < ART_H) {
+            if (s_art_cache) s_art_cache[pixel] = hi;
+            eink_display_set_pixel(ART_X + x, ART_Y + y, hi);
+        }
+        pixel++;
+
+        y = pixel / ART_W;
+        x = pixel % ART_W;
+        if (y < ART_H) {
+            if (s_art_cache) s_art_cache[pixel] = lo;
+            eink_display_set_pixel(ART_X + x, ART_Y + y, lo);
+        }
+        pixel++;
     }
+}
 
-    // Determine if this is RGB565 data
-    int expected_rgb565 = ART_SIZE * ART_SIZE * 2;
-    int pixel_count = ART_SIZE * ART_SIZE;
+// Fallback: decode RGB565, dither on-device, write to framebuffer + cache.
+static void decode_rgb565_artwork(const uint8_t *img_data, size_t img_len) {
+    int pixel_count = ART_W * ART_H;
+    int expected_rgb565 = pixel_count * 2;
 
-    // Allocate RGB888 buffer in PSRAM
     uint8_t *rgb888 = heap_caps_malloc(pixel_count * 3, MALLOC_CAP_SPIRAM);
     if (!rgb888) {
         ESP_LOGE(TAG, "Failed to allocate RGB888 buffer");
-        platform_http_free(img_data);
         return;
     }
 
     if ((int)img_len == expected_rgb565) {
-        // Convert RGB565 -> RGB888
-        eink_rgb565_to_rgb888((const uint8_t *)img_data, rgb888, ART_SIZE, ART_SIZE);
+        eink_rgb565_to_rgb888(img_data, rgb888, ART_W, ART_H);
     } else {
-        // Assume raw RGB888
         int expected_rgb888 = pixel_count * 3;
         if ((int)img_len >= expected_rgb888) {
             memcpy(rgb888, img_data, expected_rgb888);
@@ -120,13 +128,10 @@ static void render_artwork(void) {
             ESP_LOGW(TAG, "Unexpected image size: %d (expected %d or %d)",
                      (int)img_len, expected_rgb565, expected_rgb888);
             heap_caps_free(rgb888);
-            platform_http_free(img_data);
             return;
         }
     }
-    platform_http_free(img_data);
 
-    // Allocate dithered output buffer
     uint8_t *dithered = heap_caps_malloc(pixel_count * 3, MALLOC_CAP_SPIRAM);
     if (!dithered) {
         ESP_LOGE(TAG, "Failed to allocate dither buffer");
@@ -134,37 +139,74 @@ static void render_artwork(void) {
         return;
     }
 
-    // Floyd-Steinberg dither to 6-color ACeP palette
-    ESP_LOGI(TAG, "Dithering %dx%d artwork...", ART_SIZE, ART_SIZE);
-    eink_dither_rgb888(rgb888, dithered, ART_SIZE, ART_SIZE);
+    ESP_LOGI(TAG, "Dithering %dx%d artwork (on-device fallback)...", ART_W, ART_H);
+    eink_dither_rgb888(rgb888, dithered, ART_W, ART_H);
     heap_caps_free(rgb888);
 
-    // Allocate/reuse art cache for e-ink color indices
     if (!s_art_cache) {
-        s_art_cache = heap_caps_malloc(ART_SIZE * ART_SIZE, MALLOC_CAP_SPIRAM);
+        s_art_cache = heap_caps_malloc(ART_W * ART_H, MALLOC_CAP_SPIRAM);
     }
 
-    // Write dithered pixels to framebuffer and cache
-    for (int y = 0; y < ART_SIZE; y++) {
-        for (int x = 0; x < ART_SIZE; x++) {
-            int idx = (y * ART_SIZE + x) * 3;
-            uint8_t r = dithered[idx + 0];
-            uint8_t g = dithered[idx + 1];
-            uint8_t b = dithered[idx + 2];
-            // Map dithered RGB → palette index → panel hardware color
-            uint8_t color = eink_palette_to_panel(eink_nearest_color(r, g, b));
-            if (s_art_cache) {
-                s_art_cache[y * ART_SIZE + x] = color;
-            }
-            uint16_t px = ART_X + x;
-            uint16_t py = ART_Y + y;
-            if (px < EINK_WIDTH && py < EINK_HEIGHT) {
-                eink_display_set_pixel(px, py, color);
-            }
+    for (int y = 0; y < ART_H; y++) {
+        for (int x = 0; x < ART_W; x++) {
+            int idx = (y * ART_W + x) * 3;
+            uint8_t color = eink_palette_to_panel(
+                eink_nearest_color(dithered[idx], dithered[idx + 1], dithered[idx + 2]));
+            if (s_art_cache) s_art_cache[y * ART_W + x] = color;
+            eink_display_set_pixel(ART_X + x, ART_Y + y, color);
         }
     }
 
     heap_caps_free(dithered);
+}
+
+static void render_artwork(void) {
+    if (!s_ui.image_key[0]) return;
+
+    char url[256];
+    char *img_data = NULL;
+    size_t img_len = 0;
+    int expected_packed = (ART_W * ART_H + 1) / 2;
+
+    // Try pre-processed eink_acep6 format first (4-bit packed, no dithering needed)
+    const char *art_url = bridge_client_get_artwork_url(
+        url, sizeof(url), ART_W, ART_H, 0, "eink_acep6");
+    if (art_url && art_url[0]) {
+        ESP_LOGI(TAG, "Downloading artwork: %s", art_url);
+        if (platform_http_get_image(art_url, &img_data, &img_len) == 0 &&
+            img_data && (int)img_len == expected_packed) {
+            ESP_LOGI(TAG, "Blitting pre-processed %dx%d artwork (%d bytes)",
+                     ART_W, ART_H, (int)img_len);
+            blit_packed_artwork((const uint8_t *)img_data, (int)img_len);
+            platform_http_free(img_data);
+            ESP_LOGI(TAG, "Artwork rendered to framebuffer");
+            return;
+        }
+        // Wrong size or failed — bridge doesn't support eink_acep6 yet
+        if (img_data) {
+            ESP_LOGI(TAG, "Bridge returned %d bytes (expected %d packed), retrying as rgb565",
+                     (int)img_len, expected_packed);
+            platform_http_free(img_data);
+            img_data = NULL;
+        }
+    }
+
+    // Fallback: request RGB565 and dither on device
+    art_url = bridge_client_get_artwork_url(
+        url, sizeof(url), ART_W, ART_H, 0, "rgb565");
+    if (!art_url || !art_url[0]) {
+        ESP_LOGW(TAG, "No artwork URL available");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Downloading artwork (rgb565): %s", art_url);
+    if (platform_http_get_image(art_url, &img_data, &img_len) != 0 || !img_data) {
+        ESP_LOGE(TAG, "Artwork download failed");
+        return;
+    }
+
+    decode_rgb565_artwork((const uint8_t *)img_data, img_len);
+    platform_http_free(img_data);
     ESP_LOGI(TAG, "Artwork rendered to framebuffer");
 }
 
@@ -261,15 +303,17 @@ static void render_full_screen(void) {
     // Clear framebuffer to white, then re-draw everything
     eink_display_clear(EINK_WHITE);
 
-    if (s_ui.image_key[0] && s_art_cache) {
+    if (s_art_cache) {
+        // Always prefer cached artwork — even if image_key was cleared.
+        // On e-ink, showing last-known art beats a blank screen.
         blit_art_cache();
-    } else if (!s_ui.image_key[0]) {
-        // No artwork — draw thin border placeholder
-        draw_hline(ART_X, ART_Y, ART_SIZE, EINK_BLACK);
-        draw_hline(ART_X, ART_Y + ART_SIZE - 1, ART_SIZE, EINK_BLACK);
-        for (int i = 0; i < ART_SIZE; i++) {
+    } else {
+        // No artwork ever loaded — draw thin border placeholder
+        draw_hline(ART_X, ART_Y, ART_W, EINK_BLACK);
+        draw_hline(ART_X, ART_Y + ART_H - 1, ART_W, EINK_BLACK);
+        for (int i = 0; i < ART_H; i++) {
             eink_display_set_pixel(ART_X, ART_Y + i, EINK_BLACK);
-            eink_display_set_pixel(ART_X + ART_SIZE - 1, ART_Y + i, EINK_BLACK);
+            eink_display_set_pixel(ART_X + ART_W - 1, ART_Y + i, EINK_BLACK);
         }
     }
 
@@ -319,12 +363,12 @@ void eink_ui_init(void) {
     memset(&s_ui, 0, sizeof(s_ui));
     s_ui.volume = -999.0f;  // Sentinel: no volume yet
 
-    // Don't draw a boot screen — each refresh takes ~16s of flickering.
-    // Wait for real UI state to arrive, then do ONE render.
-    s_ui.dirty = true;
+    // Don't render at boot — wait for artwork to arrive.
+    // It's e-ink: whatever's on the panel from last time stays visible.
+    s_ui.dirty = false;
     s_ui.initial_draw_done = false;
     s_ui.last_render = 0;  // Allow first render immediately after debounce
-    s_ui.last_change = platform_millis();
+    s_ui.last_change = 0;
 
     ESP_LOGI(TAG, "E-ink UI initialized");
 }
@@ -332,8 +376,8 @@ void eink_ui_init(void) {
 void eink_ui_set_status(bool online) {
     if (s_ui.online != online) {
         s_ui.online = online;
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
+        // Don't set dirty — not worth a 20s e-ink refresh for a status icon change.
+        // Piggyback on next artwork-triggered render.
     }
 }
 
@@ -341,8 +385,7 @@ void eink_ui_set_message(const char *msg) {
     if (!msg) msg = "";
     if (strcmp(s_ui.message, msg) != 0) {
         snprintf(s_ui.message, sizeof(s_ui.message), "%s", msg);
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
+        // Text-only change — piggyback on next artwork render
     }
 }
 
@@ -350,8 +393,7 @@ void eink_ui_set_zone_name(const char *name) {
     if (!name) name = "";
     if (strcmp(s_ui.zone_name, name) != 0) {
         snprintf(s_ui.zone_name, sizeof(s_ui.zone_name), "%s", name);
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
+        // Text-only change — piggyback on next artwork render
     }
 }
 
@@ -359,8 +401,8 @@ void eink_ui_set_network_status(const char *status) {
     if (!status) status = "";
     if (strcmp(s_ui.network_status, status) != 0) {
         snprintf(s_ui.network_status, sizeof(s_ui.network_status), "%s", status);
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
+        // Text-only — piggyback on artwork render. No point burning a 20s refresh
+        // just to show "Connected" on an otherwise blank screen.
     }
 }
 
@@ -368,9 +410,17 @@ void eink_ui_set_artwork(const char *image_key) {
     if (!image_key) image_key = "";
     if (strcmp(s_ui.image_key, image_key) != 0) {
         snprintf(s_ui.image_key, sizeof(s_ui.image_key), "%s", image_key);
-        s_ui.art_dirty = true;
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
+        if (image_key[0]) {
+            // New artwork — trigger render
+            s_ui.art_dirty = true;
+            s_ui.dirty = true;
+            s_ui.last_change = platform_millis();
+        } else {
+            // Artwork cleared (nothing playing) — cancel any pending render.
+            // It's e-ink: keep whatever's on the display rather than blanking it.
+            s_ui.dirty = false;
+            s_ui.art_dirty = false;
+        }
     }
 }
 
@@ -403,10 +453,9 @@ void eink_ui_update(const char *line1, const char *line2, bool playing,
     // Track volume but don't trigger refresh — volume isn't displayed on e-ink
     s_ui.volume = volume;
 
-    if (changed) {
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
-    }
+    // Text-only changes (track/artist/playing state) piggyback on artwork renders.
+    // When artwork changes, eink_ui_set_artwork() sets dirty.
+    (void)changed;
 }
 
 // Zone picker stubs (simplified for e-ink — full implementation later)
@@ -464,10 +513,9 @@ void eink_ui_set_ble_status(bool connected) {
     // Don't set dirty — piggyback on next now-playing refresh
 }
 
-// Battery display refresh — marks dirty so next process cycle redraws
+// Battery display refresh — noop for e-ink (battery not shown on display)
 void eink_ui_update_battery(void) {
-    s_ui.dirty = true;
-    s_ui.last_change = platform_millis();
+    // Don't trigger a 20s e-ink refresh for battery — it's not displayed
 }
 
 // Settings panel — noop for e-ink (no LVGL settings screen)
