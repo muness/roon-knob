@@ -244,16 +244,24 @@ static void draw_bridge_icon(uint16_t x, uint16_t y, uint8_t color) {
 static void render_full_screen(void) {
     ESP_LOGI(TAG, "Rendering full screen...");
 
-    // Clear framebuffer to white
-    eink_display_clear(EINK_WHITE);
-
     // ── Artwork (centered, flush to top) ─────────────────────────────────
     if (s_ui.art_dirty && s_ui.image_key[0]) {
         render_artwork();
         // Only clear art_dirty if we have a valid cache (render succeeded)
         if (s_art_cache) s_ui.art_dirty = false;
-    } else if (s_ui.image_key[0] && s_art_cache) {
-        // Re-blit cached artwork (framebuffer was cleared above)
+    }
+
+    // If we have an image key but no cached artwork, skip the render entirely.
+    // It's e-ink — whatever's on screen stays. Better than blanking it out.
+    if (s_ui.image_key[0] && !s_art_cache) {
+        ESP_LOGW(TAG, "No artwork cache available, skipping render to preserve display");
+        return;
+    }
+
+    // Clear framebuffer to white, then re-draw everything
+    eink_display_clear(EINK_WHITE);
+
+    if (s_ui.image_key[0] && s_art_cache) {
         blit_art_cache();
     } else if (!s_ui.image_key[0]) {
         // No artwork — draw thin border placeholder
