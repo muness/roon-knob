@@ -104,10 +104,14 @@ static void ui_loop_task(void *arg) {
     eink_ui_process();
 
     // Deferred mDNS init (needs network up, and stack space)
+    static bool s_mdns_initialized = false;
     if (s_mdns_init_pending) {
       s_mdns_init_pending = false;
-      ESP_LOGI(TAG, "Initializing mDNS (network is up)...");
-      platform_mdns_init(wifi_mgr_get_hostname());
+      if (!s_mdns_initialized) {
+        s_mdns_initialized = true;
+        ESP_LOGI(TAG, "Initializing mDNS (network is up)...");
+        platform_mdns_init(wifi_mgr_get_hostname());
+      }
     }
 
     // Deferred BLE init (after WiFi STA connects — coexistence safe)

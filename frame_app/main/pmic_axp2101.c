@@ -84,20 +84,27 @@ bool pmic_init(void) {
     }
 
     // Set VBUS current limit to 2A
-    pmic_write_reg(0x15, 0x05);  // VBUS current limit = 2000mA
+    if (pmic_write_reg(0x15, 0x05) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set VBUS current limit");
 
     // Set charge current to 200mA
-    pmic_write_reg(0x62, 0x04);  // ICC = 200mA
+    if (pmic_write_reg(0x62, 0x04) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set charge current");
 
     // Configure power outputs (matching original PhotoPainter firmware)
     // DC1 = 3.3V: (3300 - 1500) / 100 = 18 = 0x12
-    pmic_write_reg(AXP2101_DC1_VOL, 0x12);
+    if (pmic_write_reg(AXP2101_DC1_VOL, 0x12) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set DC1 voltage");
 
     // ALDO1-4 = 3.3V each: (3300 - 500) / 100 = 28 = 0x1C
-    pmic_write_reg(AXP2101_ALDO1_VOL, 0x1C);
-    pmic_write_reg(AXP2101_ALDO2_VOL, 0x1C);
-    pmic_write_reg(AXP2101_ALDO3_VOL, 0x1C);
-    pmic_write_reg(AXP2101_ALDO4_VOL, 0x1C);
+    if (pmic_write_reg(AXP2101_ALDO1_VOL, 0x1C) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set ALDO1 voltage");
+    if (pmic_write_reg(AXP2101_ALDO2_VOL, 0x1C) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set ALDO2 voltage");
+    if (pmic_write_reg(AXP2101_ALDO3_VOL, 0x1C) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set ALDO3 voltage");
+    if (pmic_write_reg(AXP2101_ALDO4_VOL, 0x1C) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to set ALDO4 voltage");
 
     // Enable ALDO1-4 (bits 0-3 of register 0x90)
     uint8_t ldo_ctrl = 0;
@@ -105,7 +112,8 @@ bool pmic_init(void) {
         ESP_LOGW(TAG, "Failed to read LDO control register, using 0");
     }
     ldo_ctrl |= 0x0F;  // Enable ALDO1-4
-    pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl);
+    if (pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl) != ESP_OK)
+        ESP_LOGW(TAG, "Failed to enable ALDO1-4");
 
     ESP_LOGI(TAG, "Power outputs configured: DC1=3.3V, ALDO1-4=3.3V (LDO ctrl=0x%02x)", ldo_ctrl);
 

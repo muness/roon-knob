@@ -64,7 +64,7 @@ The panel controller is minimal. Only 5 commands are documented:
 
 ### Init Sequence (from PhotoPainter firmware)
 
-```
+```text
 0xAA → 0x49, 0x55, 0x20, 0x08, 0x09, 0x18   // Panel config
 0x01 → 0x3F                                    // Gate setting
 0x00 → 0x5F, 0x69                              // Source/gate driver
@@ -83,7 +83,7 @@ The panel controller is minimal. Only 5 commands are documented:
 
 ### Refresh Sequence
 
-```
+```text
 0x10 → [192,000 bytes pixel data]    // Load framebuffer
 0x04 → (wait BUSY)                   // Power ON
 0x06 → 0x6F, 0x1F, 0x17, 0x49       // Booster params
@@ -93,7 +93,7 @@ The panel controller is minimal. Only 5 commands are documented:
 
 ### Deep Sleep Sequence
 
-```
+```text
 0x07 → 0xA5                         // Enter deep sleep
 // To wake: toggle RST pin (LOW 20ms, HIGH 50ms)
 ```
@@ -132,8 +132,10 @@ Computationally cheaper (no error propagation), potentially cleaner visual resul
 
 ### Dither Pipeline
 
-```
-RGB565 (from bridge) → RGB888 → Floyd-Steinberg → palette index → panel color index
+```text
+Bridge (eink_acep6) → 4-bit packed panel indices → direct blit
+  — or fallback —
+Bridge (rgb565) → RGB888 → Floyd-Steinberg → palette index → panel color index
 ```
 
 The palette array index (0–5) differs from the panel color index (0,1,2,3,5,6) due to the gap at index 4. `eink_palette_to_panel()` handles this mapping.

@@ -150,12 +150,13 @@ static bool get_form_field(const char *data, const char *field, char *out,
   char search[64];
   snprintf(search, sizeof(search), "%s=", field);
 
-  const char *start = strstr(data, search);
-  if (!start) {
-    return false;
+  // Search for the field, skipping substring matches like "xssid=" for "ssid="
+  const char *start = data;
+  while ((start = strstr(start, search)) != NULL) {
+    if (start == data || *(start - 1) == '&') break;
+    start++;  // Skip this substring match, keep looking
   }
-  // Ensure we matched the full field name, not a substring like "xssid="
-  if (start != data && *(start - 1) != '&') {
+  if (!start) {
     return false;
   }
   start += strlen(search);
@@ -247,7 +248,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   rk_cfg_t cfg = {0};
   platform_storage_load(&cfg);
 
-  char wifi_html[512] = "";
+  char wifi_html[1024] = "";
   int pos = 0;
   for (int i = 0; i < cfg.wifi_count && i < RK_MAX_WIFI; i++) {
     char escaped[128];

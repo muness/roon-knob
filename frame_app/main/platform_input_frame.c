@@ -71,9 +71,9 @@ static void button_poll_cb(void *arg) {
     (void)arg;
     // BOOT: long press only = WiFi AP setup
     poll_button(&s_boot, UI_INPUT_NONE, UI_INPUT_MENU);
-    // GP4: long press triggers restart (handled below)
+    // GP4/PWR: poll_button updates internal press state (press_time, pressed)
+    // needed by the long-press restart check below, even though no events are enqueued
     poll_button(&s_gp4,  UI_INPUT_NONE, UI_INPUT_NONE);
-    // PWR: unused
     poll_button(&s_pwr,  UI_INPUT_NONE, UI_INPUT_NONE);
 
     // Check GP4 for restart (long press detection directly)

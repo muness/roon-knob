@@ -1,4 +1,4 @@
-// platform_storage.h implementation — identical to idf_app/platform_storage_idf.c
+// platform_storage.h implementation for frame_app (diverged from idf_app variant)
 
 #include "platform/platform_storage.h"
 #include "rk_cfg.h"
@@ -140,6 +140,14 @@ bool platform_storage_save(const rk_cfg_t *in) {
     }
     if (strcmp(verify.ssid, copy.ssid) != 0) {
         ESP_LOGE(TAG, "VERIFY FAILED: SSID mismatch!");
+        return false;
+    }
+    if (strcmp(verify.bridge_base, copy.bridge_base) != 0) {
+        ESP_LOGE(TAG, "VERIFY FAILED: bridge_base mismatch!");
+        return false;
+    }
+    if (strcmp(verify.zone_id, copy.zone_id) != 0) {
+        ESP_LOGE(TAG, "VERIFY FAILED: zone_id mismatch!");
         return false;
     }
 
