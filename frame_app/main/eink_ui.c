@@ -20,16 +20,13 @@ static const char *TAG = "eink_ui";
 
 // ── UI state ────────────────────────────────────────────────────────────────
 
-// Landscape layout: 800 wide x 480 tall
-// Device mounted with long axis horizontal
-#define ART_SIZE       440   // Artwork square size
-#define HEADER_H        30   // Header bar height
-#define FOOTER_H        20   // Footer bar height
-#define ART_X            0   // Artwork left edge
-#define ART_Y           HEADER_H   // Artwork top edge
-#define TEXT_X         (ART_SIZE + 10)  // Text area right of artwork
-#define TEXT_Y         (HEADER_H + 20)  // Text area top
-#define TEXT_W         (EINK_WIDTH - TEXT_X - 10)  // Text area width
+// Art-forward layout: 800 wide x 480 tall
+// Large centered artwork, slim text bar at bottom
+#define ART_SIZE       450   // Artwork square size
+#define TEXT_BAR_H      30   // Text bar height at bottom
+#define ART_X          ((EINK_WIDTH - ART_SIZE) / 2)   // Centered horizontally (175px margin)
+#define ART_Y            0   // Flush to top
+#define TEXT_Y         (EINK_HEIGHT - TEXT_BAR_H)       // Text bar at bottom
 
 // Debounce: wait 5s after last state change before rendering
 #define RENDER_DEBOUNCE_MS 5000
@@ -48,6 +45,7 @@ static struct {
     float volume_step;
     bool playing;
     bool online;
+    bool ble_connected;
 
     // Dirty flags
     bool dirty;             // Any state changed — needs re-render
@@ -151,14 +149,6 @@ static void draw_hline(uint16_t x, uint16_t y, uint16_t w, uint8_t color) {
     }
 }
 
-static void fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t color) {
-    for (uint16_t j = 0; j < h; j++) {
-        for (uint16_t i = 0; i < w; i++) {
-            eink_display_set_pixel(x + i, y + j, color);
-        }
-    }
-}
-
 // Truncate string to fit width, adding "..." if needed
 static void truncate_to_fit(const char *src, char *dst, size_t dst_len,
                             int max_width, const eink_font_t *font) {
@@ -181,6 +171,47 @@ static void truncate_to_fit(const char *src, char *dst, size_t dst_len,
     strncat(dst, "...", dst_len - chars - 1);
 }
 
+// ── Status icon drawing ─────────────────────────────────────────────────────
+
+// Draw a small Bluetooth-ish icon (8x10 pixels) at (x,y)
+static void draw_ble_icon(uint16_t x, uint16_t y, uint8_t color) {
+    // Simplified Bluetooth rune: vertical line with arrow tips
+    for (int i = 0; i < 10; i++)
+        eink_display_set_pixel(x + 3, y + i, color);  // vertical bar
+    // Upper-right arrow: (4,2),(5,3),(6,4),(5,5),(4,6)
+    eink_display_set_pixel(x + 4, y + 2, color);
+    eink_display_set_pixel(x + 5, y + 3, color);
+    eink_display_set_pixel(x + 6, y + 4, color);
+    eink_display_set_pixel(x + 5, y + 5, color);
+    eink_display_set_pixel(x + 4, y + 6, color);
+    // Lower-left notches: (2,3),(1,4),(2,5)
+    eink_display_set_pixel(x + 2, y + 3, color);
+    eink_display_set_pixel(x + 1, y + 4, color);
+    eink_display_set_pixel(x + 2, y + 5, color);
+    // Top/bottom caps
+    eink_display_set_pixel(x + 4, y + 0, color);
+    eink_display_set_pixel(x + 5, y + 1, color);
+    eink_display_set_pixel(x + 4, y + 8, color);
+    eink_display_set_pixel(x + 5, y + 9, color);
+}
+
+// Draw a small bridge/connection icon (8x10 pixels) — a simple "link" shape
+static void draw_bridge_icon(uint16_t x, uint16_t y, uint8_t color) {
+    // Two interlocking chain links
+    for (int i = 2; i <= 7; i++)
+        eink_display_set_pixel(x + i, y + 3, color);  // top bar
+    for (int i = 1; i <= 6; i++)
+        eink_display_set_pixel(x + i, y + 6, color);  // bottom bar
+    eink_display_set_pixel(x + 2, y + 2, color);
+    eink_display_set_pixel(x + 2, y + 4, color);
+    eink_display_set_pixel(x + 7, y + 2, color);
+    eink_display_set_pixel(x + 7, y + 4, color);
+    eink_display_set_pixel(x + 1, y + 5, color);
+    eink_display_set_pixel(x + 1, y + 7, color);
+    eink_display_set_pixel(x + 6, y + 5, color);
+    eink_display_set_pixel(x + 6, y + 7, color);
+}
+
 // ── Full screen render ──────────────────────────────────────────────────────
 
 static void render_full_screen(void) {
@@ -189,93 +220,56 @@ static void render_full_screen(void) {
     // Clear framebuffer to white
     eink_display_clear(EINK_WHITE);
 
-    // ── Header bar (30px) ───────────────────────────────────────────────
-    draw_hline(0, HEADER_H - 1, EINK_WIDTH, EINK_BLACK);
-
-    // Zone name (left)
-    if (s_ui.zone_name[0]) {
-        char trunc[48];
-        truncate_to_fit(s_ui.zone_name, trunc, sizeof(trunc), 500, &eink_font_16);
-        eink_font_draw_string(5, 7, trunc, &eink_font_16, EINK_BLACK, 0xFF);
-    }
-
-    // Playing status (right side of header)
-    {
-        const char *status = s_ui.playing ? "> Playing" : "|| Paused";
-        if (!s_ui.online) status = "-- Offline";
-        if (s_ui.message[0]) status = s_ui.message;
-        int sw = eink_font_string_width(status, &eink_font_16);
-        eink_font_draw_string(EINK_WIDTH - sw - 5, 7, status, &eink_font_16, EINK_BLACK, 0xFF);
-    }
-
-    // ── Artwork area (left side, 440x440) ───────────────────────────────
+    // ── Artwork (centered, flush to top) ─────────────────────────────────
     if (s_ui.art_dirty && s_ui.image_key[0]) {
         render_artwork();
         s_ui.art_dirty = false;
     } else if (!s_ui.image_key[0]) {
-        // No artwork — draw placeholder
-        fill_rect(ART_X, ART_Y, ART_SIZE, ART_SIZE, EINK_WHITE);
+        // No artwork — draw thin border placeholder
         draw_hline(ART_X, ART_Y, ART_SIZE, EINK_BLACK);
         draw_hline(ART_X, ART_Y + ART_SIZE - 1, ART_SIZE, EINK_BLACK);
         for (int i = 0; i < ART_SIZE; i++) {
             eink_display_set_pixel(ART_X, ART_Y + i, EINK_BLACK);
             eink_display_set_pixel(ART_X + ART_SIZE - 1, ART_Y + i, EINK_BLACK);
         }
-        eink_font_draw_string(ART_X + 140, ART_Y + 200, "No Artwork",
-                              &eink_font_24, EINK_BLACK, 0xFF);
     }
 
-    // ── Text area (right side) ──────────────────────────────────────────
+    // ── Text bar at bottom ───────────────────────────────────────────────
+    draw_hline(0, TEXT_Y, EINK_WIDTH, EINK_BLACK);
 
-    // Track title (large)
-    if (s_ui.track[0]) {
-        char trunc[80];
-        truncate_to_fit(s_ui.track, trunc, sizeof(trunc), TEXT_W, &eink_font_32);
-        eink_font_draw_string(TEXT_X, TEXT_Y, trunc, &eink_font_32, EINK_BLACK, 0xFF);
+    // "Track — Artist" left-aligned
+    {
+        char text[256];
+        if (s_ui.track[0] && s_ui.artist[0]) {
+            snprintf(text, sizeof(text), "%.120s  -  %.120s", s_ui.track, s_ui.artist);
+        } else if (s_ui.track[0]) {
+            snprintf(text, sizeof(text), "%s", s_ui.track);
+        } else if (s_ui.network_status[0]) {
+            snprintf(text, sizeof(text), "%s", s_ui.network_status);
+        } else {
+            snprintf(text, sizeof(text), "No track");
+        }
+        // Truncate to fit (leave 40px right margin for status icons)
+        int max_text_w = EINK_WIDTH - 50;
+        char trunc[200];
+        truncate_to_fit(text, trunc, sizeof(trunc), max_text_w, &eink_font_16);
+        eink_font_draw_string(5, TEXT_Y + 7, trunc, &eink_font_16, EINK_BLACK, 0xFF);
     }
 
-    // Artist
-    if (s_ui.artist[0]) {
-        char trunc[80];
-        truncate_to_fit(s_ui.artist, trunc, sizeof(trunc), TEXT_W, &eink_font_24);
-        eink_font_draw_string(TEXT_X, TEXT_Y + 45, trunc, &eink_font_24, EINK_BLACK, 0xFF);
+    // Status icons (bottom-right) — piggyback on now-playing refreshes only
+    {
+        int icon_x = EINK_WIDTH - 12;
+        int icon_y = TEXT_Y + 10;
+
+        // Bridge connectivity
+        draw_bridge_icon(icon_x, icon_y, s_ui.online ? EINK_BLACK : EINK_WHITE);
+
+        // BLE remote connection
+        icon_x -= 14;
+        if (s_ui.ble_connected) {
+            draw_ble_icon(icon_x, icon_y, EINK_BLACK);
+        }
     }
-
-    // Album (blue)
-    if (s_ui.album[0]) {
-        char trunc[80];
-        truncate_to_fit(s_ui.album, trunc, sizeof(trunc), TEXT_W, &eink_font_24);
-        eink_font_draw_string(TEXT_X, TEXT_Y + 80, trunc, &eink_font_24, EINK_BLUE, 0xFF);
-    }
-
-    // ── Separator + transport hint ──────────────────────────────────────
-    draw_hline(TEXT_X, ART_Y + ART_SIZE - 80, TEXT_W, EINK_BLACK);
-    eink_font_draw_string(TEXT_X + 10, ART_Y + ART_SIZE - 60,
-                          "BOOT:Prev  GP4:Play  PWR:Next",
-                          &eink_font_16, EINK_BLACK, 0xFF);
-
-    // Volume
-    if (s_ui.volume > -999.0f) {
-        char vol_str[32];
-        snprintf(vol_str, sizeof(vol_str), "Vol: %.0f dB", s_ui.volume);
-        int vw = eink_font_string_width(vol_str, &eink_font_16);
-        eink_font_draw_string(TEXT_X + TEXT_W - vw, ART_Y + ART_SIZE - 100,
-                              vol_str, &eink_font_16, EINK_BLACK, 0xFF);
-    }
-
-    // ── Network status banner ───────────────────────────────────────────
-    if (s_ui.network_status[0]) {
-        int ns_y = ART_Y + 160;
-        fill_rect(TEXT_X, ns_y, TEXT_W, 30, EINK_YELLOW);
-        eink_font_draw_string(TEXT_X + 5, ns_y + 7, s_ui.network_status,
-                              &eink_font_16, EINK_BLACK, 0xFF);
-    }
-
-    // ── Footer bar ──────────────────────────────────────────────────────
-    int footer_y = EINK_HEIGHT - FOOTER_H;
-    draw_hline(0, footer_y, EINK_WIDTH, EINK_BLACK);
-    eink_font_draw_string(5, footer_y + 2, "hiphi frame v0.1",
-                          &eink_font_16, EINK_BLACK, 0xFF);
 
     // Refresh the physical display
     eink_display_refresh();
@@ -419,6 +413,12 @@ extern void platform_input_set_handler(ui_input_cb_t cb);
 void eink_ui_set_input_handler(ui_input_cb_t handler) {
     s_input_handler = handler;
     platform_input_set_handler(handler);
+}
+
+// BLE status — updated piggyback on next now-playing refresh, never triggers its own
+void eink_ui_set_ble_status(bool connected) {
+    s_ui.ble_connected = connected;
+    // Don't set dirty — piggyback on next now-playing refresh
 }
 
 // Battery display refresh — marks dirty so next process cycle redraws

@@ -1820,6 +1820,48 @@ bool bridge_client_is_bridge_mdns(void) {
   return from_mdns;
 }
 
+int bridge_client_get_zones(bridge_zone_t *out, int max) {
+  lock_state();
+  int count = s_state.zone_count < max ? s_state.zone_count : max;
+  for (int i = 0; i < count; i++) {
+    strncpy(out[i].id, s_state.zones[i].id, sizeof(out[i].id) - 1);
+    out[i].id[sizeof(out[i].id) - 1] = '\0';
+    strncpy(out[i].name, s_state.zones[i].name, sizeof(out[i].name) - 1);
+    out[i].name[sizeof(out[i].name) - 1] = '\0';
+  }
+  unlock_state();
+  return count;
+}
+
+const char *bridge_client_get_current_zone_id(void) {
+  return s_state.cfg.zone_id;
+}
+
+void bridge_client_set_zone(const char *zone_id) {
+  lock_state();
+  for (int i = 0; i < s_state.zone_count; i++) {
+    if (strcmp(s_state.zones[i].id, zone_id) == 0) {
+      strncpy(s_state.cfg.zone_id, zone_id,
+              sizeof(s_state.cfg.zone_id) - 1);
+      s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
+      strncpy(s_state.zone_label, s_state.zones[i].name,
+              sizeof(s_state.zone_label) - 1);
+      s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
+      s_state.zone_resolved = true;
+      s_trigger_poll = true;
+      s_force_artwork_refresh = true;
+      if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+        s_device_state = DEVICE_STATE_OPERATIONAL;
+      }
+      unlock_state();
+      platform_storage_save(&s_state.cfg);
+      post_ui_zone_name(s_state.zone_label);
+      return;
+    }
+  }
+  unlock_state();
+}
+
 // Config fetch and apply implementation
 
 // Data passed to UI thread for config application

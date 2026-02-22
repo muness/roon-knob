@@ -2,7 +2,9 @@
 // Boot sequence: NVS → e-ink display → PMIC → eink_ui_init → input → UI loop → app_entry → WiFi
 
 #include "app.h"
+#include "ble_remote.h"
 #include "bridge_client.h"
+#include "captive_portal.h"
 #include "eink_display.h"
 #include "eink_ui.h"
 #include "pmic_axp2101.h"
@@ -28,6 +30,8 @@ static const char *TAG = "main";
 
 // Deferred operations flags
 static volatile bool s_mdns_init_pending = false;
+static volatile bool s_ble_init_pending = false;
+static volatile bool s_sta_server_pending = false;
 
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
   switch (evt) {
@@ -46,6 +50,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     bridge_client_set_device_ip(ip_opt);
     bridge_client_set_network_ready(true);
     s_mdns_init_pending = true;
+    s_ble_init_pending = true;
+    s_sta_server_pending = true;
     break;
 
   case RK_NET_EVT_FAIL:
@@ -99,6 +105,20 @@ static void ui_loop_task(void *arg) {
       s_mdns_init_pending = false;
       ESP_LOGI(TAG, "Initializing mDNS (network is up)...");
       platform_mdns_init(wifi_mgr_get_hostname());
+    }
+
+    // Deferred BLE init (after WiFi STA connects — coexistence safe)
+    if (s_ble_init_pending) {
+      s_ble_init_pending = false;
+      ESP_LOGI(TAG, "Initializing BLE remote...");
+      ble_remote_init();
+    }
+
+    // Deferred STA web server (zone picker + BLE config)
+    if (s_sta_server_pending) {
+      s_sta_server_pending = false;
+      ESP_LOGI(TAG, "Starting STA web server...");
+      captive_portal_start_sta();
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));

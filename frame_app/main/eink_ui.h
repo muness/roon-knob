@@ -43,6 +43,9 @@ bool eink_ui_zone_picker_is_current_selection(void);
 #include "ui.h"
 void eink_ui_set_input_handler(ui_input_cb_t handler);
 
+// BLE remote connection status (piggybacks on next now-playing refresh)
+void eink_ui_set_ble_status(bool connected);
+
 // Battery display refresh (called from bridge_client.c)
 void eink_ui_update_battery(void);
 

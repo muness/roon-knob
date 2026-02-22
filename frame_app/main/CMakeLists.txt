@@ -15,6 +15,7 @@ set(SRC_FILES
     "captive_portal.c"
     "dns_server.c"
     "pmic_axp2101.c"
+    "ble_remote.c"
     "../../common/app_main.c"
     "../../common/bridge_client.c"
     "../../common/platform/platform_log.c"
@@ -44,6 +45,8 @@ idf_component_register(
         esp_app_format
         driver
         json
+        bt
+        esp_hid
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

@@ -27,6 +27,15 @@ bool bridge_client_is_bridge_connected(void);  // True if bridge is responding
 bool bridge_client_is_bridge_mdns(
     void); // True if bridge was discovered via mDNS (persisted)
 
+// Zone enumeration for web UI
+typedef struct {
+    char id[64];
+    char name[64];
+} bridge_zone_t;
+int bridge_client_get_zones(bridge_zone_t *out, int max);
+const char *bridge_client_get_current_zone_id(void);
+void bridge_client_set_zone(const char *zone_id);
+
 // ── UDP fast-path wire format ───────────────────────────────────────────────
 
 #include <stdint.h>

@@ -4,6 +4,8 @@
 #include "rk_cfg.h"
 #include "eink_ui.h"
 #include "wifi_manager.h"
+#include "bridge_client.h"
+#include "ble_remote.h"
 
 #include <esp_http_server.h>
 #include <esp_log.h>
@@ -361,6 +363,323 @@ void captive_portal_start(void) {
   dns_server_start();
 
   ESP_LOGI(TAG, "Captive portal started with DNS hijacking");
+}
+
+// ── Common CSS for STA-mode pages ──────────────────────────────────────────
+
+static const char *STA_CSS =
+    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
+    "h1{color:#4fc3f7;margin-bottom:5px;}"
+    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
+    "a{color:#4fc3f7;}"
+    "nav{margin:10px 0 20px;}"
+    "nav a{margin-right:15px;text-decoration:none;}"
+    ".card{background:#16213e;padding:15px 20px;border-radius:10px;max-width:400px;margin:10px 0;}"
+    ".zone{display:flex;justify-content:space-between;align-items:center;"
+    "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;cursor:pointer;}"
+    ".zone:hover{background:#1e3a5f;}"
+    ".zone.active{border:1px solid #4fc3f7;}"
+    ".zone form{display:inline;margin:0;}"
+    ".btn{padding:8px 16px;background:#4fc3f7;color:#000;border:none;"
+    "border-radius:5px;font-weight:bold;cursor:pointer;}"
+    ".btn:hover{background:#29b6f6;}"
+    ".btn-danger{background:#ff7043;}"
+    ".btn-danger:hover{background:#ff5722;}"
+    ".status{color:#aaa;margin:10px 0;}"
+    ".device{display:flex;justify-content:space-between;align-items:center;"
+    "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;}"
+    ;
+
+// ── STA-mode zone picker page (GET /zones) ─────────────────────────────────
+
+static esp_err_t sta_zones_handler(httpd_req_t *req) {
+  bridge_zone_t zones[16];
+  int count = bridge_client_get_zones(zones, 16);
+  const char *current = bridge_client_get_current_zone_id();
+
+  char bridge_url[128] = "";
+  bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
+
+  size_t html_size = 4096;
+  char *html = malloc(html_size);
+  if (!html) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
+
+  int pos = snprintf(html, html_size,
+    "<!DOCTYPE html><html><head>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>hiphi frame - Zones</title>"
+    "<style>%s</style></head><body>"
+    "<h1>hiphi frame</h1>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+    "%s%s%s"
+    "</nav>"
+    "<div class='card'><h2>Zone Selection</h2>",
+    STA_CSS,
+    bridge_url[0] ? "<a href='" : "",
+    bridge_url[0] ? bridge_url : "",
+    bridge_url[0] ? "' target='_blank'>Bridge Control</a>" : "");
+
+  if (count == 0) {
+    pos += snprintf(html + pos, html_size - pos,
+      "<p class='status'>No zones discovered yet. "
+      "Make sure the bridge is running and music is playing.</p>");
+  } else {
+    for (int i = 0; i < count; i++) {
+      char esc_name[128], esc_id[128];
+      html_escape(zones[i].name, esc_name, sizeof(esc_name));
+      html_escape(zones[i].id, esc_id, sizeof(esc_id));
+      bool is_current = current && strcmp(zones[i].id, current) == 0;
+      pos += snprintf(html + pos, html_size - pos,
+        "<div class='zone%s'>"
+        "<span>%s%s</span>"
+        "<form method='POST' action='/api/zone'>"
+        "<input type='hidden' name='zone_id' value='%s'>"
+        "<button type='submit' class='btn'%s>Select</button>"
+        "</form></div>",
+        is_current ? " active" : "",
+        esc_name,
+        is_current ? " (current)" : "",
+        esc_id,
+        is_current ? " disabled" : "");
+    }
+  }
+
+  pos += snprintf(html + pos, html_size - pos, "</div></body></html>");
+
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, pos);
+  free(html);
+  return ESP_OK;
+}
+
+// ── STA-mode zone selection (POST /api/zone) ───────────────────────────────
+
+static esp_err_t sta_zone_set_handler(httpd_req_t *req) {
+  char buf[128] = {0};
+  int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+    return ESP_FAIL;
+  }
+  buf[received] = '\0';
+
+  char zone_id[64] = {0};
+  if (!get_form_field(buf, "zone_id", zone_id, sizeof(zone_id))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing zone_id");
+    return ESP_FAIL;
+  }
+
+  ESP_LOGI(TAG, "Web UI: selecting zone '%s'", zone_id);
+  bridge_client_set_zone(zone_id);
+
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/zones");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+// ── STA-mode BLE config page (GET /ble) ─────────────────────────────────────
+
+static esp_err_t sta_ble_handler(httpd_req_t *req) {
+  bool connected = ble_remote_is_connected();
+  bool scanning = ble_remote_is_scanning();
+  const char *dev_name = ble_remote_device_name();
+
+  ble_remote_device_t results[BLE_REMOTE_MAX_RESULTS];
+  int result_count = ble_remote_get_scan_results(results, BLE_REMOTE_MAX_RESULTS);
+
+  char bridge_url[128] = "";
+  bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
+
+  size_t html_size = 4096;
+  char *html = malloc(html_size);
+  if (!html) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
+
+  int pos = snprintf(html, html_size,
+    "<!DOCTYPE html><html><head>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>hiphi frame - BLE Remote</title>"
+    "<style>%s</style></head><body>"
+    "<h1>hiphi frame</h1>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+    "%s%s%s"
+    "</nav>"
+    "<div class='card'><h2>BLE Media Remote</h2>",
+    STA_CSS,
+    bridge_url[0] ? "<a href='" : "",
+    bridge_url[0] ? bridge_url : "",
+    bridge_url[0] ? "' target='_blank'>Bridge Control</a>" : "");
+
+  // Current status
+  if (connected && dev_name[0]) {
+    char esc_name[128];
+    html_escape(dev_name, esc_name, sizeof(esc_name));
+    pos += snprintf(html + pos, html_size - pos,
+      "<div class='device'>"
+      "<span>Connected: <strong>%s</strong></span>"
+      "<form method='POST' action='/api/ble-unpair'>"
+      "<button type='submit' class='btn btn-danger'>Unpair</button>"
+      "</form></div>",
+      esc_name);
+  } else if (dev_name[0]) {
+    char esc_name[128];
+    html_escape(dev_name, esc_name, sizeof(esc_name));
+    pos += snprintf(html + pos, html_size - pos,
+      "<p class='status'>Paired with <strong>%s</strong> (disconnected, reconnecting...)</p>"
+      "<form method='POST' action='/api/ble-unpair'>"
+      "<button type='submit' class='btn btn-danger'>Unpair</button>"
+      "</form>",
+      esc_name);
+  } else {
+    pos += snprintf(html + pos, html_size - pos,
+      "<p class='status'>No BLE remote paired.</p>");
+  }
+
+  // Scan
+  pos += snprintf(html + pos, html_size - pos,
+    "<h2>Find Remotes</h2>");
+
+  if (scanning) {
+    pos += snprintf(html + pos, html_size - pos,
+      "<p class='status'>Scanning... <a href='/ble'>Refresh</a></p>");
+  } else {
+    pos += snprintf(html + pos, html_size - pos,
+      "<form method='POST' action='/api/ble-scan'>"
+      "<button type='submit' class='btn'>Scan for Remotes</button>"
+      "</form>");
+  }
+
+  // Results
+  if (result_count > 0 && !scanning) {
+    pos += snprintf(html + pos, html_size - pos, "<h2>Discovered Devices</h2>");
+    for (int i = 0; i < result_count; i++) {
+      char esc_name[128];
+      html_escape(results[i].name, esc_name, sizeof(esc_name));
+      pos += snprintf(html + pos, html_size - pos,
+        "<div class='device'>"
+        "<span>%s</span>"
+        "<form method='POST' action='/api/ble-pair'>"
+        "<input type='hidden' name='idx' value='%d'>"
+        "<button type='submit' class='btn'>Pair</button>"
+        "</form></div>",
+        esc_name, i);
+    }
+  }
+
+  pos += snprintf(html + pos, html_size - pos,
+    "<p class='status' style='margin-top:20px;font-size:12px;'>"
+    "Put your BLE remote into pairing mode before scanning.</p>"
+    "</div></body></html>");
+
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, pos);
+  free(html);
+  return ESP_OK;
+}
+
+// ── BLE API handlers ────────────────────────────────────────────────────────
+
+static esp_err_t sta_ble_scan_handler(httpd_req_t *req) {
+  ESP_LOGI(TAG, "Web UI: starting BLE scan");
+  ble_remote_scan_start();
+  // Redirect back after short delay to allow scan to start
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/ble");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+static esp_err_t sta_ble_pair_handler(httpd_req_t *req) {
+  char buf[32] = {0};
+  int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+    return ESP_FAIL;
+  }
+  buf[received] = '\0';
+
+  char idx_str[8] = {0};
+  if (!get_form_field(buf, "idx", idx_str, sizeof(idx_str))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing idx");
+    return ESP_FAIL;
+  }
+
+  int idx = atoi(idx_str);
+  ESP_LOGI(TAG, "Web UI: pairing with device %d", idx);
+  ble_remote_pair(idx);
+
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/ble");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+static esp_err_t sta_ble_unpair_handler(httpd_req_t *req) {
+  ESP_LOGI(TAG, "Web UI: unpairing BLE remote");
+  ble_remote_unpair();
+
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/ble");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+// ── STA-mode root redirect ──────────────────────────────────────────────────
+
+static esp_err_t sta_root_handler(httpd_req_t *req) {
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/zones");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+// ── STA-mode web server (runs when connected to WiFi) ───────────────────────
+
+void captive_portal_start_sta(void) {
+  if (s_server) {
+    ESP_LOGW(TAG, "Web server already running");
+    return;
+  }
+
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.max_uri_handlers = 16;
+  config.stack_size = 8192;
+
+  ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
+
+  if (httpd_start(&s_server, &config) != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start HTTP server");
+    return;
+  }
+
+  httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = sta_root_handler};
+  httpd_register_uri_handler(s_server, &root);
+
+  httpd_uri_t zones = {.uri = "/zones", .method = HTTP_GET, .handler = sta_zones_handler};
+  httpd_register_uri_handler(s_server, &zones);
+
+  httpd_uri_t zone_set = {.uri = "/api/zone", .method = HTTP_POST, .handler = sta_zone_set_handler};
+  httpd_register_uri_handler(s_server, &zone_set);
+
+  httpd_uri_t ble = {.uri = "/ble", .method = HTTP_GET, .handler = sta_ble_handler};
+  httpd_register_uri_handler(s_server, &ble);
+
+  httpd_uri_t ble_scan = {.uri = "/api/ble-scan", .method = HTTP_POST, .handler = sta_ble_scan_handler};
+  httpd_register_uri_handler(s_server, &ble_scan);
+
+  httpd_uri_t ble_pair = {.uri = "/api/ble-pair", .method = HTTP_POST, .handler = sta_ble_pair_handler};
+  httpd_register_uri_handler(s_server, &ble_pair);
+
+  httpd_uri_t ble_unpair = {.uri = "/api/ble-unpair", .method = HTTP_POST, .handler = sta_ble_unpair_handler};
+  httpd_register_uri_handler(s_server, &ble_unpair);
+
+  ESP_LOGI(TAG, "STA web server started (zone picker + BLE config)");
 }
 
 void captive_portal_stop(void) {
