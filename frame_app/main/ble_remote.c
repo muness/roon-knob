@@ -61,6 +61,9 @@ static uint8_t s_pending_addr_type = 0;
 // Unpair-in-progress flag: when true, CLOSE callback skips dev_free (unpair owns it)
 static volatile bool s_unpair_pending = false;
 
+// System-wide GAP event listener (receives events from esp_hidh's connections too)
+static struct ble_gap_event_listener s_gap_listener;
+
 #define BLE_LOCK()   xSemaphoreTake(s_mutex, portMAX_DELAY)
 #define BLE_UNLOCK() xSemaphoreGive(s_mutex)
 
@@ -278,8 +281,35 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg) {
         if (s_scan_sem) xSemaphoreGive(s_scan_sem);
         break;
 
+    // ENC_CHANGE and REPEAT_PAIRING handled by system-wide listener
+    // (s_gap_listener_cb) which covers esp_hidh's connections too.
+
+    default:
+        break;
+    }
+    return 0;
+}
+
+// ── System-wide GAP event listener ──────────────────────────────────────────
+// Catches events from esp_hidh's internal connections (which use their own
+// GAP callback). Needed because nimble_hidh.c has no security handling.
+
+static int ble_gap_listener_cb(struct ble_gap_event *event, void *arg) {
+    switch (event->type) {
+    case BLE_GAP_EVENT_CONNECT:
+        if (event->connect.status == 0) {
+            ESP_LOGI(TAG, "Connection up (handle=%d), initiating security...",
+                     event->connect.conn_handle);
+            int rc = ble_gap_security_initiate(event->connect.conn_handle);
+            if (rc != 0) {
+                ESP_LOGW(TAG, "Security initiate failed: %d", rc);
+            }
+        }
+        break;
+
     case BLE_GAP_EVENT_ENC_CHANGE:
-        ESP_LOGI(TAG, "Encryption change: status=%d", event->enc_change.status);
+        ESP_LOGI(TAG, "Encryption change: status=%d handle=%d",
+                 event->enc_change.status, event->enc_change.conn_handle);
         break;
 
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
@@ -287,6 +317,7 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg) {
         struct ble_gap_conn_desc desc;
         ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
         ble_store_util_delete_peer(&desc.peer_id_addr);
+        ESP_LOGI(TAG, "Repeat pairing — deleted old bond, retrying");
         return BLE_GAP_REPEAT_PAIRING_RETRY;
     }
 
@@ -440,6 +471,10 @@ void ble_remote_init(void) {
 
     // Start NimBLE host task
     nimble_port_freertos_init(nimble_host_task);
+
+    // Register system-wide GAP listener to handle security for esp_hidh
+    // connections (nimble_hidh.c has no security handling of its own)
+    ble_gap_event_listener_register(&s_gap_listener, ble_gap_listener_cb, NULL);
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
