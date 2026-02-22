@@ -19,10 +19,87 @@ static const char *TAG = "captive_portal";
 
 static httpd_handle_t s_server = NULL;
 
-static const char *HTML_SUCCESS =
+// Favicon data URI (same icon as unified-hifi-control)
+static const char *FAVICON_LINK =
+    "<link rel='icon' type='image/x-icon' href='data:image/x-icon;base64,"
+    "AAABAAEAICAAAAEAIACoEAAAFgAAACgAAAAgAAAAQAAAAAEAIAAAAAAAABAAACMuAAAjLgAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAATU1NIVBTU1xXWVuMYGJlom1ucKJ8fn6OioqKYJKSkiMAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "SU5OMU9UVKdRVlnxVVlc/1pcWf9jY1v/bGxk/31+e/+TlZf/qqyu8r2+vqm+vr4zAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAATFBQclFYW/NSVFT/WE40/2tTGf96WQ3/gV0L/4JeDv+AXhX/emAn/4V5XP+4t7X/"
+    "2tvd9djY2Hv///8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAE5SUYxTWFv/VE4+/3FTEP+IYQP/kWYG/5NoCv+Xaw//nnAa/6d7"
+    "LP+ugzb/oncn/4poJf+on43/6Ovu/9/f35eqqqqDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMTU5yVFhb/1dONP+BWwb/j2UG/45lCP+QZwv/"
+    "lWsO/5htEP+ecRb/p3kg/7aINv/GnVj/w5tW/5lvIf+gk3j/5+rs/9TU1IEAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATFFRTlJVV/VWUDz/glwG/49l"
+    "B/+MZAr/kmsW/5dwHP+WbRP/nncf/6N5IP+sgSj/soIm/7yLMv/Ln1L/y6Vj/5htHv+lm4f/"
+    "1NXW+ri4uD0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFNUVKNY"
+    "V1lW/3NVEP+QZgf/jWQK/45lD/+xroH/wq6A/5duFP/TwZr/vqJk/8KkYf/IrW3/4Myj/72L"
+    "Lf/JnU7/vpZO/4toIv+0sq7/tra1uoCAgAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAATVVVIVhcXvNdUjb/jGMG/49mC/+QZw//kmgQ/5ZvGf+acx7/mG0U/6F7KP+1klD/"
+    "rIQv/66BKP+1hy3/toYj/7mHKv+/lUv/oXUi/4h5V/+pq6z6j4+PMAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAABaXV1gX2Nk/29WHP+TaAv/k2kQ/5RqEv+VaxH/lmsR/5Zs"
+    "Ef+YbRL/mnAW/7SSUP+keRz/p3gY/6t7Gv+vfh7/sH8g/7CCK/+ofCn/f2Ii/5eZmf+Mjo5z"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGZnZ49lZ2P/e1oS/5ZsEv+XbBX/"
+    "mG0U/5puFf+abhT/mm4T/5ltEf+dcxr/tZJQ/6R5Iv+idBX/pXcY/6Z4GP+neBr/pngb/6F0"
+    "G/+EXxH/gIB6/4GEhKIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAdHV1pW1s"
+    "ZP+BXQ//mm8Y/51yG/+fcxv/oHMZ/6J2H/+jeCT/qIAx/6R7KP+xjUn/pnwp/6R4If+idhz/"
+    "pXoj/6BzGP+gdBn/m24T/4lhDP90cmb/dXl7twAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAACDg4SmenduvIJeD/+idyX/sYg9/7OKPf+1jEH/to5F/7aQSv+6l1b/q4Q6/62H"
+    "P/+xjEb/r4tE/6yGPf+ogTP/qII1/6iCNv+abxj/hl8J/2tpXv9qbm+3AAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQEJCPJYOMF/+AXhX/qXwq/7CAJv+zgiP/toUp/7WGLf+0"
+    "hCz/sYc3/7KNRv+rgzX/rog+/59zG/+dchrlm8P/5ZrEf+WaxH/k2gL/4BdDP9iY13/YWVl"
+    "oQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACcnJpdpKWm/3pfJ/+whTb/vo05"
+    "/8ONLf/Fjy3/wY0t/7iGKf+xgy3/upVS/6uBL/+fchf/nHAV/5ltEv+Waw//lGoN/5RpD/+S"
+    "Zwf/c1cX/1tfYf9ZW1twAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJmZmR69"
+    "vb7xiX1i/6R5Kv/RpF7/05k4/9WaNf/PlzT/wo4v/7WGLP+/m1n/rYIw/6F0Gv+ccBb/l2wS"
+    "/5VqD/+UaQ//kmgN/45kBf9eUTH/VVlb+VNTUysAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAADLy8mhycnH/4hnKf/PpWD/57Jk/+GhO//WnDb/x5Iy/7iILP/DnVv/roEu"
+    "/6FzGf+bbxT/lmsQ/5RpD/+SaBH/kWYI/3ZYEP9VVlP/U1VUswAAAAEAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAy8vEJ+rq6/C1r5//mXAk/+G2df/st2j/2Z08/8eR"
+    "L/+5hin/vpZQ/6t+Kf+gchj/mm0S/5VqD/+SZxH/kWYM/4NeBv9WTzz/VVZXf1JSTjUAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOXl5WP7/f//sKaQ/5px"
+    "Jv/TqGH/3bBo/8iXQv+3hSv/rX4l/6R2HP+dcBX/lmsQ/5JoD/+RZwv/gl0I/1dOM/9UVlj/"
+    "UlJQdgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADy"
+    "9PRp+vz+/7q0p/+Kay//pXot/7SJPv+ugTP/pHYg/51vFP+Yaw//k2gK/4tiB/9yVRP/VFBA"
+    "/1NXWf9RUVGNAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAD09PRe8fP16dDR0P+Rh2//fWUx/4BgHP+BXhP/gV0Q/3lbE/9sVh//WlI4/1NW"
+    "Vf9TVlfyUVNRcgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAANR0tIi1tbWlMTFxuioqqz/j5GP/3t7dv9vb2r/Zmhn/11gY/9YW17s"
+    "U1dXn09PTy0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKamphejo06VlZV9goSElXJ0dZZmaGh/Wl1dUlVVVRsA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAP///wEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAD///////////////////////////8A///8AD//+AAP//AAB//gAAf/wAAD/8AAAf"
+    "+AAAH/gAAB/4AAAf+AAAH/gAAB/4AAAf+AAAH/gAAB/8AAAf/AAAP/4AAH//AAB//4AB///AA"
+    "///8A///////////////////////3////8='>";
+
+static const char *HTML_SUCCESS_HEAD =
     "<!DOCTYPE html>"
     "<html><head>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+
+static const char *HTML_SUCCESS_BODY =
     "<title>hiphi frame - Saved</title>"
     "<style>"
     "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
@@ -106,14 +183,23 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
     case '\'': esc = "&#39;"; esc_len = 5; break;
     default: break;
     }
-    if (esc && j + esc_len < dst_len) {
-      memcpy(dst + j, esc, esc_len);
-      j += esc_len;
-    } else if (!esc) {
+    if (esc) {
+      if (j + esc_len < dst_len) {
+        memcpy(dst + j, esc, esc_len);
+        j += esc_len;
+      } else {
+        break;  // Buffer full, stop rather than drop characters
+      }
+    } else {
       dst[j++] = src[i];
     }
   }
   dst[j] = '\0';
+}
+
+// Validate URL is safe for href embedding (must start with http:// or https://)
+static bool is_safe_url(const char *url) {
+  return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
 // Handler for POST /wifi-remove
@@ -172,7 +258,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         escaped, i);
   }
 
-  size_t html_size = 2048;
+  size_t html_size = 10240;  // Extra room for base64 favicon
   char *html = malloc(html_size);
   if (!html) {
     httpd_resp_set_type(req, "text/html");
@@ -205,11 +291,13 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
     "margin-top:20px;font-size:13px;}"
     ".note a{color:#4fc3f7;}"
-    "</style></head><body>"
+    "</style>"
+    "%s"
+    "</head><body>"
     "<h1>hiphi frame</h1>"
     "<p>WiFi Setup</p>"
     "%s%s%s"
-    "<form method='GET' action='/configure'>"
+    "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
     "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
@@ -222,6 +310,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "See <a href='https://github.com/muness/roon-knob' "
     "target='_blank'>github.com/muness/roon-knob</a> for details."
     "</div></body></html>",
+    FAVICON_LINK,
     cfg.wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
     cfg.wifi_count > 0 ? "</div>" : "");
@@ -232,19 +321,15 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
-// Handler for GET /configure - save credentials
-static esp_err_t configure_get_handler(httpd_req_t *req) {
-  const char *query = strchr(req->uri, '?');
-  if (!query || !query[1]) {
-    ESP_LOGE(TAG, "No query parameters in: %s", req->uri);
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No parameters provided");
+// Handler for POST /configure - save credentials
+static esp_err_t configure_post_handler(httpd_req_t *req) {
+  char buf[384] = {0};
+  int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
     return ESP_FAIL;
   }
-  query++;
-
-  char buf[384] = {0};
-  strncpy(buf, query, sizeof(buf) - 1);
-  ESP_LOGI(TAG, "Received config: %s", buf);
+  buf[received] = '\0';
 
   char ssid[33] = {0};
   char pass[65] = {0};
@@ -256,7 +341,7 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
   }
   get_form_field(buf, "pass", pass, sizeof(pass));
 
-  ESP_LOGI(TAG, "Configuring WiFi: SSID='%s'", ssid);
+  ESP_LOGI(TAG, "Configuring WiFi: SSID='%s', pass=***", ssid);
 
   eink_ui_set_network_status("Saving...");
   vTaskDelay(pdMS_TO_TICKS(500));
@@ -273,7 +358,10 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
   bool save_ok = platform_storage_save(&cfg);
 
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, HTML_SUCCESS, strlen(HTML_SUCCESS));
+  httpd_resp_send_chunk(req, HTML_SUCCESS_HEAD, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, FAVICON_LINK, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, HTML_SUCCESS_BODY, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, NULL, 0);
 
   if (!save_ok) {
     ESP_LOGE(TAG, "Failed to save config");
@@ -339,7 +427,7 @@ void captive_portal_start(void) {
   httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = root_get_handler};
   httpd_register_uri_handler(s_server, &root);
 
-  httpd_uri_t configure = {.uri = "/configure", .method = HTTP_GET, .handler = configure_get_handler};
+  httpd_uri_t configure = {.uri = "/configure", .method = HTTP_POST, .handler = configure_post_handler};
   httpd_register_uri_handler(s_server, &configure);
 
   httpd_uri_t wifi_remove = {.uri = "/wifi-remove", .method = HTTP_POST, .handler = wifi_remove_handler};
@@ -395,12 +483,13 @@ static const char *STA_CSS =
 static esp_err_t sta_zones_handler(httpd_req_t *req) {
   bridge_zone_t zones[16];
   int count = bridge_client_get_zones(zones, 16);
-  const char *current = bridge_client_get_current_zone_id();
+  char current[64];
+  bridge_client_get_current_zone_id(current, sizeof(current));
 
   char bridge_url[128] = "";
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
-  size_t html_size = 4096;
+  size_t html_size = 16384;  // Extra room for base64 favicon + zone list
   char *html = malloc(html_size);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -411,16 +500,17 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>hiphi frame - Zones</title>"
-    "<style>%s</style></head><body>"
+    "<style>%s</style>%s</head><body>"
     "<h1>hiphi frame</h1>"
     "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
     STA_CSS,
-    bridge_url[0] ? "<a href='" : "",
-    bridge_url[0] ? bridge_url : "",
-    bridge_url[0] ? "' target='_blank'>Bridge Control</a>" : "");
+    FAVICON_LINK,
+    is_safe_url(bridge_url) ? "<a href='" : "",
+    is_safe_url(bridge_url) ? bridge_url : "",
+    is_safe_url(bridge_url) ? "' target='_blank'>Bridge Control</a>" : "");
 
   if (count == 0) {
     pos += snprintf(html + pos, html_size - pos,
@@ -431,7 +521,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
       char esc_name[128], esc_id[128];
       html_escape(zones[i].name, esc_name, sizeof(esc_name));
       html_escape(zones[i].id, esc_id, sizeof(esc_id));
-      bool is_current = current && strcmp(zones[i].id, current) == 0;
+      bool is_current = current[0] && strcmp(zones[i].id, current) == 0;
       pos += snprintf(html + pos, html_size - pos,
         "<div class='zone%s'>"
         "<span>%s%s</span>"
@@ -486,7 +576,8 @@ static esp_err_t sta_zone_set_handler(httpd_req_t *req) {
 static esp_err_t sta_ble_handler(httpd_req_t *req) {
   bool connected = ble_remote_is_connected();
   bool scanning = ble_remote_is_scanning();
-  const char *dev_name = ble_remote_device_name();
+  char dev_name[64];
+  ble_remote_device_name(dev_name, sizeof(dev_name));
 
   ble_remote_device_t results[BLE_REMOTE_MAX_RESULTS];
   int result_count = ble_remote_get_scan_results(results, BLE_REMOTE_MAX_RESULTS);
@@ -494,7 +585,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   char bridge_url[128] = "";
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
-  size_t html_size = 4096;
+  size_t html_size = 12288;  // Extra room for base64 favicon
   char *html = malloc(html_size);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -505,16 +596,17 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>hiphi frame - BLE Remote</title>"
-    "<style>%s</style></head><body>"
+    "<style>%s</style>%s</head><body>"
     "<h1>hiphi frame</h1>"
     "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>BLE Media Remote</h2>",
     STA_CSS,
-    bridge_url[0] ? "<a href='" : "",
-    bridge_url[0] ? bridge_url : "",
-    bridge_url[0] ? "' target='_blank'>Bridge Control</a>" : "");
+    FAVICON_LINK,
+    is_safe_url(bridge_url) ? "<a href='" : "",
+    is_safe_url(bridge_url) ? bridge_url : "",
+    is_safe_url(bridge_url) ? "' target='_blank'>Bridge Control</a>" : "");
 
   // Current status
   if (connected && dev_name[0]) {
@@ -610,7 +702,12 @@ static esp_err_t sta_ble_pair_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
-  int idx = atoi(idx_str);
+  char *endp;
+  int idx = (int)strtol(idx_str, &endp, 10);
+  if (endp == idx_str || *endp != '\0') {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
+    return ESP_FAIL;
+  }
   ESP_LOGI(TAG, "Web UI: pairing with device %d", idx);
   ble_remote_pair(idx);
 
@@ -687,8 +784,8 @@ void captive_portal_stop(void) {
     return;
   }
 
-  ESP_LOGI(TAG, "Stopping captive portal");
-  dns_server_stop();
+  ESP_LOGI(TAG, "Stopping web server");
+  dns_server_stop();  // Safe no-op if DNS was never started (STA mode)
   httpd_stop(s_server);
   s_server = NULL;
 }

@@ -36,5 +36,5 @@ void ble_remote_unpair(void);
 // True if a BLE HID remote is currently connected.
 bool ble_remote_is_connected(void);
 
-// Name of the connected or last-bonded device (empty string if none).
-const char *ble_remote_device_name(void);
+// Copy name of connected or last-bonded device into out (empty string if none).
+void ble_remote_device_name(char *out, size_t len);

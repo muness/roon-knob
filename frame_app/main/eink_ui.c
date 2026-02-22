@@ -158,7 +158,7 @@ static void truncate_to_fit(const char *src, char *dst, size_t dst_len,
         snprintf(dst, dst_len, "%s", src);
         return;
     }
-    // Binary search for max chars that fit with "..."
+    // Find max chars that fit with "..." suffix
     int ellipsis_w = eink_font_string_width("...", font);
     int fit_w = max_width - ellipsis_w;
     int chars = 0;
@@ -261,14 +261,12 @@ static void render_full_screen(void) {
         int icon_x = EINK_WIDTH - 12;
         int icon_y = TEXT_Y + 10;
 
-        // Bridge connectivity
-        draw_bridge_icon(icon_x, icon_y, s_ui.online ? EINK_BLACK : EINK_WHITE);
+        // Bridge connectivity — always visible, red when offline
+        draw_bridge_icon(icon_x, icon_y, s_ui.online ? EINK_BLACK : EINK_RED);
 
-        // BLE remote connection
+        // BLE remote connection — always visible, red when disconnected
         icon_x -= 14;
-        if (s_ui.ble_connected) {
-            draw_ble_icon(icon_x, icon_y, EINK_BLACK);
-        }
+        draw_ble_icon(icon_x, icon_y, s_ui.ble_connected ? EINK_BLACK : EINK_RED);
     }
 
     // Refresh the physical display

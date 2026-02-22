@@ -31,12 +31,17 @@ static const char *TAG = "ble_remote";
 #define NVS_KEY_ATYPE "bonded_atype"
 #define NVS_KEY_NAME  "bonded_name"
 
-// ── State ────────────────────────────────────────────────────────────────────
+// Max reconnect attempts before giving up (retry via web UI or reboot)
+#define MAX_RECONNECT_ATTEMPTS 20
+
+// ── State (protected by s_mutex) ─────────────────────────────────────────────
+
+static SemaphoreHandle_t s_mutex = NULL;
 
 static uint8_t s_own_addr_type;
 static esp_hidh_dev_t *s_connected_dev = NULL;
-static bool s_connected = false;
-static bool s_scanning = false;
+static volatile bool s_connected = false;
+static volatile bool s_scanning = false;
 static char s_device_name[64] = "";
 
 // Scan results
@@ -53,7 +58,14 @@ static char s_bonded_name[64] = "";
 // Pending connect addr type (set before esp_hidh_dev_open, used in callback)
 static uint8_t s_pending_addr_type = 0;
 
+// Unpair-in-progress flag: when true, CLOSE callback skips dev_free (unpair owns it)
+static volatile bool s_unpair_pending = false;
+
+#define BLE_LOCK()   xSemaphoreTake(s_mutex, portMAX_DELAY)
+#define BLE_UNLOCK() xSemaphoreGive(s_mutex)
+
 // ── NVS helpers ──────────────────────────────────────────────────────────────
+// Caller must hold s_mutex
 
 static void save_bonded_device(const uint8_t *bda, uint8_t addr_type, const char *name) {
     nvs_handle_t h;
@@ -130,8 +142,8 @@ static void handle_consumer_control(const uint8_t *data, uint16_t len) {
     case 0x00EA:  // Volume Down
         bridge_client_handle_input(UI_INPUT_VOL_DOWN);
         break;
-    case 0x00E2:  // Mute
-        bridge_client_handle_input(UI_INPUT_PLAY_PAUSE);  // Map mute to play/pause
+    case 0x00E2:  // Mute — no bridge mute concept, ignore
+        ESP_LOGD(TAG, "Mute key ignored (no bridge mute support)");
         break;
     default:
         ESP_LOGD(TAG, "Unhandled consumer control: 0x%04x", usage);
@@ -148,6 +160,7 @@ static void hidh_callback(void *handler_args, esp_event_base_t base,
 
     switch (event) {
     case ESP_HIDH_OPEN_EVENT:
+        BLE_LOCK();
         if (param->open.status == ESP_OK) {
             s_connected_dev = param->open.dev;
             s_connected = true;
@@ -160,8 +173,10 @@ static void hidh_callback(void *handler_args, esp_event_base_t base,
             if (bda) {
                 save_bonded_device(bda, s_pending_addr_type, s_device_name);
             }
+            BLE_UNLOCK();
             eink_ui_set_ble_status(true);
         } else {
+            BLE_UNLOCK();
             ESP_LOGW(TAG, "HID open failed: %d", param->open.status);
         }
         break;
@@ -178,12 +193,15 @@ static void hidh_callback(void *handler_args, esp_event_base_t base,
 
     case ESP_HIDH_CLOSE_EVENT:
         ESP_LOGI(TAG, "BLE remote disconnected (reason: %d)", param->close.reason);
-        if (param->close.dev) {
+        BLE_LOCK();
+        // Only free the device if unpair isn't managing the lifecycle
+        if (!s_unpair_pending && param->close.dev) {
             esp_hidh_dev_free(param->close.dev);
         }
         s_connected_dev = NULL;
         s_connected = false;
         s_device_name[0] = '\0';
+        BLE_UNLOCK();
         eink_ui_set_ble_status(false);
         break;
 
@@ -212,13 +230,24 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg) {
             }
         }
         if (!has_hid) break;
-        if (s_scan_count >= BLE_REMOTE_MAX_RESULTS) break;
+
+        BLE_LOCK();
+        if (s_scan_count >= BLE_REMOTE_MAX_RESULTS) {
+            BLE_UNLOCK();
+            break;
+        }
 
         // Check for duplicate BDA
+        bool found = false;
         for (int i = 0; i < s_scan_count; i++) {
             if (memcmp(s_scan_results[i].bda, event->disc.addr.val, 6) == 0) {
-                goto done;  // Already in results
+                found = true;
+                break;
             }
+        }
+        if (found) {
+            BLE_UNLOCK();
+            break;
         }
 
         ble_remote_device_t *r = &s_scan_results[s_scan_count];
@@ -239,7 +268,7 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg) {
                  r->name, r->bda[0], r->bda[1], r->bda[2],
                  r->bda[3], r->bda[4], r->bda[5]);
         s_scan_count++;
-done:
+        BLE_UNLOCK();
         break;
     }
 
@@ -293,16 +322,23 @@ static void reconnect_task(void *arg) {
     // Wait for BLE stack to sync
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    while (s_has_bonded && !s_connected) {
-        ESP_LOGI(TAG, "Attempting reconnect to %s...", s_bonded_name);
+    int attempts = 0;
+    while (s_has_bonded && !s_connected && attempts < MAX_RECONNECT_ATTEMPTS) {
+        attempts++;
+        ESP_LOGI(TAG, "Reconnect attempt %d/%d to %s...",
+                 attempts, MAX_RECONNECT_ATTEMPTS, s_bonded_name);
+        BLE_LOCK();
         s_pending_addr_type = s_bonded_addr_type;
+        BLE_UNLOCK();
         esp_hidh_dev_open(s_bonded_bda, ESP_HID_TRANSPORT_BLE, s_bonded_addr_type);
-        // Wait and check — esp_hidh_dev_open is blocking
         if (s_connected) break;
         ESP_LOGW(TAG, "Reconnect failed, retrying in 15s...");
         vTaskDelay(pdMS_TO_TICKS(15000));
     }
 
+    if (!s_connected && attempts >= MAX_RECONNECT_ATTEMPTS) {
+        ESP_LOGW(TAG, "Reconnect gave up after %d attempts", MAX_RECONNECT_ATTEMPTS);
+    }
     ESP_LOGI(TAG, "Reconnect task done (connected=%d)", s_connected);
     vTaskDelete(NULL);
 }
@@ -310,8 +346,10 @@ static void reconnect_task(void *arg) {
 // ── Scan task (runs in background) ──────────────────────────────────────────
 
 static void scan_task(void *arg) {
+    BLE_LOCK();
     s_scan_count = 0;
     s_scanning = true;
+    BLE_UNLOCK();
 
     struct ble_gap_disc_params disc_params = {
         .filter_duplicates = 1,
@@ -341,19 +379,22 @@ static void scan_task(void *arg) {
 
 static void pair_task(void *arg) {
     int index = (int)(intptr_t)arg;
+
+    BLE_LOCK();
     if (index < 0 || index >= s_scan_count) {
+        BLE_UNLOCK();
         ESP_LOGE(TAG, "Invalid pair index: %d", index);
         vTaskDelete(NULL);
         return;
     }
 
-    ble_remote_device_t *dev = &s_scan_results[index];
-    ESP_LOGI(TAG, "Pairing with: %s", dev->name);
+    ble_remote_device_t dev = s_scan_results[index];  // Copy under lock
+    s_pending_addr_type = dev.addr_type;
+    BLE_UNLOCK();
 
-    // Store addr_type for use in OPEN callback
-    s_pending_addr_type = dev->addr_type;
+    ESP_LOGI(TAG, "Pairing with: %s", dev.name);
     // esp_hidh_dev_open is blocking — does GATT discovery, subscribes to notifications
-    esp_hidh_dev_open(dev->bda, ESP_HID_TRANSPORT_BLE, dev->addr_type);
+    esp_hidh_dev_open(dev.bda, ESP_HID_TRANSPORT_BLE, dev.addr_type);
 
     vTaskDelete(NULL);
 }
@@ -363,6 +404,7 @@ static void pair_task(void *arg) {
 void ble_remote_init(void) {
     ESP_LOGI(TAG, "Initializing BLE remote...");
 
+    s_mutex = xSemaphoreCreateMutex();
     s_scan_sem = xSemaphoreCreateBinary();
 
     // Initialize NimBLE stack (handles controller + host for ESP32-S3)
@@ -389,7 +431,11 @@ void ble_remote_init(void) {
         .event_stack_size = 4096,
         .callback_arg = NULL,
     };
-    esp_hidh_init(&hidh_cfg);
+    esp_err_t hidh_ret = esp_hidh_init(&hidh_cfg);
+    if (hidh_ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_hidh_init failed: %s", esp_err_to_name(hidh_ret));
+        return;
+    }
 
     // Start NimBLE host task
     nimble_port_freertos_init(nimble_host_task);
@@ -412,6 +458,8 @@ void ble_remote_scan_start(void) {
         ESP_LOGW(TAG, "Scan already in progress");
         return;
     }
+    // Set scanning early to prevent double-start race
+    s_scanning = true;
     xTaskCreate(scan_task, "ble_scan", 4096, NULL, 3, NULL);
 }
 
@@ -420,10 +468,12 @@ bool ble_remote_is_scanning(void) {
 }
 
 int ble_remote_get_scan_results(ble_remote_device_t *out, int max) {
+    BLE_LOCK();
     int count = s_scan_count < max ? s_scan_count : max;
     if (count > 0) {
         memcpy(out, s_scan_results, count * sizeof(ble_remote_device_t));
     }
+    BLE_UNLOCK();
     return count;
 }
 
@@ -432,13 +482,26 @@ void ble_remote_pair(int index) {
 }
 
 void ble_remote_unpair(void) {
-    if (s_connected && s_connected_dev) {
-        esp_hidh_dev_close(s_connected_dev);
+    BLE_LOCK();
+    esp_hidh_dev_t *dev = s_connected_dev;
+    bool was_connected = s_connected && dev;
+    if (was_connected) {
+        s_unpair_pending = true;  // Tell CLOSE callback not to free
     }
-    clear_bonded_device();
     s_connected = false;
     s_connected_dev = NULL;
     s_device_name[0] = '\0';
+    clear_bonded_device();
+    BLE_UNLOCK();
+
+    if (was_connected) {
+        esp_hidh_dev_close(dev);
+        // Give CLOSE event time to fire, then free
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_hidh_dev_free(dev);
+        s_unpair_pending = false;
+    }
+
     eink_ui_set_ble_status(false);
     ESP_LOGI(TAG, "Unpaired BLE remote");
 }
@@ -447,8 +510,16 @@ bool ble_remote_is_connected(void) {
     return s_connected;
 }
 
-const char *ble_remote_device_name(void) {
-    if (s_device_name[0]) return s_device_name;
-    if (s_bonded_name[0]) return s_bonded_name;
-    return "";
+void ble_remote_device_name(char *out, size_t len) {
+    if (!out || len == 0) return;
+    BLE_LOCK();
+    if (s_device_name[0]) {
+        strncpy(out, s_device_name, len - 1);
+    } else if (s_bonded_name[0]) {
+        strncpy(out, s_bonded_name, len - 1);
+    } else {
+        out[0] = '\0';
+    }
+    out[len - 1] = '\0';
+    BLE_UNLOCK();
 }

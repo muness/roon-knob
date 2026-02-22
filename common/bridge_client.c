@@ -1833,11 +1833,20 @@ int bridge_client_get_zones(bridge_zone_t *out, int max) {
   return count;
 }
 
-const char *bridge_client_get_current_zone_id(void) {
-  return s_state.cfg.zone_id;
+bool bridge_client_get_current_zone_id(char *out, size_t len) {
+  if (!out || len == 0) return false;
+  lock_state();
+  strncpy(out, s_state.cfg.zone_id, len - 1);
+  out[len - 1] = '\0';
+  unlock_state();
+  return out[0] != '\0';
 }
 
 void bridge_client_set_zone(const char *zone_id) {
+  rk_cfg_t cfg_copy;
+  char label_copy[64];
+  bool found = false;
+
   lock_state();
   for (int i = 0; i < s_state.zone_count; i++) {
     if (strcmp(s_state.zones[i].id, zone_id) == 0) {
@@ -1853,13 +1862,20 @@ void bridge_client_set_zone(const char *zone_id) {
       if (s_device_state != DEVICE_STATE_OPERATIONAL) {
         s_device_state = DEVICE_STATE_OPERATIONAL;
       }
-      unlock_state();
-      platform_storage_save(&s_state.cfg);
-      post_ui_zone_name(s_state.zone_label);
-      return;
+      // Copy shared state before releasing lock
+      memcpy(&cfg_copy, &s_state.cfg, sizeof(cfg_copy));
+      strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
+      label_copy[sizeof(label_copy) - 1] = '\0';
+      found = true;
+      break;
     }
   }
   unlock_state();
+
+  if (found) {
+    platform_storage_save(&cfg_copy);
+    post_ui_zone_name(label_copy);
+  }
 }
 
 // Config fetch and apply implementation

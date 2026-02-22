@@ -33,7 +33,7 @@ typedef struct {
     char name[64];
 } bridge_zone_t;
 int bridge_client_get_zones(bridge_zone_t *out, int max);
-const char *bridge_client_get_current_zone_id(void);
+bool bridge_client_get_current_zone_id(char *out, size_t len);
 void bridge_client_set_zone(const char *zone_id);
 
 // ── UDP fast-path wire format ───────────────────────────────────────────────
