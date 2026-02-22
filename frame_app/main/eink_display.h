@@ -36,7 +36,7 @@ bool eink_display_init(void);
 // Clear framebuffer to a solid color
 void eink_display_clear(uint8_t color);
 
-// Set a single pixel in the framebuffer (no bounds check for speed)
+// Set a single pixel in the framebuffer (bounds-checked; no-op for OOB coordinates)
 void eink_display_set_pixel(uint16_t x, uint16_t y, uint8_t color);
 
 // Get a single pixel from the framebuffer
@@ -45,7 +45,7 @@ uint8_t eink_display_get_pixel(uint16_t x, uint16_t y);
 // Get raw framebuffer pointer (for bulk writes)
 uint8_t *eink_display_get_fb(void);
 
-// Send framebuffer to panel and trigger full refresh (~1.5s)
+// Send framebuffer to panel and trigger full refresh (~15-25s for ACeP)
 void eink_display_refresh(void);
 
 // Initialize panel registers (called by eink_display_init)

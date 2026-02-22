@@ -98,6 +98,13 @@ static int http_perform(const char *url, const char *body, const char *content_t
     while (1) {
         if ((size_t)(total_read + 1024) > buf_size) {
             size_t new_size = buf_size * 2;
+            if (new_size > 512 * 1024) {  // 512 KB cap for JSON responses
+                ESP_LOGE(TAG, "Response too large (>512KB)");
+                free(buffer);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return -1;
+            }
             char *new_buf = realloc(buffer, new_size);
             if (!new_buf) {
                 ESP_LOGE(TAG, "Failed to grow response buffer");
@@ -178,11 +185,15 @@ static size_t decompress_gzip(char **data, size_t compressed_size) {
         return 0;
     }
 
-    uint32_t uncompressed_size = gzip_data[compressed_size - 4] |
-                                  (gzip_data[compressed_size - 3] << 8) |
-                                  (gzip_data[compressed_size - 2] << 16) |
-                                  (gzip_data[compressed_size - 1] << 24);
+    uint32_t uncompressed_size = (uint32_t)gzip_data[compressed_size - 4] |
+                                  ((uint32_t)gzip_data[compressed_size - 3] << 8) |
+                                  ((uint32_t)gzip_data[compressed_size - 2] << 16) |
+                                  ((uint32_t)gzip_data[compressed_size - 1] << 24);
 
+    if (uncompressed_size > 2 * 1024 * 1024) {  // 2 MB sanity cap
+        ESP_LOGE(TAG, "Gzip uncompressed size too large: %" PRIu32, uncompressed_size);
+        return 0;
+    }
     char *decompressed = calloc(1, uncompressed_size);
     if (!decompressed) {
         ESP_LOGE(TAG, "Failed to allocate decompression buffer (%" PRIu32 " bytes)", uncompressed_size);
@@ -207,10 +218,10 @@ static size_t decompress_gzip(char **data, size_t compressed_size) {
         return 0;
     }
 
-    uint32_t expected_crc = gzip_data[compressed_size - 8] |
-                            (gzip_data[compressed_size - 7] << 8) |
-                            (gzip_data[compressed_size - 6] << 16) |
-                            (gzip_data[compressed_size - 5] << 24);
+    uint32_t expected_crc = (uint32_t)gzip_data[compressed_size - 8] |
+                            ((uint32_t)gzip_data[compressed_size - 7] << 8) |
+                            ((uint32_t)gzip_data[compressed_size - 6] << 16) |
+                            ((uint32_t)gzip_data[compressed_size - 5] << 24);
 
     uint32_t actual_crc = mz_crc32(MZ_CRC32_INIT, (const uint8_t*)decompressed, uncompressed_size);
 
@@ -289,6 +300,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
         int read_len = esp_http_client_read(client, buffer + total_read, 4096);
         read_attempts++;
         if (read_len < 0) {
+            ESP_LOGE(TAG, "Image read failed");
             free(buffer);
             esp_http_client_close(client);
             esp_http_client_cleanup(client);

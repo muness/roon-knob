@@ -32,6 +32,9 @@ static const char *TAG = "main";
 static volatile bool s_mdns_init_pending = false;
 static volatile bool s_ble_init_pending = false;
 static volatile bool s_sta_server_pending = false;
+// Guard against double-init on WiFi reconnect
+static bool s_ble_initialized = false;
+static bool s_sta_server_initialized = false;
 
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
   switch (evt) {
@@ -110,15 +113,21 @@ static void ui_loop_task(void *arg) {
     // Deferred BLE init (after WiFi STA connects — coexistence safe)
     if (s_ble_init_pending) {
       s_ble_init_pending = false;
-      ESP_LOGI(TAG, "Initializing BLE remote...");
-      ble_remote_init();
+      if (!s_ble_initialized) {
+        s_ble_initialized = true;
+        ESP_LOGI(TAG, "Initializing BLE remote...");
+        ble_remote_init();
+      }
     }
 
     // Deferred STA web server (zone picker + BLE config)
     if (s_sta_server_pending) {
       s_sta_server_pending = false;
-      ESP_LOGI(TAG, "Starting STA web server...");
-      captive_portal_start_sta();
+      if (!s_sta_server_initialized) {
+        s_sta_server_initialized = true;
+        ESP_LOGI(TAG, "Starting STA web server...");
+        captive_portal_start_sta();
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -163,7 +172,10 @@ void app_main(void) {
 
   // Create UI loop task (processes input + e-ink refreshes)
   ESP_LOGI(TAG, "Creating UI loop task");
-  xTaskCreate(ui_loop_task, "ui_loop", UI_LOOP_STACK_SIZE, NULL, 2, NULL);
+  if (xTaskCreate(ui_loop_task, "ui_loop", UI_LOOP_STACK_SIZE, NULL, 2, NULL) != pdPASS) {
+    ESP_LOGE(TAG, "FATAL: Failed to create UI loop task");
+    return;
+  }
 
   // Start application logic (bridge client)
   ESP_LOGI(TAG, "Starting app...");

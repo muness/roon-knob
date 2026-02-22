@@ -166,6 +166,7 @@ void eink_dither_checkerboard(const uint8_t *src, uint8_t *dst, int w, int h) {
 
 void eink_scale_bilinear(const uint8_t *src, int src_w, int src_h,
                          uint8_t *dst, int dst_w, int dst_h) {
+    if (dst_w <= 0 || dst_h <= 0) return;
     const int32_t scale_x = (src_w * 1024) / dst_w;
     const int32_t scale_y = (src_h * 1024) / dst_h;
 

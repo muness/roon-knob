@@ -116,8 +116,14 @@ void platform_input_init(void) {
         .callback = button_poll_cb,
         .name = "btn_poll",
     };
-    esp_timer_create(&timer_args, &s_btn_poll_timer);
-    esp_timer_start_periodic(s_btn_poll_timer, 10 * 1000);  // 10ms in microseconds
+    if (esp_timer_create(&timer_args, &s_btn_poll_timer) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create button poll timer");
+        return;
+    }
+    if (esp_timer_start_periodic(s_btn_poll_timer, 10 * 1000) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start button poll timer");
+        return;
+    }
 
     ESP_LOGI(TAG, "Button input initialized (BOOT=%d, GP4=%d, PWR=%d)",
              BOOT_PIN, GP4_PIN, PWR_PIN);

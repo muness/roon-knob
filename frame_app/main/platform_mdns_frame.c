@@ -12,7 +12,7 @@
 static const char *TAG = "platform_mdns";
 static const char *SERVICE_TYPE = "_roonknob";
 static const char *SERVICE_PROTO = "_tcp";
-static bool s_mdns_ready = false;
+static volatile bool s_mdns_ready = false;
 
 static void copy_str(char *dst, size_t len, const char *src) {
     if (!dst || len == 0) return;
@@ -100,8 +100,10 @@ bool platform_mdns_resolve_local(const char *hostname, char *ip_out, size_t ip_l
 
     char host[64];
     copy_str(host, sizeof(host), hostname);
-    char *suffix = strstr(host, ".local");
-    if (suffix) *suffix = '\0';
+    size_t host_len = strlen(host);
+    if (host_len >= 6 && strcmp(host + host_len - 6, ".local") == 0) {
+        host[host_len - 6] = '\0';
+    }
 
     ESP_LOGI(TAG, "Resolving mDNS hostname: %s", host);
     esp_ip4_addr_t addr;

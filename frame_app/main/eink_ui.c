@@ -250,7 +250,8 @@ static void render_full_screen(void) {
     // ── Artwork (centered, flush to top) ─────────────────────────────────
     if (s_ui.art_dirty && s_ui.image_key[0]) {
         render_artwork();
-        s_ui.art_dirty = false;
+        // Only clear art_dirty if we have a valid cache (render succeeded)
+        if (s_art_cache) s_ui.art_dirty = false;
     } else if (s_ui.image_key[0] && s_art_cache) {
         // Re-blit cached artwork (framebuffer was cleared above)
         blit_art_cache();
@@ -375,7 +376,7 @@ void eink_ui_show_volume_change(float vol, float vol_step) {
 void eink_ui_update(const char *line1, const char *line2, bool playing,
                     float volume, float volume_min, float volume_max,
                     float volume_step, int seek_position, int length) {
-    (void)volume_min; (void)volume_max; (void)seek_position; (void)length;
+    (void)volume_min; (void)volume_max; (void)volume_step; (void)seek_position; (void)length;
 
     bool changed = false;
 

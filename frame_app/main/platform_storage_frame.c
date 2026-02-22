@@ -62,6 +62,10 @@ bool platform_storage_load(rk_cfg_t *out) {
     nvs_close(handle);
 
     if (err != ESP_OK) {
+        if (err == ESP_ERR_NVS_INVALID_LENGTH) {
+            ESP_LOGW(TAG, "Config blob too large for struct (stored=%d, max=%d)",
+                     (int)stored_len, (int)sizeof(*out));
+        }
         memset(out, 0, sizeof(*out));
         return false;
     }

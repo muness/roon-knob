@@ -100,8 +100,10 @@ bool pmic_init(void) {
     pmic_write_reg(AXP2101_ALDO4_VOL, 0x1C);
 
     // Enable ALDO1-4 (bits 0-3 of register 0x90)
-    uint8_t ldo_ctrl;
-    pmic_read_reg(AXP2101_LDO_ONOFF0, &ldo_ctrl);
+    uint8_t ldo_ctrl = 0;
+    if (pmic_read_reg(AXP2101_LDO_ONOFF0, &ldo_ctrl) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read LDO control register, using 0");
+    }
     ldo_ctrl |= 0x0F;  // Enable ALDO1-4
     pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl);
 
@@ -133,7 +135,7 @@ int pmic_get_battery_voltage(void) {
     uint8_t h, l;
     if (pmic_read_reg(AXP2101_VBAT_H, &h) != ESP_OK) return -1;
     if (pmic_read_reg(AXP2101_VBAT_L, &l) != ESP_OK) return -1;
-    // 14-bit ADC, 1.1mV per LSB
+    // 14-bit ADC, 1mV per LSB
     int raw = ((h & 0x3F) << 8) | l;
-    return raw;  // Already in mV (approximately)
+    return raw;  // mV
 }

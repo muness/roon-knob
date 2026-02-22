@@ -360,14 +360,23 @@ static void reconnect_task(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     int attempts = 0;
-    while (s_has_bonded && !s_connected && attempts < MAX_RECONNECT_ATTEMPTS) {
+    BLE_LOCK();
+    bool has_bonded = s_has_bonded;
+    uint8_t bda[6];
+    memcpy(bda, s_bonded_bda, 6);
+    uint8_t addr_type = s_bonded_addr_type;
+    char name[64];
+    snprintf(name, sizeof(name), "%s", s_bonded_name);
+    BLE_UNLOCK();
+
+    while (has_bonded && !s_connected && attempts < MAX_RECONNECT_ATTEMPTS) {
         attempts++;
         ESP_LOGI(TAG, "Reconnect attempt %d/%d to %s...",
-                 attempts, MAX_RECONNECT_ATTEMPTS, s_bonded_name);
+                 attempts, MAX_RECONNECT_ATTEMPTS, name);
         BLE_LOCK();
-        s_pending_addr_type = s_bonded_addr_type;
+        s_pending_addr_type = addr_type;
         BLE_UNLOCK();
-        esp_hidh_dev_open(s_bonded_bda, ESP_HID_TRANSPORT_BLE, s_bonded_addr_type);
+        esp_hidh_dev_open(bda, ESP_HID_TRANSPORT_BLE, addr_type);
         if (s_connected) break;
         ESP_LOGW(TAG, "Reconnect failed, retrying in 15s...");
         vTaskDelay(pdMS_TO_TICKS(15000));
@@ -502,7 +511,10 @@ void ble_remote_scan_start(void) {
     }
     // Set scanning early to prevent double-start race
     s_scanning = true;
-    xTaskCreate(scan_task, "ble_scan", 4096, NULL, 3, NULL);
+    if (xTaskCreate(scan_task, "ble_scan", 4096, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create scan task");
+        s_scanning = false;
+    }
 }
 
 bool ble_remote_is_scanning(void) {
@@ -538,9 +550,11 @@ void ble_remote_unpair(void) {
 
     if (was_connected) {
         esp_hidh_dev_close(dev);
-        // Give CLOSE event time to fire, then free
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // Give CLOSE event time to fire, then free.
+        // s_unpair_pending stays true so CLOSE callback skips dev_free.
+        vTaskDelay(pdMS_TO_TICKS(1000));
         esp_hidh_dev_free(dev);
+        // Safe to clear now — device is freed, CLOSE callback can't use it
         s_unpair_pending = false;
     }
 

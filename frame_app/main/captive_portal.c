@@ -154,6 +154,10 @@ static bool get_form_field(const char *data, const char *field, char *out,
   if (!start) {
     return false;
   }
+  // Ensure we matched the full field name, not a substring like "xssid="
+  if (start != data && *(start - 1) != '&') {
+    return false;
+  }
   start += strlen(search);
 
   const char *end = strchr(start, '&');
@@ -256,6 +260,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         "<button type='submit' class='btn-rm'>Remove</button>"
         "</form></div>",
         escaped, i);
+    if (pos >= (int)sizeof(wifi_html)) pos = (int)sizeof(wifi_html) - 1;
   }
 
   size_t html_size = 10240;  // Extra room for base64 favicon
@@ -358,17 +363,26 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   bool save_ok = platform_storage_save(&cfg);
 
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send_chunk(req, HTML_SUCCESS_HEAD, HTTPD_RESP_USE_STRLEN);
-  httpd_resp_send_chunk(req, FAVICON_LINK, HTTPD_RESP_USE_STRLEN);
-  httpd_resp_send_chunk(req, HTML_SUCCESS_BODY, HTTPD_RESP_USE_STRLEN);
-  httpd_resp_send_chunk(req, NULL, 0);
-
   if (!save_ok) {
     ESP_LOGE(TAG, "Failed to save config");
+    httpd_resp_send(req,
+      "<!DOCTYPE html><html><head>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
+      "text-align:center;}h1{color:#4fc3f7;}.error{padding:20px;margin:20px "
+      "auto;border-radius:10px;max-width:300px;background:#c62828;}</style></head><body>"
+      "<h1>hiphi frame</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
+      "<p>Please try again.</p></div></body></html>",
+      HTTPD_RESP_USE_STRLEN);
     eink_ui_set_network_status("SAVE FAILED!");
     vTaskDelay(pdMS_TO_TICKS(5000));
     return ESP_FAIL;
   }
+
+  httpd_resp_send_chunk(req, HTML_SUCCESS_HEAD, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, FAVICON_LINK, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, HTML_SUCCESS_BODY, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, NULL, 0);
 
   ESP_LOGI(TAG, "Credentials saved, rebooting...");
 
@@ -497,6 +511,12 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
+  // HTML-escape bridge_url to prevent attribute injection
+  char esc_bridge_url[256] = "";
+  if (is_safe_url(bridge_url)) {
+    html_escape(bridge_url, esc_bridge_url, sizeof(esc_bridge_url));
+  }
+
   int pos = snprintf(html, html_size,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -509,14 +529,16 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<div class='card'><h2>Zone Selection</h2>",
     STA_CSS,
     FAVICON_LINK,
-    is_safe_url(bridge_url) ? "<a href='" : "",
-    is_safe_url(bridge_url) ? bridge_url : "",
-    is_safe_url(bridge_url) ? "' target='_blank'>Bridge Control</a>" : "");
+    esc_bridge_url[0] ? "<a href='" : "",
+    esc_bridge_url[0] ? esc_bridge_url : "",
+    esc_bridge_url[0] ? "' target='_blank'>Bridge Control</a>" : "");
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   if (count == 0) {
     pos += snprintf(html + pos, html_size - pos,
       "<p class='status'>No zones discovered yet. "
       "Make sure the bridge is running and music is playing.</p>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
   } else {
     for (int i = 0; i < count; i++) {
       char esc_name[128], esc_id[128];
@@ -535,6 +557,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
         is_current ? " (current)" : "",
         esc_id,
         is_current ? " disabled" : "");
+      if (pos >= (int)html_size) pos = (int)html_size - 1;
     }
   }
 
@@ -545,6 +568,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<button type='submit' class='btn btn-danger'>Restart Device</button>"
     "</form></div>"
     "</body></html>");
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, pos);
@@ -599,6 +623,12 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
+  // HTML-escape bridge_url to prevent attribute injection
+  char esc_bridge_url[256] = "";
+  if (is_safe_url(bridge_url)) {
+    html_escape(bridge_url, esc_bridge_url, sizeof(esc_bridge_url));
+  }
+
   int pos = snprintf(html, html_size,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -611,9 +641,10 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<div class='card'><h2>BLE Media Remote</h2>",
     STA_CSS,
     FAVICON_LINK,
-    is_safe_url(bridge_url) ? "<a href='" : "",
-    is_safe_url(bridge_url) ? bridge_url : "",
-    is_safe_url(bridge_url) ? "' target='_blank'>Bridge Control</a>" : "");
+    esc_bridge_url[0] ? "<a href='" : "",
+    esc_bridge_url[0] ? esc_bridge_url : "",
+    esc_bridge_url[0] ? "' target='_blank'>Bridge Control</a>" : "");
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   // Current status
   if (connected && dev_name[0]) {
@@ -626,6 +657,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "<button type='submit' class='btn btn-danger'>Unpair</button>"
       "</form></div>",
       esc_name);
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
   } else if (dev_name[0]) {
     char esc_name[128];
     html_escape(dev_name, esc_name, sizeof(esc_name));
@@ -635,28 +667,34 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "<button type='submit' class='btn btn-danger'>Unpair</button>"
       "</form>",
       esc_name);
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
   } else {
     pos += snprintf(html + pos, html_size - pos,
       "<p class='status'>No BLE remote paired.</p>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
 
   // Scan
   pos += snprintf(html + pos, html_size - pos,
     "<h2>Find Remotes</h2>");
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   if (scanning) {
     pos += snprintf(html + pos, html_size - pos,
       "<p class='status'>Scanning... <a href='/ble'>Refresh</a></p>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
   } else {
     pos += snprintf(html + pos, html_size - pos,
       "<form method='POST' action='/api/ble-scan'>"
       "<button type='submit' class='btn'>Scan for Remotes</button>"
       "</form>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
 
   // Results
   if (result_count > 0 && !scanning) {
     pos += snprintf(html + pos, html_size - pos, "<h2>Discovered Devices</h2>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
     for (int i = 0; i < result_count; i++) {
       char esc_name[128];
       html_escape(results[i].name, esc_name, sizeof(esc_name));
@@ -668,6 +706,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
         "<button type='submit' class='btn'>Pair</button>"
         "</form></div>",
         esc_name, i);
+      if (pos >= (int)html_size) pos = (int)html_size - 1;
     }
   }
 
@@ -680,6 +719,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<button type='submit' class='btn btn-danger'>Restart Device</button>"
     "</form></div>"
     "</body></html>");
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, pos);
