@@ -184,11 +184,17 @@ static void hidh_callback(void *handler_args, esp_event_base_t base,
         }
         break;
 
-    case ESP_HIDH_INPUT_EVENT:
-        if (param->input.usage == ESP_HID_USAGE_CCONTROL) {
-            handle_consumer_control(param->input.data, param->input.length);
+    case ESP_HIDH_INPUT_EVENT: {
+        ESP_LOGI(TAG, "HID input: usage=%d map=%d id=%d len=%d",
+                 param->input.usage, param->input.map_index,
+                 param->input.report_id, param->input.length);
+        if (param->input.length > 0) {
+            ESP_LOG_BUFFER_HEX_LEVEL(TAG, param->input.data,
+                param->input.length < 16 ? param->input.length : 16, ESP_LOG_INFO);
         }
+        handle_consumer_control(param->input.data, param->input.length);
         break;
+    }
 
     case ESP_HIDH_BATTERY_EVENT:
         ESP_LOGI(TAG, "BLE remote battery: %d%%", param->battery.level);
