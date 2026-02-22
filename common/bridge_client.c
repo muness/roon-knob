@@ -11,12 +11,33 @@
 #include "ui.h"
 
 #ifdef ESP_PLATFORM
+#if !USE_EINK
 #include "display_sleep.h"
+#endif
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #endif
 
-#if USE_MANIFEST
+#if USE_EINK
+#include "eink_ui.h"
+// Dispatch macros: route ui_* calls to eink_ui_* for e-ink frame display
+#define UI_SET_STATUS(o) eink_ui_set_status(o)
+#define UI_SET_MESSAGE(m) eink_ui_set_message(m)
+#define UI_SET_ZONE_NAME(n) eink_ui_set_zone_name(n)
+#define UI_SET_NETWORK_STATUS(s) eink_ui_set_network_status(s)
+#define UI_SET_ARTWORK(k) eink_ui_set_artwork(k)
+#define UI_SHOW_VOLUME_CHANGE(v, s) eink_ui_show_volume_change(v, s)
+#define UI_SHOW_ZONE_PICKER(n, i, c, s) eink_ui_show_zone_picker()
+#define UI_HIDE_ZONE_PICKER() eink_ui_hide_zone_picker()
+#define UI_IS_ZONE_PICKER_VISIBLE() eink_ui_is_zone_picker_visible()
+#define UI_ZONE_PICKER_SCROLL(d) eink_ui_zone_picker_scroll(d)
+#define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
+  eink_ui_zone_picker_get_selected_id(o, l)
+#define UI_ZONE_PICKER_IS_CURRENT()                                            \
+  eink_ui_zone_picker_is_current_selection()
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
+  eink_ui_update(l1, l2, l3, p, v, vn, vx, vs, sp, le)
+#elif USE_MANIFEST
 #include "manifest_parse.h"
 #include "manifest_ui.h"
 // Dispatch macros: route ui_* calls to manifest_ui_* in manifest mode
@@ -34,8 +55,8 @@
   manifest_ui_zone_picker_get_selected_id(o, l)
 #define UI_ZONE_PICKER_IS_CURRENT()                                            \
   manifest_ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le) /* noop in manifest mode   \
-                                                     */
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le) /* noop in manifest    \
+                                                        */
 #else
 #define UI_SET_STATUS(o) ui_set_status(o)
 #define UI_SET_MESSAGE(m) ui_set_message(m)
@@ -50,7 +71,7 @@
 #define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
   ui_zone_picker_get_selected_id(o, l)
 #define UI_ZONE_PICKER_IS_CURRENT() ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, p, v, vn, vx, vs, sp, le)                            \
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
   ui_update(l1, l2, p, v, vn, vx, vs, sp, le)
 #endif
 
@@ -87,6 +108,7 @@ static void check_charging_state_change(void);
 struct now_playing_state {
   char line1[MAX_LINE];
   char line2[MAX_LINE];
+  char line3[MAX_LINE];  // Album name (optional from bridge)
   bool is_playing;
   float volume;
   float volume_min;
@@ -210,9 +232,9 @@ static void ui_update_cb(void *arg) {
   s_last_known_volume_min = state->volume_min;
   s_last_known_volume_max = state->volume_max;
   s_last_known_volume_step = state->volume_step;
-  UI_UPDATE(state->line1, state->line2, state->is_playing, state->volume,
-            state->volume_min, state->volume_max, state->volume_step,
-            state->seek_position, state->length);
+  UI_UPDATE(state->line1, state->line2, state->line3, state->is_playing,
+            state->volume, state->volume_min, state->volume_max,
+            state->volume_step, state->seek_position, state->length);
 
   // Update artwork if image_key changed or forced refresh
   static char last_image_key[128] = "";
@@ -287,6 +309,7 @@ static void default_now_playing(struct now_playing_state *state) {
   }
   snprintf(state->line1, sizeof(state->line1), "Idle");
   state->line2[0] = '\0';
+  state->line3[0] = '\0';
   state->is_playing = false;
   state->volume = 0.0f;
   state->volume_min = -80.0f;
@@ -588,6 +611,10 @@ static bool fetch_now_playing(struct now_playing_state *state) {
   const char *line2 = strstr(resp, "\"line2\"");
   if (line2) {
     extract_json_string(line2, "\"line2\"", state->line2, sizeof(state->line2));
+  }
+  const char *line3 = strstr(resp, "\"line3\"");
+  if (line3) {
+    extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
   }
   state->is_playing = strstr(resp, "\"is_playing\":true") != NULL;
 
@@ -955,6 +982,15 @@ static void post_manifest_update(manifest_t *m) {
   platform_task_post_to_ui(ui_manifest_cb, m);
 }
 #endif /* USE_MANIFEST */
+
+#if !USE_MANIFEST
+// Stub: UDP fast-path is manifest-only; fall back to HTTP for volume
+static bool udp_send_volume(float volume) {
+  (void)volume;
+  return false;
+}
+#endif
+
 static bool refresh_zone_label(bool prefer_zone_id) {
   LOGI("refresh_zone_label: Called (prefer_zone_id=%s)",
        prefer_zone_id ? "true" : "false");
@@ -1300,8 +1336,8 @@ static void bridge_poll_thread(void *arg) {
       snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
       UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
-      UI_UPDATE(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
-                0);
+      UI_UPDATE(line1_msg, "Testing Bridge", "", false, 0.0f, 0.0f, 100.0f,
+                1.0f, 0, 0);
       snprintf(status_msg, sizeof(status_msg),
                "Testing Bridge\nAttempt %d of %d...", s_bridge_fail_count,
                BRIDGE_FAIL_THRESHOLD);
@@ -1333,14 +1369,14 @@ static void bridge_poll_thread(void *arg) {
             snprintf(status_msg, sizeof(status_msg),
                      "mDNS failed. Configure Bridge in Settings.");
           }
-          UI_UPDATE(line1_msg, line2_msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
-                    0);
+          UI_UPDATE(line1_msg, line2_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f,
+                    0, 0);
           UI_SET_NETWORK_STATUS(status_msg);
         } else {
           // Still searching - show progress
           snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                    s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
-          UI_UPDATE(line1_msg, "Searching for Bridge", false, 0.0f, 0.0f,
+          UI_UPDATE(line1_msg, "Searching for Bridge", "", false, 0.0f, 0.0f,
                     100.0f, 1.0f, 0, 0);
           snprintf(status_msg, sizeof(status_msg),
                    "Searching for Bridge\nAttempt %d of %d...",
@@ -1369,8 +1405,8 @@ static void bridge_poll_thread(void *arg) {
                      "Bridge unreachable. Check Settings.");
           }
           UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
-          UI_UPDATE(line1_msg, line2_msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0,
-                    0);
+          UI_UPDATE(line1_msg, line2_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f,
+                    0, 0);
           UI_SET_NETWORK_STATUS(status_msg);
         } else {
           // Still retrying - show progress on main display
@@ -1378,8 +1414,8 @@ static void bridge_poll_thread(void *arg) {
           snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
                    s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
           UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
-          UI_UPDATE(line1_msg, "Testing Bridge", false, 0.0f, 0.0f, 100.0f,
-                    1.0f, 0, 0);
+          UI_UPDATE(line1_msg, "Testing Bridge", "", false, 0.0f, 0.0f,
+                    100.0f, 1.0f, 0, 0);
           snprintf(status_msg, sizeof(status_msg),
                    "Testing Bridge\nAttempt %d of %d...",
                    s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
@@ -1726,10 +1762,12 @@ void bridge_client_set_network_ready(bool ready) {
 
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
                                           int width, int height,
-                                          int clip_radius) {
+                                          int clip_radius,
+                                          const char *format) {
   if (!url_buf || buf_len < 256) {
     return NULL;
   }
+  if (!format || !format[0]) format = "rgb565";
   lock_state();
   const char *bridge_base = s_state.cfg.bridge_base;
   const char *zone_id = s_state.cfg.zone_id;
@@ -1740,14 +1778,14 @@ const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
   if (clip_radius > 0) {
     snprintf(url_buf, buf_len,
              "%s/now_playing/"
-             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565&clip_"
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s&clip_"
              "radius=%d",
-             bridge_base, zone_id, width, height, clip_radius);
+             bridge_base, zone_id, width, height, format, clip_radius);
   } else {
     snprintf(url_buf, buf_len,
              "%s/now_playing/"
-             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565",
-             bridge_base, zone_id, width, height);
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s",
+             bridge_base, zone_id, width, height, format);
   }
   unlock_state();
   return url_buf;
@@ -1807,6 +1845,65 @@ bool bridge_client_is_bridge_mdns(void) {
   return from_mdns;
 }
 
+int bridge_client_get_zones(bridge_zone_t *out, int max) {
+  if (!out || max <= 0) return 0;
+  lock_state();
+  int count = s_state.zone_count < max ? s_state.zone_count : max;
+  for (int i = 0; i < count; i++) {
+    strncpy(out[i].id, s_state.zones[i].id, sizeof(out[i].id) - 1);
+    out[i].id[sizeof(out[i].id) - 1] = '\0';
+    strncpy(out[i].name, s_state.zones[i].name, sizeof(out[i].name) - 1);
+    out[i].name[sizeof(out[i].name) - 1] = '\0';
+  }
+  unlock_state();
+  return count;
+}
+
+bool bridge_client_get_current_zone_id(char *out, size_t len) {
+  if (!out || len == 0) return false;
+  lock_state();
+  strncpy(out, s_state.cfg.zone_id, len - 1);
+  out[len - 1] = '\0';
+  unlock_state();
+  return out[0] != '\0';
+}
+
+void bridge_client_set_zone(const char *zone_id) {
+  rk_cfg_t cfg_copy;
+  char label_copy[64];
+  bool found = false;
+
+  lock_state();
+  for (int i = 0; i < s_state.zone_count; i++) {
+    if (strcmp(s_state.zones[i].id, zone_id) == 0) {
+      strncpy(s_state.cfg.zone_id, zone_id,
+              sizeof(s_state.cfg.zone_id) - 1);
+      s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
+      strncpy(s_state.zone_label, s_state.zones[i].name,
+              sizeof(s_state.zone_label) - 1);
+      s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
+      s_state.zone_resolved = true;
+      s_trigger_poll = true;
+      s_force_artwork_refresh = true;
+      if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+        s_device_state = DEVICE_STATE_OPERATIONAL;
+      }
+      // Copy shared state before releasing lock
+      memcpy(&cfg_copy, &s_state.cfg, sizeof(cfg_copy));
+      strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
+      label_copy[sizeof(label_copy) - 1] = '\0';
+      found = true;
+      break;
+    }
+  }
+  unlock_state();
+
+  if (found) {
+    platform_storage_save(&cfg_copy);
+    post_ui_zone_name(label_copy);
+  }
+}
+
 // Config fetch and apply implementation
 
 // Data passed to UI thread for config application
@@ -1824,7 +1921,7 @@ static void apply_config_on_ui_thread(void *arg) {
 
   platform_display_set_rotation(data->rotation);
 
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !USE_EINK
   display_update_timeouts(&data->cfg, data->is_charging);
   display_update_power_settings(&data->cfg);
 #endif

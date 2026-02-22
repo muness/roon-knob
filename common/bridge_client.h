@@ -12,7 +12,8 @@ void bridge_client_handle_volume_rotation(
 void bridge_client_set_network_ready(bool ready);
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
                                           int width, int height,
-                                          int clip_radius);
+                                          int clip_radius,
+                                          const char *format);
 bool bridge_client_is_ready_for_art_mode(void);
 
 // Bridge connection status (mirrors WiFi retry pattern for consistent UX)
@@ -26,6 +27,15 @@ bool bridge_client_get_bridge_url(char *buf,
 bool bridge_client_is_bridge_connected(void);  // True if bridge is responding
 bool bridge_client_is_bridge_mdns(
     void); // True if bridge was discovered via mDNS (persisted)
+
+// Zone enumeration for web UI
+typedef struct {
+    char id[64];
+    char name[64];
+} bridge_zone_t;
+int bridge_client_get_zones(bridge_zone_t *out, int max);
+bool bridge_client_get_current_zone_id(char *out, size_t len);
+void bridge_client_set_zone(const char *zone_id);
 
 // ── UDP fast-path wire format ───────────────────────────────────────────────
 

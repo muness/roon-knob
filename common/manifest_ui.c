@@ -1436,7 +1436,7 @@ bool manifest_ui_set_artwork(const char *image_url) {
 
   // Build artwork URL (no circular clip — art is square inside ring)
   char url[512];
-  if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE, 0)) {
+  if (!bridge_client_get_artwork_url(url, sizeof(url), ART_SIZE, ART_SIZE, 0, "rgb565")) {
     LOGI("set_artwork: failed to build URL");
     return false;
   }
