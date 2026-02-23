@@ -562,11 +562,6 @@ static manifest_t *fetch_manifest(void) {
     return NULL;
   }
 
-  if (ret != 0 || !resp || resp_len == 0) {
-    platform_http_free(resp);
-    return NULL;
-  }
-
   manifest_t *m = malloc(sizeof(manifest_t));
   if (!m) {
     platform_http_free(resp);
@@ -930,13 +925,9 @@ static void bridge_poll_thread(void *arg) {
       }
     } else if (!ok && s_last_net_ok) {
       // Just lost connection to bridge - start retry tracking
-      // line1=main content (bottom), line2=header (top)
       increment_bridge_fail_count();
       s_bridge_verified = false;
-      char line1_msg[64];
       char status_msg[96];
-      snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
-               s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
       manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
       snprintf(status_msg, sizeof(status_msg),
                "Testing Bridge\nAttempt %d of %d...", s_bridge_fail_count,
@@ -951,29 +942,21 @@ static void bridge_poll_thread(void *arg) {
       if (!has_bridge) {
         // No bridge URL - searching via mDNS
         // Show retry progress or recovery info based on failure count
-        char line1_msg[64];
-        char line2_msg[64];
         char status_msg[96];
         manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
 
         if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
           // mDNS search exhausted - show recovery info
           if (s_device_ip[0]) {
-            snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
-            snprintf(line2_msg, sizeof(line2_msg), "Set Bridge URL at:");
             snprintf(status_msg, sizeof(status_msg),
                      "mDNS failed. Set Bridge at http://%s", s_device_ip);
           } else {
-            snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
-            snprintf(line2_msg, sizeof(line2_msg), "Bridge Not Found");
             snprintf(status_msg, sizeof(status_msg),
                      "mDNS failed. Configure Bridge in Settings.");
           }
           manifest_ui_set_network_status(status_msg);
         } else {
           // Still searching - show progress
-          snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
-                   s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
           snprintf(status_msg, sizeof(status_msg),
                    "Searching for Bridge\nAttempt %d of %d...",
                    s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
@@ -982,21 +965,14 @@ static void bridge_poll_thread(void *arg) {
       } else {
         // Bridge URL configured but not responding - show retry progress
         increment_bridge_fail_count();
-        char line1_msg[64];
         char status_msg[96];
 
         if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
           // Max retries reached - show recovery info with device IP
-          // line1=main content (bottom), line2=header (top)
-          char line2_msg[64];
           if (s_device_ip[0]) {
-            snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
-            snprintf(line2_msg, sizeof(line2_msg), "Update Bridge at:");
             snprintf(status_msg, sizeof(status_msg),
                      "Bridge unreachable\nUpdate at http://%s", s_device_ip);
           } else {
-            snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
-            snprintf(line2_msg, sizeof(line2_msg), "Bridge Unreachable");
             snprintf(status_msg, sizeof(status_msg),
                      "Bridge unreachable. Check Settings.");
           }
@@ -1004,9 +980,6 @@ static void bridge_poll_thread(void *arg) {
           manifest_ui_set_network_status(status_msg);
         } else {
           // Still retrying - show progress on main display
-          // line1=main content (bottom), line2=header (top)
-          snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
-                   s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
           manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
           snprintf(status_msg, sizeof(status_msg),
                    "Testing Bridge\nAttempt %d of %d...",
@@ -1133,38 +1106,6 @@ void bridge_client_handle_input(ui_input_event_t event) {
   }
 
   if (event == UI_INPUT_MENU) {
-    const char *names[MAX_ZONES + 3]; /* +3 for Back, Settings, margin */
-    const char *ids[MAX_ZONES + 3];
-    static const char *back_name = "Back";
-    static const char *back_id = ZONE_ID_BACK;
-    static const char *settings_name = "Settings";
-    static const char *settings_id = ZONE_ID_SETTINGS;
-    int selected = 1; /* Default to first zone after Back */
-    int count = 0;
-
-    /* Add Back as first option */
-    names[count] = back_name;
-    ids[count] = back_id;
-    count++;
-
-    lock_state();
-    if (s_state.zone_count > 0) {
-      for (int i = 0; i < s_state.zone_count && count < MAX_ZONES + 2; ++i) {
-        names[count] = s_state.zones[i].name;
-        ids[count] = s_state.zones[i].id;
-        if (strcmp(s_state.zones[i].id, s_state.cfg.zone_id) == 0) {
-          selected = count;
-        }
-        count++;
-      }
-    }
-    unlock_state();
-
-    /* Add Settings as last option */
-    names[count] = settings_name;
-    ids[count] = settings_id;
-    count++;
-
     manifest_ui_show_zone_picker();
     return;
   }

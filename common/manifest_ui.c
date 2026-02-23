@@ -1403,7 +1403,9 @@ static void ui_cb_set_message(void *arg) {
       lv_timer_reset(s_msg_timer);
     } else {
       s_msg_timer = lv_timer_create(msg_timer_cb, 3000, NULL);
-      lv_timer_set_repeat_count(s_msg_timer, 1);
+      if (s_msg_timer) {
+        lv_timer_set_repeat_count(s_msg_timer, 1);
+      }
     }
   } else {
     lv_label_set_text(s_chrome.status_bar, "");
@@ -1591,6 +1593,8 @@ void manifest_ui_hide_zone_picker(void) {
     }
   }
   show_screen(0);
+  if (s_chrome.zone_label)
+    lv_obj_clear_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
 }
 
 bool manifest_ui_is_zone_picker_visible(void) {
