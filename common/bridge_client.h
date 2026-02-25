@@ -12,7 +12,8 @@ void bridge_client_handle_volume_rotation(
 void bridge_client_set_network_ready(bool ready);
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
                                           int width, int height,
-                                          int clip_radius);
+                                          int clip_radius,
+                                          const char *format);
 bool bridge_client_is_ready_for_art_mode(void);
 
 // Bridge connection status (mirrors WiFi retry pattern for consistent UX)
@@ -27,13 +28,22 @@ bool bridge_client_is_bridge_connected(void);  // True if bridge is responding
 bool bridge_client_is_bridge_mdns(
     void); // True if bridge was discovered via mDNS (persisted)
 
+// Zone enumeration for web UI
+typedef struct {
+    char id[64];
+    char name[64];
+} bridge_zone_t;
+int bridge_client_get_zones(bridge_zone_t *out, int max);
+bool bridge_client_get_current_zone_id(char *out, size_t len);
+void bridge_client_set_zone(const char *zone_id);
+
 // ── UDP fast-path wire format ───────────────────────────────────────────────
 
 #include <stdint.h>
 
 #define UDP_FAST_MAGIC 0x524B
 #define UDP_FAST_PORT_OFFSET 1 // bridge_port + 1
-#define UDP_REQUEST_SIZE 54
+#define UDP_REQUEST_SIZE 86
 #define UDP_RESPONSE_SIZE 48
 
 #define UDP_CMD_PLAY_PAUSE  1
@@ -41,22 +51,26 @@ bool bridge_client_is_bridge_mdns(
 #define UDP_CMD_PREV        3
 #define UDP_CMD_STOP        4
 #define UDP_CMD_VOLUME_SET  5
-#define UDP_CMD_SIZE        36
-#define UDP_CMD_VOL_SIZE    40
+#define UDP_CMD_SIZE        68
+#define UDP_CMD_VOL_SIZE    72
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
     uint8_t  cmd;         // command code
     uint8_t  _pad;        // reserved
-    char     zone_id[32]; // null-terminated
+    char     zone_id[64]; // null-terminated (max ~54 chars for OpenHome UDNs)
     float    value;       // f32 LE (for volume)
 } udp_command_t;
+_Static_assert(sizeof(udp_command_t) == UDP_CMD_VOL_SIZE, "UDP command size mismatch");
+_Static_assert(sizeof(udp_command_t) - sizeof(float) == UDP_CMD_SIZE,
+    "UDP command (no value) size mismatch — assumes 'value' is the last field");
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;       // 0x524B LE
     char     sha[20];     // manifest SHA — null-terminated hex text (8 chars + NUL, field sized for future expansion)
-    char     zone_id[32]; // zone_id (null-terminated)
+    char     zone_id[64]; // zone_id (null-terminated, max ~54 chars for OpenHome UDNs)
 } udp_fast_request_t;
+_Static_assert(sizeof(udp_fast_request_t) == UDP_REQUEST_SIZE, "UDP request size mismatch");
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;          // 0x524B LE
@@ -70,6 +84,7 @@ typedef struct __attribute__((packed)) {
     int32_t  seek_position;  // -1 = unknown
     uint32_t length;         // 0 = unknown
 } udp_fast_response_t;
+_Static_assert(sizeof(udp_fast_response_t) == UDP_RESPONSE_SIZE, "UDP response size mismatch");
 
 // Flag bit positions
 #define UDP_FLAG_PLAYING  (1 << 0)

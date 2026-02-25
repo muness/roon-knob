@@ -14,6 +14,8 @@ idf_app/dependencies.lock
 # Beads db
 .beads/
 idf_app/managed_components/*
+frame_app/managed_components/*
+frame_app/dependencies.lock
 idf_app/sdkconfig.override
 .agneto/
 .claude/

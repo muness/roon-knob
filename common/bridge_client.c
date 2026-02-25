@@ -11,13 +11,53 @@
 #include "ui.h"
 
 #ifdef ESP_PLATFORM
+#if !USE_EINK
 #include "display_sleep.h"
+#endif
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #endif
 
+#if USE_EINK
+#include "eink_ui.h"
+// Dispatch macros: route ui_* calls to eink_ui_* for e-ink frame display
+#define UI_SET_STATUS(o) eink_ui_set_status(o)
+#define UI_SET_MESSAGE(m) eink_ui_set_message(m)
+#define UI_SET_ZONE_NAME(n) eink_ui_set_zone_name(n)
+#define UI_SET_NETWORK_STATUS(s) eink_ui_set_network_status(s)
+#define UI_SET_ARTWORK(k) eink_ui_set_artwork(k)
+#define UI_SHOW_VOLUME_CHANGE(v, s) eink_ui_show_volume_change(v, s)
+#define UI_SHOW_ZONE_PICKER(n, i, c, s) eink_ui_show_zone_picker()
+#define UI_HIDE_ZONE_PICKER() eink_ui_hide_zone_picker()
+#define UI_IS_ZONE_PICKER_VISIBLE() eink_ui_is_zone_picker_visible()
+#define UI_ZONE_PICKER_SCROLL(d) eink_ui_zone_picker_scroll(d)
+#define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
+  eink_ui_zone_picker_get_selected_id(o, l)
+#define UI_ZONE_PICKER_IS_CURRENT()                                            \
+  eink_ui_zone_picker_is_current_selection()
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
+  eink_ui_update(l1, l2, l3, p, v, vn, vx, vs, sp, le)
+#else
 #include "manifest_parse.h"
 #include "manifest_ui.h"
+// Dispatch macros: route ui_* calls to manifest_ui_* in manifest mode
+#define UI_SET_STATUS(o) manifest_ui_set_status(o)
+#define UI_SET_MESSAGE(m) manifest_ui_set_message(m)
+#define UI_SET_ZONE_NAME(n) manifest_ui_set_zone_name(n)
+#define UI_SET_NETWORK_STATUS(s) manifest_ui_set_network_status(s)
+#define UI_SET_ARTWORK(k) manifest_ui_set_artwork(k)
+#define UI_SHOW_VOLUME_CHANGE(v, s) manifest_ui_show_volume_change(v, s)
+#define UI_SHOW_ZONE_PICKER(n, i, c, s) manifest_ui_show_zone_picker()
+#define UI_HIDE_ZONE_PICKER() manifest_ui_hide_zone_picker()
+#define UI_IS_ZONE_PICKER_VISIBLE() manifest_ui_is_zone_picker_visible()
+#define UI_ZONE_PICKER_SCROLL(d) manifest_ui_zone_picker_scroll(d)
+#define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
+  manifest_ui_zone_picker_get_selected_id(o, l)
+#define UI_ZONE_PICKER_IS_CURRENT()                                            \
+  manifest_ui_zone_picker_is_current_selection()
+#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le) /* noop in manifest    \
+                                                        */
+#endif
 
 #include <cJSON.h>
 #include <ctype.h>
@@ -49,6 +89,21 @@ static void check_charging_state_change(void);
 #define ZONE_ID_BACK "__back__"
 #define ZONE_ID_SETTINGS "__settings__"
 
+struct now_playing_state {
+  char line1[MAX_LINE];
+  char line2[MAX_LINE];
+  char line3[MAX_LINE];  // Album name (optional from bridge)
+  bool is_playing;
+  float volume;
+  float volume_min;
+  float volume_max;
+  float volume_step;
+  int seek_position;
+  int length;
+  char image_key[128]; // For tracking album artwork changes
+  char config_sha[9];  // Config SHA for change detection
+  char zones_sha[9];   // Zones SHA for zone list change detection
+};
 
 struct zone_entry {
   char id[MAX_ZONE_NAME];
@@ -128,19 +183,58 @@ static void lock_state(void) { os_mutex_lock(&s_state_lock); }
 
 static void unlock_state(void) { os_mutex_unlock(&s_state_lock); }
 
+static bool fetch_now_playing(struct now_playing_state *state);
 static bool refresh_zone_label(bool prefer_zone_id);
 static void parse_zones_from_response(const char *resp);
 static const char *extract_json_string(const char *start, const char *key,
                                        char *out, size_t len);
 static bool send_control_json(const char *json);
+static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(void);
 static void bridge_poll_thread(void *arg);
 static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
+static void post_ui_update(const struct now_playing_state *state);
+static void post_ui_status(bool online);
+static void post_ui_zone_name(const char *name);
+static void post_ui_message(const char *msg);
+static void post_ui_message_copy(char *msg_copy);
 static void strip_trailing_slashes(char *url);
+static void post_ui_status_copy(bool *status_copy);
+static void post_ui_zone_name_copy(char *name_copy);
 static void reset_bridge_fail_count(void);
 static void increment_bridge_fail_count(void);
 
+static void ui_update_cb(void *arg) {
+  struct now_playing_state *state = arg;
+  if (!state) {
+    LOGI("ui_update_cb: state is NULL!");
+    return;
+  }
+  // Cache volume for optimistic UI updates
+  s_last_known_volume = state->volume;
+  s_last_known_volume_min = state->volume_min;
+  s_last_known_volume_max = state->volume_max;
+  s_last_known_volume_step = state->volume_step;
+  UI_UPDATE(state->line1, state->line2, state->line3, state->is_playing,
+            state->volume, state->volume_min, state->volume_max,
+            state->volume_step, state->seek_position, state->length);
+
+  // Update artwork if image_key changed or forced refresh
+  static char last_image_key[128] = "";
+  bool force_refresh = s_force_artwork_refresh;
+  if (force_refresh) {
+    s_force_artwork_refresh = false;
+    last_image_key[0] = '\0'; // Clear cache to force reload
+  }
+  if (force_refresh || strcmp(state->image_key, last_image_key) != 0) {
+    UI_SET_ARTWORK(state->image_key);
+    strncpy(last_image_key, state->image_key, sizeof(last_image_key) - 1);
+    last_image_key[sizeof(last_image_key) - 1] = '\0';
+  }
+
+  free(state);
+}
 
 static bool host_is_valid(const char *url) {
   // Accept any URL with a non-empty hostname (IP or mDNS name like
@@ -157,6 +251,32 @@ static bool host_is_valid(const char *url) {
   return (end > host);
 }
 
+static void ui_status_cb(void *arg) {
+  bool *online = arg;
+  if (!online) {
+    return;
+  }
+  UI_SET_STATUS(*online);
+  free(online);
+}
+
+static void ui_message_cb(void *arg) {
+  char *msg = arg;
+  if (!msg) {
+    return;
+  }
+  UI_SET_MESSAGE(msg);
+  free(msg);
+}
+
+static void ui_zone_name_cb(void *arg) {
+  char *name = arg;
+  if (!name) {
+    return;
+  }
+  UI_SET_ZONE_NAME(name);
+  free(name);
+}
 
 static void ui_battery_cb(void *arg) {
   (void)arg;
@@ -167,8 +287,77 @@ static void post_ui_battery_update(void) {
   platform_task_post_to_ui(ui_battery_cb, NULL);
 }
 
+static void default_now_playing(struct now_playing_state *state) {
+  if (!state) {
+    return;
+  }
+  snprintf(state->line1, sizeof(state->line1), "Idle");
+  state->line2[0] = '\0';
+  state->line3[0] = '\0';
+  state->is_playing = false;
+  state->volume = 0.0f;
+  state->volume_min = -80.0f;
+  state->volume_max = 0.0f;
+  state->volume_step = 0.0f;
+  state->seek_position = 0;
+  state->length = 0;
+  state->image_key[0] = '\0';
+  state->config_sha[0] = '\0';
+  state->zones_sha[0] = '\0';
+}
 
+static void post_ui_update(const struct now_playing_state *state) {
+  struct now_playing_state *copy = malloc(sizeof(*copy));
+  if (!copy || !state) {
+    free(copy);
+    return;
+  }
+  *copy = *state;
+  platform_task_post_to_ui(ui_update_cb, copy);
+}
 
+static void post_ui_status_copy(bool *status_copy) {
+  platform_task_post_to_ui(ui_status_cb, status_copy);
+}
+
+static void post_ui_status(bool online) {
+  bool *copy = malloc(sizeof(*copy));
+  if (!copy) {
+    return;
+  }
+  *copy = online;
+  post_ui_status_copy(copy);
+}
+
+static void post_ui_message_copy(char *msg_copy) {
+  platform_task_post_to_ui(ui_message_cb, msg_copy);
+}
+
+static void post_ui_message(const char *msg) {
+  if (!msg) {
+    return;
+  }
+  char *copy = strdup(msg);
+  if (!copy) {
+    return;
+  }
+  post_ui_message_copy(copy);
+}
+
+static void post_ui_zone_name_copy(char *name_copy) {
+  platform_task_post_to_ui(ui_zone_name_cb, name_copy);
+}
+
+static void post_ui_zone_name(const char *name) {
+  if (!name) {
+    return;
+  }
+  char *copy = strdup(name);
+  if (!copy) {
+    return;
+  }
+  post_ui_zone_name_copy(copy);
+}
 
 static void wait_for_poll_interval(void) {
   // Use longer delay when display is sleeping, on battery, or bridge
@@ -280,7 +469,7 @@ static bool udp_broadcast_discover(void) {
   s_state.cfg.bridge_from_mdns = 1;
   platform_storage_save(&s_state.cfg);
   unlock_state();
-  manifest_ui_set_message("Bridge: Found");
+  post_ui_message("Bridge: Found");
   return true;
 #else
   return false;
@@ -328,7 +517,7 @@ static void maybe_update_bridge_base(void) {
     s_state.cfg.bridge_from_mdns = 1; // Persist mDNS source
     platform_storage_save(&s_state.cfg);
     unlock_state();
-    manifest_ui_set_message("Bridge: Found");
+    post_ui_message("Bridge: Found");
     return;
   }
 
@@ -353,7 +542,152 @@ static void maybe_update_bridge_base(void) {
   }
 }
 
+static bool fetch_now_playing(struct now_playing_state *state) {
+  if (!state) {
+    return false;
+  }
+  lock_state();
+  char bridge_base[sizeof(s_state.cfg.bridge_base)];
+  char zone_id[sizeof(s_state.cfg.zone_id)];
+  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
+  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
+  unlock_state();
 
+  if (bridge_base[0] == '\0' || zone_id[0] == '\0') {
+    LOGI("fetch_now_playing: bridge_base or zone_id empty (bridge_base='%s', "
+         "zone_id='%s')",
+         bridge_base, zone_id);
+    return false;
+  }
+
+  // Get battery status for reporting to bridge
+  int battery_level = platform_battery_get_level();
+  bool battery_charging = platform_battery_is_charging();
+
+  // Get knob ID for config_sha lookup
+  char knob_id[16];
+  platform_http_get_knob_id(knob_id, sizeof(knob_id));
+
+  char url[384];
+  snprintf(
+      url, sizeof(url),
+      "%s/"
+      "now_playing?zone_id=%s&battery_level=%d&battery_charging=%d&knob_id=%s",
+      bridge_base, zone_id, battery_level, battery_charging ? 1 : 0, knob_id);
+
+  char *resp = NULL;
+  size_t resp_len = 0;
+  int ret = platform_http_get(url, &resp, &resp_len);
+  if (ret != 0 || !resp) {
+    platform_http_free(resp);
+    return false;
+  }
+
+  if (strstr(resp, "\"error\"") || resp_len == 0) {
+    platform_http_free(resp);
+    return false;
+  }
+
+  const char *line1 = strstr(resp, "\"line1\"");
+  if (line1) {
+    extract_json_string(line1, "\"line1\"", state->line1, sizeof(state->line1));
+  }
+  const char *line2 = strstr(resp, "\"line2\"");
+  if (line2) {
+    extract_json_string(line2, "\"line2\"", state->line2, sizeof(state->line2));
+  }
+  const char *line3 = strstr(resp, "\"line3\"");
+  if (line3) {
+    extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
+  }
+  state->is_playing = strstr(resp, "\"is_playing\":true") != NULL;
+
+  const char *vol_key = strstr(resp, "\"volume\"");
+  if (vol_key) {
+    const char *colon = strchr(vol_key, ':');
+    if (colon) {
+      state->volume = atof(colon + 1);
+    }
+  }
+
+  const char *vol_min_key = strstr(resp, "\"volume_min\"");
+  if (vol_min_key) {
+    const char *colon = strchr(vol_min_key, ':');
+    if (colon) {
+      state->volume_min = atof(colon + 1);
+    }
+  }
+
+  const char *vol_max_key = strstr(resp, "\"volume_max\"");
+  if (vol_max_key) {
+    const char *colon = strchr(vol_max_key, ':');
+    if (colon) {
+      state->volume_max = atof(colon + 1);
+    }
+  }
+
+  state->volume_step = 1.0f; // Default 1.0 dB step
+  const char *step_key = strstr(resp, "\"volume_step\"");
+  if (step_key) {
+    const char *colon = strchr(step_key, ':');
+    if (colon) {
+      float parsed = atof(colon + 1);
+      if (parsed > 0.0f) {
+        state->volume_step = parsed;
+      }
+    }
+  }
+
+  const char *seek_key = strstr(resp, "\"seek_position\"");
+  if (seek_key) {
+    const char *colon = strchr(seek_key, ':');
+    if (colon) {
+      state->seek_position = atoi(colon + 1);
+    }
+  }
+  const char *length_key = strstr(resp, "\"length\"");
+  if (length_key) {
+    const char *colon = strchr(length_key, ':');
+    if (colon) {
+      state->length = atoi(colon + 1);
+    }
+  }
+
+  // Parse image_key for album artwork
+  const char *image_key = strstr(resp, "\"image_key\"");
+  if (image_key) {
+    extract_json_string(image_key, "\"image_key\"", state->image_key,
+                        sizeof(state->image_key));
+  } else {
+    state->image_key[0] = '\0'; // No artwork available
+  }
+
+  // Parse config_sha for config change detection (silent - checked in poll
+  // loop)
+  const char *config_sha_key = strstr(resp, "\"config_sha\"");
+  if (config_sha_key) {
+    extract_json_string(config_sha_key, "\"config_sha\"", state->config_sha,
+                        sizeof(state->config_sha));
+  } else {
+    state->config_sha[0] = '\0';
+  }
+
+  // Parse zones_sha for zone list change detection
+  const char *zones_sha_key = strstr(resp, "\"zones_sha\"");
+  if (zones_sha_key) {
+    extract_json_string(zones_sha_key, "\"zones_sha\"", state->zones_sha,
+                        sizeof(state->zones_sha));
+  } else {
+    state->zones_sha[0] = '\0';
+  }
+
+  // Note: Don't parse zones from now_playing response - it doesn't have
+  // zone_name Zones are parsed from /zones endpoint in refresh_zone_label()
+  platform_http_free(resp);
+  return true;
+}
+
+#if !USE_EINK
 // ── Manifest fetch ──────────────────────────────────────────────────────────
 
 static char s_manifest_sha[9] = {0}; // Cached SHA for 304 support
@@ -562,6 +896,11 @@ static manifest_t *fetch_manifest(void) {
     return NULL;
   }
 
+  if (ret != 0 || !resp || resp_len == 0) {
+    platform_http_free(resp);
+    return NULL;
+  }
+
   manifest_t *m = malloc(sizeof(manifest_t));
   if (!m) {
     platform_http_free(resp);
@@ -572,6 +911,22 @@ static manifest_t *fetch_manifest(void) {
     free(m);
     platform_http_free(resp);
     return NULL;
+  }
+
+  // Mark current zone as selected in the zones list screen
+  for (int i = 0; i < m->screen_count; i++) {
+    if (m->screens[i].type == SCREEN_TYPE_LIST &&
+        strcmp(m->screens[i].id, "zones") == 0) {
+      manifest_list_t *list = &m->screens[i].data.list;
+      for (int j = 0; j < list->item_count; j++) {
+        bool match = (strcmp(list->items[j].id, zone_id) == 0);
+        if (match) {
+          LOGI("Zone list: marking item %d '%s' as selected (zone_id='%s')",
+               j, list->items[j].label, zone_id);
+        }
+        list->items[j].selected = match;
+      }
+    }
   }
 
   // Cache SHA for next request
@@ -610,6 +965,16 @@ static void ui_manifest_cb(void *arg) {
 static void post_manifest_update(manifest_t *m) {
   platform_task_post_to_ui(ui_manifest_cb, m);
 }
+#endif /* !USE_EINK */
+
+#if USE_EINK
+// Stub: UDP fast-path is manifest-only; fall back to HTTP for volume
+static bool udp_send_volume(float volume) {
+  (void)volume;
+  return false;
+}
+#endif
+
 static bool refresh_zone_label(bool prefer_zone_id) {
   LOGI("refresh_zone_label: Called (prefer_zone_id=%s)",
        prefer_zone_id ? "true" : "false");
@@ -690,7 +1055,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
       LOGI("Device state: %s -> OPERATIONAL (zones loaded)",
            device_state_name(s_device_state));
       s_device_state = DEVICE_STATE_OPERATIONAL;
-      manifest_ui_set_network_status(NULL); // Clear status banner when ready
+      UI_SET_NETWORK_STATUS(NULL); // Clear status banner when ready
     }
     success = should_sync && zone_label_copy[0] != '\0';
   }
@@ -701,7 +1066,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     LOGI("refresh_zone_label: Selected zone '%s', posting to UI",
          zone_label_copy);
     platform_storage_save(&s_state.cfg);
-    manifest_ui_set_zone_name(zone_label_copy);
+    post_ui_zone_name(zone_label_copy);
   } else {
     LOGI("refresh_zone_label: No zone selected (success=false)");
   }
@@ -805,6 +1170,8 @@ static bool send_control_json(const char *json) {
 static void bridge_poll_thread(void *arg) {
   (void)arg;
   LOGI("Bridge poll thread started");
+  struct now_playing_state state;
+  default_now_playing(&state);
   while (s_running) {
     // Skip HTTP requests if network is not ready yet (or in BLE mode)
     // In BLE mode, s_network_ready is false, so we just sleep without logging
@@ -828,6 +1195,7 @@ static void bridge_poll_thread(void *arg) {
     if (!s_state.zone_resolved) {
       refresh_zone_label(true);
     }
+#if !USE_EINK
     // ── UDP fast-path: try lightweight poll first ──
     udp_fast_response_t udp_resp;
     bool udp_ok = udp_poll_fast_state(&udp_resp);
@@ -895,7 +1263,7 @@ static void bridge_poll_thread(void *arg) {
       ok = (manifest != NULL);
     }
 
-    manifest_ui_set_status(ok);
+    post_ui_status(ok);
 
     if (ok) {
       s_last_is_playing = manifest->fast.is_playing;
@@ -907,11 +1275,30 @@ static void bridge_poll_thread(void *arg) {
 
     if (ok) {
       post_manifest_update(manifest); // Ownership transfers to UI thread
+#else
+    bool ok = fetch_now_playing(&state);
+    post_ui_status(ok);
+    // Track play state for extended sleep polling
+    if (ok) {
+      s_last_is_playing = state.is_playing;
+    }
+    // Check for config/zones changes (only when bridge is responding)
+    if (ok) {
+      check_config_sha(state.config_sha);
+      check_zones_sha(state.zones_sha);
+    }
+    // Always check charging state (works in AP mode too)
+    check_charging_state_change();
+    // Handle bridge connection status (mirrors WiFi retry pattern)
+    if (ok) {
+      // Bridge connected - show now playing data
+      post_ui_update(&state);
+#endif
       if (!s_last_net_ok) {
         // Just connected - clear status, restore zone name, mark verified
         reset_bridge_fail_count();
-        manifest_ui_set_message("Bridge: Connected");
-        manifest_ui_set_network_status(NULL);
+        post_ui_message("Bridge: Connected");
+        UI_SET_NETWORK_STATUS(NULL);
         s_bridge_verified = true;
         // Restore zone name (was cleared during error display)
         lock_state();
@@ -920,19 +1307,25 @@ static void bridge_poll_thread(void *arg) {
         zone_name_copy[sizeof(zone_name_copy) - 1] = '\0';
         unlock_state();
         if (zone_name_copy[0]) {
-          manifest_ui_set_zone_name(zone_name_copy);
+          UI_SET_ZONE_NAME(zone_name_copy);
         }
       }
     } else if (!ok && s_last_net_ok) {
       // Just lost connection to bridge - start retry tracking
+      // line1=main content (bottom), line2=header (top)
       increment_bridge_fail_count();
       s_bridge_verified = false;
+      char line1_msg[64];
       char status_msg[96];
-      manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
+      snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+               s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
+      UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
+      UI_UPDATE(line1_msg, "Testing Bridge", "", false, 0.0f, 0.0f, 100.0f,
+                1.0f, 0, 0);
       snprintf(status_msg, sizeof(status_msg),
                "Testing Bridge\nAttempt %d of %d...", s_bridge_fail_count,
                BRIDGE_FAIL_THRESHOLD);
-      manifest_ui_set_network_status(status_msg);
+      UI_SET_NETWORK_STATUS(status_msg);
     } else if (!ok && !s_last_net_ok) {
       // Still trying to connect - check if we have a bridge URL
       lock_state();
@@ -942,49 +1335,75 @@ static void bridge_poll_thread(void *arg) {
       if (!has_bridge) {
         // No bridge URL - searching via mDNS
         // Show retry progress or recovery info based on failure count
+        char line1_msg[64];
+        char line2_msg[64];
         char status_msg[96];
-        manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
+        UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
 
         if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
           // mDNS search exhausted - show recovery info
           if (s_device_ip[0]) {
+            snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
+            snprintf(line2_msg, sizeof(line2_msg), "Set Bridge URL at:");
             snprintf(status_msg, sizeof(status_msg),
                      "mDNS failed. Set Bridge at http://%s", s_device_ip);
           } else {
+            snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
+            snprintf(line2_msg, sizeof(line2_msg), "Bridge Not Found");
             snprintf(status_msg, sizeof(status_msg),
                      "mDNS failed. Configure Bridge in Settings.");
           }
-          manifest_ui_set_network_status(status_msg);
+          UI_UPDATE(line1_msg, line2_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f,
+                    0, 0);
+          UI_SET_NETWORK_STATUS(status_msg);
         } else {
           // Still searching - show progress
+          snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+                   s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
+          UI_UPDATE(line1_msg, "Searching for Bridge", "", false, 0.0f, 0.0f,
+                    100.0f, 1.0f, 0, 0);
           snprintf(status_msg, sizeof(status_msg),
                    "Searching for Bridge\nAttempt %d of %d...",
                    s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
-          manifest_ui_set_network_status(status_msg);
+          UI_SET_NETWORK_STATUS(status_msg);
         }
       } else {
         // Bridge URL configured but not responding - show retry progress
         increment_bridge_fail_count();
+        char line1_msg[64];
         char status_msg[96];
 
         if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
           // Max retries reached - show recovery info with device IP
+          // line1=main content (bottom), line2=header (top)
+          char line2_msg[64];
           if (s_device_ip[0]) {
+            snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
+            snprintf(line2_msg, sizeof(line2_msg), "Update Bridge at:");
             snprintf(status_msg, sizeof(status_msg),
                      "Bridge unreachable\nUpdate at http://%s", s_device_ip);
           } else {
+            snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
+            snprintf(line2_msg, sizeof(line2_msg), "Bridge Unreachable");
             snprintf(status_msg, sizeof(status_msg),
                      "Bridge unreachable. Check Settings.");
           }
-          manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
-          manifest_ui_set_network_status(status_msg);
+          UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
+          UI_UPDATE(line1_msg, line2_msg, "", false, 0.0f, 0.0f, 100.0f, 1.0f,
+                    0, 0);
+          UI_SET_NETWORK_STATUS(status_msg);
         } else {
           // Still retrying - show progress on main display
-          manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
+          // line1=main content (bottom), line2=header (top)
+          snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
+                   s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
+          UI_SET_ZONE_NAME(""); // Clear zone name to avoid overlay
+          UI_UPDATE(line1_msg, "Testing Bridge", "", false, 0.0f, 0.0f,
+                    100.0f, 1.0f, 0, 0);
           snprintf(status_msg, sizeof(status_msg),
                    "Testing Bridge\nAttempt %d of %d...",
                    s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
-          manifest_ui_set_network_status(status_msg);
+          UI_SET_NETWORK_STATUS(status_msg);
         }
       }
     }
@@ -1018,40 +1437,33 @@ void bridge_client_start(const rk_cfg_t *cfg) {
 }
 
 void bridge_client_handle_input(ui_input_event_t event) {
-  if (manifest_ui_is_zone_picker_visible()) {
+  if (UI_IS_ZONE_PICKER_VISIBLE()) {
     if (event == UI_INPUT_VOL_UP) {
-      manifest_ui_zone_picker_scroll(1);
+      UI_ZONE_PICKER_SCROLL(1);
       return;
     }
     if (event == UI_INPUT_VOL_DOWN) {
-      manifest_ui_zone_picker_scroll(-1);
+      UI_ZONE_PICKER_SCROLL(-1);
       return;
     }
     if (event == UI_INPUT_PLAY_PAUSE) {
       // Get the selected zone ID directly from the picker
       char selected_id[MAX_ZONE_NAME] = {0};
-      manifest_ui_zone_picker_get_selected_id(selected_id, sizeof(selected_id));
+      UI_ZONE_PICKER_GET_SELECTED_ID(selected_id, sizeof(selected_id));
       LOGI("Zone picker: selected zone id '%s'", selected_id);
 
       // Check for Back (always a no-op, just closes picker)
       if (strcmp(selected_id, ZONE_ID_BACK) == 0) {
         LOGI("Zone picker: Back selected (no-op)");
-        manifest_ui_hide_zone_picker();
+        UI_HIDE_ZONE_PICKER();
         return;
       }
 
       // Check for Settings
       if (strcmp(selected_id, ZONE_ID_SETTINGS) == 0) {
         LOGI("Zone picker: Settings selected");
-        manifest_ui_hide_zone_picker();
+        UI_HIDE_ZONE_PICKER();
         ui_show_settings();
-        return;
-      }
-
-      // Check if user selected the same zone they started with (no-op)
-      if (manifest_ui_zone_picker_is_current_selection()) {
-        LOGI("Zone picker: Same zone selected (no-op)");
-        manifest_ui_hide_zone_picker();
         return;
       }
 
@@ -1059,6 +1471,14 @@ void bridge_client_handle_input(ui_input_event_t event) {
       char label_copy[MAX_ZONE_NAME] = {0};
       bool updated = false;
       lock_state();
+
+      // Check if user selected the same zone they started with (no-op)
+      if (strcmp(selected_id, s_state.cfg.zone_id) == 0) {
+        unlock_state();
+        LOGI("Zone picker: Same zone selected (no-op)");
+        UI_HIDE_ZONE_PICKER();
+        return;
+      }
       // Find the zone by ID to get its name
       for (int i = 0; i < s_state.zone_count; ++i) {
         struct zone_entry *entry = &s_state.zones[i];
@@ -1077,7 +1497,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
             LOGI("Device state: %s -> OPERATIONAL (zone selected)",
                  device_state_name(s_device_state));
             s_device_state = DEVICE_STATE_OPERATIONAL;
-            manifest_ui_set_network_status(NULL); // Clear status banner when ready
+            UI_SET_NETWORK_STATUS(NULL); // Clear status banner when ready
           }
           s_trigger_poll = true;
           s_force_artwork_refresh = true; // Force artwork reload for new zone
@@ -1090,23 +1510,55 @@ void bridge_client_handle_input(ui_input_event_t event) {
       }
       unlock_state();
       // Hide picker FIRST to ensure it closes before any async operations
-      manifest_ui_hide_zone_picker();
+      UI_HIDE_ZONE_PICKER();
       if (updated) {
         platform_storage_save(&s_state.cfg);
-        manifest_ui_set_zone_name(label_copy);
-        manifest_ui_set_message("Loading zone...");
+        post_ui_zone_name(label_copy);
+        post_ui_message("Loading zone...");
       }
       return;
     }
     if (event == UI_INPUT_MENU) {
-      manifest_ui_hide_zone_picker();
+      UI_HIDE_ZONE_PICKER();
       return;
     }
     return;
   }
 
   if (event == UI_INPUT_MENU) {
-    manifest_ui_show_zone_picker();
+    const char *names[MAX_ZONES + 3]; /* +3 for Back, Settings, margin */
+    const char *ids[MAX_ZONES + 3];
+    static const char *back_name = "Back";
+    static const char *back_id = ZONE_ID_BACK;
+    static const char *settings_name = "Settings";
+    static const char *settings_id = ZONE_ID_SETTINGS;
+    int selected = 1; /* Default to first zone after Back */
+    int count = 0;
+
+    /* Add Back as first option */
+    names[count] = back_name;
+    ids[count] = back_id;
+    count++;
+
+    lock_state();
+    if (s_state.zone_count > 0) {
+      for (int i = 0; i < s_state.zone_count && count < MAX_ZONES + 2; ++i) {
+        names[count] = s_state.zones[i].name;
+        ids[count] = s_state.zones[i].id;
+        if (strcmp(s_state.zones[i].id, s_state.cfg.zone_id) == 0) {
+          selected = count;
+        }
+        count++;
+      }
+    }
+    unlock_state();
+
+    /* Add Settings as last option */
+    names[count] = settings_name;
+    ids[count] = settings_id;
+    count++;
+
+    UI_SHOW_ZONE_PICKER(names, ids, count, selected);
     return;
   }
 
@@ -1123,10 +1575,10 @@ void bridge_client_handle_input(ui_input_event_t event) {
              "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
              s_state.cfg.zone_id, predicted_down);
     unlock_state();
-    manifest_ui_show_volume_change(predicted_down, s_last_known_volume_step);
+    UI_SHOW_VOLUME_CHANGE(predicted_down, s_last_known_volume_step);
     if (!udp_send_volume(predicted_down)) {
       if (!send_control_json(body)) {
-        manifest_ui_set_message("Volume change failed");
+        post_ui_message("Volume change failed");
       }
     }
     break;
@@ -1142,10 +1594,10 @@ void bridge_client_handle_input(ui_input_event_t event) {
              "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
              s_state.cfg.zone_id, predicted_up);
     unlock_state();
-    manifest_ui_show_volume_change(predicted_up, s_last_known_volume_step);
+    UI_SHOW_VOLUME_CHANGE(predicted_up, s_last_known_volume_step);
     if (!udp_send_volume(predicted_up)) {
       if (!send_control_json(body)) {
-        manifest_ui_set_message("Volume change failed");
+        post_ui_message("Volume change failed");
       }
     }
     break;
@@ -1157,7 +1609,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id);
     unlock_state();
     if (!send_control_json(body)) {
-      manifest_ui_set_message("Play/pause failed");
+      post_ui_message("Play/pause failed");
     }
     break;
   case UI_INPUT_NEXT_TRACK:
@@ -1166,7 +1618,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id);
     unlock_state();
     if (!send_control_json(body)) {
-      manifest_ui_set_message("Next track failed");
+      post_ui_message("Next track failed");
     }
     break;
   case UI_INPUT_PREV_TRACK:
@@ -1175,7 +1627,7 @@ void bridge_client_handle_input(ui_input_event_t event) {
              s_state.cfg.zone_id);
     unlock_state();
     if (!send_control_json(body)) {
-      manifest_ui_set_message("Previous track failed");
+      post_ui_message("Previous track failed");
     }
     break;
   default:
@@ -1199,7 +1651,7 @@ void bridge_client_handle_volume_rotation(int ticks) {
   unlock_state();
 
   if (!is_operational) {
-    manifest_ui_set_message("Connecting...");
+    post_ui_message("Connecting...");
     return;
   }
 
@@ -1238,11 +1690,11 @@ void bridge_client_handle_volume_rotation(int ticks) {
   unlock_state();
 
   // Show volume overlay immediately with predicted value (optimistic UI)
-  manifest_ui_show_volume_change(predicted_vol, s_last_known_volume_step);
+  UI_SHOW_VOLUME_CHANGE(predicted_vol, s_last_known_volume_step);
 
   if (!udp_send_volume(predicted_vol)) {
     if (!send_control_json(body)) {
-      manifest_ui_set_message("Volume change failed");
+      post_ui_message("Volume change failed");
     }
   }
 }
@@ -1271,7 +1723,7 @@ void bridge_client_set_network_ready(bool ready) {
       LOGI("Device state: %s -> CONNECTED (network ready)",
            device_state_name(s_device_state));
       s_device_state = DEVICE_STATE_CONNECTED;
-      manifest_ui_set_network_status("Loading zones...");
+      UI_SET_NETWORK_STATUS("Loading zones...");
     }
     s_trigger_poll = true; // Trigger immediate poll when network becomes ready
   } else {
@@ -1286,7 +1738,7 @@ void bridge_client_set_network_ready(bool ready) {
     // Only set banner for RECONNECTING (was operational, lost network).
     // During BOOT, the WiFi event handler owns the banner (AP setup, etc).
     if (new_state == DEVICE_STATE_RECONNECTING) {
-      manifest_ui_set_network_status("Reconnecting...");
+      UI_SET_NETWORK_STATUS("Reconnecting...");
     }
   }
   unlock_state();
@@ -1294,10 +1746,12 @@ void bridge_client_set_network_ready(bool ready) {
 
 const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
                                           int width, int height,
-                                          int clip_radius) {
+                                          int clip_radius,
+                                          const char *format) {
   if (!url_buf || buf_len < 256) {
     return NULL;
   }
+  if (!format || !format[0]) format = "rgb565";
   lock_state();
   const char *bridge_base = s_state.cfg.bridge_base;
   const char *zone_id = s_state.cfg.zone_id;
@@ -1308,14 +1762,14 @@ const char *bridge_client_get_artwork_url(char *url_buf, size_t buf_len,
   if (clip_radius > 0) {
     snprintf(url_buf, buf_len,
              "%s/now_playing/"
-             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565&clip_"
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s&clip_"
              "radius=%d",
-             bridge_base, zone_id, width, height, clip_radius);
+             bridge_base, zone_id, width, height, format, clip_radius);
   } else {
     snprintf(url_buf, buf_len,
              "%s/now_playing/"
-             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=rgb565",
-             bridge_base, zone_id, width, height);
+             "image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s",
+             bridge_base, zone_id, width, height, format);
   }
   unlock_state();
   return url_buf;
@@ -1375,6 +1829,65 @@ bool bridge_client_is_bridge_mdns(void) {
   return from_mdns;
 }
 
+int bridge_client_get_zones(bridge_zone_t *out, int max) {
+  if (!out || max <= 0) return 0;
+  lock_state();
+  int count = s_state.zone_count < max ? s_state.zone_count : max;
+  for (int i = 0; i < count; i++) {
+    strncpy(out[i].id, s_state.zones[i].id, sizeof(out[i].id) - 1);
+    out[i].id[sizeof(out[i].id) - 1] = '\0';
+    strncpy(out[i].name, s_state.zones[i].name, sizeof(out[i].name) - 1);
+    out[i].name[sizeof(out[i].name) - 1] = '\0';
+  }
+  unlock_state();
+  return count;
+}
+
+bool bridge_client_get_current_zone_id(char *out, size_t len) {
+  if (!out || len == 0) return false;
+  lock_state();
+  strncpy(out, s_state.cfg.zone_id, len - 1);
+  out[len - 1] = '\0';
+  unlock_state();
+  return out[0] != '\0';
+}
+
+void bridge_client_set_zone(const char *zone_id) {
+  rk_cfg_t cfg_copy;
+  char label_copy[64];
+  bool found = false;
+
+  lock_state();
+  for (int i = 0; i < s_state.zone_count; i++) {
+    if (strcmp(s_state.zones[i].id, zone_id) == 0) {
+      strncpy(s_state.cfg.zone_id, zone_id,
+              sizeof(s_state.cfg.zone_id) - 1);
+      s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
+      strncpy(s_state.zone_label, s_state.zones[i].name,
+              sizeof(s_state.zone_label) - 1);
+      s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
+      s_state.zone_resolved = true;
+      s_trigger_poll = true;
+      s_force_artwork_refresh = true;
+      if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+        s_device_state = DEVICE_STATE_OPERATIONAL;
+      }
+      // Copy shared state before releasing lock
+      memcpy(&cfg_copy, &s_state.cfg, sizeof(cfg_copy));
+      strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
+      label_copy[sizeof(label_copy) - 1] = '\0';
+      found = true;
+      break;
+    }
+  }
+  unlock_state();
+
+  if (found) {
+    platform_storage_save(&cfg_copy);
+    post_ui_zone_name(label_copy);
+  }
+}
+
 // Config fetch and apply implementation
 
 // Data passed to UI thread for config application
@@ -1392,7 +1905,7 @@ static void apply_config_on_ui_thread(void *arg) {
 
   platform_display_set_rotation(data->rotation);
 
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !USE_EINK
   display_update_timeouts(&data->cfg, data->is_charging);
   display_update_power_settings(&data->cfg);
 #endif

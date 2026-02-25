@@ -8,10 +8,10 @@ ZONE_ID = sys.argv[3] if len(sys.argv) > 3 else ""
 
 MAGIC = 0x524B  # 'RK' LE
 
-# Build request: magic(2) + sha(20) + zone_id(32) = 54 bytes
+# Build request: magic(2) + sha(20) + zone_id(64) = 86 bytes
 req = struct.pack("<H", MAGIC)
 req += b"\x00" * 20  # empty SHA → always get full response
-req += ZONE_ID.encode("utf-8").ljust(32, b"\x00")[:32]
+req += ZONE_ID.encode("utf-8").ljust(64, b"\x00")[:64]
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(2.0)
