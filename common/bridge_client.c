@@ -103,6 +103,8 @@ static float s_last_known_volume =
 static float s_last_known_volume_min = -80.0f; // Cached volume min for clamping
 static float s_last_known_volume_max = 0.0f;   // Cached volume max for clamping
 static float s_last_known_volume_step = 1.0f;  // Cached volume step
+static interactions_t s_cached_interactions;    // Cached input-to-action mappings
+static bool s_has_interactions = false;         // True when manifest has interactions
 static bool s_bridge_verified =
     false; // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0; // Timestamp of last mDNS check
@@ -597,6 +599,13 @@ static void ui_manifest_cb(void *arg) {
   s_last_known_volume_min = m->fast.volume_min;
   s_last_known_volume_max = m->fast.volume_max;
   s_last_known_volume_step = m->fast.volume_step;
+
+  // Cache interactions for config-driven input dispatch
+  s_has_interactions = m->has_interactions;
+  if (m->has_interactions) {
+    memcpy(&s_cached_interactions, &m->interactions,
+           sizeof(s_cached_interactions));
+  }
 
   manifest_ui_update(m);
 
@@ -1167,6 +1176,100 @@ void bridge_client_handle_input(ui_input_event_t event) {
 
     manifest_ui_show_zone_picker();
     return;
+  }
+
+  // Config-driven input dispatch — if manifest has interactions, use them
+  if (s_has_interactions) {
+    // Map ui_input_event_t enum to string name
+    const char *input_name = NULL;
+    switch (event) {
+    case UI_INPUT_VOL_UP:
+      input_name = "encoder_cw";
+      break;
+    case UI_INPUT_VOL_DOWN:
+      input_name = "encoder_ccw";
+      break;
+    case UI_INPUT_PLAY_PAUSE:
+      input_name = "encoder_press";
+      break;
+    case UI_INPUT_MENU:
+      input_name = "encoder_long_press";
+      break;
+    case UI_INPUT_PREV_TRACK:
+      input_name = "button_prev";
+      break;
+    case UI_INPUT_NEXT_TRACK:
+      input_name = "button_next";
+      break;
+    case UI_INPUT_MUTE:
+      input_name = "button_mute";
+      break;
+    default:
+      break;
+    }
+
+    if (input_name) {
+      const char *action =
+          manifest_lookup_interaction(&s_cached_interactions, input_name);
+      if (action) {
+        char body[256];
+        if (strcmp(action, "volume_up") == 0) {
+          // Volume up via UDP fast-path (same as hardcoded VOL_UP)
+          lock_state();
+          float predicted_up =
+              s_last_known_volume + s_last_known_volume_step;
+          if (predicted_up > s_last_known_volume_max) {
+            predicted_up = s_last_known_volume_max;
+          }
+          s_last_known_volume = predicted_up;
+          snprintf(
+              body, sizeof(body),
+              "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
+              s_state.cfg.zone_id, predicted_up);
+          unlock_state();
+          manifest_ui_show_volume_change(predicted_up,
+                                         s_last_known_volume_step);
+          if (!udp_send_volume(predicted_up)) {
+            if (!send_control_json(body)) {
+              manifest_ui_set_message("Volume change failed");
+            }
+          }
+        } else if (strcmp(action, "volume_down") == 0) {
+          // Volume down via UDP fast-path (same as hardcoded VOL_DOWN)
+          lock_state();
+          float predicted_down =
+              s_last_known_volume - s_last_known_volume_step;
+          if (predicted_down < s_last_known_volume_min) {
+            predicted_down = s_last_known_volume_min;
+          }
+          s_last_known_volume = predicted_down;
+          snprintf(
+              body, sizeof(body),
+              "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
+              s_state.cfg.zone_id, predicted_down);
+          unlock_state();
+          manifest_ui_show_volume_change(predicted_down,
+                                         s_last_known_volume_step);
+          if (!udp_send_volume(predicted_down)) {
+            if (!send_control_json(body)) {
+              manifest_ui_set_message("Volume change failed");
+            }
+          }
+        } else {
+          // For all other actions, send as JSON to bridge
+          lock_state();
+          snprintf(body, sizeof(body),
+                   "{\"zone_id\":\"%s\",\"action\":\"%s\"}",
+                   s_state.cfg.zone_id, action);
+          unlock_state();
+          if (!send_control_json(body)) {
+            manifest_ui_set_message("Action failed");
+          }
+        }
+        return; // Handled via interactions — skip hardcoded switch
+      }
+      // If input not found in interactions, fall through to hardcoded
+    }
   }
 
   char body[256];
