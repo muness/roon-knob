@@ -14,7 +14,7 @@ Roon Knob has three components:
 
 ```
 roon-knob/
-├── idf_app/           # ESP32-S3 firmware (ESP-IDF)
+├── esp_dial/           # ESP32-S3 firmware (ESP-IDF)
 │   ├── main/          # Application code
 │   ├── components/    # Custom ESP-IDF components
 │   └── sdkconfig.defaults
@@ -67,7 +67,7 @@ The simulator expects the bridge at `http://127.0.0.1:8088`. Run the bridge from
 export IDF_PATH=~/esp/esp-idf
 source "$IDF_PATH/export.sh"
 
-cd idf_app
+cd esp_dial
 idf.py build
 idf.py flash -p /dev/cu.usbmodem*  # Adjust port for your system
 idf.py monitor -p /dev/cu.usbmodem*  # View logs (Ctrl+] to exit)

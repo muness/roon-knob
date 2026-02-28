@@ -5,7 +5,7 @@ SSID="${SSID:-YourWiFi}"
 PASS="${PASS:-YourPass}"
 BRIDGE_BASE="${BRIDGE_BASE:-http://192.168.1.2:8088}"
 
-cd "$(dirname "$0")/../idf_app"
+cd "$(dirname "$0")/../esp_dial"
 
 # Write credentials to git-ignored sdkconfig.local
 cat > sdkconfig.local <<EOF

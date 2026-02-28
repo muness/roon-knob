@@ -120,12 +120,12 @@ git push origin v1.X.Y
 
 The GitHub Actions workflow (`docker.yml`) automatically:
 - Extracts version from the tag name
-- Injects it into `idf_app/CMakeLists.txt` (ESP32-S3 firmware)
+- Injects it into `esp_dial/CMakeLists.txt` (ESP32-S3 firmware)
 - Builds firmware and creates GitHub release with binaries
 - Deploys web flasher to GitHub Pages
 
 **Version locations (DO NOT EDIT MANUALLY):**
-- `idf_app/CMakeLists.txt` → `PROJECT_VER` (injected by CI)
+- `esp_dial/CMakeLists.txt` → `PROJECT_VER` (injected by CI)
 
 **Bridge:** [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)
 

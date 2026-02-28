@@ -34,7 +34,7 @@ The codebase uses a platform abstraction layer:
           ▼                                             ▼
 ┌─────────────────────────┐               ┌─────────────────────────┐
 │   ESP-IDF Implementation │               │   PC Simulator          │
-│   (idf_app/main/)        │               │   (pc_sim/)             │
+│   (esp_dial/main/)        │               │   (pc_sim/)             │
 │                          │               │                         │
 │   platform_display_idf.c │               │   SDL2 + LVGL           │
 │   platform_input_idf.c   │               │   platform_input_pc.c   │
@@ -143,7 +143,7 @@ To port Roon Knob to a different ESP32-S3 display board:
 
 ### Files to Modify
 
-#### 1. Display Driver (`idf_app/main/platform_display_idf.c`)
+#### 1. Display Driver (`esp_dial/main/platform_display_idf.c`)
 
 **Pin definitions** (lines 43-50):
 ```c
@@ -168,21 +168,21 @@ To port Roon Knob to a different ESP32-S3 display board:
 - Rewrite the SPI bus initialization
 - Use appropriate `esp_lcd_panel_io_*` functions
 
-#### 2. Touch Controller (`idf_app/components/lcd_touch_bsp/`)
+#### 2. Touch Controller (`esp_dial/components/lcd_touch_bsp/`)
 
 If not using CST816:
 1. Change I2C address in `settings.h`
 2. Rewrite `tpGetCoordinates()` for your touch IC's register layout
 3. Adjust touch callback in `platform_display_idf.c`
 
-#### 3. I2C Pins (`idf_app/components/i2c_bsp/settings.h`)
+#### 3. I2C Pins (`esp_dial/components/i2c_bsp/settings.h`)
 
 ```c
 #define ESP32_SCL_NUM (GPIO_NUM_YOUR_SCL)
 #define ESP32_SDA_NUM (GPIO_NUM_YOUR_SDA)
 ```
 
-#### 4. Rotary Encoder (`idf_app/main/platform_input_idf.c`)
+#### 4. Rotary Encoder (`esp_dial/main/platform_input_idf.c`)
 
 If your board has different encoder pins:
 ```c
@@ -192,7 +192,7 @@ If your board has different encoder pins:
 
 If no encoder, stub out `platform_input_init()` or implement alternative input.
 
-#### 5. Battery Monitoring (`idf_app/main/battery.c`)
+#### 5. Battery Monitoring (`esp_dial/main/battery.c`)
 
 If different ADC channel or voltage divider:
 ```c
@@ -202,7 +202,7 @@ If different ADC channel or voltage divider:
 
 If no battery, return dummy values or disable.
 
-#### 6. Backlight (`idf_app/main/display_sleep.c`)
+#### 6. Backlight (`esp_dial/main/display_sleep.c`)
 
 ```c
 #define PIN_NUM_BK_LIGHT    ((gpio_num_t)YOUR_BACKLIGHT_PIN)

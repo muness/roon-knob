@@ -293,5 +293,5 @@ void on_zone_selected(const char *zone_id) {
 |------|---------|
 | `common/rk_cfg.h` | Configuration structure definition |
 | `common/platform/platform_storage.h` | Platform-agnostic API |
-| `idf_app/main/platform_storage_idf.c` | ESP-IDF NVS implementation |
+| `esp_dial/main/platform_storage_idf.c` | ESP-IDF NVS implementation |
 | `pc_sim/platform_storage_pc.c` | PC simulator (JSON file storage) |

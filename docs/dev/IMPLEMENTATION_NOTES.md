@@ -41,7 +41,7 @@ The firmware uses a layered architecture with platform abstraction:
 
 ### Rotary Encoder (ESP32-S3)
 
-**File:** `idf_app/main/platform_input_idf.c`
+**File:** `esp_dial/main/platform_input_idf.c`
 
 **Implementation:** Software quadrature decoding with polling
 
@@ -74,7 +74,7 @@ ui_dispatch_input(UI_INPUT_VOL_UP/DOWN)
 
 ### Touch Input (ESP32-S3)
 
-**File:** `idf_app/main/platform_display_idf.c`
+**File:** `esp_dial/main/platform_display_idf.c`
 
 **Implementation:** CST816D via I2C, integrated with LVGL
 
@@ -116,7 +116,7 @@ typedef enum {
 
 ### ESP32-S3 Hardware Display
 
-**File:** `idf_app/main/platform_display_idf.c`
+**File:** `esp_dial/main/platform_display_idf.c`
 
 | Parameter | Value |
 |-----------|-------|
@@ -206,7 +206,7 @@ Uses SDL2 for rendering:
 
 ### ESP32-S3
 ```bash
-cd idf_app
+cd esp_dial
 idf.py set-target esp32s3
 idf.py build
 idf.py -p PORT flash monitor
@@ -242,12 +242,12 @@ The `platform_*.h` headers define interfaces implemented differently per platfor
 - `common/ui.h` - UI interface and event types
 
 ### ESP32-S3 Platform
-- `idf_app/main/platform_display_idf.c` - Display + touch
-- `idf_app/main/platform_input_idf.c` - Rotary encoder
-- `idf_app/main/platform_battery_idf.c` - Battery ADC
-- `idf_app/main/platform_http_idf.c` - HTTP client
-- `idf_app/main/platform_storage_idf.c` - NVS storage
-- `idf_app/main/platform_wifi_idf.c` - WiFi management
+- `esp_dial/main/platform_display_idf.c` - Display + touch
+- `esp_dial/main/platform_input_idf.c` - Rotary encoder
+- `esp_dial/main/platform_battery_idf.c` - Battery ADC
+- `esp_dial/main/platform_http_idf.c` - HTTP client
+- `esp_dial/main/platform_storage_idf.c` - NVS storage
+- `esp_dial/main/platform_wifi_idf.c` - WiFi management
 
 ### PC Simulator
 - `pc_sim/main_pc.c` - SDL setup and main loop

@@ -7,14 +7,14 @@ sdkconfig
 sdkconfig.old
 sdkconfig.local
 idf_*.log
-idf_app/dependencies.lock
+esp_dial/dependencies.lock
 
 # Node modules
 
 # Beads db
 .beads/
-idf_app/managed_components/*
-idf_app/sdkconfig.override
+esp_dial/managed_components/*
+esp_dial/sdkconfig.override
 .agneto/
 .claude/
 .superego/

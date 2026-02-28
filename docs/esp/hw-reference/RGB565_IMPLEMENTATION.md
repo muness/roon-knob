@@ -46,7 +46,7 @@ Firmware now receives artwork as raw RGB565 data from the bridge instead of JPEG
 - **URL construction:** `common/bridge_client.c:1091`
 - **RGB565 handler:** `common/ui_jpeg.c:165-205` (`ui_rgb565_from_buffer`)
 - **Size validation:** `common/ui.c:1241-1247`
-- **Byte swap:** `idf_app/main/platform_display_idf.c:329-333`
+- **Byte swap:** `esp_dial/main/platform_display_idf.c:329-333`
 
 ## Byte Order
 

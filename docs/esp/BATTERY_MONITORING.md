@@ -237,5 +237,5 @@ The display sleep feature helps conserve battery when idle.
 
 | File | Purpose |
 |------|---------|
-| `idf_app/main/battery.c` | ADC reading, voltage calculation, curve lookup |
-| `idf_app/main/battery.h` | Public API |
+| `esp_dial/main/battery.c` | ADC reading, voltage calculation, curve lookup |
+| `esp_dial/main/battery.h` | Public API |

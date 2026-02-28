@@ -150,7 +150,7 @@ Simply running `idf.py reconfigure` or `idf.py fullclean` is NOT sufficient—th
 ### Via menuconfig (Interactive)
 
 ```bash
-cd idf_app
+cd esp_dial
 idf.py menuconfig
 # Navigate menus, change values
 # Save and exit
@@ -159,7 +159,7 @@ idf.py build
 
 ### Via sdkconfig.defaults (Persistent)
 
-Edit `idf_app/sdkconfig.defaults` and rebuild:
+Edit `esp_dial/sdkconfig.defaults` and rebuild:
 
 ```bash
 # Add or modify options
@@ -258,6 +258,6 @@ CONFIG_MY_FEATURE_TIMEOUT=10
 
 | File | Purpose |
 |------|---------|
-| `idf_app/main/Kconfig.projbuild` | Project-specific option definitions |
-| `idf_app/sdkconfig.defaults` | Default values for all builds |
-| `idf_app/sdkconfig` | Generated config (don't commit) |
+| `esp_dial/main/Kconfig.projbuild` | Project-specific option definitions |
+| `esp_dial/sdkconfig.defaults` | Default values for all builds |
+| `esp_dial/sdkconfig` | Generated config (don't commit) |

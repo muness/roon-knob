@@ -23,7 +23,7 @@ Code path analysis for test scripts, identifying potential regressions.
 
 **Fix:** Removed duplicate activation in `main_idf.c:427-436`. Now relies solely on the callback-triggered activation.
 
-**File:** `idf_app/main/main_idf.c:427-436`
+**File:** `esp_dial/main/main_idf.c:427-436`
 
 ---
 
@@ -41,7 +41,7 @@ Code path analysis for test scripts, identifying potential regressions.
 
 **Mitigation:** Could add cleanup call in mode_change_callback when exiting BT mode.
 
-**File:** `idf_app/main/esp32_comm.c:463-477`
+**File:** `esp_dial/main/esp32_comm.c:463-477`
 
 ---
 
@@ -66,7 +66,7 @@ Code path analysis for test scripts, identifying potential regressions.
 
 **Mitigation:** Could use `httpd_resp_send()` return value and wait for ACK.
 
-**File:** `idf_app/main/captive_portal.c:191-198`
+**File:** `esp_dial/main/captive_portal.c:191-198`
 
 ---
 
@@ -76,7 +76,7 @@ Code path analysis for test scripts, identifying potential regressions.
 
 **Impact:** Very unlikely - ESP32 chip stops sending when deactivated, and buffers empty during WiFi usage time.
 
-**File:** `idf_app/main/esp32_comm.c:74-80`
+**File:** `esp_dial/main/esp32_comm.c:74-80`
 
 ---
 

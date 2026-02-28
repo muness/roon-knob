@@ -268,6 +268,6 @@ esp_wifi_set_max_tx_power(44);  // 11 dBm instead of 20 dBm (44 = 0.25dBm units)
 
 ## Related Files
 
-- `idf_app/main/platform_display_idf.c` - Backlight control (GPIO47)
+- `esp_dial/main/platform_display_idf.c` - Backlight control (GPIO47)
 - `docs/references/HARDWARE_PINS.md` - GPIO assignments
-- Future: `idf_app/main/battery.c` - Battery monitoring driver
+- Future: `esp_dial/main/battery.c` - Battery monitoring driver

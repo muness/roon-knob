@@ -119,6 +119,6 @@ Call it from `ui_init()` to verify colors are correct, then remove the call.
 
 ## Implementation Files
 
-- `idf_app/main/platform_display_idf.c` - Flush callback with byte swap
+- `esp_dial/main/platform_display_idf.c` - Flush callback with byte swap
 - `common/ui_jpeg.c` - JPEG decoder configuration
 - `common/ui.c` - Test pattern for debugging

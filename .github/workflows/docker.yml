@@ -27,22 +27,22 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
           else
-            VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+            VERSION=$(grep 'set(PROJECT_VER' esp_dial/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building firmware version: $VERSION"
 
       - name: Inject version into CMakeLists.txt
         run: |
-          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.version.outputs.version }}")/' idf_app/CMakeLists.txt
-          grep PROJECT_VER idf_app/CMakeLists.txt
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.version.outputs.version }}")/' esp_dial/CMakeLists.txt
+          grep PROJECT_VER esp_dial/CMakeLists.txt
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: release-v5.5
           target: esp32s3
-          path: idf_app
+          path: esp_dial
 
       - name: Create merged flash image for web flashing
         run: |
@@ -50,10 +50,10 @@ jobs:
           esptool --chip esp32s3 merge-bin \
             -o roon_knob_merged.bin \
             --flash-mode dio --flash-freq 80m --flash-size 16MB \
-            0x0 idf_app/build/bootloader/bootloader.bin \
-            0x8000 idf_app/build/partition_table/partition-table.bin \
-            0xd000 idf_app/build/ota_data_initial.bin \
-            0x10000 idf_app/build/roon_knob.bin
+            0x0 esp_dial/build/bootloader/bootloader.bin \
+            0x8000 esp_dial/build/partition_table/partition-table.bin \
+            0xd000 esp_dial/build/ota_data_initial.bin \
+            0x10000 esp_dial/build/roon_knob.bin
           ls -la *.bin
 
       - name: Upload ESP32-S3 artifact
@@ -61,7 +61,7 @@ jobs:
         with:
           name: esp32s3-firmware
           path: |
-            idf_app/build/roon_knob.bin
+            esp_dial/build/roon_knob.bin
             roon_knob_merged.bin
           retention-days: 30
 
@@ -122,7 +122,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin release-assets/
+          cp esp32s3-artifacts/esp_dial/build/roon_knob.bin release-assets/
           cp esp32s3-artifacts/roon_knob_merged.bin release-assets/
           ls -la release-assets/
 

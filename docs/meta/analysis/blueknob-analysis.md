@@ -562,7 +562,7 @@ void check_power_source_and_adjust(void) {
 **This Project:**
 - `docs/reference/hardware/battery.md` - Hardware specifications
 - `docs/reference/hardware/board.md` - GPIO pin assignments
-- `idf_app/main/battery.c` - Current battery driver implementation
+- `esp_dial/main/battery.c` - Current battery driver implementation
 
 **External Projects:**
 - [BlueKnob GitHub](https://github.com/joshuacant/BlueKnob)

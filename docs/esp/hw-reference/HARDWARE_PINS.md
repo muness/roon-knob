@@ -84,6 +84,6 @@ Be cautious with these ESP32-S3 pins:
 
 ## Implementation Files
 
-- `idf_app/main/platform_display_idf.c` - Display pin definitions and SH8601 init
-- `idf_app/main/platform_input_idf.c` - Encoder GPIO and polling
-- `idf_app/main/platform_battery_idf.c` - Battery ADC configuration
+- `esp_dial/main/platform_display_idf.c` - Display pin definitions and SH8601 init
+- `esp_dial/main/platform_input_idf.c` - Encoder GPIO and polling
+- `esp_dial/main/platform_battery_idf.c` - Battery ADC configuration

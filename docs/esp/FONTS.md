@@ -88,7 +88,7 @@ This covers most music metadata including:
 
 ## Generating Fonts
 
-Run from `idf_app/` directory:
+Run from `esp_dial/` directory:
 
 ```bash
 ./scripts/generate_fonts.sh
@@ -132,13 +132,13 @@ This maintains the stability benefits while allowing extended language support.
 
 ## Files
 
-- `idf_app/scripts/generate_fonts.sh` - Font generation script
-- `idf_app/main/fonts/*.c` - Generated bitmap font data
-- `idf_app/main/font_manager.c` - Font access API
-- `idf_app/main/font_manager.h` - Font API and icon definitions
-- `idf_app/spiffs_data/Lato-Regular.ttf` - Source TTF for metadata font
-- `idf_app/spiffs_data/NotoSans-Regular.ttf` - Source TTF for content font
-- `idf_app/spiffs_data/MaterialIcons-Regular.ttf` - Source TTF for icons
+- `esp_dial/scripts/generate_fonts.sh` - Font generation script
+- `esp_dial/main/fonts/*.c` - Generated bitmap font data
+- `esp_dial/main/font_manager.c` - Font access API
+- `esp_dial/main/font_manager.h` - Font API and icon definitions
+- `esp_dial/spiffs_data/Lato-Regular.ttf` - Source TTF for metadata font
+- `esp_dial/spiffs_data/NotoSans-Regular.ttf` - Source TTF for content font
+- `esp_dial/spiffs_data/MaterialIcons-Regular.ttf` - Source TTF for icons
 
 ## Memory Usage
 

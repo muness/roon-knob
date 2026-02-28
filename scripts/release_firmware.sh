@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-CMAKE_FILE="$ROOT_DIR/idf_app/CMakeLists.txt"
+CMAKE_FILE="$ROOT_DIR/esp_dial/CMakeLists.txt"
 
 show_usage() {
     CURRENT=$(grep 'set(PROJECT_VER' "$CMAKE_FILE" | sed 's/.*"\(.*\)".*/\1/')

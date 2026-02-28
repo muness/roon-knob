@@ -6,7 +6,7 @@ Over-the-air firmware updates allow the Roon Knob to download and install new fi
 
 The OTA system consists of:
 
-- **Device firmware** (`idf_app/main/ota_update.c`) - checks for updates, downloads, and installs
+- **Device firmware** (`esp_dial/main/ota_update.c`) - checks for updates, downloads, and installs
 - **Bridge server** ([unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)) - serves version info and firmware binary
 - **CI/CD pipeline** (`.github/workflows/docker.yml`) - builds and packages firmware on release
 
@@ -24,7 +24,7 @@ The ESP32-S3 uses a dual-OTA partition scheme for safe updates:
 | ota_1     | app     | 0x410000   | 2 MB    | OTA slot B |
 | spiffs    | data    | 0x610000   | ~10 MB  | File storage |
 
-Source: `idf_app/partitions.csv`
+Source: `esp_dial/partitions.csv`
 
 The ESP-IDF OTA APIs automatically alternate between `ota_0` and `ota_1`, ensuring the device can always roll back if an update fails validation.
 
@@ -277,7 +277,7 @@ Error details are stored in `ota_info_t.error_msg` (64 characters max):
 
 This script:
 
-1. Updates `PROJECT_VER` in `idf_app/CMakeLists.txt`
+1. Updates `PROJECT_VER` in `esp_dial/CMakeLists.txt`
 2. Commits the version change
 3. Creates and pushes git tag `v1.2.13`
 

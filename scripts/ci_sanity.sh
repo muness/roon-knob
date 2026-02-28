@@ -4,7 +4,7 @@ set -euo pipefail
 cmake -S pc_sim -B build_pc_ci
 cmake --build build_pc_ci
 
-pushd idf_app >/dev/null
+pushd esp_dial >/dev/null
 idf.py build
 popd >/dev/null
 

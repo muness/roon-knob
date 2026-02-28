@@ -213,7 +213,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 - Router UI: Should display custom hostname
 - Packet capture: DHCP REQUEST should contain hostname in option 12
 
-**See:** `idf_app/main/wifi_manager.c:314-322` for implementation
+**See:** `esp_dial/main/wifi_manager.c:314-322` for implementation
 
 **Status:** Workaround implemented, testing in progress against UniFi Controller
 
@@ -439,8 +439,8 @@ If this shows correct name but router doesn't, it's a router display issue (not 
 ## Complete Working Example (Roon Knob Implementation)
 
 **Files:**
-- `idf_app/main/wifi_manager.c` - Hostname generation and DHCP setup
-- `idf_app/main/platform_mdns_idf.c` - mDNS configuration
+- `esp_dial/main/wifi_manager.c` - Hostname generation and DHCP setup
+- `esp_dial/main/platform_mdns_idf.c` - mDNS configuration
 - `common/rk_cfg.h` - Config structure with `knob_name` field
 
 **Hostname Generation (`wifi_manager.c`):**
@@ -587,10 +587,10 @@ When hostname doesn't appear in router:
 ## Roon Knob Implementation
 
 See working implementation:
-- `idf_app/main/wifi_manager.c:99-165` - Hostname generation with sanitization
-- `idf_app/main/wifi_manager.c:410-421` - DHCP hostname setup (STA)
-- `idf_app/main/wifi_manager.c:363-372` - DHCP hostname setup (AP)
-- `idf_app/main/wifi_manager.c:338-344` - Hostname re-assertion after IP
-- `idf_app/main/platform_mdns_idf.c:35-49` - mDNS configuration
+- `esp_dial/main/wifi_manager.c:99-165` - Hostname generation with sanitization
+- `esp_dial/main/wifi_manager.c:410-421` - DHCP hostname setup (STA)
+- `esp_dial/main/wifi_manager.c:363-372` - DHCP hostname setup (AP)
+- `esp_dial/main/wifi_manager.c:338-344` - Hostname re-assertion after IP
+- `esp_dial/main/platform_mdns_idf.c:35-49` - mDNS configuration
 
 **GitHub PR:** https://github.com/muness/roon-knob/pull/68

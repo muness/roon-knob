@@ -30,7 +30,7 @@ idf.py -p /dev/cu.usbserial-XXX flash monitor
 
 ### ESP32-S3 (Display chip):
 ```bash
-cd idf_app
+cd esp_dial
 source ~/esp/esp-idf/export.sh
 idf.py build
 idf.py -p /dev/cu.usbmodem-XXX flash monitor

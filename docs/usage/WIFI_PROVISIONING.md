@@ -255,7 +255,7 @@ See [NVS_STORAGE.md](../dev/NVS_STORAGE.md) for details on persistence.
 
 ## Kconfig Options
 
-Build-time defaults in `idf_app/main/Kconfig.projbuild`:
+Build-time defaults in `esp_dial/main/Kconfig.projbuild`:
 
 | Option | Default | Description |
 |--------|---------|-------------|

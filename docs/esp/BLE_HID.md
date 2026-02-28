@@ -38,8 +38,8 @@ When Bluetooth mode is selected from the zone picker, the knob:
 
 Uses a custom BLE HID profile based on [BlueKnob](https://github.com/peterramsing/BlueKnob)'s proven implementation:
 
-- `idf_app/components/ble_hid/` - HID device profile (GATT services)
-- `idf_app/main/ble_hid_client.c` - High-level API and state management
+- `esp_dial/components/ble_hid/` - HID device profile (GATT services)
+- `esp_dial/main/ble_hid_client.c` - High-level API and state management
 
 ### HID Report Descriptor
 
@@ -101,7 +101,7 @@ On boot, the saved mode is restored. If Bluetooth was selected, WiFi initializat
 
 ## Kconfig Options
 
-In `idf_app/main/Kconfig.projbuild`:
+In `esp_dial/main/Kconfig.projbuild`:
 
 ```
 CONFIG_ROON_KNOB_BLE_HID_ENABLED=y   # Enable BLE HID support
@@ -141,7 +141,7 @@ Key log tags:
 
 The `ble_hid` component is self-contained and can be copied to other ESP-IDF projects:
 
-1. **Copy the component**: `idf_app/components/ble_hid/` → your project's `components/`
+1. **Copy the component**: `esp_dial/components/ble_hid/` → your project's `components/`
 
 2. **Add to CMakeLists.txt**:
    ```cmake

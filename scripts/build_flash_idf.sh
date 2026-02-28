@@ -9,7 +9,7 @@ fi
 PORT=${1:-/dev/tty.usbmodemXYZ}
 TARGET=esp32s3
 
-pushd idf_app >/dev/null
+pushd esp_dial >/dev/null
 idf.py set-target "$TARGET"
 idf.py -p "$PORT" build flash monitor
 popd >/dev/null

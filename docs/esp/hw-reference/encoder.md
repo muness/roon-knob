@@ -34,6 +34,6 @@ Testing
 - Confirm direction matches UI expectations; swap A/B if needed.
 
 References
-- Implementation: idf_app/main/platform_input_idf.c (ENCODER_GPIO_A/B, debounce, polling).
+- Implementation: esp_dial/main/platform_input_idf.c (ENCODER_GPIO_A/B, debounce, polling).
 - Pinout: docs/references/HARDWARE_PINS.md.
 
