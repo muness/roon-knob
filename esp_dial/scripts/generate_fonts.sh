@@ -27,12 +27,12 @@ echo "Generating bitmap fonts..."
 # - Latin Extended-B: 0x180-0x24F (Additional Latin) - ƒ ơ ư ǎ ǐ ǒ ǔ ș ț
 # - Greek and Coptic: 0x370-0x3FF (Greek) - α β γ δ ε ζ η θ ι κ λ μ
 # - Cyrillic: 0x400-0x4FF (Russian, Ukrainian, etc.) - А Б В Г Д Е Ж З
-# - General Punctuation: 0x2010-0x203A (Typography) - em dash, en dash, curly quotes,
-#   primes, ellipsis, angle quotes. Music metadata from Roon/Tidal/Qobuz uses these extensively.
-#   0x2018-201F: all curly/smart quote variants (' ' ‚ ‛ " " „ ‟)
-#   0x2032-2033: prime ′ and double prime ″ (feet/inches, minutes/seconds)
-#   0x2039-203A: single angle quotes ‹ ›
-TEXT_RANGES="0x20-0x7F,0xA0-0xFF,0x100-0x17F,0x180-0x24F,0x370-0x3FF,0x400-0x4FF,0x2010-0x203A"
+# - General Punctuation: split ranges to skip bidi controls (Typography)
+#   0x2010-0x2027: dashes (2010-2015), curly quotes (2018-201F), ellipsis (2026-2027)
+#   0x2032-0x2033: prime ′ and double prime ″ (feet/inches, minutes/seconds)
+#   0x2039-0x203A: single angle quotes ‹ ›
+#   Skipped: bidi controls 202A-202E (cause rendering artifacts), per-mille 2030-2031, daggers 2020-2021
+TEXT_RANGES="0x20-0x7F,0xA0-0xFF,0x100-0x17F,0x180-0x24F,0x370-0x3FF,0x400-0x4FF,0x2010-0x2027,0x2032-0x2033,0x2039-0x203A"
 
 # Material Icons codepoint ranges (using MaterialIcons-Regular.ttf)
 # Core icons needed for the UI:

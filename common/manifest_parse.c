@@ -258,7 +258,7 @@ static void parse_action(const cJSON *obj, manifest_action_t *out) {
         safe_strcpy(out->action, action->valuestring, MAX_ACTION_LEN);
     }
     const cJSON *params = cJSON_GetObjectItem(obj, "params");
-    if (params && cJSON_IsObject(params)) {
+    if (params && !cJSON_IsNull(params)) {
         out->has_params = true;
         char *json_str = cJSON_PrintUnformatted(params);
         if (json_str) {
