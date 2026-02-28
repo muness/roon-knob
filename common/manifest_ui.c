@@ -136,6 +136,11 @@ static struct {
   lv_obj_t *btn_play;
   lv_obj_t *btn_next;
   lv_obj_t *btn_mute;     // Mute toggle — hidden by default, shown via controls[]
+  // Label objects for dynamic icon updates (command-pattern elements)
+  lv_obj_t *lbl_prev;
+  lv_obj_t *lbl_next;
+  lv_obj_t *lbl_mute;
+  lv_obj_t *controls_container; // Flex row holding all transport buttons
 } s_media;
 
 /// LVGL widget pointers — shared chrome (header, status).
@@ -224,6 +229,44 @@ static void animate_arc(lv_obj_t *arc, int from, int to, int duration_ms,
 
 // Input callback
 static ui_input_cb_t s_input_cb = NULL;
+
+// Track which element index is mapped to each physical button during rendering.
+// -1 means no element is mapped to that button slot.
+static int s_btn_prev_element_idx = -1;
+static int s_btn_play_element_idx = -1;
+static int s_btn_next_element_idx = -1;
+static int s_btn_mute_element_idx = -1;
+
+/// Map a Material Icons name to its UTF-8 font character.
+/// Returns NULL if the icon is not in the firmware font.
+static const char *icon_name_to_char(const char *name) {
+    if (!name || !name[0]) return NULL;
+    // Media transport
+    if (strcmp(name, "play_arrow") == 0)    return ICON_PLAY;
+    if (strcmp(name, "pause") == 0)         return ICON_PAUSE;
+    if (strcmp(name, "stop") == 0)          return ICON_STOP;
+    if (strcmp(name, "skip_previous") == 0) return ICON_SKIP_PREV;
+    if (strcmp(name, "skip_next") == 0)     return ICON_SKIP_NEXT;
+    if (strcmp(name, "shuffle") == 0)       return ICON_SHUFFLE;
+    if (strcmp(name, "repeat") == 0)        return ICON_REPEAT;
+    if (strcmp(name, "repeat_one") == 0)    return ICON_REPEAT_ONE;
+    // Seek / skip
+    if (strcmp(name, "forward_5") == 0)     return ICON_FORWARD_5;
+    if (strcmp(name, "forward_10") == 0)    return ICON_FORWARD_10;
+    if (strcmp(name, "forward_30") == 0)    return ICON_FORWARD_30;
+    if (strcmp(name, "replay_5") == 0)      return ICON_REPLAY_5;
+    if (strcmp(name, "replay_10") == 0)     return ICON_REPLAY_10;
+    if (strcmp(name, "replay_30") == 0)     return ICON_REPLAY_30;
+    // Volume
+    if (strcmp(name, "volume_up") == 0)     return ICON_VOLUME_UP;
+    if (strcmp(name, "volume_down") == 0)   return ICON_VOLUME_DOWN;
+    if (strcmp(name, "volume_mute") == 0)   return ICON_VOLUME_MUTE;
+    if (strcmp(name, "volume_off") == 0)    return ICON_VOLUME_OFF;
+    // Status
+    if (strcmp(name, "music_note") == 0)    return ICON_MUSIC_NOTE;
+    if (strcmp(name, "settings") == 0)      return ICON_SETTINGS;
+    return NULL;
+}
 
 // ── Forward declarations ───────────────────────────────────────────────────
 
@@ -709,16 +752,16 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
                                 LV_STATE_PRESSED);
   lv_obj_set_style_radius(s_media.btn_prev, LV_RADIUS_CIRCLE, 0);
-  lv_obj_t *prev_lbl = lv_label_create(s_media.btn_prev);
+  s_media.lbl_prev = lv_label_create(s_media.btn_prev);
 #if !TARGET_PC
-  lv_label_set_text(prev_lbl, ICON_SKIP_PREV);
-  lv_obj_set_style_text_font(prev_lbl, font_icon_normal(), 0);
+  lv_label_set_text(s_media.lbl_prev, ICON_SKIP_PREV);
+  lv_obj_set_style_text_font(s_media.lbl_prev, font_icon_normal(), 0);
 #else
-  lv_label_set_text(prev_lbl, LV_SYMBOL_PREV);
-  lv_obj_set_style_text_font(prev_lbl, &lv_font_montserrat_28, 0);
+  lv_label_set_text(s_media.lbl_prev, LV_SYMBOL_PREV);
+  lv_obj_set_style_text_font(s_media.lbl_prev, &lv_font_montserrat_28, 0);
 #endif
-  lv_obj_set_style_text_color(prev_lbl, COLOR_TEXT_PRIMARY, 0);
-  lv_obj_center(prev_lbl);
+  lv_obj_set_style_text_color(s_media.lbl_prev, COLOR_TEXT_PRIMARY, 0);
+  lv_obj_center(s_media.lbl_prev);
 
   // Play/Pause button
   s_media.btn_play = lv_btn_create(controls);
@@ -762,16 +805,16 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
                                 LV_STATE_PRESSED);
   lv_obj_set_style_radius(s_media.btn_next, LV_RADIUS_CIRCLE, 0);
-  lv_obj_t *next_lbl = lv_label_create(s_media.btn_next);
+  s_media.lbl_next = lv_label_create(s_media.btn_next);
 #if !TARGET_PC
-  lv_label_set_text(next_lbl, ICON_SKIP_NEXT);
-  lv_obj_set_style_text_font(next_lbl, font_icon_normal(), 0);
+  lv_label_set_text(s_media.lbl_next, ICON_SKIP_NEXT);
+  lv_obj_set_style_text_font(s_media.lbl_next, font_icon_normal(), 0);
 #else
-  lv_label_set_text(next_lbl, LV_SYMBOL_NEXT);
-  lv_obj_set_style_text_font(next_lbl, &lv_font_montserrat_28, 0);
+  lv_label_set_text(s_media.lbl_next, LV_SYMBOL_NEXT);
+  lv_obj_set_style_text_font(s_media.lbl_next, &lv_font_montserrat_28, 0);
 #endif
-  lv_obj_set_style_text_color(next_lbl, COLOR_TEXT_PRIMARY, 0);
-  lv_obj_center(next_lbl);
+  lv_obj_set_style_text_color(s_media.lbl_next, COLOR_TEXT_PRIMARY, 0);
+  lv_obj_center(s_media.lbl_next);
 
   // Mute button — hidden by default, shown when manifest controls[] includes "mute"
   s_media.btn_mute = lv_btn_create(controls);
@@ -788,16 +831,16 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_border_color(s_media.btn_mute, COLOR_BTN_BORDER_HL,
                                 LV_STATE_PRESSED);
   lv_obj_set_style_radius(s_media.btn_mute, LV_RADIUS_CIRCLE, 0);
-  lv_obj_t *mute_lbl = lv_label_create(s_media.btn_mute);
+  s_media.lbl_mute = lv_label_create(s_media.btn_mute);
 #if !TARGET_PC
-  lv_label_set_text(mute_lbl, ICON_VOLUME_MUTE);
-  lv_obj_set_style_text_font(mute_lbl, font_icon_normal(), 0);
+  lv_label_set_text(s_media.lbl_mute, ICON_VOLUME_MUTE);
+  lv_obj_set_style_text_font(s_media.lbl_mute, font_icon_normal(), 0);
 #else
-  lv_label_set_text(mute_lbl, LV_SYMBOL_MUTE);
-  lv_obj_set_style_text_font(mute_lbl, &lv_font_montserrat_28, 0);
+  lv_label_set_text(s_media.lbl_mute, LV_SYMBOL_MUTE);
+  lv_obj_set_style_text_font(s_media.lbl_mute, &lv_font_montserrat_28, 0);
 #endif
-  lv_obj_set_style_text_color(mute_lbl, COLOR_TEXT_PRIMARY, 0);
-  lv_obj_center(mute_lbl);
+  lv_obj_set_style_text_color(s_media.lbl_mute, COLOR_TEXT_PRIMARY, 0);
+  lv_obj_center(s_media.lbl_mute);
   lv_obj_add_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN); // Hidden by default
 }
 
@@ -1052,10 +1095,16 @@ static void update_media_fast(const manifest_fast_t *fast) {
     lv_obj_add_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   }
 
-  // Play/pause icon
+  // Play/pause icon — only update in legacy mode (no element assigned to play slot).
+  // When an element is assigned, the element rendering loop in manifest_ui_update
+  // already sets the correct icon (bridge regenerates elements with the right icon
+  // on play/pause state transitions). Updating here would clobber the element icon
+  // every fast poll, which runs more frequently than full manifest re-parses.
 #if !TARGET_PC
-  lv_label_set_text(s_media.play_icon,
-                    fast->is_playing ? ICON_PAUSE : ICON_PLAY);
+  if (s_btn_play_element_idx < 0) {
+    lv_label_set_text(s_media.play_icon,
+                      fast->is_playing ? ICON_PAUSE : ICON_PLAY);
+  }
 #else
   lv_label_set_text(s_media.play_icon,
                     fast->is_playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
@@ -1348,8 +1397,39 @@ void manifest_ui_update(const manifest_t *manifest) {
     for (int i = 0; i < manifest->screen_count; i++) {
       const manifest_screen_t *scr = &manifest->screens[i];
       if (scr->type == SCREEN_TYPE_MEDIA) {
-        if (scr->controls_count > 0) {
-          // Controls specified — hide all transport buttons first
+        if (scr->element_count > 0) {
+          // v2 command-pattern: render elements positionally into 4 button slots
+          // Each element gets the next available button slot with its icon
+          lv_obj_t *btn_slots[4] = { s_media.btn_prev, s_media.btn_play, s_media.btn_next, s_media.btn_mute };
+          lv_obj_t *lbl_slots[4] = { s_media.lbl_prev, s_media.play_icon, s_media.lbl_next, s_media.lbl_mute };
+          int *idx_slots[4] = { &s_btn_prev_element_idx, &s_btn_play_element_idx, &s_btn_next_element_idx, &s_btn_mute_element_idx };
+
+          // Hide all buttons and reset mappings
+          for (int s = 0; s < 4; s++) {
+            lv_obj_add_flag(btn_slots[s], LV_OBJ_FLAG_HIDDEN);
+            *idx_slots[s] = -1;
+          }
+
+          // Assign elements to slots positionally (up to 4 with renderable icons)
+          int slot = 0;
+          for (int e = 0; e < scr->element_count && slot < 4; e++) {
+            const char *icon_char = icon_name_to_char(scr->elements[e].display.icon);
+            if (!icon_char) {
+              LOGI("Controls: element[%d] icon '%s' not in firmware font (skipped)",
+                   e, scr->elements[e].display.icon);
+              continue;
+            }
+            // Show this button slot with the element's icon
+            lv_obj_remove_flag(btn_slots[slot], LV_OBJ_FLAG_HIDDEN);
+#if !TARGET_PC
+            lv_label_set_text(lbl_slots[slot], icon_char);
+#endif
+            *idx_slots[slot] = e;
+            slot++;
+          }
+          LOGI("Controls: rendered %d elements into button slots", slot);
+        } else if (scr->controls_count > 0) {
+          // v1 backward compat: Controls specified — hide all transport buttons first
           lv_obj_add_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
           lv_obj_add_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
           lv_obj_add_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
@@ -1367,7 +1447,7 @@ void manifest_ui_update(const manifest_t *manifest) {
           }
           LOGI("Controls: showing %d specified buttons", scr->controls_count);
         } else {
-          // No controls specified — show all default buttons (backward compat)
+          // No elements or controls — show all default buttons (backward compat)
           lv_obj_remove_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
           lv_obj_remove_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
           lv_obj_remove_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
@@ -1425,6 +1505,18 @@ const char *manifest_ui_current_screen_id(void) {
     return "now_playing";
   }
   return s_mgr.manifest.nav.order[s_mgr.current_screen];
+}
+
+/// Return the element index that was mapped to the given physical button during
+/// the last v2 element render pass.  Returns -1 if no element is mapped.
+int manifest_ui_get_button_element_idx(ui_input_event_t input) {
+  switch (input) {
+  case UI_INPUT_PREV_TRACK: return s_btn_prev_element_idx;
+  case UI_INPUT_PLAY_PAUSE: return s_btn_play_element_idx;
+  case UI_INPUT_NEXT_TRACK: return s_btn_next_element_idx;
+  case UI_INPUT_MUTE:       return s_btn_mute_element_idx;
+  default: return -1;
+  }
 }
 
 // ── Thread-safe wrappers ────────────────────────────────────────────────────
@@ -1827,13 +1919,30 @@ void ui_set_controls_visible(bool v) {
       lv_obj_clear_flag(s_media.artist_label, LV_OBJ_FLAG_HIDDEN);
     if (s_media.play_icon)
       lv_obj_clear_flag(s_media.play_icon, LV_OBJ_FLAG_HIDDEN);
-    if (s_media.btn_prev)
-      lv_obj_clear_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
-    if (s_media.btn_play)
-      lv_obj_clear_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
-    if (s_media.btn_next)
-      lv_obj_clear_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
-    // Note: btn_mute visibility is managed by config-driven controls[];
+    // Restore button visibility respecting element-mode state.
+    // If elements are active, only show buttons that have an element assigned.
+    // In legacy mode (no elements), show all three default transport buttons.
+    if (s_btn_prev_element_idx >= 0 || s_btn_play_element_idx >= 0 ||
+        s_btn_next_element_idx >= 0 || s_btn_mute_element_idx >= 0) {
+      // Element mode: restore only buttons that had elements assigned
+      if (s_btn_prev_element_idx >= 0 && s_media.btn_prev)
+        lv_obj_clear_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
+      if (s_btn_play_element_idx >= 0 && s_media.btn_play)
+        lv_obj_clear_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
+      if (s_btn_next_element_idx >= 0 && s_media.btn_next)
+        lv_obj_clear_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+      if (s_btn_mute_element_idx >= 0 && s_media.btn_mute)
+        lv_obj_clear_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      // Legacy mode: show default prev/play/next buttons
+      if (s_media.btn_prev)
+        lv_obj_clear_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
+      if (s_media.btn_play)
+        lv_obj_clear_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
+      if (s_media.btn_next)
+        lv_obj_clear_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Note: btn_mute visibility in legacy mode is managed by config-driven controls[];
     // don't force-show it here — let manifest_ui_update handle it.
     if (s_media.artwork_image)
       lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_40, 0);

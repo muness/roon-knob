@@ -105,6 +105,26 @@ static float s_last_known_volume_max = 0.0f;   // Cached volume max for clamping
 static float s_last_known_volume_step = 1.0f;  // Cached volume step
 static interactions_t s_cached_interactions;    // Cached input-to-action mappings
 static bool s_has_interactions = false;         // True when manifest has interactions
+
+// Cached per-screen encoders (indexed parallel to manifest screens)
+#define MAX_CACHED_SCREENS MANIFEST_MAX_SCREENS
+typedef struct {
+    char screen_id[MANIFEST_MAX_ID];
+    bool has_encoder;
+    manifest_encoder_t encoder;
+} cached_screen_encoder_t;
+static cached_screen_encoder_t s_cached_encoders[MAX_CACHED_SCREENS];
+static int s_cached_encoder_count = 0;
+
+// Cached per-screen elements for v2 button tap dispatch
+#define MAX_CACHED_ELEMENTS MAX_ELEMENTS
+typedef struct {
+    char screen_id[MANIFEST_MAX_ID];
+    manifest_element_t elements[MAX_CACHED_ELEMENTS];
+    int element_count;
+} cached_screen_elements_t;
+static cached_screen_elements_t s_cached_elements[MAX_CACHED_SCREENS];
+static int s_cached_element_count = 0;
 static bool s_bridge_verified =
     false; // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0; // Timestamp of last mDNS check
@@ -607,6 +627,32 @@ static void ui_manifest_cb(void *arg) {
            sizeof(s_cached_interactions));
   }
 
+  // Cache per-screen encoder config for v2 command-pattern dispatch
+  s_cached_encoder_count = 0;
+  for (int i = 0; i < m->screen_count && i < MAX_CACHED_SCREENS; i++) {
+    cached_screen_encoder_t *ce = &s_cached_encoders[s_cached_encoder_count];
+    strncpy(ce->screen_id, m->screens[i].id, sizeof(ce->screen_id) - 1);
+    ce->screen_id[sizeof(ce->screen_id) - 1] = '\0';
+    ce->has_encoder = m->screens[i].has_encoder;
+    if (m->screens[i].has_encoder) {
+      memcpy(&ce->encoder, &m->screens[i].encoder, sizeof(ce->encoder));
+    }
+    s_cached_encoder_count++;
+  }
+
+  // Cache per-screen elements for v2 button tap dispatch
+  s_cached_element_count = 0;
+  for (int i = 0; i < m->screen_count && i < MAX_CACHED_SCREENS; i++) {
+    cached_screen_elements_t *ce = &s_cached_elements[s_cached_element_count];
+    strncpy(ce->screen_id, m->screens[i].id, sizeof(ce->screen_id) - 1);
+    ce->screen_id[sizeof(ce->screen_id) - 1] = '\0';
+    ce->element_count = m->screens[i].element_count;
+    if (m->screens[i].element_count > 0) {
+      memcpy(ce->elements, m->screens[i].elements, sizeof(ce->elements));
+    }
+    s_cached_element_count++;
+  }
+
   manifest_ui_update(m);
 
   // Fetch artwork whenever screens are updated (SHA changed)
@@ -1053,6 +1099,97 @@ void bridge_client_start(const rk_cfg_t *cfg) {
   platform_task_start(bridge_poll_thread, NULL);
 }
 
+/// Look up the encoder for the currently visible screen.
+/// Returns NULL if the current screen has no encoder config.
+static const manifest_encoder_t *get_current_encoder(void) {
+    const char *screen_id = manifest_ui_current_screen_id();
+    if (!screen_id)
+        return NULL;
+    for (int i = 0; i < s_cached_encoder_count; i++) {
+        if (strcmp(s_cached_encoders[i].screen_id, screen_id) == 0) {
+            return s_cached_encoders[i].has_encoder
+                       ? &s_cached_encoders[i].encoder
+                       : NULL;
+        }
+    }
+    return NULL;
+}
+
+/// Look up an element by its index in the currently visible screen's element list.
+/// Returns NULL if the current screen has no such element.
+static const manifest_element_t *get_element_for_button(int element_idx) {
+    if (element_idx < 0)
+        return NULL;
+    const char *screen_id = manifest_ui_current_screen_id();
+    if (!screen_id)
+        return NULL;
+    for (int i = 0; i < s_cached_element_count; i++) {
+        if (strcmp(s_cached_elements[i].screen_id, screen_id) == 0) {
+            if (element_idx < s_cached_elements[i].element_count)
+                return &s_cached_elements[i].elements[element_idx];
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+/// Dispatch a manifest action. Handles volume fast-path and generic JSON.
+static void dispatch_action(const manifest_action_t *act) {
+    if (!act || !act->action[0])
+        return;
+
+    // Buffer must hold: zone_id (64) + action (32) + params_json (128) + JSON template overhead (~37) + null = ~262 bytes minimum.
+    char body[384];
+    if (strcmp(act->action, "volume_up") == 0) {
+        lock_state();
+        float predicted_up = s_last_known_volume + s_last_known_volume_step;
+        if (predicted_up > s_last_known_volume_max)
+            predicted_up = s_last_known_volume_max;
+        s_last_known_volume = predicted_up;
+        snprintf(body, sizeof(body),
+                 "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
+                 s_state.cfg.zone_id, predicted_up);
+        unlock_state();
+        manifest_ui_show_volume_change(predicted_up, s_last_known_volume_step);
+        if (!udp_send_volume(predicted_up)) {
+            if (!send_control_json(body))
+                manifest_ui_set_message("Volume change failed");
+        }
+    } else if (strcmp(act->action, "volume_down") == 0) {
+        lock_state();
+        float predicted_down = s_last_known_volume - s_last_known_volume_step;
+        if (predicted_down < s_last_known_volume_min)
+            predicted_down = s_last_known_volume_min;
+        s_last_known_volume = predicted_down;
+        snprintf(body, sizeof(body),
+                 "{\"zone_id\":\"%s\",\"action\":\"vol_abs\",\"value\":%.10g}",
+                 s_state.cfg.zone_id, predicted_down);
+        unlock_state();
+        manifest_ui_show_volume_change(predicted_down, s_last_known_volume_step);
+        if (!udp_send_volume(predicted_down)) {
+            if (!send_control_json(body))
+                manifest_ui_set_message("Volume change failed");
+        }
+    } else if (strcmp(act->action, "show_zone_picker") == 0) {
+        manifest_ui_show_zone_picker();
+    } else {
+        // Generic action: send JSON to bridge
+        lock_state();
+        if (act->has_params && act->params_json[0]) {
+            snprintf(body, sizeof(body),
+                     "{\"zone_id\":\"%s\",\"action\":\"%s\",\"params\":%s}",
+                     s_state.cfg.zone_id, act->action, act->params_json);
+        } else {
+            snprintf(body, sizeof(body),
+                     "{\"zone_id\":\"%s\",\"action\":\"%s\"}",
+                     s_state.cfg.zone_id, act->action);
+        }
+        unlock_state();
+        if (!send_control_json(body))
+            manifest_ui_set_message("Action failed");
+    }
+}
+
 void bridge_client_handle_input(ui_input_event_t event) {
   if (manifest_ui_is_zone_picker_visible()) {
     if (event == UI_INPUT_VOL_UP) {
@@ -1139,6 +1276,47 @@ void bridge_client_handle_input(ui_input_event_t event) {
       return;
     }
     return;
+  }
+
+  // v2 per-screen encoder dispatch — try this before hardcoded defaults
+  {
+    const manifest_encoder_t *enc = get_current_encoder();
+    if (enc) {
+      const manifest_action_t *act = NULL;
+      switch (event) {
+      case UI_INPUT_VOL_UP:
+        act = &enc->cw;
+        break;
+      case UI_INPUT_VOL_DOWN:
+        act = &enc->ccw;
+        break;
+      case UI_INPUT_PLAY_PAUSE:
+        act = enc->has_press ? &enc->press : NULL;
+        break;
+      case UI_INPUT_MENU:
+        act = enc->has_long_press ? &enc->long_press : NULL;
+        break;
+      default:
+        break;
+      }
+      if (act && act->action[0]) {
+        dispatch_action(act);
+        return; // Handled via per-screen encoder — skip fallbacks
+      }
+    }
+  }
+
+  // v2 element-based button tap dispatch — if current screen has elements,
+  // use the element's on_tap action instead of hardcoded action strings.
+  {
+    int elem_idx = manifest_ui_get_button_element_idx(event);
+    if (elem_idx >= 0) {
+      const manifest_element_t *elem = get_element_for_button(elem_idx);
+      if (elem && elem->has_on_tap) {
+        dispatch_action(&elem->on_tap);
+        return; // Handled via v2 element on_tap — skip fallbacks
+      }
+    }
   }
 
   if (event == UI_INPUT_MENU) {

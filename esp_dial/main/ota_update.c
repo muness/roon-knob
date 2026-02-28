@@ -113,6 +113,16 @@ static void check_update_task(void *arg) {
         return;
     }
 
+    if (status_code == 403) {
+        ESP_LOGW(TAG, "License required for firmware updates");
+        s_ota_info.status = OTA_STATUS_ERROR;
+        strncpy(s_ota_info.error_msg, "License required", sizeof(s_ota_info.error_msg));
+        esp_http_client_cleanup(client);
+        s_ota_task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
     if (status_code != 200 || content_length <= 0 || content_length >= (int)sizeof(response)) {
         ESP_LOGE(TAG, "Bad response: status=%d, len=%d", status_code, content_length);
         s_ota_info.status = OTA_STATUS_ERROR;

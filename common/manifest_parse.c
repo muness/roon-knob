@@ -249,6 +249,102 @@ static void parse_screen_controls(cJSON *screen_obj, manifest_screen_t *out) {
   }
 }
 
+/// Parse a single action object: {"action": "...", "params": {...}}
+static void parse_action(const cJSON *obj, manifest_action_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!obj || !cJSON_IsObject(obj)) return;
+    const cJSON *action = cJSON_GetObjectItem(obj, "action");
+    if (action && cJSON_IsString(action)) {
+        safe_strcpy(out->action, action->valuestring, MAX_ACTION_LEN);
+    }
+    const cJSON *params = cJSON_GetObjectItem(obj, "params");
+    if (params && cJSON_IsObject(params)) {
+        out->has_params = true;
+        char *json_str = cJSON_PrintUnformatted(params);
+        if (json_str) {
+            safe_strcpy(out->params_json, json_str, MAX_PARAMS_JSON);
+            cJSON_free(json_str);
+        }
+    }
+}
+
+/// Parse display object: {"icon": "...", "label": "...", "active": true}
+static void parse_display(const cJSON *obj, manifest_display_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!obj || !cJSON_IsObject(obj)) return;
+    const cJSON *icon = cJSON_GetObjectItem(obj, "icon");
+    if (icon && cJSON_IsString(icon)) {
+        safe_strcpy(out->icon, icon->valuestring, MAX_ICON_LEN);
+    }
+    const cJSON *label = cJSON_GetObjectItem(obj, "label");
+    if (label && cJSON_IsString(label)) {
+        safe_strcpy(out->label, label->valuestring, MAX_LABEL_LEN);
+    }
+    const cJSON *active = cJSON_GetObjectItem(obj, "active");
+    if (active && cJSON_IsBool(active)) {
+        out->active = cJSON_IsTrue(active);
+    }
+}
+
+/// Parse elements array from a screen object.
+static void parse_screen_elements(const cJSON *screen_obj, manifest_screen_t *scr) {
+    scr->element_count = 0;
+    const cJSON *elements = cJSON_GetObjectItem(screen_obj, "elements");
+    if (!elements || !cJSON_IsArray(elements)) return;
+
+    int count = cJSON_GetArraySize(elements);
+    if (count > MAX_ELEMENTS) count = MAX_ELEMENTS;
+
+    for (int i = 0; i < count; i++) {
+        const cJSON *elem = cJSON_GetArrayItem(elements, i);
+        if (!elem || !cJSON_IsObject(elem)) continue;
+
+        manifest_element_t *el = &scr->elements[scr->element_count];
+        memset(el, 0, sizeof(*el));
+
+        parse_display(cJSON_GetObjectItem(elem, "display"), &el->display);
+
+        const cJSON *on_tap = cJSON_GetObjectItem(elem, "on_tap");
+        if (on_tap && cJSON_IsObject(on_tap)) {
+            el->has_on_tap = true;
+            parse_action(on_tap, &el->on_tap);
+        }
+
+        const cJSON *on_long_press = cJSON_GetObjectItem(elem, "on_long_press");
+        if (on_long_press && cJSON_IsObject(on_long_press)) {
+            el->has_on_long_press = true;
+            parse_action(on_long_press, &el->on_long_press);
+        }
+
+        scr->element_count++;
+    }
+}
+
+/// Parse per-screen encoder config.
+static void parse_screen_encoder(const cJSON *screen_obj, manifest_screen_t *scr) {
+    scr->has_encoder = false;
+    const cJSON *enc = cJSON_GetObjectItem(screen_obj, "encoder");
+    if (!enc || !cJSON_IsObject(enc)) return;
+
+    scr->has_encoder = true;
+    memset(&scr->encoder, 0, sizeof(scr->encoder));
+
+    parse_action(cJSON_GetObjectItem(enc, "cw"), &scr->encoder.cw);
+    parse_action(cJSON_GetObjectItem(enc, "ccw"), &scr->encoder.ccw);
+
+    const cJSON *press = cJSON_GetObjectItem(enc, "press");
+    if (press && cJSON_IsObject(press)) {
+        scr->encoder.has_press = true;
+        parse_action(press, &scr->encoder.press);
+    }
+
+    const cJSON *long_press = cJSON_GetObjectItem(enc, "long_press");
+    if (long_press && cJSON_IsObject(long_press)) {
+        scr->encoder.has_long_press = true;
+        parse_action(long_press, &scr->encoder.long_press);
+    }
+}
+
 static bool parse_screen(cJSON *screen_obj, manifest_screen_t *out) {
   memset(out, 0, sizeof(*out));
 
@@ -264,6 +360,10 @@ static bool parse_screen(cJSON *screen_obj, manifest_screen_t *out) {
 
   // Parse optional controls array (config-driven button visibility)
   parse_screen_controls(screen_obj, out);
+
+  // Parse v2 command-pattern elements and encoder (optional)
+  parse_screen_elements(screen_obj, out);
+  parse_screen_encoder(screen_obj, out);
 
   switch (out->type) {
   case SCREEN_TYPE_MEDIA:

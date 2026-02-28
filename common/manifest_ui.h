@@ -73,6 +73,12 @@ void manifest_ui_show_volume_change(float vol, float vol_step);
 /// Set network status banner (persistent, NULL to clear).
 void manifest_ui_set_network_status(const char *status);
 
+/// Return the element index that was mapped to the physical button corresponding
+/// to the given input event during the last v2 element render pass.
+/// Returns -1 if no element is mapped to that button (not a v2 screen or
+/// the icon had no matching button slot).
+int manifest_ui_get_button_element_idx(ui_input_event_t input);
+
 #ifdef __cplusplus
 }
 #endif

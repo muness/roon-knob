@@ -32,8 +32,18 @@ bool font_manager_has_icons(void);    // Icon fonts loaded?
 // Media controls
 #define ICON_PLAY           "\xEE\x80\xB7"  // U+E037
 #define ICON_PAUSE          "\xEE\x80\xB4"  // U+E034
+#define ICON_STOP           "\xEE\x81\x87"  // U+E047
 #define ICON_SKIP_PREV      "\xEE\x81\x85"  // U+E045
 #define ICON_SKIP_NEXT      "\xEE\x81\x84"  // U+E044
+#define ICON_SHUFFLE        "\xEE\x81\x83"  // U+E043
+#define ICON_REPEAT         "\xEE\x81\x80"  // U+E040
+#define ICON_REPEAT_ONE     "\xEE\x81\x81"  // U+E041
+#define ICON_FORWARD_5      "\xEE\x81\x98"  // U+E058
+#define ICON_FORWARD_10     "\xEE\x81\x96"  // U+E056
+#define ICON_FORWARD_30     "\xEE\x81\x97"  // U+E057
+#define ICON_REPLAY_5       "\xEE\x81\x9B"  // U+E05B
+#define ICON_REPLAY_10      "\xEE\x81\x99"  // U+E059
+#define ICON_REPLAY_30      "\xEE\x81\x9A"  // U+E05A
 
 // Volume
 #define ICON_VOLUME_UP      "\xEE\x81\x90"  // U+E050
@@ -50,11 +60,21 @@ bool font_manager_has_icons(void);    // Icon fonts loaded?
 
 // Battery icons (Lucide horizontal style)
 // From lucide.ttf - horizontal battery matches UI aesthetic
+//
+// CODEPOINT NOTE: ICON_BATTERY_LOW (U+E056) and ICON_BATTERY_MEDIUM (U+E057)
+// share the same UTF-8 byte sequences as ICON_FORWARD_10 and ICON_FORWARD_30
+// above. This is NOT a rendering bug — the correct glyph is selected by the
+// LVGL label's font property, not by the byte string. Battery icons are always
+// rendered with font_manager_get_lucide_battery(), which contains the Lucide
+// battery glyphs at those codepoints. Transport icons use
+// font_manager_get_icon_normal()/font_manager_get_icon_large(), which contain
+// the Material Icons forward glyphs at the same codepoints. Do NOT change these
+// codepoints to resolve the apparent collision — they are correct for each font.
 #define ICON_BATTERY_EMPTY    "\xEE\x81\x93"  // U+E053 battery (empty outline)
 #define ICON_BATTERY_CHARGING "\xEE\x81\x94"  // U+E054 battery-charging
 #define ICON_BATTERY_FULL     "\xEE\x81\x95"  // U+E055 battery-full
-#define ICON_BATTERY_LOW      "\xEE\x81\x96"  // U+E056 battery-low
-#define ICON_BATTERY_MEDIUM   "\xEE\x81\x97"  // U+E057 battery-medium
+#define ICON_BATTERY_LOW      "\xEE\x81\x96"  // U+E056 battery-low  (same bytes as ICON_FORWARD_10; different font)
+#define ICON_BATTERY_MEDIUM   "\xEE\x81\x97"  // U+E057 battery-medium (same bytes as ICON_FORWARD_30; different font)
 #define ICON_BATTERY_WARNING  "\xEE\x8E\xAC"  // U+E3AC battery-warning
 
 // Lucide battery font (horizontal icons)

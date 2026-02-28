@@ -30,6 +30,12 @@ extern "C" {
 #define MAX_ACTION_LEN 32
 #define MAX_INPUT_LEN 32
 
+// ── Command-pattern limits (schema v2) ──────────────────────────────────────
+#define MAX_ELEMENTS 6
+#define MAX_PARAMS_JSON 128
+#define MAX_ICON_LEN 32
+#define MAX_LABEL_LEN 64
+
 // ── Screen types ────────────────────────────────────────────────────────────
 
 typedef enum {
@@ -133,6 +139,41 @@ typedef struct {
     int count;
 } interactions_t;
 
+// ── Command-pattern types (schema v2) ────────────────────────────────────────
+
+/// An action triggered by user interaction.
+typedef struct {
+    char action[MAX_ACTION_LEN];       // e.g., "toggle_playback", "previous"
+    bool has_params;
+    char params_json[MAX_PARAMS_JSON]; // Raw JSON string for bridge to interpret
+} manifest_action_t;
+
+/// Display properties for a command-pattern element.
+typedef struct {
+    char icon[MAX_ICON_LEN];           // Material Symbols icon name
+    char label[MAX_LABEL_LEN];         // Text label (alternative to icon)
+    bool active;                       // Visual active state
+} manifest_display_t;
+
+/// A command-pattern element — self-contained {display, behavior} unit.
+typedef struct {
+    manifest_display_t display;
+    bool has_on_tap;
+    manifest_action_t on_tap;
+    bool has_on_long_press;
+    manifest_action_t on_long_press;
+} manifest_element_t;
+
+/// Per-screen encoder configuration.
+typedef struct {
+    manifest_action_t cw;              // Clockwise rotation
+    manifest_action_t ccw;             // Counter-clockwise rotation
+    bool has_press;
+    manifest_action_t press;           // Encoder press
+    bool has_long_press;
+    manifest_action_t long_press;      // Encoder long press
+} manifest_encoder_t;
+
 /// A single screen in the manifest.
 typedef struct {
   char id[MANIFEST_MAX_ID];
@@ -144,9 +185,15 @@ typedef struct {
     manifest_progress_t progress;
     manifest_status_t status;
   } data;
-  // Config-driven controls for this screen (e.g. "prev", "play", "next", "mute")
+  // v1 backward compat: Config-driven controls (e.g. "prev", "play", "next", "mute")
   char controls[MAX_CONTROLS][MAX_ACTION_LEN];
   int controls_count; // 0 = show all defaults
+  // v2 command-pattern elements
+  manifest_element_t elements[MAX_ELEMENTS];
+  int element_count;  // 0 = fall back to controls[]
+  // v2 per-screen encoder config
+  bool has_encoder;
+  manifest_encoder_t encoder;
 } manifest_screen_t;
 
 /// Navigation configuration.

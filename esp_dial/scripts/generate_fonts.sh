@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate LVGL bitmap fonts from TTF files
-# Run from idf_app directory: ./scripts/generate_fonts.sh
+# Run from esp_dial directory: ./scripts/generate_fonts.sh
 
 set -e
 
@@ -27,19 +27,27 @@ echo "Generating bitmap fonts..."
 # - Latin Extended-B: 0x180-0x24F (Additional Latin) - ƒ ơ ư ǎ ǐ ǒ ǔ ș ț
 # - Greek and Coptic: 0x370-0x3FF (Greek) - α β γ δ ε ζ η θ ι κ λ μ
 # - Cyrillic: 0x400-0x4FF (Russian, Ukrainian, etc.) - А Б В Г Д Е Ж З
-# - General Punctuation: 0x2010-0x2027 (Typography) - em dash, en dash, quotes, ellipsis
-TEXT_RANGES="0x20-0x7F,0xA0-0xFF,0x100-0x17F,0x180-0x24F,0x370-0x3FF,0x400-0x4FF,0x2010-0x2027"
+# - General Punctuation: 0x2010-0x203A (Typography) - em dash, en dash, curly quotes,
+#   primes, ellipsis, angle quotes. Music metadata from Roon/Tidal/Qobuz uses these extensively.
+#   0x2018-201F: all curly/smart quote variants (' ' ‚ ‛ " " „ ‟)
+#   0x2032-2033: prime ′ and double prime ″ (feet/inches, minutes/seconds)
+#   0x2039-203A: single angle quotes ‹ ›
+TEXT_RANGES="0x20-0x7F,0xA0-0xFF,0x100-0x17F,0x180-0x24F,0x370-0x3FF,0x400-0x4FF,0x2010-0x203A"
 
 # Material Icons codepoint ranges (using MaterialIcons-Regular.ttf)
 # Core icons needed for the UI:
-# - Media: play e037, pause e034, skip_next e044, skip_prev e045, music_note e405
+# - Media: play e037, pause e034, stop e047, skip_next e044, skip_prev e045, music_note e405
+#   shuffle e043, repeat e040, repeat_one e041
+#   forward_5 e058, forward_10 e056, forward_30 e057
+#   replay_5 e05b, replay_10 e059, replay_30 e05a
 # - Volume: volume_up e050, volume_down e04d, volume_mute e04e, volume_off e04f
 # - Navigation: arrow_back e5c4, chevron_left e5cb, chevron_right e5cc, settings e8b8
 # - Connectivity: bluetooth e1a7, wifi e63e, wifi_off e648, cast e307, speaker e32d
 # - Battery: battery_charging e1a3 (Material Icons, kept for fallback)
 # - Status: check e5ca, close e5cd, error e000, info e88e, warning e002
 # - Misc: download f090, refresh e5d5, home e88a, search e8b6
-ICON_RANGES="0xE000,0xE002,0xE034,0xE037,0xE044-0xE045,0xE04D-0xE050,0xE1A3,0xE1A7,0xE307,0xE32D,0xE405,0xE5C4,0xE5CA-0xE5CD,0xE5D5,0xE63E,0xE648,0xE88A,0xE88E,0xE8B6,0xE8B8,0xF090"
+# Extended for command-pattern: stop, shuffle, repeat, forward_N, replay_N
+ICON_RANGES="0xE000,0xE002,0xE034,0xE037,0xE040-0xE041,0xE043-0xE045,0xE047,0xE04D-0xE05B,0xE1A3,0xE1A7,0xE307,0xE32D,0xE405,0xE5C4,0xE5CA-0xE5CD,0xE5D5,0xE63E,0xE648,0xE88A,0xE88E,0xE8B6,0xE8B8,0xF090"
 
 # Lucide battery icons (horizontal style) - from lucide.ttf
 # battery e053, battery-charging e054, battery-full e055, battery-low e056,

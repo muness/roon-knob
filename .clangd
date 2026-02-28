@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: esp_dial/build
+  Remove:
+    - -mlongcalls
+    - -mdisable-hardware-atomics
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -fno-jump-tables
+    - -fmacro-prefix-map=*
