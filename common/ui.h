@@ -15,6 +15,7 @@ typedef enum {
     UI_INPUT_MENU = 3,
     UI_INPUT_NEXT_TRACK = 4,
     UI_INPUT_PREV_TRACK = 5,
+    UI_INPUT_MUTE = 6,
 } ui_input_event_t;
 
 typedef void (*ui_input_cb_t)(ui_input_event_t event);

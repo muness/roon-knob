@@ -1237,6 +1237,16 @@ void bridge_client_handle_input(ui_input_event_t event) {
       manifest_ui_set_message("Previous track failed");
     }
     break;
+  case UI_INPUT_MUTE:
+    lock_state();
+    snprintf(body, sizeof(body),
+             "{\"zone_id\":\"%s\",\"action\":\"toggle_mute\"}",
+             s_state.cfg.zone_id);
+    unlock_state();
+    if (!send_control_json(body)) {
+      manifest_ui_set_message("Mute toggle failed");
+    }
+    break;
   default:
     break;
   }

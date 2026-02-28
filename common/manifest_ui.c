@@ -135,6 +135,7 @@ static struct {
   lv_obj_t *btn_prev;
   lv_obj_t *btn_play;
   lv_obj_t *btn_next;
+  lv_obj_t *btn_mute;     // Mute toggle — hidden by default, shown via controls[]
 } s_media;
 
 /// LVGL widget pointers — shared chrome (header, status).
@@ -291,6 +292,12 @@ static void btn_next_event_cb(lv_event_t *e) {
   (void)e;
   if (s_input_cb)
     s_input_cb(UI_INPUT_NEXT_TRACK);
+}
+
+static void btn_mute_event_cb(lv_event_t *e) {
+  (void)e;
+  if (s_input_cb)
+    s_input_cb(UI_INPUT_MUTE);
 }
 
 // ── Volume helpers ───────────────────────────────────────────────────────────────────
@@ -765,6 +772,33 @@ static void build_media_screen(lv_obj_t *parent) {
 #endif
   lv_obj_set_style_text_color(next_lbl, COLOR_TEXT_PRIMARY, 0);
   lv_obj_center(next_lbl);
+
+  // Mute button — hidden by default, shown when manifest controls[] includes "mute"
+  s_media.btn_mute = lv_btn_create(controls);
+  lv_obj_set_size(s_media.btn_mute, 60, 60);
+  lv_obj_add_event_cb(s_media.btn_mute, btn_mute_event_cb, LV_EVENT_CLICKED,
+                      NULL);
+  lv_obj_set_style_bg_color(s_media.btn_mute, COLOR_BTN_BG, LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_color(s_media.btn_mute, COLOR_BTN_PRESSED,
+                            LV_STATE_PRESSED);
+  lv_obj_set_style_border_width(s_media.btn_mute, 2, 0);
+  lv_obj_set_style_shadow_opa(s_media.btn_mute, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_color(s_media.btn_mute, COLOR_BTN_BORDER,
+                                LV_STATE_DEFAULT);
+  lv_obj_set_style_border_color(s_media.btn_mute, COLOR_BTN_BORDER_HL,
+                                LV_STATE_PRESSED);
+  lv_obj_set_style_radius(s_media.btn_mute, LV_RADIUS_CIRCLE, 0);
+  lv_obj_t *mute_lbl = lv_label_create(s_media.btn_mute);
+#if !TARGET_PC
+  lv_label_set_text(mute_lbl, ICON_VOLUME_MUTE);
+  lv_obj_set_style_text_font(mute_lbl, font_icon_normal(), 0);
+#else
+  lv_label_set_text(mute_lbl, LV_SYMBOL_MUTE);
+  lv_obj_set_style_text_font(mute_lbl, &lv_font_montserrat_28, 0);
+#endif
+  lv_obj_set_style_text_color(mute_lbl, COLOR_TEXT_PRIMARY, 0);
+  lv_obj_center(mute_lbl);
+  lv_obj_add_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN); // Hidden by default
 }
 
 // ── List screen builder ────────────────────────────────────────────────────
@@ -1061,9 +1095,11 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_mute, accent, LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_prev, accent, LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_play, accent, LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_next, accent, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_mute, accent, LV_STATE_PRESSED);
     // Adapt arc track colors for contrast against background
     // Perceived brightness: 0.299R + 0.587G + 0.114B
     unsigned int br, bg_g, bb;
@@ -1079,6 +1115,7 @@ static void update_media_screen(const manifest_media_t *media) {
         lv_obj_set_style_shadow_color(s_media.btn_prev, glow, 0);
         lv_obj_set_style_shadow_color(s_media.btn_play, glow, 0);
         lv_obj_set_style_shadow_color(s_media.btn_next, glow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_mute, glow, 0);
         lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
         lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
         lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
@@ -1091,6 +1128,7 @@ static void update_media_screen(const manifest_media_t *media) {
         lv_obj_set_style_shadow_color(s_media.btn_prev, shadow, 0);
         lv_obj_set_style_shadow_color(s_media.btn_play, shadow, 0);
         lv_obj_set_style_shadow_color(s_media.btn_next, shadow, 0);
+        lv_obj_set_style_shadow_color(s_media.btn_mute, shadow, 0);
         lv_obj_set_style_text_color(s_media.track_label, lv_color_hex(0x1a1a1a), 0);
         lv_obj_set_style_text_color(s_media.volume_label, lv_color_hex(0x1a1a1a), 0);
         lv_obj_set_style_text_color(s_media.artist_label, lv_color_hex(0x444444), 0);
@@ -1099,9 +1137,11 @@ static void update_media_screen(const manifest_media_t *media) {
       lv_obj_set_style_shadow_width(s_media.btn_prev, 6, 0);
       lv_obj_set_style_shadow_width(s_media.btn_play, 8, 0);
       lv_obj_set_style_shadow_width(s_media.btn_next, 6, 0);
+      lv_obj_set_style_shadow_width(s_media.btn_mute, 6, 0);
       lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_40, 0);
       lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_40, 0);
       lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_40, 0);
+      lv_obj_set_style_shadow_opa(s_media.btn_mute, LV_OPA_40, 0);
     }
   } else {
     lv_obj_set_style_bg_color(s_media.container, COLOR_BG, 0);
@@ -1117,11 +1157,15 @@ static void update_media_screen(const manifest_media_t *media) {
                                   LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
                                   LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_media.btn_mute, COLOR_BTN_BORDER,
+                                  LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(s_media.btn_prev, COLOR_BTN_BORDER_HL,
                                   LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_play, COLOR_ARC_PROGRESS,
                                   LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_media.btn_next, COLOR_BTN_BORDER_HL,
+                                  LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_media.btn_mute, COLOR_BTN_BORDER_HL,
                                   LV_STATE_PRESSED);
     // Reset arc track colors to defaults
     lv_obj_set_style_arc_color(s_media.volume_arc, COLOR_ARC_BG, LV_PART_MAIN);
@@ -1130,6 +1174,7 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_shadow_opa(s_media.btn_prev, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_opa(s_media.btn_play, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_opa(s_media.btn_next, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_opa(s_media.btn_mute, LV_OPA_TRANSP, 0);
     // Reset text colors to defaults
     lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
@@ -1296,6 +1341,39 @@ void manifest_ui_update(const manifest_t *manifest) {
         break;
       default:
         break;
+      }
+    }
+
+    // Apply config-driven controls visibility for media screens
+    for (int i = 0; i < manifest->screen_count; i++) {
+      const manifest_screen_t *scr = &manifest->screens[i];
+      if (scr->type == SCREEN_TYPE_MEDIA) {
+        if (scr->controls_count > 0) {
+          // Controls specified — hide all transport buttons first
+          lv_obj_add_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN);
+          // Show only specified controls
+          for (int c = 0; c < scr->controls_count; c++) {
+            if (strcmp(scr->controls[c], "prev") == 0)
+              lv_obj_remove_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
+            else if (strcmp(scr->controls[c], "play") == 0)
+              lv_obj_remove_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
+            else if (strcmp(scr->controls[c], "next") == 0)
+              lv_obj_remove_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+            else if (strcmp(scr->controls[c], "mute") == 0)
+              lv_obj_remove_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN);
+          }
+          LOGI("Controls: showing %d specified buttons", scr->controls_count);
+        } else {
+          // No controls specified — show all default buttons (backward compat)
+          lv_obj_remove_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_remove_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_remove_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN); // mute hidden by default
+        }
+        break; // Only one media screen expected
       }
     }
 
@@ -1755,6 +1833,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_clear_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
     if (s_media.btn_next)
       lv_obj_clear_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+    // Note: btn_mute visibility is managed by config-driven controls[];
+    // don't force-show it here — let manifest_ui_update handle it.
     if (s_media.artwork_image)
       lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_40, 0);
   } else {
@@ -1788,6 +1868,8 @@ void ui_set_controls_visible(bool v) {
       lv_obj_add_flag(s_media.btn_play, LV_OBJ_FLAG_HIDDEN);
     if (s_media.btn_next)
       lv_obj_add_flag(s_media.btn_next, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.btn_mute)
+      lv_obj_add_flag(s_media.btn_mute, LV_OBJ_FLAG_HIDDEN);
     if (s_media.artwork_image)
       lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_COVER, 0);
   }

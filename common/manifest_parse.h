@@ -24,6 +24,12 @@ extern "C" {
 #define MANIFEST_MAX_URL 256
 #define MANIFEST_SHA_LEN 9 // 8 hex chars + null
 
+// ── Config-driven input/control limits ──────────────────────────────────────
+#define MAX_INTERACTIONS 12
+#define MAX_CONTROLS 6
+#define MAX_ACTION_LEN 32
+#define MAX_INPUT_LEN 32
+
 // ── Screen types ────────────────────────────────────────────────────────────
 
 typedef enum {
@@ -113,6 +119,20 @@ typedef struct {
   char icon[32]; // Material Symbols name
 } manifest_status_t;
 
+// ── Interaction mapping (config-driven inputs) ──────────────────────────────
+
+/// Maps a physical input (e.g. "encoder_cw") to a logical action (e.g. "volume_up").
+typedef struct {
+    char input[MAX_INPUT_LEN];
+    char action[MAX_ACTION_LEN];
+} interaction_mapping_t;
+
+/// Collection of input-to-action mappings from the manifest.
+typedef struct {
+    interaction_mapping_t mappings[MAX_INTERACTIONS];
+    int count;
+} interactions_t;
+
 /// A single screen in the manifest.
 typedef struct {
   char id[MANIFEST_MAX_ID];
@@ -124,6 +144,9 @@ typedef struct {
     manifest_progress_t progress;
     manifest_status_t status;
   } data;
+  // Config-driven controls for this screen (e.g. "prev", "play", "next", "mute")
+  char controls[MAX_CONTROLS][MAX_ACTION_LEN];
+  int controls_count; // 0 = show all defaults
 } manifest_screen_t;
 
 /// Navigation configuration.
@@ -141,7 +164,14 @@ typedef struct {
   manifest_screen_t screens[MANIFEST_MAX_SCREENS];
   int screen_count;
   manifest_nav_t nav;
+  interactions_t interactions;  // Input-to-action mappings
+  bool has_interactions;        // false = use hardcoded defaults
 } manifest_t;
+
+/// Look up an action for a given input name in the interactions table.
+/// Returns the action string, or NULL if not found.
+const char *manifest_lookup_interaction(const interactions_t *interactions,
+                                         const char *input_name);
 
 // ── API ─────────────────────────────────────────────────────────────────────
 

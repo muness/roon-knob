@@ -230,6 +230,25 @@ static bool parse_status_screen(cJSON *obj, manifest_status_t *out) {
   return true;
 }
 
+/// Parse "controls" array on a screen (e.g. ["prev", "play", "next", "mute"]).
+/// Optional — if absent, controls_count stays 0 (show all defaults).
+static void parse_screen_controls(cJSON *screen_obj, manifest_screen_t *out) {
+  cJSON *controls_arr = cJSON_GetObjectItem(screen_obj, "controls");
+  if (!cJSON_IsArray(controls_arr))
+    return;
+
+  cJSON *item;
+  cJSON_ArrayForEach(item, controls_arr) {
+    if (out->controls_count >= MAX_CONTROLS)
+      break;
+    if (cJSON_IsString(item)) {
+      safe_strcpy(out->controls[out->controls_count], item->valuestring,
+                  MAX_ACTION_LEN);
+      out->controls_count++;
+    }
+  }
+}
+
 static bool parse_screen(cJSON *screen_obj, manifest_screen_t *out) {
   memset(out, 0, sizeof(*out));
 
@@ -242,6 +261,9 @@ static bool parse_screen(cJSON *screen_obj, manifest_screen_t *out) {
   out->type = parse_screen_type(type_item->valuestring);
   if (cJSON_IsString(id_item))
     safe_strcpy(out->id, id_item->valuestring, sizeof(out->id));
+
+  // Parse optional controls array (config-driven button visibility)
+  parse_screen_controls(screen_obj, out);
 
   switch (out->type) {
   case SCREEN_TYPE_MEDIA:
@@ -337,6 +359,27 @@ bool manifest_parse(const char *json, size_t json_len, manifest_t *out) {
   // Nav
   parse_nav(cJSON_GetObjectItem(root, "nav"), &out->nav);
 
+  // Interactions (optional — config-driven input mapping)
+  cJSON *interactions = cJSON_GetObjectItem(root, "interactions");
+  if (cJSON_IsObject(interactions)) {
+    cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, interactions) {
+      if (out->interactions.count >= MAX_INTERACTIONS)
+        break;
+      if (entry->string && cJSON_IsString(entry)) {
+        interaction_mapping_t *m =
+            &out->interactions.mappings[out->interactions.count];
+        safe_strcpy(m->input, entry->string, sizeof(m->input));
+        safe_strcpy(m->action, entry->valuestring, sizeof(m->action));
+        out->interactions.count++;
+      }
+    }
+    out->has_interactions = (out->interactions.count > 0);
+    LOGI("Parsed %d interaction mappings", out->interactions.count);
+  } else {
+    out->has_interactions = false;
+  }
+
   cJSON_Delete(root);
   return true;
 }
@@ -375,4 +418,16 @@ bool manifest_parse_sha(const char *json, size_t json_len, char *sha_out,
 
   cJSON_Delete(root);
   return false;
+}
+
+const char *manifest_lookup_interaction(const interactions_t *interactions,
+                                         const char *input_name) {
+  if (!interactions || !input_name)
+    return NULL;
+  for (int i = 0; i < interactions->count; i++) {
+    if (strcmp(interactions->mappings[i].input, input_name) == 0) {
+      return interactions->mappings[i].action;
+    }
+  }
+  return NULL;
 }
