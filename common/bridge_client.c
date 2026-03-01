@@ -1670,12 +1670,17 @@ void bridge_client_set_network_ready(bool ready) {
     // discovery. This enables seamless location switching — if the knob
     // connects to a different WiFi, it finds the local bridge instead of
     // trying the stale one. Manually configured bridges are kept.
-    if (s_state.cfg.bridge_from_mdns) {
-      LOGI("Clearing mDNS-discovered bridge for fresh discovery");
+    // Always clear bridge on network reconnect to force fresh discovery.
+    // This handles both mDNS-discovered and stale NVS bridges (e.g.,
+    // http://NAS2:8088 from a previous network that can't resolve here).
+    if (s_state.cfg.bridge_base[0] != '\0') {
+      LOGI("Clearing bridge '%s' for fresh discovery",
+           s_state.cfg.bridge_base);
       s_state.cfg.bridge_base[0] = '\0';
       s_state.cfg.bridge_from_mdns = 0;
-      s_state.zone_resolved = false;  // Force zone re-discovery
-      s_bridge_verified = false;      // Allow immediate mDNS/UDP
+      s_state.zone_resolved = false;
+      s_bridge_verified = false;
+      platform_storage_save(&s_state.cfg);
     }
     if (s_device_state == DEVICE_STATE_OPERATIONAL) {
       // Already operational — OPERATIONAL->OPERATIONAL is a valid no-op
