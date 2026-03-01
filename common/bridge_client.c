@@ -55,11 +55,12 @@ struct zone_entry {
 
 // Device operational state for safe volume control
 typedef enum {
-  DEVICE_STATE_BOOT,        // Hardware ready, no network
-  DEVICE_STATE_CONNECTING,  // WiFi attempting
-  DEVICE_STATE_CONNECTED,   // Network ready, zones unknown
-  DEVICE_STATE_OPERATIONAL, // Zones loaded, fully ready
-  DEVICE_STATE_RECONNECTING // Was operational, lost connection
+  DEVICE_STATE_BOOT,            // Hardware ready, no network
+  DEVICE_STATE_CONNECTING,      // WiFi attempting
+  DEVICE_STATE_DISCOVERING,     // WiFi up, searching for bridge (mDNS/UDP)
+  DEVICE_STATE_TESTING_BRIDGE,  // Bridge URL found, testing connection
+  DEVICE_STATE_OPERATIONAL,     // Bridge connected, zones loaded, fully ready
+  DEVICE_STATE_RECONNECTING     // Was operational, lost connection
 } device_state_t;
 
 static const char *device_state_name(device_state_t state) {
@@ -68,8 +69,10 @@ static const char *device_state_name(device_state_t state) {
     return "BOOT";
   case DEVICE_STATE_CONNECTING:
     return "CONNECTING";
-  case DEVICE_STATE_CONNECTED:
-    return "CONNECTED";
+  case DEVICE_STATE_DISCOVERING:
+    return "DISCOVERING";
+  case DEVICE_STATE_TESTING_BRIDGE:
+    return "TESTING_BRIDGE";
   case DEVICE_STATE_OPERATIONAL:
     return "OPERATIONAL";
   case DEVICE_STATE_RECONNECTING:
@@ -84,14 +87,20 @@ static device_state_t s_device_state = DEVICE_STATE_BOOT;
 /// Transition the device state machine. Returns true if the transition was
 /// valid, false if it was rejected. Valid transitions:
 ///
-///   BOOT ──────────► CONNECTED (WiFi up)
-///   BOOT ──────────► BOOT     (WiFi failed, stay in boot)
-///   CONNECTED ─────► OPERATIONAL (zones loaded / zone selected)
-///   CONNECTED ─────► BOOT     (WiFi lost before bridge found)
-///   OPERATIONAL ───► RECONNECTING (WiFi lost while operational)
-///   OPERATIONAL ───► OPERATIONAL  (WiFi reconnect while operational — no regress)
-///   RECONNECTING ──► CONNECTED (WiFi back, re-discover bridge)
-///   RECONNECTING ──► BOOT     (WiFi lost again)
+///   BOOT ────────────► DISCOVERING    (WiFi up, no bridge URL)
+///   BOOT ────────────► TESTING_BRIDGE (WiFi up, has bridge URL from NVS)
+///   BOOT ────────────► BOOT          (WiFi failed, stay in boot)
+///   DISCOVERING ─────► TESTING_BRIDGE (mDNS/UDP found a bridge)
+///   DISCOVERING ─────► DISCOVERING   (still searching, no-op)
+///   DISCOVERING ─────► BOOT          (WiFi lost)
+///   TESTING_BRIDGE ──► OPERATIONAL   (bridge responded, zones loaded)
+///   TESTING_BRIDGE ──► DISCOVERING   (bridge unreachable, cleared, rediscover)
+///   TESTING_BRIDGE ──► BOOT          (WiFi lost)
+///   OPERATIONAL ─────► RECONNECTING  (WiFi lost while operational)
+///   OPERATIONAL ─────► OPERATIONAL   (WiFi reconnect while operational — no-op)
+///   RECONNECTING ────► DISCOVERING   (WiFi back, re-discover bridge)
+///   RECONNECTING ────► TESTING_BRIDGE(WiFi back, has bridge URL)
+///   RECONNECTING ────► BOOT          (WiFi lost again)
 ///
 static bool device_state_transition(device_state_t new_state) {
   device_state_t old = s_device_state;
@@ -99,15 +108,23 @@ static bool device_state_transition(device_state_t new_state) {
 
   switch (old) {
   case DEVICE_STATE_BOOT:
-    valid = (new_state == DEVICE_STATE_CONNECTED ||
+    valid = (new_state == DEVICE_STATE_DISCOVERING ||
+             new_state == DEVICE_STATE_TESTING_BRIDGE ||
              new_state == DEVICE_STATE_BOOT);
     break;
   case DEVICE_STATE_CONNECTING:
-    valid = (new_state == DEVICE_STATE_CONNECTED ||
+    valid = (new_state == DEVICE_STATE_DISCOVERING ||
+             new_state == DEVICE_STATE_TESTING_BRIDGE ||
              new_state == DEVICE_STATE_BOOT);
     break;
-  case DEVICE_STATE_CONNECTED:
+  case DEVICE_STATE_DISCOVERING:
+    valid = (new_state == DEVICE_STATE_TESTING_BRIDGE ||
+             new_state == DEVICE_STATE_DISCOVERING ||
+             new_state == DEVICE_STATE_BOOT);
+    break;
+  case DEVICE_STATE_TESTING_BRIDGE:
     valid = (new_state == DEVICE_STATE_OPERATIONAL ||
+             new_state == DEVICE_STATE_DISCOVERING ||
              new_state == DEVICE_STATE_BOOT);
     break;
   case DEVICE_STATE_OPERATIONAL:
@@ -115,7 +132,8 @@ static bool device_state_transition(device_state_t new_state) {
              new_state == DEVICE_STATE_OPERATIONAL);
     break;
   case DEVICE_STATE_RECONNECTING:
-    valid = (new_state == DEVICE_STATE_CONNECTED ||
+    valid = (new_state == DEVICE_STATE_DISCOVERING ||
+             new_state == DEVICE_STATE_TESTING_BRIDGE ||
              new_state == DEVICE_STATE_BOOT);
     break;
   }
@@ -940,7 +958,11 @@ static void bridge_poll_thread(void *arg) {
     lock_state();
     bool bridge_base_empty = (s_state.cfg.bridge_base[0] == '\0');
     unlock_state();
-    if (bridge_base_empty && s_device_state == DEVICE_STATE_CONNECTED) {
+    if (bridge_base_empty) {
+      // Transition to DISCOVERING if not already
+      if (s_device_state != DEVICE_STATE_DISCOVERING) {
+        device_state_transition(DEVICE_STATE_DISCOVERING);
+      }
       char status_msg[128];
       manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
       if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
@@ -968,7 +990,12 @@ static void bridge_poll_thread(void *arg) {
       continue;
     }
 
-    // Show status immediately before any HTTP timeouts
+    // Bridge URL exists — transition to TESTING_BRIDGE and show status
+    if (s_device_state == DEVICE_STATE_DISCOVERING ||
+        (s_device_state != DEVICE_STATE_OPERATIONAL &&
+         s_device_state != DEVICE_STATE_TESTING_BRIDGE)) {
+      device_state_transition(DEVICE_STATE_TESTING_BRIDGE);
+    }
     if (!s_last_net_ok && !s_bridge_verified) {
       lock_state();
       char bridge_url[64];
@@ -1151,6 +1178,7 @@ static void bridge_poll_thread(void *arg) {
           unlock_state();
           reset_bridge_fail_count();
           s_bridge_verified = false;
+          device_state_transition(DEVICE_STATE_DISCOVERING);
           snprintf(status_msg, sizeof(status_msg),
                    "Bridge lost, rediscovering...");
           manifest_ui_set_zone_name("");
@@ -1682,11 +1710,16 @@ void bridge_client_set_network_ready(bool ready) {
       s_bridge_verified = false;
     }
     if (s_device_state == DEVICE_STATE_OPERATIONAL) {
-      // Already operational — OPERATIONAL->OPERATIONAL is a valid no-op
+      // Already operational — no-op
       device_state_transition(DEVICE_STATE_OPERATIONAL);
     } else {
-      if (device_state_transition(DEVICE_STATE_CONNECTED)) {
-        manifest_ui_set_network_status("Loading zones...");
+      // Go to DISCOVERING or TESTING_BRIDGE depending on whether we have a URL
+      bool has_url = (s_state.cfg.bridge_base[0] != '\0');
+      device_state_t next = has_url ? DEVICE_STATE_TESTING_BRIDGE
+                                    : DEVICE_STATE_DISCOVERING;
+      if (device_state_transition(next)) {
+        manifest_ui_set_network_status(
+            has_url ? "Connecting to bridge..." : "Searching for bridge...");
       }
     }
     s_trigger_poll = true; // Trigger immediate poll when network becomes ready
