@@ -441,10 +441,23 @@ void manifest_ui_init(void) {
   // the LVGL tick timer ISR would assert on vTaskNotifyGive with no task.
   if (s_media.track_label) {
     lv_label_set_text(s_media.track_label, "HiPhi Dial");
+    LOGI("Default boot text set: track='HiPhi Dial' artist='Connecting...'");
+  } else {
+    LOGW("track_label is NULL at boot - cannot set default text");
   }
   if (s_media.artist_label) {
     lv_label_set_text(s_media.artist_label, "Connecting...");
   }
+  // Ensure the media container is visible
+  if (s_media.container) {
+    lv_obj_remove_flag(s_media.container, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  // NOTE: Display shows uninitialized GRAM (TV static) until the first
+  // ui_loop_iter() call flushes LVGL to the display. We can't flush here
+  // because lv_timer_handler() causes a spinlock deadlock between SPI flash
+  // (NVS on Core 0) and display SPI (Core 1). The static lasts ~50ms until
+  // the UI loop task starts after app_main returns.
 
   LOGI("manifest_ui_init complete: screen_root=%p media=%p",
        (void *)s_chrome.screen_root, (void *)s_media.container);
