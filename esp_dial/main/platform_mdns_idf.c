@@ -105,14 +105,20 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
     }
     // ALWAYS prefer IP address — ESP32 lwIP can't resolve bare hostnames
     // like "NAS2" (only .local via mDNS). IP is reliable.
+    // Skip loopback (127.x.x.x) — bridge may advertise it alongside real IPs.
     if (!found && r->addr && r->port) {
-      char ip_str[16];
-      snprintf(ip_str, sizeof(ip_str), IPSTR,
-               IP2STR(&r->addr->addr.u_addr.ip4));
-      snprintf(url, sizeof(url), "http://%s:%u", ip_str, r->port);
-      ESP_LOGI(TAG, "  Using IP:port: %s (hostname=%s)", url,
-               r->hostname ? r->hostname : "(null)");
-      found = true;
+      uint8_t first_octet = (r->addr->addr.u_addr.ip4.addr) & 0xFF;
+      if (first_octet == 127) {
+        ESP_LOGI(TAG, "  Skipping loopback IP");
+      } else {
+        char ip_str[16];
+        snprintf(ip_str, sizeof(ip_str), IPSTR,
+                 IP2STR(&r->addr->addr.u_addr.ip4));
+        snprintf(url, sizeof(url), "http://%s:%u", ip_str, r->port);
+        ESP_LOGI(TAG, "  Using IP:port: %s (hostname=%s)", url,
+                 r->hostname ? r->hostname : "(null)");
+        found = true;
+      }
     }
   }
   // Fall back to TXT base URL if no IP address was found
