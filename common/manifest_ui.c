@@ -1789,6 +1789,22 @@ void manifest_ui_zone_picker_scroll(int delta) {
     max_idx = 0;
   if (s_list.selected > max_idx)
     s_list.selected = max_idx;
+
+  // Update visual: highlight selected item and scroll into view
+  if (s_list.list) {
+    uint32_t child_count = lv_obj_get_child_count(s_list.list);
+    for (uint32_t i = 0; i < child_count; i++) {
+      lv_obj_t *child = lv_obj_get_child(s_list.list, i);
+      if (!child) continue;
+      if ((int)i == s_list.selected) {
+        lv_obj_set_style_bg_color(child, lv_color_hex(0x333333), 0);
+        lv_obj_set_style_bg_opa(child, LV_OPA_COVER, 0);
+        lv_obj_scroll_to_view(child, LV_ANIM_ON);
+      } else {
+        lv_obj_set_style_bg_opa(child, LV_OPA_TRANSP, 0);
+      }
+    }
+  }
 }
 
 void manifest_ui_zone_picker_get_selected_id(char *out, size_t len) {
