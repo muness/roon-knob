@@ -90,17 +90,21 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
   }
   bool found = false;
   char url[128] = {0};
+  char txt_url[128] = {0};
   int count = 0;
   for (mdns_result_t *r = results; r; r = r->next) {
     count++;
     ESP_LOGI(TAG, "mDNS result %d: hostname=%s port=%d txt_count=%zu", count,
              r->hostname ? r->hostname : "(null)", r->port, r->txt_count);
-    if (!found && txt_find_base(r, url, sizeof(url))) {
-      ESP_LOGI(TAG, "  Found base TXT: %s", url);
-      found = true;
+    // Save TXT base as fallback (may contain unresolvable hostname like "NAS2")
+    if (txt_url[0] == '\0') {
+      txt_find_base(r, txt_url, sizeof(txt_url));
+      if (txt_url[0]) {
+        ESP_LOGI(TAG, "  Found base TXT: %s", txt_url);
+      }
     }
-    // Prefer IP address over hostname - ESP32 lwIP has issues resolving .local
-    // hostnames
+    // ALWAYS prefer IP address — ESP32 lwIP can't resolve bare hostnames
+    // like "NAS2" (only .local via mDNS). IP is reliable.
     if (!found && r->addr && r->port) {
       char ip_str[16];
       snprintf(ip_str, sizeof(ip_str), IPSTR,
@@ -110,6 +114,12 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
                r->hostname ? r->hostname : "(null)");
       found = true;
     }
+  }
+  // Fall back to TXT base URL if no IP address was found
+  if (!found && txt_url[0]) {
+    ESP_LOGW(TAG, "No IP in mDNS results, falling back to TXT base: %s", txt_url);
+    copy_str(url, sizeof(url), txt_url);
+    found = true;
   }
   ESP_LOGI(TAG, "mDNS: found %d results, selected: %s", count,
            found ? url : "(none)");
