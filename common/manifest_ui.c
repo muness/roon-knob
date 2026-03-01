@@ -434,39 +434,16 @@ void manifest_ui_init(void) {
   manifest_update_battery_display();
 #endif
 
-  // Render a default manifest so the screen is never blank on boot.
+  // Set default text on the media screen so it's never blank on boot.
   // This gets overwritten as soon as the bridge sends a real manifest.
-  {
-    manifest_t def;
-    memset(&def, 0, sizeof(def));
-    def.version = 2;
-    strncpy(def.sha, "default", sizeof(def.sha) - 1);
-    def.screen_count = 1;
-    def.screens[0].type = SCREEN_TYPE_MEDIA;
-    strncpy(def.screens[0].id, "now_playing", MANIFEST_MAX_ID - 1);
-    // Title line
-    strncpy(def.screens[0].data.media.lines[0].text, "HiPhi Dial",
-            MANIFEST_MAX_TEXT - 1);
-    def.screens[0].data.media.lines[0].style = TEXT_STYLE_TITLE;
-    // Subtitle line
-    strncpy(def.screens[0].data.media.lines[1].text, "Connecting...",
-            MANIFEST_MAX_TEXT - 1);
-    def.screens[0].data.media.lines[1].style = TEXT_STYLE_SUBTITLE;
-    def.screens[0].data.media.line_count = 2;
-    // Default transport elements
-    def.screens[0].element_count = 3;
-    strncpy(def.screens[0].elements[0].display.icon, "skip_previous",
-            MAX_ICON_LEN - 1);
-    strncpy(def.screens[0].elements[1].display.icon, "play_arrow",
-            MAX_ICON_LEN - 1);
-    strncpy(def.screens[0].elements[2].display.icon, "skip_next",
-            MAX_ICON_LEN - 1);
-    // Nav
-    def.nav.count = 1;
-    strncpy(def.nav.order[0], "now_playing", MANIFEST_MAX_ID - 1);
-    strncpy(def.nav.default_screen, "now_playing", MANIFEST_MAX_ID - 1);
-
-    manifest_ui_update(&def);
+  // NOTE: We set LVGL labels directly here instead of calling
+  // manifest_ui_update() because the UI task hasn't been created yet —
+  // the LVGL tick timer ISR would assert on vTaskNotifyGive with no task.
+  if (s_media.track_label) {
+    lv_label_set_text(s_media.track_label, "HiPhi Dial");
+  }
+  if (s_media.artist_label) {
+    lv_label_set_text(s_media.artist_label, "Connecting...");
   }
 
   LOGI("manifest_ui_init complete: screen_root=%p media=%p",

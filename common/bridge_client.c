@@ -79,6 +79,60 @@ static const char *device_state_name(device_state_t state) {
   }
 }
 
+static device_state_t s_device_state = DEVICE_STATE_BOOT;
+
+/// Transition the device state machine. Returns true if the transition was
+/// valid, false if it was rejected. Valid transitions:
+///
+///   BOOT ──────────► CONNECTED (WiFi up)
+///   BOOT ──────────► BOOT     (WiFi failed, stay in boot)
+///   CONNECTED ─────► OPERATIONAL (zones loaded / zone selected)
+///   CONNECTED ─────► BOOT     (WiFi lost before bridge found)
+///   OPERATIONAL ───► RECONNECTING (WiFi lost while operational)
+///   OPERATIONAL ───► OPERATIONAL  (WiFi reconnect while operational — no regress)
+///   RECONNECTING ──► CONNECTED (WiFi back, re-discover bridge)
+///   RECONNECTING ──► BOOT     (WiFi lost again)
+///
+static bool device_state_transition(device_state_t new_state) {
+  device_state_t old = s_device_state;
+  bool valid = false;
+
+  switch (old) {
+  case DEVICE_STATE_BOOT:
+    valid = (new_state == DEVICE_STATE_CONNECTED ||
+             new_state == DEVICE_STATE_BOOT);
+    break;
+  case DEVICE_STATE_CONNECTING:
+    valid = (new_state == DEVICE_STATE_CONNECTED ||
+             new_state == DEVICE_STATE_BOOT);
+    break;
+  case DEVICE_STATE_CONNECTED:
+    valid = (new_state == DEVICE_STATE_OPERATIONAL ||
+             new_state == DEVICE_STATE_BOOT);
+    break;
+  case DEVICE_STATE_OPERATIONAL:
+    valid = (new_state == DEVICE_STATE_RECONNECTING ||
+             new_state == DEVICE_STATE_OPERATIONAL);
+    break;
+  case DEVICE_STATE_RECONNECTING:
+    valid = (new_state == DEVICE_STATE_CONNECTED ||
+             new_state == DEVICE_STATE_BOOT);
+    break;
+  }
+
+  if (valid) {
+    if (old != new_state) {
+      LOGI("Device state: %s -> %s", device_state_name(old),
+           device_state_name(new_state));
+    }
+    s_device_state = new_state;
+  } else {
+    LOGW("REJECTED state transition: %s -> %s (invalid)",
+         device_state_name(old), device_state_name(new_state));
+  }
+  return valid;
+}
+
 struct bridge_state {
   rk_cfg_t cfg;
   struct zone_entry zones[MAX_ZONES];
@@ -94,7 +148,7 @@ static bool s_running;
 static bool s_trigger_poll;
 static bool s_last_net_ok;
 static bool s_network_ready;
-static device_state_t s_device_state = DEVICE_STATE_BOOT; // Initial state
+// s_device_state declared above device_state_transition()
 static bool s_force_artwork_refresh; // Force artwork reload on zone change
 static float s_last_known_volume =
     0.0f; // Cached volume for optimistic UI updates
@@ -743,10 +797,9 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     }
     s_state.zone_resolved = true;
     if (s_device_state != DEVICE_STATE_OPERATIONAL) {
-      LOGI("Device state: %s -> OPERATIONAL (zones loaded)",
-           device_state_name(s_device_state));
-      s_device_state = DEVICE_STATE_OPERATIONAL;
-      manifest_ui_set_network_status(NULL); // Clear status banner when ready
+      if (device_state_transition(DEVICE_STATE_OPERATIONAL)) {
+        manifest_ui_set_network_status(NULL); // Clear status banner when ready
+      }
     }
     success = should_sync && zone_label_copy[0] != '\0';
   }
@@ -1291,10 +1344,9 @@ void bridge_client_handle_input(ui_input_event_t event) {
           strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
           s_state.zone_resolved = true;
           if (s_device_state != DEVICE_STATE_OPERATIONAL) {
-            LOGI("Device state: %s -> OPERATIONAL (zone selected)",
-                 device_state_name(s_device_state));
-            s_device_state = DEVICE_STATE_OPERATIONAL;
-            manifest_ui_set_network_status(NULL); // Clear status banner when ready
+            if (device_state_transition(DEVICE_STATE_OPERATIONAL)) {
+              manifest_ui_set_network_status(NULL);
+            }
           }
           s_trigger_poll = true;
           s_force_artwork_refresh = true; // Force artwork reload for new zone
@@ -1626,29 +1678,23 @@ void bridge_client_set_network_ready(bool ready) {
       s_bridge_verified = false;      // Allow immediate mDNS/UDP
     }
     if (s_device_state == DEVICE_STATE_OPERATIONAL) {
-      // Already operational — don't regress to CONNECTED on transient
-      // WiFi reconnect. Zones are already loaded.
-      LOGI("Device state: OPERATIONAL (network ready, no state change)");
+      // Already operational — OPERATIONAL->OPERATIONAL is a valid no-op
+      device_state_transition(DEVICE_STATE_OPERATIONAL);
     } else {
-      LOGI("Device state: %s -> CONNECTED (network ready)",
-           device_state_name(s_device_state));
-      s_device_state = DEVICE_STATE_CONNECTED;
-      manifest_ui_set_network_status("Loading zones...");
+      if (device_state_transition(DEVICE_STATE_CONNECTED)) {
+        manifest_ui_set_network_status("Loading zones...");
+      }
     }
     s_trigger_poll = true; // Trigger immediate poll when network becomes ready
   } else {
-    // Transition to RECONNECTING if we were operational, otherwise back to
-    // BOOT
+    // Transition to RECONNECTING if we were operational, otherwise back to BOOT
     device_state_t new_state = (s_device_state == DEVICE_STATE_OPERATIONAL)
                                    ? DEVICE_STATE_RECONNECTING
                                    : DEVICE_STATE_BOOT;
-    LOGI("Device state: %s -> %s (network lost)",
-         device_state_name(s_device_state), device_state_name(new_state));
-    s_device_state = new_state;
-    // Only set banner for RECONNECTING (was operational, lost network).
-    // During BOOT, the WiFi event handler owns the banner (AP setup, etc).
-    if (new_state == DEVICE_STATE_RECONNECTING) {
-      manifest_ui_set_network_status("Reconnecting...");
+    if (device_state_transition(new_state)) {
+      if (new_state == DEVICE_STATE_RECONNECTING) {
+        manifest_ui_set_network_status("Reconnecting...");
+      }
     }
   }
   unlock_state();
