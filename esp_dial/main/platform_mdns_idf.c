@@ -78,8 +78,11 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
   }
   ESP_LOGI(TAG, "Querying mDNS for %s.%s...", SERVICE_TYPE, SERVICE_PROTO);
   mdns_result_t *results = NULL;
-  esp_err_t err =
-      mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 3000, 4, &results);
+  // Use mdns_query_generic with MULTICAST to get ALL responders,
+  // not just the first cached/unicast response.
+  esp_err_t err = mdns_query_generic(
+      NULL, SERVICE_TYPE, SERVICE_PROTO, MDNS_TYPE_PTR,
+      MDNS_QUERY_MULTICAST, 3000, 4, &results);
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "mDNS query failed: %s", esp_err_to_name(err));
     return false;
