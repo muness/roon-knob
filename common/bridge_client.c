@@ -28,7 +28,7 @@
 #include <string.h>
 
 // Forward declarations for config handling
-static bool fetch_knob_config(void);
+static bool fetch_knob_config(void) __attribute__((unused));
 static void apply_knob_config(const rk_cfg_t *cfg);
 static void check_charging_state_change(void);
 
@@ -130,8 +130,6 @@ static bool s_last_charging_state =
     true; // Track charging state for config reapply
 static bool s_last_is_playing =
     false; // Track play state for extended sleep polling
-static char s_last_zones_sha[9] = {
-    0}; // Track zones SHA for zone list change detection
 #define MDNS_RECHECK_INTERVAL_MS                                               \
   (3600 * 1000) // Re-check mDNS every hour if bridge stops responding
 
@@ -915,6 +913,20 @@ static void bridge_poll_thread(void *arg) {
       manifest_ui_set_network_status(status_msg);
       wait_for_poll_interval();
       continue;
+    }
+
+    // Show status immediately before any HTTP timeouts
+    if (!s_last_net_ok && !s_bridge_verified) {
+      lock_state();
+      char bridge_url[64];
+      strncpy(bridge_url, s_state.cfg.bridge_base, sizeof(bridge_url) - 1);
+      bridge_url[sizeof(bridge_url) - 1] = '\0';
+      unlock_state();
+      if (bridge_url[0]) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Connecting...\n%.50s", bridge_url);
+        manifest_ui_set_network_status(msg);
+      }
     }
 
     if (!s_state.zone_resolved) {
