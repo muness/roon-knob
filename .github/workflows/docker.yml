@@ -6,6 +6,8 @@ on:
     tags: ['v*']
   pull_request:
     branches: [master, main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: write
