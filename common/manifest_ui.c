@@ -115,8 +115,9 @@ static struct {
   int screen_count;           // Number of navigable screens
   char sha[MANIFEST_SHA_LEN]; // Last rendered SHA
 
-  // Cached manifest for current screens
-  manifest_t manifest;
+  // Cached manifest — heap-allocated (uses PSRAM on ESP32-S3) to avoid
+  // 32KB+ in BSS which exhausts internal SRAM.
+  manifest_t *manifest;
   bool has_manifest;
 } s_mgr;
 
@@ -386,6 +387,12 @@ void manifest_ui_set_input_handler(ui_input_cb_t handler) {
 
 void manifest_ui_init(void) {
   memset(&s_mgr, 0, sizeof(s_mgr));
+  // Allocate manifest on heap (uses PSRAM) — too large for static BSS
+  s_mgr.manifest = calloc(1, sizeof(manifest_t));
+  if (!s_mgr.manifest) {
+    LOGW("Failed to allocate manifest buffer");
+    return;
+  }
   memset(&s_media, 0, sizeof(s_media));
   memset(&s_chrome, 0, sizeof(s_chrome));
   memset(&s_list, 0, sizeof(s_list));
@@ -988,8 +995,8 @@ static void build_status_screen(lv_obj_t *parent) {
 // ── Screen manager ─────────────────────────────────────────────────────────
 
 static int find_screen_index(const char *screen_id) {
-  for (int i = 0; i < s_mgr.manifest.screen_count; i++) {
-    if (strcmp(s_mgr.manifest.screens[i].id, screen_id) == 0)
+  for (int i = 0; i < s_mgr.manifest->screen_count; i++) {
+    if (strcmp(s_mgr.manifest->screens[i].id, screen_id) == 0)
       return i;
   }
   return -1;
@@ -1026,14 +1033,14 @@ static void show_screen(int nav_index) {
     lv_obj_add_flag(s_status.container, LV_OBJ_FLAG_HIDDEN);
 
   if (!s_mgr.has_manifest || nav_index < 0 ||
-      nav_index >= s_mgr.manifest.nav.count) {
+      nav_index >= s_mgr.manifest->nav.count) {
     // Fallback: show media
     if (s_media.container)
       lv_obj_remove_flag(s_media.container, LV_OBJ_FLAG_HIDDEN);
     return;
   }
 
-  const char *screen_id = s_mgr.manifest.nav.order[nav_index];
+  const char *screen_id = s_mgr.manifest->nav.order[nav_index];
   int screen_idx = find_screen_index(screen_id);
   if (screen_idx < 0) {
     LOGI("show_screen: screen '%s' not found in manifest", screen_id);
@@ -1042,7 +1049,7 @@ static void show_screen(int nav_index) {
     return;
   }
 
-  screen_type_t type = s_mgr.manifest.screens[screen_idx].type;
+  screen_type_t type = s_mgr.manifest->screens[screen_idx].type;
   lv_obj_t *container = get_screen_container(type);
   if (container) {
     lv_obj_remove_flag(container, LV_OBJ_FLAG_HIDDEN);
@@ -1364,7 +1371,7 @@ void manifest_ui_update(const manifest_t *manifest) {
          s_mgr.sha, manifest->sha, manifest->screen_count);
 
     // Cache the new manifest
-    s_mgr.manifest = *manifest;
+    *s_mgr.manifest = *manifest;
     s_mgr.has_manifest = true;
     strncpy(s_mgr.sha, manifest->sha, sizeof(s_mgr.sha) - 1);
     s_mgr.sha[MANIFEST_SHA_LEN - 1] = '\0';
@@ -1490,21 +1497,21 @@ void manifest_ui_navigate(int delta) {
 }
 
 screen_type_t manifest_ui_current_screen_type(void) {
-  if (!s_mgr.has_manifest || s_mgr.current_screen >= s_mgr.manifest.nav.count) {
+  if (!s_mgr.has_manifest || s_mgr.current_screen >= s_mgr.manifest->nav.count) {
     return SCREEN_TYPE_MEDIA;
   }
-  const char *id = s_mgr.manifest.nav.order[s_mgr.current_screen];
+  const char *id = s_mgr.manifest->nav.order[s_mgr.current_screen];
   int idx = find_screen_index(id);
   if (idx < 0)
     return SCREEN_TYPE_MEDIA;
-  return s_mgr.manifest.screens[idx].type;
+  return s_mgr.manifest->screens[idx].type;
 }
 
 const char *manifest_ui_current_screen_id(void) {
-  if (!s_mgr.has_manifest || s_mgr.current_screen >= s_mgr.manifest.nav.count) {
+  if (!s_mgr.has_manifest || s_mgr.current_screen >= s_mgr.manifest->nav.count) {
     return "now_playing";
   }
-  return s_mgr.manifest.nav.order[s_mgr.current_screen];
+  return s_mgr.manifest->nav.order[s_mgr.current_screen];
 }
 
 /// Return the element index that was mapped to the given physical button during
@@ -1672,8 +1679,8 @@ void manifest_ui_show_volume_change(float vol, float vol_step) {
   float vol_min = 0, vol_max = 100;
   // Use cached manifest values if available
   if (s_mgr.has_manifest) {
-    vol_min = s_mgr.manifest.fast.volume_min;
-    vol_max = s_mgr.manifest.fast.volume_max;
+    vol_min = s_mgr.manifest->fast.volume_min;
+    vol_max = s_mgr.manifest->fast.volume_max;
   }
   float *vals = malloc(4 * sizeof(float));
   if (!vals)
@@ -1737,9 +1744,9 @@ void manifest_ui_set_network_status(const char *status) {
 
 void manifest_ui_show_zone_picker(void) {
   // Navigate to the zones list screen
-  for (int i = 0; i < s_mgr.manifest.nav.count; i++) {
-    int idx = find_screen_index(s_mgr.manifest.nav.order[i]);
-    if (idx >= 0 && s_mgr.manifest.screens[idx].type == SCREEN_TYPE_LIST) {
+  for (int i = 0; i < s_mgr.manifest->nav.count; i++) {
+    int idx = find_screen_index(s_mgr.manifest->nav.order[i]);
+    if (idx >= 0 && s_mgr.manifest->screens[idx].type == SCREEN_TYPE_LIST) {
       show_screen(i);
       lv_obj_add_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
       return;
@@ -1749,11 +1756,11 @@ void manifest_ui_show_zone_picker(void) {
 
 void manifest_ui_hide_zone_picker(void) {
   // Navigate back to default screen
-  int def = find_screen_index(s_mgr.manifest.nav.default_screen);
+  int def = find_screen_index(s_mgr.manifest->nav.default_screen);
   if (def >= 0) {
     // Find nav index for this screen
-    for (int i = 0; i < s_mgr.manifest.nav.count; i++) {
-      if (find_screen_index(s_mgr.manifest.nav.order[i]) == def) {
+    for (int i = 0; i < s_mgr.manifest->nav.count; i++) {
+      if (find_screen_index(s_mgr.manifest->nav.order[i]) == def) {
         show_screen(i);
         lv_obj_clear_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -1772,9 +1779,9 @@ void manifest_ui_zone_picker_scroll(int delta) {
   if (s_list.selected < 0)
     s_list.selected = 0;
   int max_idx = 0;
-  for (int i = 0; i < s_mgr.manifest.screen_count; i++) {
-    if (s_mgr.manifest.screens[i].type == SCREEN_TYPE_LIST) {
-      max_idx = s_mgr.manifest.screens[i].data.list.item_count - 1;
+  for (int i = 0; i < s_mgr.manifest->screen_count; i++) {
+    if (s_mgr.manifest->screens[i].type == SCREEN_TYPE_LIST) {
+      max_idx = s_mgr.manifest->screens[i].data.list.item_count - 1;
       break;
     }
   }
@@ -1790,9 +1797,9 @@ void manifest_ui_zone_picker_get_selected_id(char *out, size_t len) {
   out[0] = '\0';
 
   // Find the list screen
-  for (int i = 0; i < s_mgr.manifest.screen_count; i++) {
-    if (s_mgr.manifest.screens[i].type == SCREEN_TYPE_LIST) {
-      const manifest_list_t *list = &s_mgr.manifest.screens[i].data.list;
+  for (int i = 0; i < s_mgr.manifest->screen_count; i++) {
+    if (s_mgr.manifest->screens[i].type == SCREEN_TYPE_LIST) {
+      const manifest_list_t *list = &s_mgr.manifest->screens[i].data.list;
       if (s_list.selected >= 0 && s_list.selected < list->item_count) {
         strncpy(out, list->items[s_list.selected].id, len - 1);
         out[len - 1] = '\0';
