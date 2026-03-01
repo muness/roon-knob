@@ -434,10 +434,6 @@ void manifest_ui_init(void) {
   manifest_update_battery_display();
 #endif
 
-  // Boot screen — overwritten when bridge sends a real manifest.
-  lv_label_set_text(s_media.track_label, "HiPhi Dial");
-  lv_label_set_text(s_media.artist_label, "Connecting...");
-
   LOGI("manifest_ui_init complete: screen_root=%p media=%p",
        (void *)s_chrome.screen_root, (void *)s_media.container);
 }
@@ -715,7 +711,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
   lv_label_set_long_mode(s_media.artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_style_anim_time(s_media.artist_label, 25000, LV_PART_MAIN);
-  lv_label_set_text(s_media.artist_label, "");
+  lv_label_set_text(s_media.artist_label, "Connecting...");
 
   // Track (line[0] = title)
   s_media.track_label = lv_label_create(np);
@@ -725,7 +721,7 @@ static void build_media_screen(lv_obj_t *parent) {
   lv_obj_set_style_text_color(s_media.track_label, COLOR_TEXT_PRIMARY, 0);
   lv_label_set_long_mode(s_media.track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_style_anim_time(s_media.track_label, 25000, LV_PART_MAIN);
-  lv_label_set_text(s_media.track_label, "");
+  lv_label_set_text(s_media.track_label, "HiPhi Dial");
 
   // Transport controls row
   lv_obj_t *controls = lv_obj_create(np);
