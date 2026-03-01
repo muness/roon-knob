@@ -90,11 +90,11 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
   }
   ESP_LOGI(TAG, "Querying mDNS for %s.%s...", SERVICE_TYPE, SERVICE_PROTO);
   mdns_result_t *results = NULL;
-  // Use mdns_query_generic with MULTICAST to get ALL responders,
-  // not just the first cached/unicast response.
+  // Use mdns_query_generic with MULTICAST to get ALL responders.
+  // 5-second timeout to allow slower WiFi responders to answer.
   esp_err_t err = mdns_query_generic(
       NULL, SERVICE_TYPE, SERVICE_PROTO, MDNS_TYPE_PTR,
-      MDNS_QUERY_MULTICAST, 3000, 4, &results);
+      MDNS_QUERY_MULTICAST, 5000, 8, &results);
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "mDNS query failed: %s", esp_err_to_name(err));
     return false;
