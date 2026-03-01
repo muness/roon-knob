@@ -1187,6 +1187,9 @@ static void bridge_poll_thread(void *arg) {
           unlock_state();
           reset_bridge_fail_count();
           s_bridge_verified = false;
+          // Flush ESP-IDF mDNS internal cache so stale entries don't
+          // get returned on the next query
+          platform_mdns_flush_cache();
           device_state_transition(DEVICE_STATE_DISCOVERING);
           snprintf(status_msg, sizeof(status_msg),
                    "Bridge lost, rediscovering...");

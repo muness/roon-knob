@@ -6,6 +6,7 @@
 void platform_mdns_init(const char *hostname);
 bool platform_mdns_is_ready(void);
 bool platform_mdns_discover_base_url(char *out, size_t len);
+void platform_mdns_flush_cache(void);
 
 // Resolve a .local hostname to IP address via mDNS
 // hostname can be "foo" or "foo.local" - .local suffix is stripped

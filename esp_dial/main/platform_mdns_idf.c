@@ -55,6 +55,18 @@ void platform_mdns_init(const char *hostname) {
 
 bool platform_mdns_is_ready(void) { return s_mdns_ready; }
 
+void platform_mdns_flush_cache(void) {
+  if (!s_mdns_ready) return;
+  ESP_LOGI(TAG, "Flushing mDNS cache (reinitializing)");
+  // Save hostname before teardown
+  char hostname[64] = {0};
+  mdns_hostname_get(hostname);
+  // Tear down and reinitialize
+  mdns_free();
+  s_mdns_ready = false;
+  platform_mdns_init(hostname[0] ? hostname : NULL);
+}
+
 static bool txt_find_base(const mdns_result_t *result, char *out, size_t len) {
   if (!result || !out || len == 0) {
     return false;
