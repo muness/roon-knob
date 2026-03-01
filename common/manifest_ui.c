@@ -1,7 +1,6 @@
 /// Manifest-driven knob UI.
 ///
-/// Fresh implementation alongside ui.c, activated via USE_MANIFEST.
-/// Style values copied from ui.c for pixel-identical default rendering.
+/// Implements the knob UI with manifest-driven screen rendering.
 /// Screen manager handles navigation between multiple screens.
 
 #include "manifest_ui.h"
@@ -31,7 +30,7 @@
 
 #define TAG "manifest_ui"
 
-// ── Display constants (from ui.c) ──────────────────────────────────────────
+// ── Display constants ────────────────────────────────────────────────────────────────
 
 #ifdef ESP_PLATFORM
 #define SCREEN_SIZE 360
@@ -43,7 +42,7 @@
 // Progress arc inner diameter = 322, max inscribed square = 322/√2 ≈ 228.
 #define ART_SIZE 228
 
-// Colors — intentional departures from legacy ui.c:
+// Colors:
 // - STATUS_GREEN: 0x2ecc71 (muted) preferred over legacy 0x00ff00 for OLED
 // longevity
 // - STATUS_RED: 0xe74c3c signals offline clearly vs legacy 0x5a5a5a grey
@@ -72,7 +71,7 @@
 static lv_color_t s_accent_color;
 static bool s_has_accent = false;
 
-// ── Font wrappers (same as ui.c) ──────────────────────────────────────────
+// ── Font wrappers ────────────────────────────────────────────────────────────────────
 
 #if !TARGET_PC
 static inline const lv_font_t *font_small(void) {
@@ -222,7 +221,7 @@ static void animate_arc(lv_obj_t *arc, int from, int to, int duration_ms,
   lv_anim_start(&a);
 }
 
-// Input callback (same pattern as ui.c)
+// Input callback
 static ui_input_cb_t s_input_cb = NULL;
 
 // ── Forward declarations ───────────────────────────────────────────────────
@@ -294,7 +293,7 @@ static void btn_next_event_cb(lv_event_t *e) {
     s_input_cb(UI_INPUT_NEXT_TRACK);
 }
 
-// ── Volume helpers (from ui.c) ─────────────────────────────────────────────
+// ── Volume helpers ───────────────────────────────────────────────────────────────────
 
 static int calculate_volume_percentage(float vol, float vol_min,
                                        float vol_max) {
@@ -373,7 +372,7 @@ void manifest_ui_init(void) {
   s_mgr.current_screen = 0;
   show_screen(0);
   // Force full-screen redraw — flush happens in ui_loop_iter via
-  // lv_task_handler
+  // lv_timer_handler
   lv_obj_invalidate(screen);
   // Periodic battery poll (30s) + initial update
 #ifdef ESP_PLATFORM
@@ -400,7 +399,7 @@ static void manifest_update_battery_display(void) {
   int percent = battery_get_percentage();
   bool charging = battery_is_charging();
 
-  // Convert to 4 discrete levels (matches ui.c thresholds)
+  // Convert to 4 discrete levels
   int level;
   if (percent <= 10)
     level = 0; // Critical
@@ -533,7 +532,7 @@ static void build_chrome(lv_obj_t *parent) {
 }
 
 // ── Media screen builder ───────────────────────────────────────────────────
-// Pixel-identical to ui.c build_layout() now_playing section.
+// Pixel-identical to original layout.
 
 static void build_media_screen(lv_obj_t *parent) {
   s_media.container = lv_obj_create(parent);
@@ -1409,7 +1408,9 @@ static void ui_cb_set_message(void *arg) {
       lv_timer_reset(s_msg_timer);
     } else {
       s_msg_timer = lv_timer_create(msg_timer_cb, 3000, NULL);
-      lv_timer_set_repeat_count(s_msg_timer, 1);
+      if (s_msg_timer) {
+        lv_timer_set_repeat_count(s_msg_timer, 1);
+      }
     }
   } else {
     lv_label_set_text(s_chrome.status_bar, "");
@@ -1597,6 +1598,8 @@ void manifest_ui_hide_zone_picker(void) {
     }
   }
   show_screen(0);
+  if (s_chrome.zone_label)
+    lv_obj_clear_flag(s_chrome.zone_label, LV_OBJ_FLAG_HIDDEN);
 }
 
 bool manifest_ui_is_zone_picker_visible(void) {
@@ -1661,44 +1664,14 @@ bool manifest_ui_zone_picker_is_current_selection(void) {
   return false;
 }
 
-#if USE_MANIFEST
-// ── Compatibility shims ──────────────────────────────────────────────────────
-// When USE_MANIFEST=1, ui.c is not linked. Other files (ui_network.c, etc.)
-// call ui_* functions directly. Provide thin forwards to manifest_ui_*.
-
-void ui_init(void) { manifest_ui_init(); }
-void ui_set_status(bool online) { manifest_ui_set_status(online); }
+// ── ui.h API implementations ─────────────────────────────────────────────────
+// These provide the ui_* function implementations declared in ui.h.
+// Other files (ui_network.c, captive_portal.c, display_sleep.c, main_idf.c)
+// call these directly.
 void ui_set_message(const char *msg) { manifest_ui_set_message(msg); }
 void ui_set_zone_name(const char *name) { manifest_ui_set_zone_name(name); }
 void ui_set_network_status(const char *status) {
   manifest_ui_set_network_status(status);
-}
-void ui_set_artwork(const char *key) { manifest_ui_set_artwork(key); }
-void ui_show_volume_change(float v, float s) {
-  manifest_ui_show_volume_change(v, s);
-}
-void ui_set_input_handler(ui_input_cb_t h) { manifest_ui_set_input_handler(h); }
-void ui_update(const char *l1, const char *l2, bool p, float v, float vn,
-               float vx, float vs, int sp, int le) {
-  (void)l2;
-  (void)p;
-  (void)v;
-  (void)vn;
-  (void)vx;
-  (void)vs;
-  (void)sp;
-  (void)le;
-  manifest_ui_set_message(l1);
-}
-void ui_dispatch_input(ui_input_event_t ev) {
-  if (s_input_cb)
-    s_input_cb(ev);
-}
-void ui_handle_volume_rotation(int ticks) {
-  if (manifest_ui_is_zone_picker_visible()) {
-    manifest_ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
-  }
-  // Volume rotation handled by bridge_client directly
 }
 
 // Map RSSI to dot color: blue (excellent), green (good), yellow (fair), red
@@ -1753,7 +1726,6 @@ static void tick_progress(void) {
 }
 void ui_loop_iter(void) {
   platform_task_run_pending();
-  lv_task_handler();
   lv_timer_handler();
 
   // Tick progress arc every ~1s (100 iterations at 10ms)
@@ -1770,25 +1742,6 @@ void ui_loop_iter(void) {
     update_wifi_indicator();
   }
 }
-void ui_show_zone_picker(const char **n, const char **i, int c, int s) {
-  (void)n;
-  (void)i;
-  (void)c;
-  (void)s;
-  manifest_ui_show_zone_picker();
-}
-void ui_hide_zone_picker(void) { manifest_ui_hide_zone_picker(); }
-bool ui_is_zone_picker_visible(void) {
-  return manifest_ui_is_zone_picker_visible();
-}
-void ui_zone_picker_scroll(int d) { manifest_ui_zone_picker_scroll(d); }
-void ui_zone_picker_get_selected_id(char *o, size_t l) {
-  manifest_ui_zone_picker_get_selected_id(o, l);
-}
-bool ui_zone_picker_is_current_selection(void) {
-  return manifest_ui_zone_picker_is_current_selection();
-}
-int ui_zone_picker_get_selected(void) { return 0; }
 void ui_update_battery(void) { manifest_update_battery_display(); }
 void ui_set_controls_visible(bool v) {
   // Art mode: hide chrome + controls, show artwork at full opacity
@@ -1864,7 +1817,6 @@ void ui_set_controls_visible(bool v) {
       lv_obj_set_style_img_opa(s_media.artwork_image, LV_OPA_COVER, 0);
   }
 }
-void ui_test_pattern(void) {}
 // ── OTA Update UI ───────────────────────────────────────────────────────────
 
 #ifdef ESP_PLATFORM
@@ -2007,8 +1959,3 @@ void ui_trigger_update(void) {
   ota_start_update();
 #endif
 }
-void ui_set_progress(int seek, int len) {
-  (void)seek;
-  (void)len;
-}
-#endif /* USE_MANIFEST */

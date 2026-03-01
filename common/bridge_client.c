@@ -37,7 +37,7 @@
   eink_ui_zone_picker_is_current_selection()
 #define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
   eink_ui_update(l1, l2, l3, p, v, vn, vx, vs, sp, le)
-#elif USE_MANIFEST
+#else
 #include "manifest_parse.h"
 #include "manifest_ui.h"
 // Dispatch macros: route ui_* calls to manifest_ui_* in manifest mode
@@ -57,22 +57,6 @@
   manifest_ui_zone_picker_is_current_selection()
 #define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le) /* noop in manifest    \
                                                         */
-#else
-#define UI_SET_STATUS(o) ui_set_status(o)
-#define UI_SET_MESSAGE(m) ui_set_message(m)
-#define UI_SET_ZONE_NAME(n) ui_set_zone_name(n)
-#define UI_SET_NETWORK_STATUS(s) ui_set_network_status(s)
-#define UI_SET_ARTWORK(k) ui_set_artwork(k)
-#define UI_SHOW_VOLUME_CHANGE(v, s) ui_show_volume_change(v, s)
-#define UI_SHOW_ZONE_PICKER(n, i, c, s) ui_show_zone_picker(n, i, c, s)
-#define UI_HIDE_ZONE_PICKER() ui_hide_zone_picker()
-#define UI_IS_ZONE_PICKER_VISIBLE() ui_is_zone_picker_visible()
-#define UI_ZONE_PICKER_SCROLL(d) ui_zone_picker_scroll(d)
-#define UI_ZONE_PICKER_GET_SELECTED_ID(o, l)                                   \
-  ui_zone_picker_get_selected_id(o, l)
-#define UI_ZONE_PICKER_IS_CURRENT() ui_zone_picker_is_current_selection()
-#define UI_UPDATE(l1, l2, l3, p, v, vn, vx, vs, sp, le)                        \
-  ui_update(l1, l2, p, v, vn, vx, vs, sp, le)
 #endif
 
 #include <cJSON.h>
@@ -703,7 +687,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
   return true;
 }
 
-#if USE_MANIFEST
+#if !USE_EINK
 // ── Manifest fetch ──────────────────────────────────────────────────────────
 
 static char s_manifest_sha[9] = {0}; // Cached SHA for 304 support
@@ -981,9 +965,9 @@ static void ui_manifest_cb(void *arg) {
 static void post_manifest_update(manifest_t *m) {
   platform_task_post_to_ui(ui_manifest_cb, m);
 }
-#endif /* USE_MANIFEST */
+#endif /* !USE_EINK */
 
-#if !USE_MANIFEST
+#if USE_EINK
 // Stub: UDP fast-path is manifest-only; fall back to HTTP for volume
 static bool udp_send_volume(float volume) {
   (void)volume;
@@ -1211,7 +1195,7 @@ static void bridge_poll_thread(void *arg) {
     if (!s_state.zone_resolved) {
       refresh_zone_label(true);
     }
-#if USE_MANIFEST
+#if !USE_EINK
     // ── UDP fast-path: try lightweight poll first ──
     udp_fast_response_t udp_resp;
     bool udp_ok = udp_poll_fast_state(&udp_resp);

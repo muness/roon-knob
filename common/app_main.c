@@ -8,7 +8,7 @@
 #include "ui.h"
 #if USE_EINK
 #include "eink_ui.h"
-#elif USE_MANIFEST
+#else
 #include "manifest_ui.h"
 #endif
 
@@ -27,13 +27,10 @@ void app_entry(void) {
 #if USE_EINK
   eink_ui_set_input_handler(bridge_client_handle_input);
   eink_ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "");
-#elif USE_MANIFEST
+#else
   manifest_ui_set_input_handler(bridge_client_handle_input);
   manifest_ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id
                                            : "Tap here to select zone");
-#else
-  ui_set_input_handler(bridge_client_handle_input);
-  ui_set_zone_name(cfg.zone_id[0] ? cfg.zone_id : "Tap here to select zone");
 #endif
   bridge_client_start(&cfg);
 }
