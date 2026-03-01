@@ -56,7 +56,6 @@ struct zone_entry {
 // Device operational state for safe volume control
 typedef enum {
   DEVICE_STATE_BOOT,            // Hardware ready, no network
-  DEVICE_STATE_CONNECTING,      // WiFi attempting
   DEVICE_STATE_DISCOVERING,     // WiFi up, searching for bridge (mDNS/UDP)
   DEVICE_STATE_TESTING_BRIDGE,  // Bridge URL found, testing connection
   DEVICE_STATE_OPERATIONAL,     // Bridge connected, zones loaded, fully ready
@@ -67,8 +66,6 @@ static const char *device_state_name(device_state_t state) {
   switch (state) {
   case DEVICE_STATE_BOOT:
     return "BOOT";
-  case DEVICE_STATE_CONNECTING:
-    return "CONNECTING";
   case DEVICE_STATE_DISCOVERING:
     return "DISCOVERING";
   case DEVICE_STATE_TESTING_BRIDGE:
@@ -108,11 +105,6 @@ static bool device_state_transition(device_state_t new_state) {
 
   switch (old) {
   case DEVICE_STATE_BOOT:
-    valid = (new_state == DEVICE_STATE_DISCOVERING ||
-             new_state == DEVICE_STATE_TESTING_BRIDGE ||
-             new_state == DEVICE_STATE_BOOT);
-    break;
-  case DEVICE_STATE_CONNECTING:
     valid = (new_state == DEVICE_STATE_DISCOVERING ||
              new_state == DEVICE_STATE_TESTING_BRIDGE ||
              new_state == DEVICE_STATE_BOOT);
@@ -423,7 +415,10 @@ static void maybe_update_bridge_base(void) {
   }
 
   // mDNS failed - try compile-time default fallback
-  if (CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0') {
+  // Skip loopback fallback — it just wastes 5 retry cycles
+  if (CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0' &&
+      strstr(CONFIG_RK_DEFAULT_BRIDGE_BASE, "127.0.0.1") == NULL &&
+      strstr(CONFIG_RK_DEFAULT_BRIDGE_BASE, "localhost") == NULL) {
     LOGI("mDNS discovery failed, using fallback: %s",
          CONFIG_RK_DEFAULT_BRIDGE_BASE);
     lock_state();
@@ -652,11 +647,6 @@ static manifest_t *fetch_manifest(void) {
     return NULL;
   }
 
-  if (ret != 0 || !resp || resp_len == 0) {
-    platform_http_free(resp);
-    return NULL;
-  }
-
   manifest_t *m = malloc(sizeof(manifest_t));
   if (!m) {
     platform_http_free(resp);
@@ -820,6 +810,9 @@ static bool refresh_zone_label(bool prefer_zone_id) {
       }
     }
     success = should_sync && zone_label_copy[0] != '\0';
+  } else {
+    // HTTP 200 but no zones returned
+    manifest_ui_set_network_status("Bridge connected\nNo zones found");
   }
   unlock_state();
 
@@ -938,6 +931,11 @@ static void bridge_poll_thread(void *arg) {
     if (!s_network_ready) {
       wait_for_poll_interval();
       continue;
+    }
+
+    // Show current state name on screen during non-operational states
+    if (s_device_state != DEVICE_STATE_OPERATIONAL) {
+      manifest_ui_set_zone_name(device_state_name(s_device_state));
     }
 
     // Only run mDNS discovery if:
@@ -1731,6 +1729,8 @@ void bridge_client_set_network_ready(bool ready) {
     if (device_state_transition(new_state)) {
       if (new_state == DEVICE_STATE_RECONNECTING) {
         manifest_ui_set_network_status("Reconnecting...");
+      } else {
+        manifest_ui_set_network_status("WiFi disconnected");
       }
     }
   }
