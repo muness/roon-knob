@@ -190,6 +190,7 @@ static int s_cached_element_count = 0;
 static bool s_bridge_verified =
     false; // True after bridge found AND responded successfully
 static uint32_t s_last_mdns_check_ms = 0; // Timestamp of last mDNS check
+static char s_last_failed_bridge[128] = {0}; // Skip re-discovering this URL
 static bool s_last_charging_state =
     true; // Track charging state for config reapply
 static bool s_last_is_playing =
@@ -399,6 +400,13 @@ static void maybe_update_bridge_base(void) {
       platform_mdns_discover_base_url(discovered, sizeof(discovered));
 
   if (mdns_ok && host_is_valid(discovered)) {
+    // Skip if this is the same URL that just failed and was cleared
+    if (s_last_failed_bridge[0] && strcmp(discovered, s_last_failed_bridge) == 0) {
+      LOGI("mDNS rediscovered failed bridge '%s', skipping", discovered);
+      s_mdns_fail_count++;
+      return;
+    }
+    s_last_failed_bridge[0] = '\0'; // Clear on successful new discovery
     // mDNS found a bridge - save it
     s_mdns_fail_count = 0;
     lock_state();
@@ -1169,6 +1177,9 @@ static void bridge_poll_thread(void *arg) {
           lock_state();
           LOGI("Bridge unreachable after %d attempts, clearing '%s' for rediscovery",
                BRIDGE_FAIL_THRESHOLD, s_state.cfg.bridge_base);
+          // Remember this URL so mDNS rediscovery skips it
+          strncpy(s_last_failed_bridge, s_state.cfg.bridge_base,
+                  sizeof(s_last_failed_bridge) - 1);
           s_state.cfg.bridge_base[0] = '\0';
           s_state.cfg.bridge_from_mdns = 0;
           s_state.zone_resolved = false;
