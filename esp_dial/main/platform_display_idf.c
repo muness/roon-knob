@@ -539,6 +539,24 @@ bool platform_display_init(void) {
   ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel_handle));
   ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel_handle));
 
+  // Clear display GRAM to black immediately — eliminates TV static on boot.
+  // The SH8601 wakes with uninitialized GRAM; this pushes a black frame
+  // before LVGL starts. Uses a small row buffer to avoid large allocation.
+  {
+    const int row_pixels = LCD_H_RES * 10; // 10 rows at a time
+    uint16_t *black_buf = heap_caps_calloc(1, row_pixels * sizeof(uint16_t),
+                                           MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (black_buf) {
+      for (int y = 0; y < LCD_V_RES; y += 10) {
+        int h = (y + 10 <= LCD_V_RES) ? 10 : (LCD_V_RES - y);
+        esp_lcd_panel_draw_bitmap(s_panel_handle, 0, y, LCD_H_RES, y + h,
+                                  black_buf);
+      }
+      free(black_buf);
+      ESP_LOGI(TAG, "Display cleared to black");
+    }
+  }
+
   // Initialize I2C bus and touch controller
   ESP_LOGI(TAG, "Initializing I2C bus");
   i2c_master_Init();
