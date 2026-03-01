@@ -885,6 +885,30 @@ static void bridge_poll_thread(void *arg) {
       s_last_mdns_check_ms = now_ms;
     }
 
+    // If bridge URL is still empty after discovery attempt, show status
+    // and skip the rest of the poll loop (no point trying HTTP/UDP)
+    {
+      lock_state();
+      bool bridge_empty = (s_state.cfg.bridge_base[0] == '\0');
+      unlock_state();
+      if (bridge_empty) {
+        static int s_search_display_count = 0;
+        if (s_search_display_count % 10 == 0) {
+          if (s_device_ip[0]) {
+            char msg[96];
+            snprintf(msg, sizeof(msg),
+                     "Searching for bridge...\nKnob IP: %s", s_device_ip);
+            manifest_ui_set_network_status(msg);
+          } else {
+            manifest_ui_set_network_status("Searching for bridge...");
+          }
+        }
+        s_search_display_count++;
+        wait_for_poll_interval();
+        continue;
+      }
+    }
+
     if (!s_state.zone_resolved) {
       refresh_zone_label(true);
     }
