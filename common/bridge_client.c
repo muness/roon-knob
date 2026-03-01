@@ -30,8 +30,6 @@
 // Forward declarations for config handling
 static bool fetch_knob_config(void);
 static void apply_knob_config(const rk_cfg_t *cfg);
-static void check_config_sha(const char *new_sha);
-static void check_zones_sha(const char *new_sha);
 static void check_charging_state_change(void);
 
 #define MAX_LINE 128
@@ -885,28 +883,38 @@ static void bridge_poll_thread(void *arg) {
       s_last_mdns_check_ms = now_ms;
     }
 
-    // If bridge URL is still empty after discovery attempt, show status
-    // and skip the rest of the poll loop (no point trying HTTP/UDP)
-    {
-      lock_state();
-      bool bridge_empty = (s_state.cfg.bridge_base[0] == '\0');
-      unlock_state();
-      if (bridge_empty) {
-        static int s_search_display_count = 0;
-        if (s_search_display_count % 10 == 0) {
-          if (s_device_ip[0]) {
-            char msg[96];
-            snprintf(msg, sizeof(msg),
-                     "Searching for bridge...\nKnob IP: %s", s_device_ip);
-            manifest_ui_set_network_status(msg);
-          } else {
-            manifest_ui_set_network_status("Searching for bridge...");
-          }
+    // If bridge URL is still empty after mDNS/UDP discovery attempt,
+    // show a helpful status screen immediately rather than letting the
+    // failed HTTP/UDP calls produce a blank screen.
+    lock_state();
+    bool bridge_base_empty = (s_state.cfg.bridge_base[0] == '\0');
+    unlock_state();
+    if (bridge_base_empty && s_device_state == DEVICE_STATE_CONNECTED) {
+      char status_msg[128];
+      manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
+      if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
+        // Many attempts failed — show "Bridge Not Found" with config URL
+        if (s_device_ip[0]) {
+          snprintf(status_msg, sizeof(status_msg),
+                   "Bridge Not Found\nConfigure at http://%s", s_device_ip);
+        } else {
+          snprintf(status_msg, sizeof(status_msg),
+                   "Bridge Not Found\nUse zone menu > Settings");
         }
-        s_search_display_count++;
-        wait_for_poll_interval();
-        continue;
+      } else {
+        // Still searching — show progress with device IP for manual config
+        if (s_device_ip[0]) {
+          snprintf(status_msg, sizeof(status_msg),
+                   "Searching for bridge...\nKnob IP: %s", s_device_ip);
+        } else {
+          snprintf(status_msg, sizeof(status_msg),
+                   "Searching for bridge...\nAttempt %d of %d",
+                   s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
+        }
       }
+      manifest_ui_set_network_status(status_msg);
+      wait_for_poll_interval();
+      continue;
     }
 
     if (!s_state.zone_resolved) {
@@ -1344,38 +1352,6 @@ void bridge_client_handle_input(ui_input_event_t event) {
   }
 
   if (event == UI_INPUT_MENU) {
-    const char *names[MAX_ZONES + 3]; /* +3 for Back, Settings, margin */
-    const char *ids[MAX_ZONES + 3];
-    static const char *back_name = "Back";
-    static const char *back_id = ZONE_ID_BACK;
-    static const char *settings_name = "Settings";
-    static const char *settings_id = ZONE_ID_SETTINGS;
-    int selected = 1; /* Default to first zone after Back */
-    int count = 0;
-
-    /* Add Back as first option */
-    names[count] = back_name;
-    ids[count] = back_id;
-    count++;
-
-    lock_state();
-    if (s_state.zone_count > 0) {
-      for (int i = 0; i < s_state.zone_count && count < MAX_ZONES + 2; ++i) {
-        names[count] = s_state.zones[i].name;
-        ids[count] = s_state.zones[i].id;
-        if (strcmp(s_state.zones[i].id, s_state.cfg.zone_id) == 0) {
-          selected = count;
-        }
-        count++;
-      }
-    }
-    unlock_state();
-
-    /* Add Settings as last option */
-    names[count] = settings_name;
-    ids[count] = settings_id;
-    count++;
-
     manifest_ui_show_zone_picker();
     return;
   }
@@ -1798,44 +1774,6 @@ static void apply_knob_config(const rk_cfg_t *cfg) {
   }
 }
 
-static void check_config_sha(const char *new_sha) {
-  if (!new_sha || !new_sha[0]) {
-    return;
-  }
-
-  lock_state();
-  bool sha_changed = (strcmp(s_state.cfg.config_sha, new_sha) != 0);
-  unlock_state();
-
-  if (sha_changed) {
-    LOGI("Config SHA changed: '%s' -> '%s', fetching new config",
-         s_state.cfg.config_sha[0] ? s_state.cfg.config_sha : "(empty)",
-         new_sha);
-    fetch_knob_config();
-  }
-}
-
-static void check_zones_sha(const char *new_sha) {
-  // Skip if no SHA provided (backward compatibility with old bridges)
-  if (!new_sha || !new_sha[0]) {
-    return;
-  }
-
-  // Check if zones SHA changed
-  bool sha_changed = (strcmp(s_last_zones_sha, new_sha) != 0);
-
-  if (sha_changed) {
-    LOGI("Zones SHA changed: '%s' -> '%s', refreshing zone list",
-         s_last_zones_sha[0] ? s_last_zones_sha : "(empty)", new_sha);
-
-    // Update cached SHA
-    strncpy(s_last_zones_sha, new_sha, sizeof(s_last_zones_sha) - 1);
-    s_last_zones_sha[sizeof(s_last_zones_sha) - 1] = '\0';
-
-    // Re-fetch zones from bridge
-    refresh_zone_label(true);
-  }
-}
 
 static bool fetch_knob_config(void) {
   lock_state();
