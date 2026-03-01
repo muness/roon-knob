@@ -1138,21 +1138,22 @@ static void bridge_poll_thread(void *arg) {
         char status_msg[96];
 
         if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
-          // Max retries reached - show recovery info with device IP
-          // line1=main content (bottom), line2=header (top)
-          char line2_msg[64];
-          if (s_device_ip[0]) {
-            snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
-            snprintf(line2_msg, sizeof(line2_msg), "Update Bridge at:");
-            snprintf(status_msg, sizeof(status_msg),
-                     "Bridge unreachable\nUpdate at http://%s", s_device_ip);
-          } else {
-            snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
-            snprintf(line2_msg, sizeof(line2_msg), "Bridge Unreachable");
-            snprintf(status_msg, sizeof(status_msg),
-                     "Bridge unreachable. Check Settings.");
-          }
-          manifest_ui_set_zone_name(""); // Clear zone name to avoid overlay
+          // Bridge unreachable after max retries — clear it and restart discovery.
+          // This handles stale NVS URLs (e.g., http://NAS2:8088 from a previous
+          // network) without requiring manual erase.
+          lock_state();
+          LOGI("Bridge unreachable after %d attempts, clearing '%s' for rediscovery",
+               BRIDGE_FAIL_THRESHOLD, s_state.cfg.bridge_base);
+          s_state.cfg.bridge_base[0] = '\0';
+          s_state.cfg.bridge_from_mdns = 0;
+          s_state.zone_resolved = false;
+          platform_storage_save(&s_state.cfg);
+          unlock_state();
+          reset_bridge_fail_count();
+          s_bridge_verified = false;
+          snprintf(status_msg, sizeof(status_msg),
+                   "Bridge lost, rediscovering...");
+          manifest_ui_set_zone_name("");
           manifest_ui_set_network_status(status_msg);
         } else {
           // Still retrying - show progress on main display
@@ -1670,17 +1671,15 @@ void bridge_client_set_network_ready(bool ready) {
     // discovery. This enables seamless location switching — if the knob
     // connects to a different WiFi, it finds the local bridge instead of
     // trying the stale one. Manually configured bridges are kept.
-    // Always clear bridge on network reconnect to force fresh discovery.
-    // This handles both mDNS-discovered and stale NVS bridges (e.g.,
-    // http://NAS2:8088 from a previous network that can't resolve here).
-    if (s_state.cfg.bridge_base[0] != '\0') {
-      LOGI("Clearing bridge '%s' for fresh discovery",
-           s_state.cfg.bridge_base);
+    // Clear mDNS-discovered bridges on reconnect for fresh discovery.
+    // Manually configured bridges are kept — they'll be cleared automatically
+    // if they prove unreachable (after BRIDGE_FAIL_THRESHOLD attempts).
+    if (s_state.cfg.bridge_from_mdns) {
+      LOGI("Clearing mDNS-discovered bridge for fresh discovery");
       s_state.cfg.bridge_base[0] = '\0';
       s_state.cfg.bridge_from_mdns = 0;
       s_state.zone_resolved = false;
       s_bridge_verified = false;
-      platform_storage_save(&s_state.cfg);
     }
     if (s_device_state == DEVICE_STATE_OPERATIONAL) {
       // Already operational — OPERATIONAL->OPERATIONAL is a valid no-op
