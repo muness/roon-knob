@@ -693,30 +693,38 @@ static void ui_manifest_cb(void *arg) {
            sizeof(s_cached_interactions));
   }
 
-  // Cache per-screen encoder config for v2 command-pattern dispatch
-  s_cached_encoder_count = 0;
-  for (int i = 0; i < m->screen_count && i < MAX_CACHED_SCREENS; i++) {
-    cached_screen_encoder_t *ce = &s_cached_encoders[s_cached_encoder_count];
-    strncpy(ce->screen_id, m->screens[i].id, sizeof(ce->screen_id) - 1);
-    ce->screen_id[sizeof(ce->screen_id) - 1] = '\0';
-    ce->has_encoder = m->screens[i].has_encoder;
-    if (m->screens[i].has_encoder) {
-      memcpy(&ce->encoder, &m->screens[i].encoder, sizeof(ce->encoder));
+  // Cache per-screen encoder config for v2 command-pattern dispatch.
+  // Only update cache when screens are present (full manifest).
+  // Fast-state-only updates (SHA unchanged, screen_count=0) must NOT wipe the cache.
+  if (m->screen_count > 0) {
+    s_cached_encoder_count = 0;
+    for (int i = 0; i < m->screen_count && i < MAX_CACHED_SCREENS; i++) {
+      cached_screen_encoder_t *ce = &s_cached_encoders[s_cached_encoder_count];
+      strncpy(ce->screen_id, m->screens[i].id, sizeof(ce->screen_id) - 1);
+      ce->screen_id[sizeof(ce->screen_id) - 1] = '\0';
+      ce->has_encoder = m->screens[i].has_encoder;
+      if (m->screens[i].has_encoder) {
+        memcpy(&ce->encoder, &m->screens[i].encoder, sizeof(ce->encoder));
+      }
+      s_cached_encoder_count++;
     }
-    s_cached_encoder_count++;
   }
 
-  // Cache per-screen elements for v2 button tap dispatch
-  s_cached_element_count = 0;
-  for (int i = 0; i < m->screen_count && i < MAX_CACHED_SCREENS; i++) {
-    cached_screen_elements_t *ce = &s_cached_elements[s_cached_element_count];
-    strncpy(ce->screen_id, m->screens[i].id, sizeof(ce->screen_id) - 1);
-    ce->screen_id[sizeof(ce->screen_id) - 1] = '\0';
-    ce->element_count = m->screens[i].element_count;
-    if (m->screens[i].element_count > 0) {
-      memcpy(ce->elements, m->screens[i].elements, sizeof(ce->elements));
+  // Cache per-screen elements for v2 button tap dispatch.
+  // Only update cache when screens are present (full manifest).
+  // Fast-state-only updates (SHA unchanged, screen_count=0) must NOT wipe the cache.
+  if (m->screen_count > 0) {
+    s_cached_element_count = 0;
+    for (int i = 0; i < m->screen_count && i < MAX_CACHED_SCREENS; i++) {
+      cached_screen_elements_t *ce = &s_cached_elements[s_cached_element_count];
+      strncpy(ce->screen_id, m->screens[i].id, sizeof(ce->screen_id) - 1);
+      ce->screen_id[sizeof(ce->screen_id) - 1] = '\0';
+      ce->element_count = m->screens[i].element_count;
+      if (m->screens[i].element_count > 0) {
+        memcpy(ce->elements, m->screens[i].elements, sizeof(ce->elements));
+      }
+      s_cached_element_count++;
     }
-    s_cached_element_count++;
   }
 
   manifest_ui_update(m);
@@ -1447,8 +1455,12 @@ void bridge_client_handle_input(ui_input_event_t event) {
   // use the element's on_tap action instead of hardcoded action strings.
   {
     int elem_idx = manifest_ui_get_button_element_idx(event);
+    LOGI("v2 dispatch: event=%d elem_idx=%d cached_screens=%d cur_screen='%s'",
+         event, elem_idx, s_cached_element_count, manifest_ui_current_screen_id());
     if (elem_idx >= 0) {
       const manifest_element_t *elem = get_element_for_button(elem_idx);
+      LOGI("v2 dispatch: elem=%p has_on_tap=%d action='%s'",
+           (void*)elem, elem ? elem->has_on_tap : 0, elem ? elem->on_tap.action : "");
       if (elem && elem->has_on_tap) {
         dispatch_action(&elem->on_tap);
         return; // Handled via v2 element on_tap — skip fallbacks

@@ -237,6 +237,8 @@ static int s_btn_prev_element_idx = -1;
 static int s_btn_play_element_idx = -1;
 static int s_btn_next_element_idx = -1;
 static int s_btn_mute_element_idx = -1;
+/// Slot index (0-3) that has toggle_playback action, or -1 if none.
+static int s_toggle_playback_slot = -1;
 
 /// Map a Material Icons name to its UTF-8 font character.
 /// Returns NULL if the icon is not in the firmware font.
@@ -1102,20 +1104,27 @@ static void update_media_fast(const manifest_fast_t *fast) {
     lv_obj_add_flag(s_media.progress_gutter, LV_OBJ_FLAG_HIDDEN);
   }
 
-  // Play/pause icon — only update in legacy mode (no element assigned to play slot).
-  // When an element is assigned, the element rendering loop in manifest_ui_update
-  // already sets the correct icon (bridge regenerates elements with the right icon
-  // on play/pause state transitions). Updating here would clobber the element icon
-  // every fast poll, which runs more frequently than full manifest re-parses.
+  // Play/pause icon — update the button that has toggle_playback.
+  // In v2 element mode, s_toggle_playback_slot tracks which slot needs updating.
+  // In legacy mode, update the default play slot.
+  {
+    lv_obj_t *target_lbl = NULL;
+    if (s_toggle_playback_slot >= 0) {
+      // v2 mode: update whichever slot has toggle_playback
+      lv_obj_t *lbl_slots[4] = { s_media.lbl_prev, s_media.play_icon, s_media.lbl_next, s_media.lbl_mute };
+      target_lbl = lbl_slots[s_toggle_playback_slot];
+    } else if (s_btn_prev_element_idx < 0) {
+      // Legacy mode: no v2 elements, update default play icon
+      target_lbl = s_media.play_icon;
+    }
+    if (target_lbl) {
 #if !TARGET_PC
-  if (s_btn_play_element_idx < 0) {
-    lv_label_set_text(s_media.play_icon,
-                      fast->is_playing ? ICON_PAUSE : ICON_PLAY);
-  }
+      lv_label_set_text(target_lbl, fast->is_playing ? ICON_PAUSE : ICON_PLAY);
 #else
-  lv_label_set_text(s_media.play_icon,
-                    fast->is_playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+      lv_label_set_text(target_lbl, fast->is_playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 #endif
+    }
+  }
 }
 
 static lv_color_t parse_hex_color(const char *hex, lv_color_t fallback) {
@@ -1132,10 +1141,12 @@ static void update_media_screen(const manifest_media_t *media) {
   // Track (title — line[0])
   if (media->line_count > 0) {
     lv_label_set_text(s_media.track_label, media->lines[0].text);
+    lv_obj_clear_flag(s_media.track_label, LV_OBJ_FLAG_HIDDEN);
   }
   // Artist (subtitle — line[1])
   if (media->line_count > 1) {
     lv_label_set_text(s_media.artist_label, media->lines[1].text);
+    lv_obj_clear_flag(s_media.artist_label, LV_OBJ_FLAG_HIDDEN);
   }
 
   // Theme UI from album art edge color
@@ -1411,13 +1422,13 @@ void manifest_ui_update(const manifest_t *manifest) {
           lv_obj_t *lbl_slots[4] = { s_media.lbl_prev, s_media.play_icon, s_media.lbl_next, s_media.lbl_mute };
           int *idx_slots[4] = { &s_btn_prev_element_idx, &s_btn_play_element_idx, &s_btn_next_element_idx, &s_btn_mute_element_idx };
 
-          // Hide all buttons and reset mappings
+          // Reset mappings (but don't hide buttons yet — update in place to avoid blank frames)
+          s_toggle_playback_slot = -1;
           for (int s = 0; s < 4; s++) {
-            lv_obj_add_flag(btn_slots[s], LV_OBJ_FLAG_HIDDEN);
             *idx_slots[s] = -1;
           }
 
-          // Assign elements to slots positionally (up to 4 with renderable icons)
+          // Assign elements to slots: set icons first, then hide unused slots
           int slot = 0;
           for (int e = 0; e < scr->element_count && slot < 4; e++) {
             const char *icon_char = icon_name_to_char(scr->elements[e].display.icon);
@@ -1426,15 +1437,24 @@ void manifest_ui_update(const manifest_t *manifest) {
                    e, scr->elements[e].display.icon);
               continue;
             }
-            // Show this button slot with the element's icon
-            lv_obj_remove_flag(btn_slots[slot], LV_OBJ_FLAG_HIDDEN);
+            // Update icon in place and ensure visible
 #if !TARGET_PC
             lv_label_set_text(lbl_slots[slot], icon_char);
 #endif
+            lv_obj_remove_flag(btn_slots[slot], LV_OBJ_FLAG_HIDDEN);
             *idx_slots[slot] = e;
+            // Track which slot has toggle_playback for live icon updates
+            if (scr->elements[e].has_on_tap &&
+                strcmp(scr->elements[e].on_tap.action, "toggle_playback") == 0) {
+              s_toggle_playback_slot = slot;
+            }
             slot++;
           }
-          LOGI("Controls: rendered %d elements into button slots", slot);
+          // Hide only the unused slots (after new icons are already rendered)
+          for (int s = slot; s < 4; s++) {
+            lv_obj_add_flag(btn_slots[s], LV_OBJ_FLAG_HIDDEN);
+          }
+          LOGI("Controls: rendered %d elements into button slots (playback_slot=%d)", slot, s_toggle_playback_slot);
         } else if (scr->controls_count > 0) {
           // v1 backward compat: Controls specified — hide all transport buttons first
           lv_obj_add_flag(s_media.btn_prev, LV_OBJ_FLAG_HIDDEN);
