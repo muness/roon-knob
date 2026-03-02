@@ -98,6 +98,13 @@ typedef struct {
   manifest_text_line_t lines[MANIFEST_MAX_LINES];
   int line_count;
   char bg_color[8];   // "#rrggbb" hex string from bridge
+  // Ring configuration (volume = outer, progress = inner)
+  char vol_ring_color[8];  // "#rrggbb" or empty = default
+  uint8_t vol_ring_width;  // 0 = default (8)
+  bool vol_ring_visible;   // default true
+  char prog_ring_color[8]; // "#rrggbb" or empty = default
+  uint8_t prog_ring_width; // 0 = default (6)
+  bool prog_ring_visible;  // default true
 } manifest_media_t;
 
 /// List screen data (zone picker equivalent).

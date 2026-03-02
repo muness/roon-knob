@@ -1123,6 +1123,8 @@ static void update_media_fast(const manifest_fast_t *fast) {
 #else
       lv_label_set_text(target_lbl, fast->is_playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 #endif
+      // Ensure label is visible — art mode may have hidden it
+      lv_obj_clear_flag(target_lbl, LV_OBJ_FLAG_HIDDEN);
     }
   }
 }
@@ -1247,6 +1249,42 @@ static void update_media_screen(const manifest_media_t *media) {
     lv_obj_set_style_text_color(s_media.volume_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_color(s_media.artist_label, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_color(s_chrome.zone_label, COLOR_ZONE_LABEL, 0);
+  }
+
+  // Apply ring configuration (color, width, visibility)
+  // Volume ring
+  if (!media->vol_ring_visible) {
+    lv_obj_add_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_media.volume_gutter, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.volume_label)
+      lv_obj_add_flag(s_media.volume_label, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_clear_flag(s_media.volume_arc, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_media.volume_gutter, LV_OBJ_FLAG_HIDDEN);
+    if (s_media.volume_label)
+      lv_obj_clear_flag(s_media.volume_label, LV_OBJ_FLAG_HIDDEN);
+    if (media->vol_ring_color[0]) {
+      lv_color_t c = parse_hex_color(media->vol_ring_color, COLOR_ARC_VOLUME);
+      lv_obj_set_style_arc_color(s_media.volume_arc, c, LV_PART_INDICATOR);
+    }
+    if (media->vol_ring_width > 0) {
+      lv_obj_set_style_arc_width(s_media.volume_arc, media->vol_ring_width, LV_PART_MAIN);
+      lv_obj_set_style_arc_width(s_media.volume_arc, media->vol_ring_width, LV_PART_INDICATOR);
+    }
+  }
+  // Progress ring
+  if (!media->prog_ring_visible) {
+    lv_obj_add_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_clear_flag(s_media.progress_arc, LV_OBJ_FLAG_HIDDEN);
+    if (media->prog_ring_color[0]) {
+      lv_color_t c = parse_hex_color(media->prog_ring_color, COLOR_ARC_PROGRESS);
+      lv_obj_set_style_arc_color(s_media.progress_arc, c, LV_PART_INDICATOR);
+    }
+    if (media->prog_ring_width > 0) {
+      lv_obj_set_style_arc_width(s_media.progress_arc, media->prog_ring_width, LV_PART_MAIN);
+      lv_obj_set_style_arc_width(s_media.progress_arc, media->prog_ring_width, LV_PART_INDICATOR);
+    }
   }
 }
 
@@ -1437,11 +1475,12 @@ void manifest_ui_update(const manifest_t *manifest) {
                    e, scr->elements[e].display.icon);
               continue;
             }
-            // Update icon in place and ensure visible
+            // Update icon in place and ensure both button and label are visible
 #if !TARGET_PC
             lv_label_set_text(lbl_slots[slot], icon_char);
+            lv_obj_clear_flag(lbl_slots[slot], LV_OBJ_FLAG_HIDDEN);
 #endif
-            lv_obj_remove_flag(btn_slots[slot], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(btn_slots[slot], LV_OBJ_FLAG_HIDDEN);
             *idx_slots[slot] = e;
             // Track which slot has toggle_playback for live icon updates
             if (scr->elements[e].has_on_tap &&

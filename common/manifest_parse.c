@@ -151,6 +151,38 @@ static bool parse_media_screen(cJSON *obj, manifest_media_t *out) {
   if (cJSON_IsString(item))
     safe_strcpy(out->bg_color, item->valuestring, sizeof(out->bg_color));
 
+  // Ring configs — default to visible with 0 = use firmware default width
+  out->vol_ring_visible = true;
+  out->vol_ring_width = 0;
+  out->prog_ring_visible = true;
+  out->prog_ring_width = 0;
+
+  cJSON *vol_ring = cJSON_GetObjectItem(obj, "volume_ring");
+  if (cJSON_IsObject(vol_ring)) {
+    item = cJSON_GetObjectItem(vol_ring, "color");
+    if (cJSON_IsString(item))
+      safe_strcpy(out->vol_ring_color, item->valuestring, sizeof(out->vol_ring_color));
+    item = cJSON_GetObjectItem(vol_ring, "width");
+    if (cJSON_IsNumber(item))
+      out->vol_ring_width = (uint8_t)item->valueint;
+    item = cJSON_GetObjectItem(vol_ring, "visible");
+    if (cJSON_IsBool(item))
+      out->vol_ring_visible = cJSON_IsTrue(item);
+  }
+
+  cJSON *prog_ring = cJSON_GetObjectItem(obj, "progress_ring");
+  if (cJSON_IsObject(prog_ring)) {
+    item = cJSON_GetObjectItem(prog_ring, "color");
+    if (cJSON_IsString(item))
+      safe_strcpy(out->prog_ring_color, item->valuestring, sizeof(out->prog_ring_color));
+    item = cJSON_GetObjectItem(prog_ring, "width");
+    if (cJSON_IsNumber(item))
+      out->prog_ring_width = (uint8_t)item->valueint;
+    item = cJSON_GetObjectItem(prog_ring, "visible");
+    if (cJSON_IsBool(item))
+      out->prog_ring_visible = cJSON_IsTrue(item);
+  }
+
   out->line_count = parse_text_lines(cJSON_GetObjectItem(obj, "lines"),
                                      out->lines, MANIFEST_MAX_LINES);
 
