@@ -371,8 +371,8 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
     rk_cfg_set_display_defaults(&cfg);
   }
   rk_cfg_add_wifi(&cfg, ssid, pass);
-  strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
-  strncpy(cfg.pass, pass, sizeof(cfg.pass) - 1);
+  rk_strlcpy(cfg.ssid, ssid, sizeof(cfg.ssid));
+  rk_strlcpy(cfg.pass, pass, sizeof(cfg.pass));
   cfg.cfg_ver = RK_CFG_CURRENT_VER;
 
   bool save_ok = platform_storage_save(&cfg);

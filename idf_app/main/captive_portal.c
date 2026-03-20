@@ -308,7 +308,7 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
 
   // Copy query string to mutable buffer for parsing
   char buf[384] = {0};
-  strncpy(buf, query, sizeof(buf) - 1);
+  rk_strlcpy(buf, query, sizeof(buf));
   ESP_LOGI(TAG, "Received config: %s", buf);
 
   char ssid[33] = {0};

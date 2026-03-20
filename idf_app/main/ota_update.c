@@ -21,8 +21,7 @@ static bool get_bridge_url(char *url, size_t len) {
     rk_cfg_t cfg;
     if (platform_storage_load(&cfg)) {
         if (cfg.bridge_base[0]) {
-            strncpy(url, cfg.bridge_base, len - 1);
-            url[len - 1] = '\0';
+            rk_strlcpy(url, cfg.bridge_base, len);
             return true;
         }
     }
@@ -69,7 +68,7 @@ static void check_update_task(void *arg) {
     char response[256];
 
     s_ota_info.status = OTA_STATUS_CHECKING;
-    strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
+    rk_strlcpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version));
 
     if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
         ESP_LOGE(TAG, "No bridge URL configured");
@@ -346,7 +345,7 @@ static void do_update_task(void *arg) {
 
 void ota_init(void) {
     memset(&s_ota_info, 0, sizeof(s_ota_info));
-    strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
+    rk_strlcpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version));
     s_ota_info.status = OTA_STATUS_IDLE;
     ESP_LOGI(TAG, "OTA initialized, current version: %s", s_ota_info.current_version);
 }
