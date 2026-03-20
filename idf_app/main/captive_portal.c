@@ -113,6 +113,9 @@ static void url_decode(char *str) {
 }
 
 // Parse form data to extract a field value
+// Uses an intermediate buffer for URL-encoded data so that long encoded values
+// (e.g. a 63-char WiFi password with special characters) aren't truncated
+// before decoding.
 static bool get_form_field(const char *data, const char *field, char *out,
                            size_t out_len) {
   char search[64];
@@ -127,13 +130,20 @@ static bool get_form_field(const char *data, const char *field, char *out,
   const char *end = strchr(start, '&');
   size_t len = end ? (size_t)(end - start) : strlen(start);
 
-  if (len >= out_len) {
-    len = out_len - 1;
+  // URL-encoded data can be up to 3x the decoded length (e.g. ! -> %21).
+  // Use a stack buffer large enough for the encoded form, then decode and
+  // copy into the caller's output buffer.
+  char encoded[256];
+  if (len >= sizeof(encoded)) {
+    len = sizeof(encoded) - 1;
   }
 
-  memcpy(out, start, len);
-  out[len] = '\0';
-  url_decode(out);
+  memcpy(encoded, start, len);
+  encoded[len] = '\0';
+  url_decode(encoded);
+
+  strncpy(out, encoded, out_len - 1);
+  out[out_len - 1] = '\0';
   return true;
 }
 
