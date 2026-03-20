@@ -338,8 +338,8 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
   // Add to wifi list (or update if SSID already exists)
   rk_cfg_add_wifi(&cfg, ssid, pass);
   // Set active credentials for immediate connection
-  snprintf(cfg.ssid, sizeof(cfg.ssid), "%s", ssid);
-  snprintf(cfg.pass, sizeof(cfg.pass), "%s", pass);
+  rk_strlcpy(cfg.ssid, ssid, sizeof(cfg.ssid));
+  rk_strlcpy(cfg.pass, pass, sizeof(cfg.pass));
   cfg.cfg_ver = RK_CFG_CURRENT_VER;
 
   bool save_ok = platform_storage_save(&cfg);

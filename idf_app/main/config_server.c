@@ -319,7 +319,7 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
             return ESP_FAIL;
         }
 
-        snprintf(cfg.bridge_base, sizeof(cfg.bridge_base), "%s", bridge);
+        rk_strlcpy(cfg.bridge_base, bridge, sizeof(cfg.bridge_base));
 
         // Resolve .local hostnames to IPs (ESP32 lwIP has issues with .local DNS)
         if (bridge[0]) {

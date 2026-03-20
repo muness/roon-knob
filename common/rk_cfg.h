@@ -2,8 +2,16 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
+
+// Safe bounded string copy that avoids GCC -Wstringop-truncation and -Wrestrict
+static inline void rk_strlcpy(char *dst, const char *src, size_t dst_size) {
+    if (!dst_size) return;
+    size_t len = strlen(src);
+    if (len >= dst_size) len = dst_size - 1;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
 
 #define RK_CFG_CURRENT_VER 3
 #define RK_CFG_V1_SIZE 291  // Size of v1 struct for migration
@@ -203,7 +211,7 @@ static inline int rk_cfg_add_wifi(rk_cfg_t *cfg, const char *ssid, const char *p
     if (idx >= 0) {
         // Update existing entry
         if (pass) {
-            snprintf(cfg->wifi[idx].pass, sizeof(cfg->wifi[idx].pass), "%s", pass);
+            rk_strlcpy(cfg->wifi[idx].pass, pass, sizeof(cfg->wifi[idx].pass));
         }
         return idx;
     }
@@ -214,10 +222,10 @@ static inline int rk_cfg_add_wifi(rk_cfg_t *cfg, const char *ssid, const char *p
         // Evict last entry
         idx = RK_MAX_WIFI - 1;
     }
-    snprintf(cfg->wifi[idx].ssid, sizeof(cfg->wifi[idx].ssid), "%s", ssid);
+    rk_strlcpy(cfg->wifi[idx].ssid, ssid, sizeof(cfg->wifi[idx].ssid));
     cfg->wifi[idx].pass[0] = '\0';
     if (pass) {
-        snprintf(cfg->wifi[idx].pass, sizeof(cfg->wifi[idx].pass), "%s", pass);
+        rk_strlcpy(cfg->wifi[idx].pass, pass, sizeof(cfg->wifi[idx].pass));
     }
     return idx;
 }
