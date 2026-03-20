@@ -107,8 +107,12 @@ static bool get_form_field(const char *data, const char *field, char *out, size_
     encoded[len] = '\0';
     url_decode(encoded);
 
-    strncpy(out, encoded, out_len - 1);
-    out[out_len - 1] = '\0';
+    size_t decoded_len = strlen(encoded);
+    if (decoded_len >= out_len) {
+        decoded_len = out_len - 1;
+    }
+    memcpy(out, encoded, decoded_len);
+    out[decoded_len] = '\0';
     return true;
 }
 
@@ -315,7 +319,7 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
             return ESP_FAIL;
         }
 
-        strncpy(cfg.bridge_base, bridge, sizeof(cfg.bridge_base) - 1);
+        snprintf(cfg.bridge_base, sizeof(cfg.bridge_base), "%s", bridge);
 
         // Resolve .local hostnames to IPs (ESP32 lwIP has issues with .local DNS)
         if (bridge[0]) {

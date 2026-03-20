@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #define RK_CFG_CURRENT_VER 3
@@ -202,8 +203,7 @@ static inline int rk_cfg_add_wifi(rk_cfg_t *cfg, const char *ssid, const char *p
     if (idx >= 0) {
         // Update existing entry
         if (pass) {
-            strncpy(cfg->wifi[idx].pass, pass, sizeof(cfg->wifi[idx].pass) - 1);
-            cfg->wifi[idx].pass[sizeof(cfg->wifi[idx].pass) - 1] = '\0';
+            snprintf(cfg->wifi[idx].pass, sizeof(cfg->wifi[idx].pass), "%s", pass);
         }
         return idx;
     }
@@ -214,12 +214,10 @@ static inline int rk_cfg_add_wifi(rk_cfg_t *cfg, const char *ssid, const char *p
         // Evict last entry
         idx = RK_MAX_WIFI - 1;
     }
-    strncpy(cfg->wifi[idx].ssid, ssid, sizeof(cfg->wifi[idx].ssid) - 1);
-    cfg->wifi[idx].ssid[sizeof(cfg->wifi[idx].ssid) - 1] = '\0';
+    snprintf(cfg->wifi[idx].ssid, sizeof(cfg->wifi[idx].ssid), "%s", ssid);
     cfg->wifi[idx].pass[0] = '\0';
     if (pass) {
-        strncpy(cfg->wifi[idx].pass, pass, sizeof(cfg->wifi[idx].pass) - 1);
-        cfg->wifi[idx].pass[sizeof(cfg->wifi[idx].pass) - 1] = '\0';
+        snprintf(cfg->wifi[idx].pass, sizeof(cfg->wifi[idx].pass), "%s", pass);
     }
     return idx;
 }

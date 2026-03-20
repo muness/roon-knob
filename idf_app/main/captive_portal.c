@@ -142,8 +142,12 @@ static bool get_form_field(const char *data, const char *field, char *out,
   encoded[len] = '\0';
   url_decode(encoded);
 
-  strncpy(out, encoded, out_len - 1);
-  out[out_len - 1] = '\0';
+  size_t decoded_len = strlen(encoded);
+  if (decoded_len >= out_len) {
+    decoded_len = out_len - 1;
+  }
+  memcpy(out, encoded, decoded_len);
+  out[decoded_len] = '\0';
   return true;
 }
 
@@ -334,8 +338,8 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
   // Add to wifi list (or update if SSID already exists)
   rk_cfg_add_wifi(&cfg, ssid, pass);
   // Set active credentials for immediate connection
-  strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
-  strncpy(cfg.pass, pass, sizeof(cfg.pass) - 1);
+  snprintf(cfg.ssid, sizeof(cfg.ssid), "%s", ssid);
+  snprintf(cfg.pass, sizeof(cfg.pass), "%s", pass);
   cfg.cfg_ver = RK_CFG_CURRENT_VER;
 
   bool save_ok = platform_storage_save(&cfg);

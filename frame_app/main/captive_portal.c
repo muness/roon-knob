@@ -179,8 +179,12 @@ static bool get_form_field(const char *data, const char *field, char *out,
   encoded[len] = '\0';
   url_decode(encoded);
 
-  strncpy(out, encoded, out_len - 1);
-  out[out_len - 1] = '\0';
+  size_t decoded_len = strlen(encoded);
+  if (decoded_len >= out_len) {
+    decoded_len = out_len - 1;
+  }
+  memcpy(out, encoded, decoded_len);
+  out[decoded_len] = '\0';
   return true;
 }
 
