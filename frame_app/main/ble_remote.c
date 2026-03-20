@@ -4,6 +4,7 @@
 #include "ble_remote.h"
 #include "eink_ui.h"
 #include "bridge_client.h"
+#include "rk_cfg.h"
 #include "ui.h"
 
 #include <esp_hidh.h>
@@ -572,12 +573,11 @@ void ble_remote_device_name(char *out, size_t len) {
     if (!out || len == 0) return;
     BLE_LOCK();
     if (s_device_name[0]) {
-        strncpy(out, s_device_name, len - 1);
+        rk_strlcpy(out, s_device_name, len);
     } else if (s_bonded_name[0]) {
-        strncpy(out, s_bonded_name, len - 1);
+        rk_strlcpy(out, s_bonded_name, len);
     } else {
         out[0] = '\0';
     }
-    out[len - 1] = '\0';
     BLE_UNLOCK();
 }

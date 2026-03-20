@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "platform/platform_log.h"
+#include "rk_cfg.h"
 
 #define TAG "manifest_parse"
 
@@ -15,8 +16,7 @@ static void safe_strcpy(char *dst, const char *src, size_t dst_size) {
     dst[0] = '\0';
     return;
   }
-  strncpy(dst, src, dst_size - 1);
-  dst[dst_size - 1] = '\0';
+  rk_strlcpy(dst, src, dst_size);
 }
 
 static text_style_t parse_text_style(const char *style) {

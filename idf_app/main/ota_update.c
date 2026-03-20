@@ -73,7 +73,7 @@ static void check_update_task(void *arg) {
     if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
         ESP_LOGE(TAG, "No bridge URL configured");
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "No bridge configured", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "No bridge configured", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -93,7 +93,7 @@ static void check_update_task(void *arg) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
         s_ota_task = NULL;
         vTaskDelete(NULL);
@@ -115,7 +115,7 @@ static void check_update_task(void *arg) {
     if (status_code != 200 || content_length <= 0 || content_length >= (int)sizeof(response)) {
         ESP_LOGE(TAG, "Bad response: status=%d, len=%d", status_code, content_length);
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Bad server response", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Bad server response", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
         s_ota_task = NULL;
         vTaskDelete(NULL);
@@ -127,7 +127,7 @@ static void check_update_task(void *arg) {
 
     if (read_len <= 0) {
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Read failed", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Read failed", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -139,7 +139,7 @@ static void check_update_task(void *arg) {
     char *ver_start = strstr(response, "\"version\"");
     if (!ver_start) {
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Missing version", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Missing version", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -147,7 +147,7 @@ static void check_update_task(void *arg) {
     ver_start = strchr(ver_start + 9, '"');  // Find opening quote of value
     if (!ver_start) {
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Invalid JSON", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Invalid JSON", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -156,7 +156,7 @@ static void check_update_task(void *arg) {
     char *ver_end = strchr(ver_start, '"');
     if (!ver_end || (ver_end - ver_start) >= (int)sizeof(s_ota_info.available_version)) {
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Invalid version", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Invalid version", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -197,7 +197,7 @@ static void do_update_task(void *arg) {
 
     if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "No bridge configured", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "No bridge configured", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -211,7 +211,7 @@ static void do_update_task(void *arg) {
     if (!update_partition) {
         ESP_LOGE(TAG, "No OTA partition found");
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "No OTA partition", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "No OTA partition", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -231,7 +231,7 @@ static void do_update_task(void *arg) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
         s_ota_task = NULL;
         vTaskDelete(NULL);
@@ -242,7 +242,7 @@ static void do_update_task(void *arg) {
     if (content_length <= 0) {
         ESP_LOGE(TAG, "Invalid content length: %d", content_length);
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Invalid firmware", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Invalid firmware", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
         s_ota_task = NULL;
         vTaskDelete(NULL);
@@ -256,7 +256,7 @@ static void do_update_task(void *arg) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "OTA begin failed", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "OTA begin failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
         s_ota_task = NULL;
         vTaskDelete(NULL);
@@ -268,7 +268,7 @@ static void do_update_task(void *arg) {
         esp_ota_abort(ota_handle);
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Out of memory", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Out of memory", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -285,7 +285,7 @@ static void do_update_task(void *arg) {
             esp_ota_abort(ota_handle);
             esp_http_client_cleanup(client);
             s_ota_info.status = OTA_STATUS_ERROR;
-            strncpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
+            rk_strlcpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
             s_ota_task = NULL;
             vTaskDelete(NULL);
             return;
@@ -305,7 +305,7 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "Download incomplete: %d/%d", total_read, content_length);
         esp_ota_abort(ota_handle);
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Download incomplete", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Download incomplete", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -315,7 +315,7 @@ static void do_update_task(void *arg) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Validation failed", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Validation failed", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -325,7 +325,7 @@ static void do_update_task(void *arg) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "Set boot failed", sizeof(s_ota_info.error_msg));
+        rk_strlcpy(s_ota_info.error_msg, "Set boot failed", sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;

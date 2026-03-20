@@ -1278,8 +1278,7 @@ void manifest_ui_update(const manifest_t *manifest) {
     // Cache the new manifest
     s_mgr.manifest = *manifest;
     s_mgr.has_manifest = true;
-    strncpy(s_mgr.sha, manifest->sha, sizeof(s_mgr.sha) - 1);
-    s_mgr.sha[MANIFEST_SHA_LEN - 1] = '\0';
+    rk_strlcpy(s_mgr.sha, manifest->sha, sizeof(s_mgr.sha));
 
     // Update each screen's content
     for (int i = 0; i < manifest->screen_count; i++) {
@@ -1646,8 +1645,7 @@ void manifest_ui_zone_picker_get_selected_id(char *out, size_t len) {
     if (s_mgr.manifest.screens[i].type == SCREEN_TYPE_LIST) {
       const manifest_list_t *list = &s_mgr.manifest.screens[i].data.list;
       if (s_list.selected >= 0 && s_list.selected < list->item_count) {
-        strncpy(out, list->items[s_list.selected].id, len - 1);
-        out[len - 1] = '\0';
+        rk_strlcpy(out, list->items[s_list.selected].id, len);
       }
       return;
     }
@@ -1994,7 +1992,7 @@ void ui_set_update_available(const char *ver) {
   if (!d)
     return;
   if (ver && ver[0])
-    strncpy(d->version, ver, sizeof(d->version) - 1);
+    rk_strlcpy(d->version, ver, sizeof(d->version));
   platform_task_post_to_ui(ui_cb_ota_available, d);
 }
 

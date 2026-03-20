@@ -245,8 +245,7 @@ static void ui_update_cb(void *arg) {
   }
   if (force_refresh || strcmp(state->image_key, last_image_key) != 0) {
     UI_SET_ARTWORK(state->image_key);
-    strncpy(last_image_key, state->image_key, sizeof(last_image_key) - 1);
-    last_image_key[sizeof(last_image_key) - 1] = '\0';
+    rk_strlcpy(last_image_key, state->image_key, sizeof(last_image_key));
   }
 
   free(state);
@@ -526,9 +525,8 @@ static void maybe_update_bridge_base(void) {
     s_mdns_fail_count = 0;
     lock_state();
     LOGI("mDNS discovered bridge: %s", discovered);
-    strncpy(s_state.cfg.bridge_base, discovered,
-            sizeof(s_state.cfg.bridge_base) - 1);
-    s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
+    rk_strlcpy(s_state.cfg.bridge_base, discovered,
+            sizeof(s_state.cfg.bridge_base));
     strip_trailing_slashes(s_state.cfg.bridge_base);
     s_state.cfg.bridge_from_mdns = 1; // Persist mDNS source
     platform_storage_save(&s_state.cfg);
@@ -542,9 +540,8 @@ static void maybe_update_bridge_base(void) {
     LOGI("mDNS discovery failed, using fallback: %s",
          CONFIG_RK_DEFAULT_BRIDGE_BASE);
     lock_state();
-    strncpy(s_state.cfg.bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE,
-            sizeof(s_state.cfg.bridge_base) - 1);
-    s_state.cfg.bridge_base[sizeof(s_state.cfg.bridge_base) - 1] = '\0';
+    rk_strlcpy(s_state.cfg.bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE,
+            sizeof(s_state.cfg.bridge_base));
     strip_trailing_slashes(s_state.cfg.bridge_base);
     // Don't save the fallback - let mDNS retry on next poll
     unlock_state();
@@ -565,8 +562,8 @@ static bool fetch_now_playing(struct now_playing_state *state) {
   lock_state();
   char bridge_base[sizeof(s_state.cfg.bridge_base)];
   char zone_id[sizeof(s_state.cfg.zone_id)];
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
-  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
+  rk_strlcpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id));
   unlock_state();
 
   if (bridge_base[0] == '\0' || zone_id[0] == '\0') {
@@ -755,10 +752,8 @@ static bool udp_poll_fast_state(udp_fast_response_t *resp_out) {
   char bridge_base[128];
   char zone_id[64];
   lock_state();
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
-  bridge_base[sizeof(bridge_base) - 1] = '\0';
-  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
-  zone_id[sizeof(zone_id) - 1] = '\0';
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
+  rk_strlcpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id));
   unlock_state();
 
   if (bridge_base[0] == '\0' || zone_id[0] == '\0')
@@ -803,8 +798,8 @@ static bool udp_poll_fast_state(udp_fast_response_t *resp_out) {
   udp_fast_request_t req;
   memset(&req, 0, sizeof(req));
   req.magic = UDP_FAST_MAGIC; // LE native on ESP32
-  strncpy((char *)req.sha, s_manifest_sha, sizeof(req.sha) - 1);
-  strncpy(req.zone_id, zone_id, sizeof(req.zone_id) - 1);
+  rk_strlcpy((char *)req.sha, s_manifest_sha, sizeof(req.sha));
+  rk_strlcpy(req.zone_id, zone_id, sizeof(req.zone_id));
 
   // Send
   ssize_t sent = sendto(s_udp_sock, &req, sizeof(req), 0,
@@ -842,10 +837,8 @@ static bool udp_send_volume(float volume) {
   char bridge_base[128];
   char zone_id[64];
   lock_state();
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
-  bridge_base[sizeof(bridge_base) - 1] = '\0';
-  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
-  zone_id[sizeof(zone_id) - 1] = '\0';
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
+  rk_strlcpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id));
   unlock_state();
 
   if (bridge_base[0] == '\0' || zone_id[0] == '\0')
@@ -873,7 +866,7 @@ static bool udp_send_volume(float volume) {
   memset(&cmd, 0, sizeof(cmd));
   cmd.magic = UDP_FAST_MAGIC;
   cmd.cmd = UDP_CMD_VOLUME_SET;
-  strncpy(cmd.zone_id, zone_id, sizeof(cmd.zone_id) - 1);
+  rk_strlcpy(cmd.zone_id, zone_id, sizeof(cmd.zone_id));
   cmd.value = volume;
 
   ssize_t sent = sendto(s_udp_sock, &cmd, sizeof(cmd), 0,
@@ -887,8 +880,8 @@ static manifest_t *fetch_manifest(void) {
   lock_state();
   char bridge_base[sizeof(s_state.cfg.bridge_base)];
   char zone_id[sizeof(s_state.cfg.zone_id)];
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
-  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
+  rk_strlcpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id));
   unlock_state();
 
   if (bridge_base[0] == '\0' || zone_id[0] == '\0')
@@ -946,7 +939,7 @@ static manifest_t *fetch_manifest(void) {
   }
 
   // Cache SHA for next request
-  strncpy(s_manifest_sha, m->sha, sizeof(s_manifest_sha) - 1);
+  rk_strlcpy(s_manifest_sha, m->sha, sizeof(s_manifest_sha));
 
   platform_http_free(resp);
   return m;
@@ -996,7 +989,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
        prefer_zone_id ? "true" : "false");
   lock_state();
   char bridge_base[sizeof(s_state.cfg.bridge_base)];
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
   unlock_state();
   if (bridge_base[0] == '\0') {
     LOGI("refresh_zone_label: bridge_base is empty, returning false");
@@ -1034,24 +1027,21 @@ static bool refresh_zone_label(bool prefer_zone_id) {
       struct zone_entry *entry = &s_state.zones[i];
       if (prefer_zone_id && s_state.cfg.zone_id[0] &&
           strcmp(entry->id, s_state.cfg.zone_id) == 0) {
-        strncpy(s_state.zone_label, entry->name,
-                sizeof(s_state.zone_label) - 1);
-        s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
-        strncpy(zone_label_copy, s_state.zone_label,
-                sizeof(zone_label_copy) - 1);
+        rk_strlcpy(s_state.zone_label, entry->name,
+                sizeof(s_state.zone_label));
+        rk_strlcpy(zone_label_copy, s_state.zone_label,
+                sizeof(zone_label_copy));
         found = true;
         should_sync = true;
         break;
       }
       if (!s_state.cfg.zone_id[0]) {
-        strncpy(s_state.cfg.zone_id, entry->id,
-                sizeof(s_state.cfg.zone_id) - 1);
-        s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
-        strncpy(s_state.zone_label, entry->name,
-                sizeof(s_state.zone_label) - 1);
-        s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
-        strncpy(zone_label_copy, s_state.zone_label,
-                sizeof(zone_label_copy) - 1);
+        rk_strlcpy(s_state.cfg.zone_id, entry->id,
+                sizeof(s_state.cfg.zone_id));
+        rk_strlcpy(s_state.zone_label, entry->name,
+                sizeof(s_state.zone_label));
+        rk_strlcpy(zone_label_copy, s_state.zone_label,
+                sizeof(zone_label_copy));
         found = true;
         should_sync = true;
         break;
@@ -1059,11 +1049,9 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     }
     if (!found && s_state.zone_count > 0) {
       struct zone_entry *entry = &s_state.zones[0];
-      strncpy(s_state.cfg.zone_id, entry->id, sizeof(s_state.cfg.zone_id) - 1);
-      s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
-      strncpy(s_state.zone_label, entry->name, sizeof(s_state.zone_label) - 1);
-      s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
-      strncpy(zone_label_copy, s_state.zone_label, sizeof(zone_label_copy) - 1);
+      rk_strlcpy(s_state.cfg.zone_id, entry->id, sizeof(s_state.cfg.zone_id));
+      rk_strlcpy(s_state.zone_label, entry->name, sizeof(s_state.zone_label));
+      rk_strlcpy(zone_label_copy, s_state.zone_label, sizeof(zone_label_copy));
       should_sync = true;
     }
     s_state.zone_resolved = true;
@@ -1111,14 +1099,10 @@ static void parse_zones_from_response(const char *resp) {
       cursor = next;
       continue;
     }
-    strncpy(s_state.zones[s_state.zone_count].id, id,
-            sizeof(s_state.zones[0].id) - 1);
-    strncpy(s_state.zones[s_state.zone_count].name, name,
-            sizeof(s_state.zones[0].name) - 1);
-    s_state.zones[s_state.zone_count].id[sizeof(s_state.zones[0].id) - 1] =
-        '\0';
-    s_state.zones[s_state.zone_count].name[sizeof(s_state.zones[0].name) - 1] =
-        '\0';
+    rk_strlcpy(s_state.zones[s_state.zone_count].id, id,
+            sizeof(s_state.zones[0].id));
+    rk_strlcpy(s_state.zones[s_state.zone_count].name, name,
+            sizeof(s_state.zones[0].name));
     s_state.zone_count++;
     cursor = after_name;
   }
@@ -1160,8 +1144,8 @@ static bool send_control_json(const char *json) {
   lock_state();
   char bridge_base[sizeof(s_state.cfg.bridge_base)];
   char zone_id[sizeof(s_state.cfg.zone_id)];
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
-  strncpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id) - 1);
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
+  rk_strlcpy(zone_id, s_state.cfg.zone_id, sizeof(zone_id));
   unlock_state();
   if (bridge_base[0] == '\0' || zone_id[0] == '\0') {
     return false;
@@ -1238,7 +1222,7 @@ static void bridge_poll_thread(void *arg) {
         if (manifest) {
           memset(manifest, 0, sizeof(manifest_t));
           manifest->version = 1;
-          strncpy(manifest->sha, s_manifest_sha, sizeof(manifest->sha) - 1);
+          rk_strlcpy(manifest->sha, s_manifest_sha, sizeof(manifest->sha));
           manifest->screen_count = 0; // No screen updates
           manifest->fast.is_playing = (udp_resp.flags & UDP_FLAG_PLAYING) != 0;
           manifest->fast.transport.play =
@@ -1319,8 +1303,7 @@ static void bridge_poll_thread(void *arg) {
         // Restore zone name (was cleared during error display)
         lock_state();
         char zone_name_copy[MAX_ZONE_NAME];
-        strncpy(zone_name_copy, s_state.zone_label, sizeof(zone_name_copy) - 1);
-        zone_name_copy[sizeof(zone_name_copy) - 1] = '\0';
+        rk_strlcpy(zone_name_copy, s_state.zone_label, sizeof(zone_name_copy));
         unlock_state();
         if (zone_name_copy[0]) {
           UI_SET_ZONE_NAME(zone_name_copy);
@@ -1435,10 +1418,9 @@ void bridge_client_start(const rk_cfg_t *cfg) {
   platform_task_init();
   lock_state();
   s_state.cfg = *cfg;
-  strncpy(s_state.zone_label,
+  rk_strlcpy(s_state.zone_label,
           cfg->zone_id[0] ? cfg->zone_id : "Tap here to select zone",
-          sizeof(s_state.zone_label) - 1);
-  s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
+          sizeof(s_state.zone_label));
   unlock_state();
 
   // Always apply config on startup (uses defaults if no saved config)
@@ -1501,13 +1483,11 @@ void bridge_client_handle_input(ui_input_event_t event) {
         if (strcmp(entry->id, selected_id) == 0) {
           LOGI("Zone picker: switching to zone '%s' (id=%s)", entry->name,
                entry->id);
-          strncpy(s_state.cfg.zone_id, entry->id,
-                  sizeof(s_state.cfg.zone_id) - 1);
-          s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
-          strncpy(s_state.zone_label, entry->name,
-                  sizeof(s_state.zone_label) - 1);
-          s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
-          strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
+          rk_strlcpy(s_state.cfg.zone_id, entry->id,
+                  sizeof(s_state.cfg.zone_id));
+          rk_strlcpy(s_state.zone_label, entry->name,
+                  sizeof(s_state.zone_label));
+          rk_strlcpy(label_copy, s_state.zone_label, sizeof(label_copy));
           s_state.zone_resolved = true;
           if (s_device_state != DEVICE_STATE_OPERATIONAL) {
             LOGI("Device state: %s -> OPERATIONAL (zone selected)",
@@ -1809,8 +1789,7 @@ static void increment_bridge_fail_count(void) {
 
 void bridge_client_set_device_ip(const char *ip) {
   if (ip && ip[0]) {
-    strncpy(s_device_ip, ip, sizeof(s_device_ip) - 1);
-    s_device_ip[sizeof(s_device_ip) - 1] = '\0';
+    rk_strlcpy(s_device_ip, ip, sizeof(s_device_ip));
   } else {
     s_device_ip[0] = '\0';
   }
@@ -1827,8 +1806,7 @@ bool bridge_client_get_bridge_url(char *buf, size_t len) {
   lock_state();
   bool has_bridge = (s_state.cfg.bridge_base[0] != '\0');
   if (has_bridge) {
-    strncpy(buf, s_state.cfg.bridge_base, len - 1);
-    buf[len - 1] = '\0';
+    rk_strlcpy(buf, s_state.cfg.bridge_base, len);
   } else {
     buf[0] = '\0';
   }
@@ -1850,10 +1828,8 @@ int bridge_client_get_zones(bridge_zone_t *out, int max) {
   lock_state();
   int count = s_state.zone_count < max ? s_state.zone_count : max;
   for (int i = 0; i < count; i++) {
-    strncpy(out[i].id, s_state.zones[i].id, sizeof(out[i].id) - 1);
-    out[i].id[sizeof(out[i].id) - 1] = '\0';
-    strncpy(out[i].name, s_state.zones[i].name, sizeof(out[i].name) - 1);
-    out[i].name[sizeof(out[i].name) - 1] = '\0';
+    rk_strlcpy(out[i].id, s_state.zones[i].id, sizeof(out[i].id));
+    rk_strlcpy(out[i].name, s_state.zones[i].name, sizeof(out[i].name));
   }
   unlock_state();
   return count;
@@ -1862,8 +1838,7 @@ int bridge_client_get_zones(bridge_zone_t *out, int max) {
 bool bridge_client_get_current_zone_id(char *out, size_t len) {
   if (!out || len == 0) return false;
   lock_state();
-  strncpy(out, s_state.cfg.zone_id, len - 1);
-  out[len - 1] = '\0';
+  rk_strlcpy(out, s_state.cfg.zone_id, len);
   unlock_state();
   return out[0] != '\0';
 }
@@ -1876,12 +1851,10 @@ void bridge_client_set_zone(const char *zone_id) {
   lock_state();
   for (int i = 0; i < s_state.zone_count; i++) {
     if (strcmp(s_state.zones[i].id, zone_id) == 0) {
-      strncpy(s_state.cfg.zone_id, zone_id,
-              sizeof(s_state.cfg.zone_id) - 1);
-      s_state.cfg.zone_id[sizeof(s_state.cfg.zone_id) - 1] = '\0';
-      strncpy(s_state.zone_label, s_state.zones[i].name,
-              sizeof(s_state.zone_label) - 1);
-      s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
+      rk_strlcpy(s_state.cfg.zone_id, zone_id,
+              sizeof(s_state.cfg.zone_id));
+      rk_strlcpy(s_state.zone_label, s_state.zones[i].name,
+              sizeof(s_state.zone_label));
       s_state.zone_resolved = true;
       s_trigger_poll = true;
       s_force_artwork_refresh = true;
@@ -1890,8 +1863,7 @@ void bridge_client_set_zone(const char *zone_id) {
       }
       // Copy shared state before releasing lock
       memcpy(&cfg_copy, &s_state.cfg, sizeof(cfg_copy));
-      strncpy(label_copy, s_state.zone_label, sizeof(label_copy) - 1);
-      label_copy[sizeof(label_copy) - 1] = '\0';
+      rk_strlcpy(label_copy, s_state.zone_label, sizeof(label_copy));
       found = true;
       break;
     }
@@ -1984,8 +1956,7 @@ static void check_zones_sha(const char *new_sha) {
          s_last_zones_sha[0] ? s_last_zones_sha : "(empty)", new_sha);
 
     // Update cached SHA
-    strncpy(s_last_zones_sha, new_sha, sizeof(s_last_zones_sha) - 1);
-    s_last_zones_sha[sizeof(s_last_zones_sha) - 1] = '\0';
+    rk_strlcpy(s_last_zones_sha, new_sha, sizeof(s_last_zones_sha));
 
     // Re-fetch zones from bridge
     refresh_zone_label(true);
@@ -1995,8 +1966,7 @@ static void check_zones_sha(const char *new_sha) {
 static bool fetch_knob_config(void) {
   lock_state();
   char bridge_base[sizeof(s_state.cfg.bridge_base)];
-  strncpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base) - 1);
-  bridge_base[sizeof(bridge_base) - 1] = '\0';
+  rk_strlcpy(bridge_base, s_state.cfg.bridge_base, sizeof(bridge_base));
   unlock_state();
 
   if (bridge_base[0] == '\0') {
@@ -2038,8 +2008,7 @@ static bool fetch_knob_config(void) {
   // config_sha (at root level)
   cJSON *sha = cJSON_GetObjectItem(root, "config_sha");
   if (cJSON_IsString(sha) && sha->valuestring) {
-    strncpy(cfg->config_sha, sha->valuestring, sizeof(cfg->config_sha) - 1);
-    cfg->config_sha[sizeof(cfg->config_sha) - 1] = '\0';
+    rk_strlcpy(cfg->config_sha, sha->valuestring, sizeof(cfg->config_sha));
   }
 
   // Get nested config object - all config fields are inside "config"
@@ -2054,8 +2023,7 @@ static bool fetch_knob_config(void) {
   // name (inside config object)
   cJSON *name = cJSON_GetObjectItem(config_obj, "name");
   if (cJSON_IsString(name) && name->valuestring) {
-    strncpy(cfg->knob_name, name->valuestring, sizeof(cfg->knob_name) - 1);
-    cfg->knob_name[sizeof(cfg->knob_name) - 1] = '\0';
+    rk_strlcpy(cfg->knob_name, name->valuestring, sizeof(cfg->knob_name));
   }
 
   // rotation

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "bridge_client.h"
+#include "rk_cfg.h"
 #include "lvgl.h"
 #include "os_mutex.h"
 #include "platform/platform_http.h"
@@ -763,24 +764,21 @@ static void poll_pending(lv_timer_t *timer) {
   bool show_message = s_message_dirty;
   char message[128];
   if (show_message) {
-    strncpy(message, s_pending_message, sizeof(message) - 1);
-    message[sizeof(message) - 1] = '\0';
+    rk_strlcpy(message, s_pending_message, sizeof(message));
     s_message_dirty = false;
   }
 
   bool zone_name_changed = s_zone_name_dirty;
   char zone_name[64];
   if (zone_name_changed) {
-    strncpy(zone_name, s_pending.zone_name, sizeof(zone_name) - 1);
-    zone_name[sizeof(zone_name) - 1] = '\0';
+    rk_strlcpy(zone_name, s_pending.zone_name, sizeof(zone_name));
     s_zone_name_dirty = false;
   }
 
   bool network_status_changed = s_network_status_dirty;
   char net_status[128];
   if (network_status_changed) {
-    strncpy(net_status, s_network_status, sizeof(net_status) - 1);
-    net_status[sizeof(net_status) - 1] = '\0';
+    rk_strlcpy(net_status, s_network_status, sizeof(net_status));
     s_network_status_dirty = false;
   }
   os_mutex_unlock(&s_state_lock);
@@ -961,8 +959,7 @@ void ui_show_zone_picker(const char **zone_names, const char **zone_ids,
   s_zone_picker_selected = selected;
   s_zone_picker_current = selected; // Remember current zone for no-op detection
   for (int i = 0; i < s_zone_picker_count; i++) {
-    strncpy(s_zone_picker_ids[i], zone_ids[i], MAX_ZONE_ID_LEN - 1);
-    s_zone_picker_ids[i][MAX_ZONE_ID_LEN - 1] = '\0';
+    rk_strlcpy(s_zone_picker_ids[i], zone_ids[i], MAX_ZONE_ID_LEN);
   }
 
   // Create fullscreen dark overlay
@@ -1111,8 +1108,7 @@ void ui_zone_picker_get_selected_id(char *out, size_t len) {
   }
   int selected = s_zone_picker_selected;
   if (selected >= 0 && selected < s_zone_picker_count) {
-    strncpy(out, s_zone_picker_ids[selected], len - 1);
-    out[len - 1] = '\0';
+    rk_strlcpy(out, s_zone_picker_ids[selected], len);
   }
 }
 
@@ -1137,10 +1133,8 @@ void ui_loop_iter(void) {
 
 void ui_set_track(const char *line1, const char *line2) {
   os_mutex_lock(&s_state_lock);
-  strncpy(s_pending.line1, line1, sizeof(s_pending.line1) - 1);
-  strncpy(s_pending.line2, line2, sizeof(s_pending.line2) - 1);
-  s_pending.line1[sizeof(s_pending.line1) - 1] = '\0';
-  s_pending.line2[sizeof(s_pending.line2) - 1] = '\0';
+  rk_strlcpy(s_pending.line1, line1, sizeof(s_pending.line1));
+  rk_strlcpy(s_pending.line2, line2, sizeof(s_pending.line2));
   s_dirty = true;
   os_mutex_unlock(&s_state_lock);
 }
@@ -1204,8 +1198,7 @@ void ui_set_online(bool online) {
 void ui_set_zone_name(const char *zone_name) {
   os_mutex_lock(&s_state_lock);
   if (zone_name) {
-    strncpy(s_pending.zone_name, zone_name, sizeof(s_pending.zone_name) - 1);
-    s_pending.zone_name[sizeof(s_pending.zone_name) - 1] = '\0';
+    rk_strlcpy(s_pending.zone_name, zone_name, sizeof(s_pending.zone_name));
     s_zone_name_dirty = true;
   }
   os_mutex_unlock(&s_state_lock);
@@ -1213,8 +1206,7 @@ void ui_set_zone_name(const char *zone_name) {
 
 void ui_set_message(const char *message) {
   os_mutex_lock(&s_state_lock);
-  strncpy(s_pending_message, message, sizeof(s_pending_message) - 1);
-  s_pending_message[sizeof(s_pending_message) - 1] = '\0';
+  rk_strlcpy(s_pending_message, message, sizeof(s_pending_message));
   s_message_dirty = true;
   os_mutex_unlock(&s_state_lock);
 }
@@ -1222,8 +1214,7 @@ void ui_set_message(const char *message) {
 void ui_set_network_status(const char *status) {
   os_mutex_lock(&s_state_lock);
   if (status) {
-    strncpy(s_network_status, status, sizeof(s_network_status) - 1);
-    s_network_status[sizeof(s_network_status) - 1] = '\0';
+    rk_strlcpy(s_network_status, status, sizeof(s_network_status));
   } else {
     s_network_status[0] = '\0'; // Clear status
   }
@@ -1423,8 +1414,7 @@ void ui_set_artwork(const char *image_key) {
   lv_obj_center(s_artwork_image);
   lv_obj_invalidate(s_artwork_image);
 
-  strncpy(s_last_image_key, image_key, sizeof(s_last_image_key) - 1);
-  s_last_image_key[sizeof(s_last_image_key) - 1] = '\0';
+  rk_strlcpy(s_last_image_key, image_key, sizeof(s_last_image_key));
 
   ESP_LOGI(UI_TAG, "Artwork displayed");
 #else
@@ -1444,8 +1434,7 @@ void ui_set_artwork(const char *image_key) {
   lv_image_set_src(s_artwork_image, &img_dsc);
   lv_obj_clear_flag(s_artwork_image, LV_OBJ_FLAG_HIDDEN);
 
-  strncpy(s_last_image_key, image_key, sizeof(s_last_image_key) - 1);
-  s_last_image_key[sizeof(s_last_image_key) - 1] = '\0';
+  rk_strlcpy(s_last_image_key, image_key, sizeof(s_last_image_key));
 
   ESP_LOGI(UI_TAG, "Artwork displayed (PC sim)");
 #endif
@@ -1505,8 +1494,7 @@ static void update_btn_clicked(lv_event_t *e) {
 
 void ui_set_update_available(const char *version) {
   if (version && version[0]) {
-    strncpy(s_update_version, version, sizeof(s_update_version) - 1);
-    s_update_version[sizeof(s_update_version) - 1] = '\0';
+    rk_strlcpy(s_update_version, version, sizeof(s_update_version));
     ESP_LOGI(UI_TAG, "Update available: %s", s_update_version);
 
     // Hide settings panel so update button is visible
