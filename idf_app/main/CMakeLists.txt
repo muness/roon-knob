@@ -73,7 +73,7 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 
 # Force -O3 for our code (override IDF default)
-target_compile_options(${COMPONENT_LIB} PRIVATE -O3)
+target_compile_options(${COMPONENT_LIB} PRIVATE -O3 -Wno-error=stringop-truncation)
 
 # Manifest-driven UI (ADR-0003). Set to OFF to use legacy hardcoded UI.
 # Default ON = manifest-driven UI.

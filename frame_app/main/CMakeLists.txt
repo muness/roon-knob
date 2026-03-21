@@ -54,4 +54,4 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE USE_EINK=1)
 
-target_compile_options(${COMPONENT_LIB} PRIVATE -O2)
+target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -Wno-error=stringop-truncation)
