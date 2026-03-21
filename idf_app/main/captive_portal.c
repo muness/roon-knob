@@ -127,13 +127,23 @@ static bool get_form_field(const char *data, const char *field, char *out,
   const char *end = strchr(start, '&');
   size_t len = end ? (size_t)(end - start) : strlen(start);
 
-  if (len >= out_len) {
-    len = out_len - 1;
+  // URL-encoded data can be up to 3x the decoded length (e.g. ! -> %21).
+  // Decode in a temporary buffer first, then truncate to fit the output.
+  char encoded[256];
+  if (len >= sizeof(encoded)) {
+    len = sizeof(encoded) - 1;
   }
 
-  memcpy(out, start, len);
-  out[len] = '\0';
-  url_decode(out);
+  memcpy(encoded, start, len);
+  encoded[len] = '\0';
+  url_decode(encoded);
+
+  size_t decoded_len = strlen(encoded);
+  if (decoded_len >= out_len) {
+    decoded_len = out_len - 1;
+  }
+  memcpy(out, encoded, decoded_len);
+  out[decoded_len] = '\0';
   return true;
 }
 
