@@ -69,4 +69,6 @@ idf_component_register(
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
+# TODO(#183): Remove after ESP-IDF 6.0 migration (Picolibc has proper strlcpy)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
 
