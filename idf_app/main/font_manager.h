@@ -1,21 +1,26 @@
 // Font manager - provides pre-rendered bitmap fonts for Unicode support
-// Two font families:
-// 1. Text fonts (Charis SIL) - for music metadata with full Unicode support
-// 2. Icon fonts (Material Symbols) - for UI controls and status indicators
+// Two font families at three sizes:
+// 1. Lato (22/25/28px) - clean sans-serif for metadata
+// 2. Noto Sans (22/25/28px) - humanist sans-serif for content
+// 3. Material Icons - for UI controls and status indicators
 
 #pragma once
 
 #include "lvgl.h"
 #include <stdbool.h>
+#include "display_config.h"
 
 // Initialize font manager
 // Call after lv_init() but before ui_init()
 bool font_manager_init(void);
 
-// Text fonts (Charis SIL) - for artist, track, album, metadata
-const lv_font_t *font_manager_get_small(void);   // 22px for metadata, hints
-const lv_font_t *font_manager_get_normal(void);  // 28px for artist, zone names
-const lv_font_t *font_manager_get_large(void);   // 40px for track title
+// Get font by family and size - primary API for display_config
+const lv_font_t *font_manager_get_font(font_family_t family, font_size_t size);
+
+// Legacy text font getters (for backward compatibility)
+const lv_font_t *font_manager_get_small(void);   // 22px Lato
+const lv_font_t *font_manager_get_normal(void);  // 28px Noto Sans
+const lv_font_t *font_manager_get_large(void);   // 28px Noto Sans
 
 // Icon fonts (Material Symbols) - for UI controls
 const lv_font_t *font_manager_get_icon_small(void);   // 22px for status icons

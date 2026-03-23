@@ -46,31 +46,35 @@ ICON_RANGES="0xE000,0xE002,0xE034,0xE037,0xE044-0xE045,0xE04D-0xE050,0xE1A3,0xE1
 # battery-medium e057, battery-warning e3ac
 LUCIDE_BATTERY_RANGES="0xE053-0xE057,0xE3AC"
 
-# Generate Lato text font at 22px (for artist, volume label, status)
+# Generate Lato text fonts at 22px (small), 25px (medium), 28px (large)
 echo "Converting Lato..."
-echo "  - lato_22.c"
-lv_font_conv \
-    --bpp 4 \
-    --size 22 \
-    --font "$SPIFFS_DIR/Lato-Regular.ttf" \
-    --range $TEXT_RANGES \
-    --format lvgl \
-    --no-compress \
-    --no-prefilter \
-    -o "$OUTPUT_DIR/lato_22.c"
+for size in 22 25 28; do
+    echo "  - lato_${size}.c"
+    lv_font_conv \
+        --bpp 4 \
+        --size $size \
+        --font "$SPIFFS_DIR/Lato-Regular.ttf" \
+        --range $TEXT_RANGES \
+        --format lvgl \
+        --no-compress \
+        --no-prefilter \
+        -o "$OUTPUT_DIR/lato_${size}.c"
+done
 
-# Generate Noto Sans text font at 28px (for track, zone)
+# Generate Noto Sans text fonts at 22px (small), 25px (medium), 28px (large)
 echo "Converting Noto Sans..."
-echo "  - notosans_28.c"
-lv_font_conv \
-    --bpp 4 \
-    --size 28 \
-    --font "$SPIFFS_DIR/NotoSans-Regular.ttf" \
-    --range $TEXT_RANGES \
-    --format lvgl \
-    --no-compress \
-    --no-prefilter \
-    -o "$OUTPUT_DIR/notosans_28.c"
+for size in 22 25 28; do
+    echo "  - notosans_${size}.c"
+    lv_font_conv \
+        --bpp 4 \
+        --size $size \
+        --font "$SPIFFS_DIR/NotoSans-Regular.ttf" \
+        --range $TEXT_RANGES \
+        --format lvgl \
+        --no-compress \
+        --no-prefilter \
+        -o "$OUTPUT_DIR/notosans_${size}.c"
+done
 
 # Generate Material Icons icon fonts at 22, 28, 44, 60px
 # Sizes 44/60 match enlarged transport buttons (60px/80px backgrounds)
@@ -115,18 +119,21 @@ for file in "$OUTPUT_DIR"/*.c; do
 done
 rm -f "$OUTPUT_DIR"/*.bak
 
-# Set up font fallback: Lato/Noto Sans -> Material Symbols (for icons in text)
-echo "Setting up font fallback (Lato/Noto Sans -> Material Symbols)..."
+# Set up font fallback: Lato/Noto Sans -> Material Icons (for icons in text)
+echo "Setting up font fallback (Lato/Noto Sans -> Material Icons)..."
 
-# lato_22 -> material_icons_22
-sed -i.bak "s|#include \"lvgl.h\"|#include \"lvgl.h\"\nextern const lv_font_t material_icons_22;|" "$OUTPUT_DIR/lato_22.c"
-sed -i.bak "s|\.fallback = NULL|.fallback = \&material_icons_22|" "$OUTPUT_DIR/lato_22.c"
-rm -f "$OUTPUT_DIR/lato_22.c.bak"
+# All text fonts fall back to corresponding Material Icons size
+for size in 22 25 28; do
+    # lato -> material_icons
+    sed -i.bak "s|#include \"lvgl.h\"|#include \"lvgl.h\"\nextern const lv_font_t material_icons_${size};|" "$OUTPUT_DIR/lato_${size}.c"
+    sed -i.bak "s|\.fallback = NULL|.fallback = \&material_icons_${size}|" "$OUTPUT_DIR/lato_${size}.c"
+    rm -f "$OUTPUT_DIR/lato_${size}.c.bak"
 
-# notosans_28 -> material_icons_28
-sed -i.bak "s|#include \"lvgl.h\"|#include \"lvgl.h\"\nextern const lv_font_t material_icons_28;|" "$OUTPUT_DIR/notosans_28.c"
-sed -i.bak "s|\.fallback = NULL|.fallback = \&material_icons_28|" "$OUTPUT_DIR/notosans_28.c"
-rm -f "$OUTPUT_DIR/notosans_28.c.bak"
+    # notosans -> material_icons
+    sed -i.bak "s|#include \"lvgl.h\"|#include \"lvgl.h\"\nextern const lv_font_t material_icons_${size};|" "$OUTPUT_DIR/notosans_${size}.c"
+    sed -i.bak "s|\.fallback = NULL|.fallback = \&material_icons_${size}|" "$OUTPUT_DIR/notosans_${size}.c"
+    rm -f "$OUTPUT_DIR/notosans_${size}.c.bak"
+done
 
 echo "Done! Generated fonts in $OUTPUT_DIR"
 ls -la "$OUTPUT_DIR"
