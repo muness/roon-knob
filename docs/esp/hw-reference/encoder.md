@@ -1,9 +1,15 @@
 Rotary Encoder (EC11‑class) – App‑Facing Notes
 
+This file owns quadrature decoding technique and tuning. Board identity — how many encoders
+the vendor declares, and what is still physically unverified — is in the canonical record:
+[board.md](board.md).
+
 Overview
 - Mechanically‑detented quadrature rotary encoder used for volume and navigation.
 - Two digital outputs: Channel A (ECA) and Channel B (ECB).
-- Our board’s shaft is rotation‑only (no push switch wired).
+- This firmware reads rotation only; it reads no shaft switch on any GPIO. Whether a switch is
+  fitted on the owned unit is unconfirmed — see
+  [board.md](board.md#still-requires-physical-inspection).
 
 Electrical
 - Open‑collector style contacts; require pull‑ups. Firmware enables internal pull‑ups.
@@ -35,5 +41,6 @@ Testing
 
 References
 - Implementation: idf_app/main/platform_input_idf.c (ENCODER_GPIO_A/B, debounce, polling).
-- Pinout: docs/references/HARDWARE_PINS.md.
+- Pinout: [HARDWARE_PINS.md](HARDWARE_PINS.md).
+- Board identity: [board.md](board.md).
 

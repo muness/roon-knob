@@ -1,16 +1,18 @@
 # Touch Input
 
-This document covers capacitive touch input using the CST816S controller.
+This document covers capacitive touch input and its LVGL integration. The exact touch
+controller part, and what about it is still unverified, is recorded in
+[hw-reference/board.md](hw-reference/board.md).
 
 ## Hardware Overview
 
-| Component | Model | Interface | Address |
+| Component | Value | Interface | Address |
 |-----------|-------|-----------|---------|
-| Touch controller | CST816 | I2C | 0x15 |
+| Touch controller | CST816 family (see [board.md](hw-reference/board.md)) | I2C | 0x15 |
 | I2C SDA | GPIO 11 | - | - |
 | I2C SCL | GPIO 12 | - | - |
 
-The CST816 is a single-point capacitive touch controller commonly found in smartwatch displays. It reports touch coordinates over I2C when the user touches the screen.
+CST816-family parts are single-point capacitive touch controllers commonly found in smartwatch displays. They report touch coordinates over I2C when the user touches the screen.
 
 ## Architecture
 
@@ -27,7 +29,7 @@ The CST816 is a single-point capacitive touch controller commonly found in smart
                             │ tpGetCoordinates()
 ┌───────────────────────────▼─────────────────────────────────┐
 │                    lcd_touch_bsp.c                           │
-│              CST816S I2C register reads                      │
+│           raw I2C register reads (7 bytes @ 0x00)            │
 └───────────────────────────┬─────────────────────────────────┘
                             │ i2c_read_buff()
 ┌───────────────────────────▼─────────────────────────────────┐
@@ -36,7 +38,7 @@ The CST816 is a single-point capacitive touch controller commonly found in smart
 └───────────────────────────┬─────────────────────────────────┘
                             │
 ┌───────────────────────────▼─────────────────────────────────┐
-│                  CST816S Touch IC                            │
+│              CST816-family touch IC @ 0x15                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,9 +65,11 @@ Devices on this bus:
 
 The bus runs at 300kHz, which is within spec for both devices.
 
-## CST816S Register Map
+## Touch Register Map
 
-The touch controller uses a simple register interface. Reading 7 bytes from register 0x00 gives:
+The touch controller uses a simple register interface, documented in the CST816D datasheet
+Waveshare links and shared across the CST816 variants this firmware could be sitting on.
+Reading 7 bytes from register 0x00 gives:
 
 | Byte | Content |
 |------|---------|

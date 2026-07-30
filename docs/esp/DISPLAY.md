@@ -1,16 +1,21 @@
 # Display Subsystem
 
-This document covers how the Roon Knob drives its 360×360 pixel AMOLED display using ESP-IDF and LVGL.
+This document covers how the Roon Knob drives its 360×360 pixel display using ESP-IDF and
+LVGL. It owns the driver mechanics; the board's identity — product name, panel technology,
+panel driver IC, colour depth — lives in the canonical record,
+[hw-reference/board.md](hw-reference/board.md).
 
 ## Hardware Overview
 
-| Component | Model | Interface | Notes |
+| Component | Value | Interface | Notes |
 |-----------|-------|-----------|-------|
-| Display controller | SH8601 | QSPI (4-wire) | IPS LCD, 16-bit RGB565 |
+| Panel driver component | `esp_lcd_sh8601` | QSPI (4-wire) | Software component, **not** the panel's driver IC — see [board.md](hw-reference/board.md#panel-controller-versus-software-driver) |
 | Resolution | 360×360 | - | Round display |
-| Backlight | PWM-controlled | GPIO 47 | 8-bit brightness (0-255) |
+| Pixel format | RGB565 | - | `bits_per_pixel = 16`, byte-swapped in the flush callback |
+| Backlight | PWM-controlled | GPIO 47 | LEDC, 8-bit brightness (0-255) |
 
-The SH8601 is an LCD driver IC that accepts pixel data over Quad SPI, allowing faster transfers than standard SPI by using 4 data lines simultaneously.
+Quad SPI carries pixel data over four data lines simultaneously, allowing faster transfers
+than standard SPI.
 
 ## Architecture
 
@@ -36,7 +41,7 @@ The SH8601 is an LCD driver IC that accepts pixel data over Quad SPI, allowing f
 └───────────────────────────┬─────────────────────────────────┘
                             │ SPI DMA transfer
 ┌───────────────────────────▼─────────────────────────────────┐
-│                     SH8601 Display                           │
+│                    360×360 QSPI Panel                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,11 +112,12 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
 }
 ```
 
-The byte-swap is necessary because ESP32 is little-endian but the SH8601 expects big-endian RGB565 pixels.
+The byte-swap is necessary because ESP32 is little-endian but the panel consumes big-endian
+RGB565 pixels.
 
 ### Rounder Callback
 
-The SH8601 requires 2-pixel alignment for memory writes. LVGL's rounder callback adjusts dirty regions:
+The panel requires 2-pixel alignment for memory writes. LVGL's rounder callback adjusts dirty regions:
 
 ```c
 static void lvgl_rounder_cb(lv_event_t *e) {
@@ -141,7 +147,13 @@ esp_lcd_panel_dev_config_t panel_config = {
 esp_lcd_new_panel_sh8601(io_handle, &panel_config, &panel_handle);
 ```
 
-The `vendor_config` contains SH8601-specific initialization commands - a sequence of register writes that configure the display's internal settings (gamma curves, timing, power, etc.).
+The `vendor_config` supplies a panel-specific initialization array — a sequence of register
+writes that configure gamma curves, timing, power, and so on. Passing it **replaces** the
+component's own three-command default; the component still sends standard DCS `MADCTL` and
+`COLMOD` setup before the array, and the project's array overwrites `MADCTL` while `COLMOD`
+stays governed by `bits_per_pixel`. The array itself is Waveshare's own sequence for this
+product. Full analysis and provenance:
+[board.md](hw-reference/board.md#panel-controller-versus-software-driver).
 
 ### Drawing
 
@@ -168,12 +180,12 @@ Used by the sleep manager to power down the display during inactivity.
 The backlight uses PWM (pulse-width modulation) for smooth brightness control:
 
 ```c
-// Configure PWM channel
+// Configure PWM channel (platform_display_idf.c)
 ledc_channel_config_t ledc_channel = {
     .gpio_num = PIN_NUM_BK_LIGHT,
     .speed_mode = LEDC_LOW_SPEED_MODE,
     .channel = LEDC_CHANNEL_0,
-    .duty = 128,  // 50% brightness (0-255)
+    .duty = CONFIG_RK_BACKLIGHT_NORMAL,  // Kconfig default 100 of 255 (~39%)
 };
 ledc_channel_config(&ledc_channel);
 
@@ -182,10 +194,15 @@ ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, new_brightness);
 ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 ```
 
-The firmware defines brightness levels in Kconfig:
+The firmware defines brightness levels in Kconfig — see
+[KCONFIG.md](../dev/KCONFIG.md#display-sleep-settings-menu) for the defaults and ranges:
 
-- `CONFIG_RK_BACKLIGHT_NORMAL` - Active brightness
-- `CONFIG_RK_BACKLIGHT_DIM` - Dimmed brightness after inactivity
+- `CONFIG_RK_BACKLIGHT_NORMAL` - Active brightness, default 100 of 255 (≈ 39 %)
+- `CONFIG_RK_BACKLIGHT_DIM` - Dimmed brightness after inactivity, default 25 of 255 (≈ 10 %)
+
+The comment above the LEDC setup in `platform_display_idf.c` still says 50 %. It is stale: the
+initial duty has come from `CONFIG_RK_BACKLIGHT_NORMAL` since that option was introduced, and
+no 128 literal exists in the file.
 
 ## Display Sleep Management
 
@@ -224,7 +241,7 @@ Thread safety is handled via a FreeRTOS mutex - timer callbacks set pending flag
 1. **Backlight PWM** - Configure LEDC timer and channel
 2. **SPI bus** - Initialize QSPI with DMA
 3. **Panel IO** - Create SPI panel IO handle
-4. **Panel driver** - Initialize SH8601 with vendor commands
+4. **Panel driver** - Create the panel via `esp_lcd_new_panel_sh8601()` with the project's init array
 5. **Panel reset** - Hardware reset via GPIO
 6. **I2C bus** - For touch controller (separate from display)
 7. **Touch controller** - CST816 initialization

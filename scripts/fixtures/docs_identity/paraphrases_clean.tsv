@@ -1,0 +1,27 @@
+# Sentences that must produce NO violation (issue #211).
+#
+# Format: WHY<TAB>sentence
+#
+# The counterweight to paraphrases.tsv.  Strengthening a rule is only useful if
+# it stays a rule about a *claim* rather than a ban on a topic, so every one of
+# these is prose the repository is entitled to write: corrected identity facts,
+# qualified statements about what is unverified, and adjacent subject matter that
+# happens to share vocabulary with a guarded phrase.
+#
+# A rule that starts reporting one of these has become a topic ban and must be
+# narrowed, not exempted.
+
+corrected-driver-wording	The vendor declares an ST77916 driver IC; esp_lcd_sh8601 is the software component this project binds.
+corrected-panel	The panel is a 360x360 round IPS LCD declaring 262K colours.
+pixel-format-not-panel	RGB888 is a 24-bit colour pixel format; the panel itself still declares 262K colours.
+qualified-shaft-switch	Whether the encoder shaft has a push switch is unconfirmed on the owned unit.
+corrected-gesture	Tap the zone name to open the zone picker.
+family-not-variant	The vendor declares the CST816 family; the fitted marking is unverified.
+datasheet-reference	The vendor-linked datasheet is for the CST816D part.
+corrected-duty	Backlight on GPIO 47, initial duty CONFIG_RK_BACKLIGHT_NORMAL (100/255).
+corrected-soc	The vendor declares the SoC as ESP32-S3R8 with 8 MB PSRAM.
+dimming-is-a-feature	Automatic display dimming and sleep are configurable from the knob settings.
+firmware-reads-no-switch	This firmware reads rotation only; it reads no shaft switch on any GPIO.
+backlight-exists	The firmware drives an LEDC PWM backlight and can dim it on idle.
+sitronix-alone	Sitronix publishes the ST77916 datasheet the vendor declaration points at.
+sixteen-bit-is-fine	LVGL is configured for 16-bit colour, so each pixel is two bytes on the wire.

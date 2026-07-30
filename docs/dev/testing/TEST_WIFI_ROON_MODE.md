@@ -86,7 +86,9 @@ Happy path test script for WiFi setup and Roon control functionality.
    - Clockwise = scroll down
    - Counter-clockwise = scroll up
 
-4. **Select zone by pressing the knob (center button)**
+4. **Select the zone by tapping it in the list**
+   - The firmware reads no encoder button, so selection is confirmed by touch
+     (see [board.md](../../esp/hw-reference/board.md) for what is and is not wired)
    - Zone picker closes
    - Zone label updates to selected zone name
    - Display shows "Loading zone..."

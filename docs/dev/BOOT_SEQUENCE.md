@@ -22,7 +22,7 @@ app_main()
 ┌────────────────────────────────────────────────────────────────┐
 │ 2. Display Hardware Init                                       │
 │    - SPI bus initialization                                    │
-│    - SH8601 LCD panel driver                                   │
+│    - QSPI LCD panel driver (esp_lcd_sh8601 component)          │
 │    - I2C bus (touch controller, haptic motor)                  │
 │    - CST816 touch controller                                   │
 │    - PWM backlight                                             │

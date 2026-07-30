@@ -76,7 +76,9 @@ ui_dispatch_input(UI_INPUT_VOL_UP/DOWN)
 
 **File:** `idf_app/main/platform_display_idf.c`
 
-**Implementation:** CST816D via I2C, integrated with LVGL
+**Implementation:** CST816-family capacitive touch over I2C, integrated with LVGL. The firmware
+reads raw registers rather than binding a variant-specific driver; the fitted marking is
+unverified, so see [board.md](../esp/hw-reference/board.md) rather than asserting a variant.
 
 | Parameter | Value |
 |-----------|-------|
@@ -120,7 +122,7 @@ typedef enum {
 
 | Parameter | Value |
 |-----------|-------|
-| Controller | SH8601 |
+| Panel driver component | `esp_lcd_sh8601` (software component; the panel's driver IC is recorded in [board.md](../esp/hw-reference/board.md)) |
 | Resolution | 360×360 |
 | Interface | QSPI (4-wire) |
 | Color format | RGB565 |
@@ -128,7 +130,7 @@ typedef enum {
 
 **Critical: Byte Order**
 
-The SH8601 expects big-endian RGB565, but ESP32-S3 is little-endian. The flush callback swaps bytes before sending:
+The panel consumes big-endian RGB565, but ESP32-S3 is little-endian. The flush callback swaps bytes before sending:
 
 ```c
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
@@ -146,7 +148,7 @@ See [COLORTEST_HELLOWORLD.md](../esp/hw-reference/COLORTEST_HELLOWORLD.md) for d
 **Initialization sequence:**
 1. Initialize SPI bus
 2. Configure LCD panel IO (QSPI)
-3. Load SH8601 init commands
+3. Create the panel with the project's init array (replaces the component's default)
 4. Register LVGL display driver with byte-swap flush callback
 5. Register touch input device
 6. Start LVGL tick timer
@@ -229,7 +231,7 @@ The `platform_*.h` headers define interfaces implemented differently per platfor
 
 | Interface | ESP32-S3 | PC Sim |
 |-----------|----------|--------|
-| `platform_display` | SH8601/QSPI | SDL2 |
+| `platform_display` | `esp_lcd_sh8601`/QSPI | SDL2 |
 | `platform_input` | Encoder + Touch | Keyboard/Mouse |
 | `platform_http` | esp_http_client | libcurl |
 | `platform_storage` | NVS | JSON file |

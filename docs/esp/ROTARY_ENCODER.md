@@ -1,6 +1,10 @@
 # Rotary Encoder Input
 
-This document covers how the firmware reads the physical knob (rotary encoder) and translates rotation into volume control.
+This document covers how the firmware reads the physical knob (rotary encoder) and translates
+rotation into volume control. How many encoders the board has, and whether the shaft carries a
+switch, are identity questions answered in
+[hw-reference/board.md](hw-reference/board.md) — this firmware reads rotation only, on GPIO 8
+and GPIO 7.
 
 ## Hardware Overview
 

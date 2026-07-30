@@ -1,6 +1,6 @@
 # Roon Knob
 
-Custom firmware and a companion service that turn a [Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) into a dedicated hi-fi controller.
+Custom firmware and a companion service that turn a [Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) into a dedicated hi-fi controller. See the [canonical hardware identity and provenance record](docs/esp/hw-reference/board.md) for the exact target.
 
 See what's playing, adjust volume, skip tracks, and switch zones—all from a physical knob on your desk.
 
@@ -77,8 +77,8 @@ The knob finds the extension automatically via mDNS.
 | Action | What it does |
 |--------|--------------|
 | **Turn the knob** | Volume up/down |
-| **Press the knob** | Open zone picker |
-| **Tap the screen** | Play/pause |
+| **Tap the zone name** | Open zone picker |
+| **Tap the centre button** | Play/pause |
 | **Swipe up** | Art mode (hide controls, show album art) |
 | **Swipe down** | Exit art mode |
 | **Long-press zone name** | Settings |

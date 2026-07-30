@@ -1,7 +1,10 @@
 Touch UI Handling – Patterns and Hooks
 
+This file owns the LVGL touch event wiring. Board identity, including the exact touch part and
+what remains unverified, is in the canonical record: [board.md](board.md).
+
 Input Path
-- Hardware: CST816 capacitive touch over I2C.
+- Hardware: capacitive touch over I2C at address `0x15`.
 - LVGL: Registered as a `LV_INDEV_TYPE_POINTER` in `platform_display_idf.c`.
   - Callback: `lvgl_touch_read_cb()` fills `lv_indev_data_t` with `(x,y)` and `PRESSED/RELEASED`.
 

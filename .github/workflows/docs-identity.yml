@@ -1,0 +1,133 @@
+name: Docs Identity Guard
+
+# Issue #211. Independent of docker.yml on purpose: this is a host-only check with
+# no ESP-IDF container, no artifacts, and no dependency on any other workflow or on
+# unmerged release-config work (PR #204). It reads documentation and runs Python
+# from the standard library.
+#
+# Status: advisory until #205 adds required status checks on master. A red run is
+# visible on the pull request but does not block a merge until then.
+#
+# Advisory red decays: a check nobody has to pass is a check people learn to scroll
+# past, and this one is deliberately loud. So leaving it advisory indefinitely is a
+# real failure mode, not a neutral state -- but no date is set here, because a date
+# in a comment enforces nothing and expires without anyone noticing. Whether this
+# job becomes required or is retired is tracked in #213, which gates #205.
+#
+# Also runnable locally, and not from scripts/ci_sanity.sh -- that script needs a
+# toolchain. See docs/dev/DEVELOPMENT.md and AGENTS.md for the direct host-only
+# command.
+#
+# No `paths:` filter, deliberately. The earlier cut only ran when Markdown or the
+# checker changed, which makes the job *skipped* rather than green on every other
+# pull request -- and a required status check that can be skipped is a required
+# check that can be bypassed by touching no Markdown. Running unconditionally
+# costs one short host job and means the check always reports, so #205 can require
+# it without any further change here. The scan is repo-wide, so there is nothing to
+# narrow to anyway; the one bot-managed exemption (root CHANGELOG.md, written by
+# changelog.yml) lives in the checker's SKIP_FILES and is covered by the fixture
+# suite rather than duplicated as a path filter.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-identity:
+    name: Target identity contradiction guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Record interpreter identity
+        run: |
+          python3 --version
+          bash --version | head -1
+
+      # The fixture suite proves both directions -- that current docs are accepted
+      # and that each guarded contradiction is rejected -- it exercises the
+      # independent paraphrase corpus, and it also proves the checker's own
+      # --self-check is live. Run it before the repository check so a broken guard
+      # is reported as a broken guard, not as clean documentation.
+      - name: Fixture suite
+        run: bash scripts/test_check_docs_identity.sh
+
+      # --self-check is not optional here: without it, a rule whose regex stopped
+      # matching anything would report a clean repository forever. It also proves
+      # that rule-level `unless` suppressions are still recorded, so the guard
+      # cannot narrow itself invisibly.
+      #
+      # Exit contract, in precedence order: 3 MISSING, 4 SELFCHECK, 2 STRUCTURE,
+      # 1 VIOLATION, 0 OK (64 is a bad invocation). Structure outranks violation
+      # deliberately: a document whose HTML comment or code fence is opened and
+      # never closed hides its own tail, so it is exactly the state in which a
+      # contradiction cannot be seen, and it is reported as STRUCTURE naming the
+      # file and the opening line rather than absorbed. Outranked tokens are still
+      # printed, so nothing is hidden by precedence.
+      #
+      # Source anchors: the canonical record's repository-observed rows cite source
+      # files, and prose rules cannot see a citation rot. SOURCE_ANCHORS asserts
+      # that each cited file still carries its expected tokens; an absent file or a
+      # missing token is a named STRUCTURE finding. Each token is a whole line or
+      # block that states the relationship the row cites, matched
+      # whitespace-insensitively and word-boundary guarded, so a pair of fragments
+      # cannot both be present while the relationship between them is gone.
+      #
+      # Three limits, stated here because a green run invites all three assumptions:
+      #   * an anchor is a freshness check on the citation, not evidence the fact is
+      #     true -- a missing token means "re-read the source", not "the claim is
+      #     false";
+      #   * an anchor checks text, NEVER the line numbers a row cites, so pure line
+      #     movement leaves every `:NN` in the Markdown stale with the guard still
+      #     green. That is human-review work, tracked in #213;
+      #   * `anchors_fresh=N/N` is not coverage. The table covers a subset of the
+      #     repository-observed rows; negative and uniqueness rows cannot be anchored
+      #     at all, and neither can derived counts or anything about the silicon.
+      #
+      # Report contract: --report writes one JSON object whose `token` and
+      # `exit_code` agree with this step's status. Finding groups are `violations`,
+      # `marker_abuse`, `structure_failures`, `missing` and `selfcheck_failures`.
+      # `suppressions` is informational -- every hit a rule's `unless` clause
+      # excused, with file, line, rule id, matched text and the suppressor that
+      # excused it. Suppressions never change the exit code; they are reported so a
+      # widened suppressor is visible in review, and the fixture suite additionally
+      # pins the repository's suppression *set* as an exact
+      # rule|file|suppressor|count fingerprint -- so swapping one suppressor for
+      # another fails at an unchanged total, and an additional suppressed hit inside
+      # a triple the baseline already lists fails on the count -- making a change
+      # review friction rather than a silent narrowing. `quoting_note` carries the
+      # checker's statement that a four-space indented block is scanned as prose
+      # rather than exempted as code, so quoted source belongs in a fenced block; the
+      # renderer prints it beneath the violations it explains.
+      # `source_anchors` is the full inventory with each anchor's status,
+      # so a reader sees what was checked and not only what failed, and
+      # `source_anchor_scope` carries the checker's own statement of the three limits
+      # above. `rules` is the size of the rule table, not a count of covered
+      # alternation branches.
+      - name: Check repository documentation
+        run: |
+          python3 scripts/check_docs_identity.py \
+            --self-check \
+            --report "$RUNNER_TEMP/rk_docs_identity.json"
+
+      # The renderer is a tested script, not a heredoc: scripts/summarize_docs_identity.py
+      # is exercised by the fixture suite above, including the all-groups report
+      # shape and the informational suppressions group. It always exits 0, so it
+      # cannot mask the checker's exit code.
+      - name: Summarise
+        if: always()
+        run: |
+          python3 scripts/summarize_docs_identity.py \
+            --report "$RUNNER_TEMP/rk_docs_identity.json" \
+            >> "$GITHUB_STEP_SUMMARY"

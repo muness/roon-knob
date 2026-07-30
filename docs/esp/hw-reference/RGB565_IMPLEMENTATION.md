@@ -39,7 +39,7 @@ Firmware now receives artwork as raw RGB565 data from the bridge instead of JPEG
 2. **Validate** - Check size matches expected (360×360×2)
 3. **Copy** - memcpy to global PSRAM buffer (ui_jpeg.c:191)
 4. **Display** - LVGL descriptor points to buffer
-5. **Byte swap** - Display flush callback converts to big-endian for SH8601 QSPI (platform_display_idf.c:329-333)
+5. **Byte swap** - Display flush callback converts to big-endian for the QSPI panel (platform_display_idf.c:329-333)
 
 ### Code Locations
 
@@ -51,7 +51,7 @@ Firmware now receives artwork as raw RGB565 data from the bridge instead of JPEG
 ## Byte Order
 
 **Bridge sends:** Little-endian RGB565
-**Display expects:** Big-endian RGB565 (SH8601 QSPI)
+**Panel consumes:** Big-endian RGB565 over QSPI (see [board.md](board.md))
 **Handled by:** Flush callback swaps bytes before sending to display
 
 ## Error Handling

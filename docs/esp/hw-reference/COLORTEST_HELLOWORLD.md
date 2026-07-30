@@ -1,17 +1,19 @@
-# SH8601 QSPI Display Color Configuration (LVGL 9)
+# Display Color Configuration — RGB565 byte order (LVGL 9)
 
-This document describes the correct color configuration for the Waveshare ESP32-S3 Touch AMOLED 1.8" display with SH8601 controller using LVGL 9.
+This document owns one thing: the RGB565 byte order and LVGL 9 colour-format settings that
+make colours render correctly over the QSPI panel. For the board's identity — product name,
+panel technology, panel driver IC, colour depth — see [board.md](board.md).
 
 ## The Problem
 
-Colors appear shifted/wrong on the SH8601 QSPI display. Common symptoms:
+Colors appear shifted/wrong on the QSPI panel. Common symptoms:
 - Red appears as a different color
 - Green/blue channels seem swapped or mixed
 - Test patterns show wrong colors but UI elements render
 
 ## Root Cause: Byte Order Mismatch
 
-The SH8601 QSPI display expects **big-endian RGB565** data, but:
+The panel consumes **big-endian RGB565** data over QSPI, but:
 - ESP32-S3 is **little-endian**
 - LVGL 9 renders in native (little-endian) RGB565
 
@@ -23,7 +25,8 @@ The correct approach is to swap bytes in the LVGL flush callback before sending 
 
 ### Flush Callback Implementation
 
-In `platform_display_idf.c`:
+Adapted from `platform_display_idf.c` (the stale controller attribution in the source
+comment is replaced here with transport-neutral wording):
 
 ```c
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
@@ -34,7 +37,7 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
     const int offsety1 = area->y1;
     const int offsety2 = area->y2;
 
-    // Swap bytes for big-endian QSPI display (SH8601 expects big-endian RGB565)
+    // Swap bytes for the panel transport's big-endian RGB565 byte order
     // ESP32 is little-endian, so we need to swap each 16-bit pixel
     const int width = offsetx2 - offsetx1 + 1;
     const int height = offsety2 - offsety1 + 1;
@@ -75,7 +78,9 @@ img_dsc.header.cf = LV_COLOR_FORMAT_RGB565;  // Standard format
 
 ## Panel Configuration
 
-Standard SH8601 configuration:
+The panel-device configuration handed to the driver component — note that `bits_per_pixel`,
+not the init array, is what selects the pixel format
+(see [board.md](board.md#panel-controller-versus-software-driver)):
 
 ```c
 const esp_lcd_panel_dev_config_t panel_config = {
@@ -111,7 +116,7 @@ Call it from `ui_init()` to verify colors are correct, then remove the call.
 
 | Component | Format | Notes |
 |-----------|--------|-------|
-| Display driver | Standard RGB565 | No special color format setting |
+| Panel driver | Standard RGB565 | No special color format setting |
 | Flush callback | Byte swap | Swaps each 16-bit pixel before send |
 | JPEG decoder | `JPEG_PIXEL_FORMAT_RGB565_LE` | Little-endian, flush swaps it |
 | Image descriptors | `LV_COLOR_FORMAT_RGB565` | Standard format |

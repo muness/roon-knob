@@ -17,7 +17,7 @@ Transport Recommendations (HTTP)
 
 Sidecar (Server) Knobs
 - Proxy via RoonApiImage with `width/height/scale` to bound bytes. Use `format=jpeg` (if available) and re‑encode if the core cannot.
-- Optional: provide `format=rgb565` that returns a raw RGB565 frame (**big‑endian/byte-swapped** to match SH8601 QSPI display) with `Content-Type: application/octet-stream` for zero‑decode on the device. Include `X-Width`, `X-Height` headers.
+- Optional: provide `format=rgb565` that returns a raw RGB565 frame (**big‑endian/byte-swapped** to match the QSPI panel) with `Content-Type: application/octet-stream` for zero‑decode on the device. Include `X-Width`, `X-Height` headers.
 - Return placeholder SVG/PNG only when artwork is absent.
 
 Decoder choices (ESP32‑S3)
@@ -26,7 +26,7 @@ Decoder choices (ESP32‑S3)
   - Feed from the HTTP buffer via read callbacks; write RGB565 scanlines into an LVGL image/canvas.
 - ESP‑IDF esp_jpeg (IDF 5.x) **[Currently Used]**
   - Native component with examples; decode to RGB565 buffer (PSRAM‑backed) and blit.
-  - **Important**: Use `JPEG_PIXEL_FORMAT_RGB565_BE` (big-endian) output to match the SH8601 QSPI display's byte order. See `common/ui_jpeg.c`.
+  - **Important**: Use `JPEG_PIXEL_FORMAT_RGB565_BE` (big-endian) output to match the QSPI panel's byte order. See `common/ui_jpeg.c`.
 - Others (Bitbank JPEGDEC / TJpg_Decoder)
   - Viable; prefer TJpgDec/esp_jpeg for clean LVGL/IDF integration.
 
@@ -71,5 +71,5 @@ Example Sequence
 References
 - RoonApiImage: `get_image(image_key, {scale,width,height,format}, cb)` (proxied by sidecar)
 - LVGL image decoder docs; ESP‑IDF `esp_jpeg` example
-- **Color Configuration**: See `docs/references/COLORTEST_HELLOWORLD.md` for SH8601 display byte order and LVGL 9 color format setup
+- **Color Configuration**: See [COLORTEST_HELLOWORLD.md](COLORTEST_HELLOWORLD.md) for panel byte order and LVGL 9 color format setup
 

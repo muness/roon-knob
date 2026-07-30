@@ -1,0 +1,31 @@
+# Independent paraphrase corpus for scripts/check_docs_identity.py (issue #211).
+#
+# Format: RULE_ID<TAB>sentence
+#
+# These sentences are the whole point of this file: they are authored *outside*
+# the checker, and none of them is a rule probe, a rule antiprobe or a copy of
+# any wording that ever appeared in this repository.  Each one is a way a
+# reviewer or a language model actually restated a #211 contradiction while the
+# first cut of the rule table stayed green.  If a rule is ever narrowed, these
+# fail before the repository goes quietly wrong again.
+#
+# Every sentence below is about the shipping target and is written as ordinary
+# prose -- no code fence, no backticks, no marker -- so each must be reported.
+#
+# Sentences that must NOT be reported live in paraphrases_clean.tsv.
+
+CONTROLLER_CLAIM	The SH8601 is the display driver IC fitted to this board.
+CONTROLLER_CLAIM	This board uses SH8601 silicon behind the QSPI bus.
+CONTROLLER_CLAIM	The panel controller is manufactured by Sitronix as the SH8601.
+NO_BACKLIGHT	The display has no backlight at all, so brightness is fixed.
+NO_BACKLIGHT	The screen is self-lit, so there is no dimming control.
+ENCODER_BUTTON	Click the dial to open the zone picker.
+ENCODER_BUTTON	Push the dial in to confirm the selection.
+ENCODER_BUTTON	The rotary shaft switch selects the highlighted zone.
+COLOR_DEPTH	The panel renders 16777216 distinct colours.
+COLOR_DEPTH	It is a 24-bit colour display.
+PANEL_AMOLED	The screen is an active-matrix organic LED panel.
+MODULE_CLAIM	The SoC is an ESP32S3 WROOM 1 module with 8 MB PSRAM.
+MODULE_CLAIM	The main chip is an ESP32-S3 WROOM1 N16R8.
+TOUCH_VARIANT	The touch controller is the CST816S part.
+BACKLIGHT_DUTY	The backlight starts at fifty percent brightness.

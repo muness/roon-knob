@@ -50,3 +50,8 @@
 
 - GitHub Issues is the source of truth for tasks (no Markdown TODOs)
 - Superego catches strategic mistakes — invoke before committing to an approach
+- After editing Markdown or the hardware sources it cites, run
+  `python3 scripts/check_docs_identity.py --self-check` (host-only, no ESP-IDF).
+  It guards the canonical target-identity record `docs/esp/hw-reference/board.md`.
+  It is a phrase tripwire, not a factual check — a green run is not a substitute
+  for reviewing identity claims on their merits.

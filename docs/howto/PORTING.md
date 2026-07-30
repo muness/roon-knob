@@ -52,7 +52,7 @@ If you want to build a different application for the Waveshare ESP32-S3 Knob (e.
 
 | Component | Files | Notes |
 |-----------|-------|-------|
-| Display init | `platform_display_idf.c` | SH8601 QSPI setup, LVGL driver |
+| Display init | `platform_display_idf.c` | QSPI panel setup, LVGL driver |
 | Touch input | `lcd_touch_bsp.c`, touch code in display | CST816 I2C |
 | Rotary encoder | `platform_input_idf.c` | Quadrature decoding |
 | Battery monitoring | `battery.c` | ADC, voltage curve |
@@ -154,10 +154,14 @@ To port Roon Knob to a different ESP32-S3 display board:
 // ... etc
 ```
 
-**Display controller**: If not using SH8601:
+**Display controller**: The Roon Knob target's panel driver IC and the software component it
+is driven through are two different things — read
+[board.md](../esp/hw-reference/board.md#panel-controller-versus-software-driver) before
+assuming either. For a different panel:
 1. Find or write an ESP-IDF component for your display IC
 2. Replace `esp_lcd_new_panel_sh8601()` with your driver
-3. Adjust initialization commands
+3. Supply your panel's initialization array (and check whether your component sends DCS
+   `MADCTL`/`COLMOD` itself before that array, as this one does)
 
 **Resolution**: Search for `360` and update:
 - `LCD_H_RES`, `LCD_V_RES`
@@ -223,13 +227,13 @@ Hypothetical changes for a common alternative board:
 
 | Component | Waveshare Knob | T-Display-S3 |
 |-----------|----------------|--------------|
-| Display | SH8601 360×360 QSPI | ST7789 170×320 SPI |
-| Touch | CST816 I2C | None (buttons only) |
+| Display | 360×360 QSPI (see [board.md](../esp/hw-reference/board.md)) | ST7789 170×320 SPI |
+| Touch | Capacitive, I2C `0x15` | None (buttons only) |
 | Encoder | GPIO 7/8 | None |
 | Input | Encoder + touch | Two buttons |
 
 **Changes needed:**
-1. Replace SH8601 driver with ST7789
+1. Replace the `esp_lcd_sh8601`-based panel driver with ST7789
 2. Change from QSPI to standard SPI
 3. Update resolution to 170×320
 4. Remove touch code, add button input

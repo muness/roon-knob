@@ -98,16 +98,53 @@ Bridge code is at [unified-hifi-control](https://github.com/cloud-atlas-ai/unifi
 
 ## Hardware
 
-The [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8) includes:
+The target is the [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8).
 
-- ESP32-S3 with 16MB Flash + 8MB PSRAM
-- 1.8" 360×360 IPS LCD (SH8601 via QSPI)
-- CST816 capacitive touch (I2C)
-- Rotary encoder with push button
-- Battery management (charging + voltage monitoring)
-- Vibration motor
+**Do not restate hardware facts here.** The canonical, provenance-classed identity record —
+exact part numbers, panel technology and driver IC, colour depth, memory sizes, backlight,
+touch, encoders, and the list of facts still awaiting physical verification — is
+[docs/esp/hw-reference/board.md](../esp/hw-reference/board.md). Pin mappings are in
+[HARDWARE_PINS.md](../esp/hw-reference/HARDWARE_PINS.md).
 
-See [board overview](../esp/hw-reference/board.md) for pin mappings.
+One behavioural note that matters when you build a UI: this firmware reads **no** physical
+button. Rotation comes from the encoder; every button-like action comes from the touchscreen.
+
+### Checking documentation identity claims
+
+After editing Markdown, or after editing the hardware sources the canonical record cites, run:
+
+```bash
+python3 scripts/check_docs_identity.py --self-check
+```
+
+Host-only: Python standard library, no ESP-IDF, no network, no writes. It is deliberately
+not wired into `scripts/ci_sanity.sh` — that script's next step is `idf.py build`, so it cannot run
+on a host without a toolchain, which is exactly the host this command is for. Run it directly.
+`.github/workflows/docs-identity.yml` runs the same command in CI, together with
+`scripts/test_check_docs_identity.sh`.
+
+What it does and does not do:
+
+- It is a **phrase tripwire** for the specific identity contradictions that
+  [#211](https://github.com/muness/roon-knob/issues/211) corrected. A novel wording will pass, so a
+  green run is not a substitute for reviewing identity claims on their merits.
+- It checks that the source files the canonical record's repository-observed rows cite still
+  contain the text those rows were read from. That is a freshness check on the citation, not
+  evidence the fact is true — and it does **not** check the line numbers those rows cite, so a
+  citation can go stale from line movement alone with the check still green.
+- If a firmware edit fails a source anchor, **re-derive the row and rewrite the token** — including
+  when the edit preserved the fact (writing `.freq_hz = 5000` as `5 * 1000`, reordering a Kconfig
+  stanza). Never delete an anchor to make the run green; that removes the evidence instead of
+  refreshing it. See the *Consequences* section of the
+  [target-identity decision record](../meta/decisions/2026-07-30_DECISION_TARGET_IDENTITY_PROVENANCE.md).
+- **Quote source in a fenced block, not by indenting it.** Fenced code is exempt; a four-space
+  indented block is **scanned as prose**, so an indented quotation of a superseded wording is
+  reported as a claim. That is deliberate — an indentation-only exemption would also exempt the
+  reflowed middle of a paragraph — and every violation report says so, so you do not have to
+  remember it.
+- Suppressions (`RK-IDENT-SUPPRESSED`) are informational and never fail the run. The fixture suite
+  pins the exact set as `rule|file|suppressor|count`, so adding a suppressed sentence — even under an
+  excuse the baseline already lists — is a review conversation rather than a silent narrowing.
 
 ## Task Management
 

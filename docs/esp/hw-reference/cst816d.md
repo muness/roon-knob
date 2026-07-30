@@ -1,8 +1,15 @@
-Self-Capacitive Touch Controller CST816D – App-Facing Notes
+Self-Capacitive Touch Controller CST816-family – App-Facing Notes
 
 Purpose
-- Summarize only what matters to integrate a CST816D-based touch panel with our ESP32/LVGL firmware.
+- Summarize only what matters to integrate a CST816-family touch panel with our ESP32/LVGL firmware.
 - Focus on wiring, init, event flow, and pitfalls that affect reliability.
+
+Which part is actually fitted
+- Waveshare declares the touch IC as **CST816** and links a **CST816D** datasheet; the exact
+  marking on the owned device is unverified, and this firmware reads raw registers that
+  several variants share. The canonical record is [board.md](board.md) — do not treat the
+  variant letter in this file's *filename* as a verified fact — the title above deliberately
+  says CST816-family.
 
 What It Is
 - Single‑touch, self‑capacitive touch controller with gesture detection.

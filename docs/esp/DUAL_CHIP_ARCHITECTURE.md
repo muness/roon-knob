@@ -2,14 +2,22 @@
 
 > **Note**: Bluetooth mode was removed from this project. The secondary ESP32 chip is unused. This documentation is kept as reference for the Waveshare board's hardware capabilities.
 
-The Waveshare ESP32-S3-Knob-Touch-LCD-1.8 board contains **two separate ESP32 chips** that communicate via UART. This enables capabilities not possible with either chip alone.
+The Waveshare ESP32-S3-Knob-Touch-LCD-1.8 board contains **two separate ESP32 SoCs** that communicate via UART. This enables capabilities not possible with either chip alone.
+
+Board identity facts (exact part numbers, memory sizes, what is vendor-declared versus still
+unverified) live in the canonical record: [hw-reference/board.md](hw-reference/board.md). This
+document owns the two-SoC topology, the UART link, and the protocol.
 
 ## Hardware Overview
 
-| Chip | Model | Bluetooth | Primary Role |
-|------|-------|-----------|--------------|
-| ESP32-S3 | ESP32-S3-WROOM-1 (R8) | BLE 5.0 only | Display, Touch, WiFi, BLE HID |
-| ESP32 | ESP32-WROOM | Classic BT + BLE | Audio DAC, AVRCP, A2DP |
+Roles and radio capability only. Part numbers, package, memory and flash sizes are **not**
+restated here — they are in the
+[canonical record's identity summary](hw-reference/board.md#identity-summary).
+
+| SoC | Bluetooth | Primary Role |
+|-----|-----------|--------------|
+| Primary (the one this firmware runs on) | BLE 5.0 only | Display, Touch, WiFi, BLE HID |
+| Secondary (unused by this firmware) | Classic BT + BLE | Audio DAC, AVRCP, A2DP |
 
 ## Why Two Chips?
 
@@ -65,9 +73,9 @@ To switch programming target:
 ## Peripheral Connections
 
 ### ESP32-S3 Peripherals
-- **Display**: SH8601 AMOLED via QSPI
-- **Touch**: CST816 via I2C
-- **Rotary Encoder**: Quadrature input
+- **Display**: 360×360 QSPI panel (see [board.md](hw-reference/board.md))
+- **Touch**: capacitive touch via I2C
+- **Rotary Encoder**: Quadrature input on GPIO 8 / GPIO 7 — the one this firmware reads
 - **WiFi**: 2.4GHz 802.11 b/g/n
 - **BLE**: Bluetooth 5.0 LE
 
@@ -77,7 +85,10 @@ To switch programming target:
   - `ESP32_I2S_DAC_DIN` - Data in
   - `ESP32_I2S_DAC_LRCK` - Left/Right clock
 - **Classic Bluetooth**: BR/EDR for A2DP/AVRCP
-- **Rotary Encoder**: Second encoder input (board has dual encoders)
+- **Rotary Encoder**: Waveshare declares a second encoder "acting on ESP32S3 and ESP32
+  respectively". Whether it is populated and reachable is **unverified** on the owned device,
+  and no code in this repository reads it — see
+  [board.md](hw-reference/board.md#still-requires-physical-inspection).
 
 ### Shared/Other
 - **DRV2605**: Haptic driver via I2C

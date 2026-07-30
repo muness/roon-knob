@@ -1,0 +1,62 @@
+{
+  "exit_code": 3,
+  "files_scanned": [
+    ".github/RELEASE_TEMPLATE.md",
+    "README.md",
+    "docs/esp/hw-reference/board.md"
+  ],
+  "marker_abuse": [
+    {
+      "file": "docs/howto/PORTING.md",
+      "line": 42,
+      "message": "allowance names the shipping target 'ESP32-S3-Knob-Touch-LCD-1.8'; this escape exists only for truthful facts about other boards"
+    },
+    {
+      "file": "docs/esp/DISPLAY.md",
+      "line": 9,
+      "message": "carries the retired rk-ident-allow-file marker"
+    }
+  ],
+  "missing": [
+    "required document absent: docs/esp/ROTARY_ENCODER.md"
+  ],
+  "quoting_note": "quote source in a fenced code block (``` ... ```) if it is a quotation, not a claim: a four-space indented block is scanned as prose, not exempted as code, so indented source is reported here",
+  "root": "/synthetic/root",
+  "rules": [
+    {"id": "PRODUCT_NAME", "message": "wrong product name"},
+    {"id": "PANEL_AMOLED", "message": "the panel is an IPS LCD"}
+  ],
+  "selfcheck_failures": [
+    "PANEL_AMOLED: probe does not match its own pattern"
+  ],
+  "structure_failures": [
+    "docs/esp/hw-reference/board.md: corrected value 'ST77916' no longer present",
+    "docs/esp/DISPLAY.md:12: unterminated code fence opened here with 3 '`' and never closed"
+  ],
+  "suppressions": [
+    {
+      "file": "docs/esp/hw-reference/cst816d.md",
+      "line": 8,
+      "match": "CST816D",
+      "rule": "TOUCH_VARIANT",
+      "suppressor": "datasheet"
+    },
+    {
+      "file": "docs/esp/hw-reference/board.md",
+      "line": 118,
+      "match": "24-bit colour",
+      "rule": "COLOR_DEPTH",
+      "suppressor": "RGB888"
+    }
+  ],
+  "token": "RK-IDENT-MISSING",
+  "violations": [
+    {
+      "file": "docs/esp/hw-reference/board.md",
+      "line": 27,
+      "match": "AMOLED",
+      "message": "the panel is an IPS LCD, not an AMOLED; see the canonical record",
+      "rule": "PANEL_AMOLED"
+    }
+  ]
+}

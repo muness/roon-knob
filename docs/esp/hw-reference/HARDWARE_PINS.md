@@ -1,8 +1,10 @@
 # Hardware Pin Configuration
 
-GPIO pin assignments for the Waveshare ESP32-S3 Touch AMOLED 1.8" (360×360).
+GPIO pin assignments as this firmware configures them. For the board's identity — product
+name, panel technology, panel driver IC, colour depth, memory sizes — see the canonical
+record: [board.md](board.md). This file owns only the pin assignments.
 
-## Display Pins (SH8601 AMOLED via QSPI)
+## Display Pins (QSPI)
 
 | Function | GPIO | Notes |
 |----------|------|-------|
@@ -13,9 +15,10 @@ GPIO pin assignments for the Waveshare ESP32-S3 Touch AMOLED 1.8" (360×360).
 | LCD_DATA2 | 17 | QSPI Data 2 |
 | LCD_DATA3 | 18 | QSPI Data 3 |
 | LCD_RST | 21 | Reset line |
-| BK_LIGHT | 47 | Backlight (always on for AMOLED) |
+| BK_LIGHT | 47 | Backlight, LEDC PWM, 8-bit duty; initial value `CONFIG_RK_BACKLIGHT_NORMAL` (Kconfig default 100 of 255, ≈ 39 %) |
 
-**Display:** 360×360 round AMOLED with SH8601 controller using 4-wire QSPI interface.
+**Display:** 360×360 round panel over a 4-wire QSPI interface. Panel technology and driver IC
+are recorded in [board.md](board.md).
 
 ## Input Pins
 
@@ -32,9 +35,11 @@ GPIO pin assignments for the Waveshare ESP32-S3 Touch AMOLED 1.8" (360×360).
 - Internal pull-ups enabled
 - Generates UI_INPUT_VOL_UP/VOL_DOWN events
 
-**Note:** This device has NO physical buttons. The encoder shaft is NOT pressable. All button-like interactions use the touchscreen.
+**Note:** This firmware reads no physical button on any GPIO — all button-like interactions go
+through the touchscreen. Whether the encoder shaft has a switch fitted is unconfirmed on the
+owned device; see [board.md](board.md#still-requires-physical-inspection).
 
-### Touch Controller (CST816D)
+### Touch Controller
 
 | Function | GPIO | I2C Details |
 |----------|------|-------------|
@@ -48,9 +53,10 @@ GPIO pin assignments for the Waveshare ESP32-S3 Touch AMOLED 1.8" (360×360).
 | Resolution | 12-bit (0-4095 raw → 0-359 display) |
 
 **Implementation:**
-- CST816D capacitive touch controller
+- Raw 7-byte register read at address `0x15` (see `idf_app/components/lcd_touch_bsp/`)
 - Integrated with LVGL as `LV_INDEV_TYPE_POINTER`
 - Touch events handled automatically by LVGL input system
+- Exact touch controller part: see [board.md](board.md)
 
 ## Battery Monitoring (ADC)
 
@@ -84,6 +90,6 @@ Be cautious with these ESP32-S3 pins:
 
 ## Implementation Files
 
-- `idf_app/main/platform_display_idf.c` - Display pin definitions and SH8601 init
+- `idf_app/main/platform_display_idf.c` - Display pin definitions and panel init sequence
 - `idf_app/main/platform_input_idf.c` - Encoder GPIO and polling
 - `idf_app/main/platform_battery_idf.c` - Battery ADC configuration

@@ -40,8 +40,8 @@ Developer reference for building and extending the firmware.
 
 ESP32 hardware-specific documentation.
 
-- [DISPLAY.md](esp/DISPLAY.md) - SH8601 AMOLED setup, LVGL integration
-- [TOUCH_INPUT.md](esp/TOUCH_INPUT.md) - CST816 touch controller
+- [DISPLAY.md](esp/DISPLAY.md) - QSPI panel setup, LVGL integration
+- [TOUCH_INPUT.md](esp/TOUCH_INPUT.md) - Touch controller integration
 - [SWIPE_GESTURES.md](esp/SWIPE_GESTURES.md) - Gesture detection
 - [ROTARY_ENCODER.md](esp/ROTARY_ENCODER.md) - Quadrature encoder handling
 - [BATTERY_MONITORING.md](esp/BATTERY_MONITORING.md) - ADC-based battery level
@@ -51,10 +51,10 @@ ESP32 hardware-specific documentation.
 
 Pin mappings, datasheets, component details.
 
-- [board.md](esp/hw-reference/board.md) - Board overview and specs
+- **[board.md](esp/hw-reference/board.md) - Canonical target identity record (provenance-classed). Start here for any product, panel, controller, memory, or encoder fact.**
 - [HARDWARE_PINS.md](esp/hw-reference/HARDWARE_PINS.md) - GPIO assignments
-- [COLORTEST_HELLOWORLD.md](esp/hw-reference/COLORTEST_HELLOWORLD.md) - Display color format
-- [cst816d.md](esp/hw-reference/cst816d.md) - Touch controller details
+- [COLORTEST_HELLOWORLD.md](esp/hw-reference/COLORTEST_HELLOWORLD.md) - RGB565 byte order and colour format
+- [cst816d.md](esp/hw-reference/cst816d.md) - Touch controller integration notes
 - [encoder.md](esp/hw-reference/encoder.md) - Rotary encoder interface
 - [battery.md](esp/hw-reference/battery.md) - Battery monitoring circuit
 - [drv2605.md](esp/hw-reference/drv2605.md) - Haptic motor driver
@@ -76,6 +76,7 @@ Date-prefixed architectural decision records.
 - [2025-12-20_DESIGN_KNOB_CONFIG.md](meta/decisions/2025-12-20_DESIGN_KNOB_CONFIG.md) - Per-knob config from bridge
 - [2025-12-20_DECISION_ROTATION.md](meta/decisions/2025-12-20_DECISION_ROTATION.md) - Display rotation (0/180 only)
 - [2025-12-20_DECISION_JSON_PARSING.md](meta/decisions/2025-12-20_DECISION_JSON_PARSING.md) - cJSON for API parsing
+- [2026-07-30_DECISION_TARGET_IDENTITY_PROVENANCE.md](meta/decisions/2026-07-30_DECISION_TARGET_IDENTITY_PROVENANCE.md) - One provenance-classed identity record, enforced by a host check
 
 ### Analysis
 
