@@ -68,6 +68,12 @@ static bool s_lvgl_ready = false;
 // Register semantics and sequence transcribed from m5stack/M5GFX's verified
 // Core2/Tough boot path (see docs/esp/hw-reference/board-tough.md).
 
+// Logs the actual register value read back on every step (not just
+// pass/fail) -- this sequence is transcribed from a different codebase's
+// C++ (m5stack/M5GFX) and has not been run against real AXP192 silicon by
+// this firmware. If first hardware bring-up produces a black screen or dead
+// touch, these lines are what tells a physical-unit debugging session
+// whether the PMIC is even responding, not just whether esp_err_t was OK.
 static esp_err_t axp192_write_masked(uint8_t reg, uint8_t data, uint8_t mask) {
     uint8_t old_value = 0;
     esp_err_t err = i2c_master_transmit_receive(s_axp192_dev, &reg, 1,
@@ -77,18 +83,23 @@ static esp_err_t axp192_write_masked(uint8_t reg, uint8_t data, uint8_t mask) {
                  esp_err_to_name(err));
         return err;
     }
-    uint8_t buf[2] = {reg, (uint8_t)((old_value & mask) | data)};
+    uint8_t new_value = (uint8_t)((old_value & mask) | data);
+    uint8_t buf[2] = {reg, new_value};
     err = i2c_master_transmit(s_axp192_dev, buf, sizeof(buf), 100);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "AXP192 write reg 0x%02x failed: %s", reg,
                  esp_err_to_name(err));
+        return err;
     }
-    return err;
+    ESP_LOGI(TAG, "AXP192 reg 0x%02x: 0x%02x -> 0x%02x", reg, old_value,
+             new_value);
+    return ESP_OK;
 }
 
 static bool axp192_power_sequence(void) {
     // Step 1: enable LCD power (LDO2 @ 3300mV) and configure the two GPIOs
     // used as reset lines for the LCD (GPIO4) and touch controller (GPIO1).
+    ESP_LOGI(TAG, "AXP192 step 1: LCD power (LDO2) + GPIO function select");
     if (axp192_write_masked(0x95, 0x84, 0x72) != ESP_OK) return false;   // GPIO4 function select
     if (axp192_write_masked(0x28, 0xF0, 0xFF) != ESP_OK) return false;  // LDO2 = 3300mV (LCD power)
     if (axp192_write_masked(0x12, 0x04, 0xFF) != ESP_OK) return false;  // LDO2 enable
@@ -97,12 +108,14 @@ static bool axp192_power_sequence(void) {
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Step 2: assert reset on both the LCD and touch controller.
+    ESP_LOGI(TAG, "AXP192 step 2: assert LCD + touch reset");
     if (axp192_write_masked(0x96, 0x00, 0xFD) != ESP_OK) return false;  // GPIO4 LOW (LCD RST)
     if (axp192_write_masked(0x94, 0x00, 0xFD) != ESP_OK) return false;  // GPIO1 LOW (touch RST)
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
     // Step 3: release reset on both.
+    ESP_LOGI(TAG, "AXP192 step 3: release LCD + touch reset");
     if (axp192_write_masked(0x96, 0x02, 0xFF) != ESP_OK) return false;  // GPIO4 HIGH
     if (axp192_write_masked(0x94, 0x02, 0xFF) != ESP_OK) return false;  // GPIO1 HIGH
 
@@ -110,6 +123,12 @@ static bool axp192_power_sequence(void) {
 
     // Step 4: enable backlight power (LDO3). No brightness control this
     // Alpha -- a single fixed "on" code in LDO3's voltage nibble.
+    // NOTE for hardware bring-up: register 0x28 encodes BOTH LDO2 (high
+    // nibble, step 1) and LDO3 (low nibble, here) voltage. If the display
+    // stays dark, check this register's readback in the log above/below
+    // before assuming the panel driver or SPI wiring is at fault -- a wrong
+    // nibble here affects backlight only, not panel power.
+    ESP_LOGI(TAG, "AXP192 step 4: backlight power (LDO3)");
     if (axp192_write_masked(0x12, 0x08, 0xFF) != ESP_OK) return false;  // LDO3 enable
     if (axp192_write_masked(0x28, 0x0F, 0xF0) != ESP_OK) return false;  // LDO3 voltage (low nibble)
 
@@ -130,14 +149,22 @@ static bool chsc6540_init(void) {
 }
 
 // Reads the first touch point, if any. See docs/esp/hw-reference/board-tough.md
-// for the register-layout source.
+// for the register-layout source. Raw bytes are logged at DEBUG (not INFO,
+// since this runs on every LVGL indev poll) so a first-hardware-bring-up
+// session can distinguish "I2C is answering but count byte is always 0"
+// (wiring/init issue) from "no I2C response at all" (address/bus issue)
+// without needing to add logging under time pressure on real hardware.
 static bool chsc6540_read_point(uint16_t *x, uint16_t *y) {
     static const uint8_t count_reg = 0x02;
     uint8_t buf[5] = {0};
-    if (i2c_master_transmit_receive(s_touch_dev, &count_reg, 1, buf,
-                                    sizeof(buf), 50) != ESP_OK) {
+    esp_err_t err = i2c_master_transmit_receive(s_touch_dev, &count_reg, 1,
+                                                buf, sizeof(buf), 50);
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "CHSC6540 read failed: %s", esp_err_to_name(err));
         return false;
     }
+    ESP_LOGD(TAG, "CHSC6540 raw: count=%u [%02x %02x %02x %02x]", buf[0],
+             buf[1], buf[2], buf[3], buf[4]);
     if (buf[0] == 0) {
         return false;
     }
