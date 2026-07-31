@@ -28,13 +28,42 @@ void platform_task_init(void) {
 }
 
 int platform_task_start(platform_task_fn_t fn, void *arg) {
-    if (!fn) {
+    return platform_task_start_configured("task", 8192, fn, arg);
+}
+
+int platform_task_start_configured(const char *name, uint32_t stack_size,
+                                   platform_task_fn_t fn, void *arg) {
+    if (!name || name[0] == '\0' || stack_size == 0 || !fn) {
         return -1;
     }
     os_thread_t thread;
-    int err = os_thread_create(&thread, fn, arg);
+    int err = os_thread_create_configured(&thread, fn, arg, name, stack_size);
     (void)thread;
     return err;
+}
+
+int platform_task_start_external_stack(const char *name, uint32_t stack_size,
+                                       platform_task_fn_t fn, void *arg) {
+    if (!name || name[0] == '\0' || stack_size == 0 || !fn) {
+        return -1;
+    }
+    os_thread_t thread;
+    int err = os_thread_create_external_stack(&thread, fn, arg, name,
+                                              stack_size);
+    (void)thread;
+    return err;
+}
+
+size_t platform_task_current_stack_free_bytes(void) {
+    return os_thread_current_stack_free_bytes();
+}
+
+size_t platform_task_internal_heap_free_bytes(void) {
+    return os_internal_heap_free_bytes();
+}
+
+size_t platform_task_internal_heap_largest_free_block_bytes(void) {
+    return os_internal_heap_largest_free_block_bytes();
 }
 
 static bool ui_queue_push(platform_task_fn_t fn, void *arg) {
@@ -54,11 +83,11 @@ static bool ui_queue_push(platform_task_fn_t fn, void *arg) {
     return true;
 }
 
-void platform_task_post_to_ui(platform_task_fn_t fn, void *arg) {
+bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg) {
     if (!s_initialized) {
         platform_task_init();
     }
-    ui_queue_push(fn, arg);
+    return ui_queue_push(fn, arg);
 }
 
 void platform_task_run_pending(void) {

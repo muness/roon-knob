@@ -7,4 +7,4 @@ If you want to use this project for commercial purposes, contact Muness Castle t
 ## Contact
 
 - GitHub: [@muness](https://github.com/muness)
-- Project: [roon-knob](https://github.com/muness/roon-knob)
+- Project: [HiPhi Dial](https://github.com/muness/roon-knob)

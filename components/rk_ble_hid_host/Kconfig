@@ -1,0 +1,12 @@
+menu "Shared BLE HID host"
+
+config RK_BLE_HID_HOST
+    bool "Enable BLE HID media-remote host"
+    depends on IDF_TARGET_ESP32S3 && BT_ENABLED && BT_NIMBLE_ENABLED && BT_NIMBLE_NVS_PERSIST && BT_NIMBLE_SM_SC && BT_NIMBLE_HID_SERVICE
+    default n
+    help
+        Enable the NimBLE HOGP host used to receive media keys from a paired
+        BLE remote. This is a host capability, not the legacy HID peripheral
+        profile. Targets choose their local default at runtime.
+
+endmenu

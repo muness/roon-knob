@@ -1,15 +1,20 @@
-# Roon Knob
+# HiPhi Dial
 
 Custom firmware and a companion service that turn a [Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) into a dedicated hi-fi controller.
 
 See what's playing, adjust volume, skip tracks, and switch zones—all from a physical knob on your desk.
+
+> **Firmware maturity:** HiPhi Dial is **Beta** and has direct hardware-test
+> coverage. HiPhi Frame is **Alpha**: builds are available for early testing,
+> but its current shared-stack firmware has not completed equivalent hardware
+> regression coverage.
 
 **Now supports multiple music sources:**
 - **Roon** - Full zone control with album artwork
 - **Lyrion Music Server (LMS)** - Squeezebox/LMS player control
 - **OpenHome/UPnP** - Control OpenHome-compatible renderers
 
-[![Roon Knob demo](docs/images/roon-knob-photo.jpg)](https://photos.app.goo.gl/s5LpWqBTaXRihmjh7)
+[![HiPhi Dial demo](docs/images/roon-knob-photo.jpg)](https://photos.app.goo.gl/s5LpWqBTaXRihmjh7)
 *Click to watch video demo*
 
 ## What You Need
@@ -24,11 +29,13 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ### 1. Flash the Firmware (one-time)
 
-Use the [Web Flasher](https://roon-knob.muness.com/flash.html) in Chrome or Edge—no tools to install. Just plug in the knob via USB-C and click "Flash ESP32-S3".
+Use the [Web Flasher](https://roon-knob.muness.com/flash.html) in Chrome or Edge—no tools to install. Just plug in the knob via USB-C and click "Flash HiPhi Dial".
 
 > **Prefer command line?** See [Firmware Flashing](docs/usage/FIRMWARE_FLASHING.md) for esptool instructions.
 
-After flashing, future updates happen automatically over WiFi.
+Stable firmware updates are available over Wi-Fi. Beta and Alpha prereleases
+remain opt-in through the [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html)
+and are never pushed through the stable OTA feed.
 
 ### 2. Run the Control Service
 
@@ -60,15 +67,15 @@ docker compose up -d
 
 **Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?**
 
-Find "Roon Knob" in the extension list and install it from there (Roon-only mode).
+Find "Unified Hi-Fi Control" in the extension list and install it from there (Roon-only mode).
 
 ### 3. Authorize in Roon
 
-Go to **Roon → Settings → Extensions** and enable **"Roon Knob Bridge"**.
+Go to **Roon → Settings → Extensions** and enable **"Unified Hi-Fi Control"**.
 
 ### 4. Set Up the Knob
 
-Power on the knob. It creates a WiFi network called **"roon-knob-setup"**. Connect to it, enter your WiFi credentials, and you're done.
+Power on the dial. It creates a WiFi network called **"hiphi-dial-setup"**. Connect to it, enter your WiFi credentials, and you're done.
 
 The knob finds the extension automatically via mDNS.
 
@@ -96,7 +103,7 @@ The knob finds the extension automatically via mDNS.
 
 | Display shows | Meaning |
 |---------------|---------|
-| "WiFi: Setup Mode" | Connect to "roon-knob-setup" network to configure WiFi |
+| "WiFi: Setup Mode" | Connect to "hiphi-dial-setup" network to configure WiFi |
 | "Extension: Searching..." | Looking for the extension—make sure it's running |
 | "Extension: Connected" | Ready to use |
 

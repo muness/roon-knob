@@ -87,9 +87,9 @@ To switch programming target:
 ## Use Cases
 
 ### 1. Current Implementation (ESP32-S3 only)
-- Roon control via WiFi
-- BLE HID media control
-- ESP32 likely running minimal USB-UART bridge firmware
+- Playback control via Wi-Fi
+- Optional BLE HID host for pairing a separate media remote
+- No Classic Bluetooth, A2DP, or AVRCP firmware in the shipping controller
 
 ### 2. AVRCP Metadata (requires ESP32 firmware)
 The ESP32 can:

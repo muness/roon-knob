@@ -10,5 +10,5 @@ void platform_log_backend(const char *level, const char *fmt, va_list args) {
     } else if (level && level[0] == 'E') {
         lvl = ESP_LOG_ERROR;
     }
-    esp_log_writev(lvl, "roon-knob", fmt, args);
+    esp_log_writev(lvl, "hiphi-dial", fmt, args);
 }

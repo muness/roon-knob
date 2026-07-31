@@ -1,6 +1,6 @@
 # Firmware Flashing
 
-This guide covers how to flash firmware to your Roon Knob hardware. There are two methods:
+This guide covers how to flash firmware to your HiPhi Dial hardware. There are two methods:
 1. **Web Flasher** (recommended) - No tools to install, works in Chrome/Edge
 2. **esptool.py** - Command-line tool for advanced users
 
@@ -18,7 +18,7 @@ The easiest way to flash firmware. Works directly in your browser using the Web 
 1. Connect the ESP32-S3 board via USB-C
 2. Turn on the device (power slider towards USB-C port)
 3. Go to the **[Web Flasher](https://roon-knob.muness.com/flash.html)**
-4. Click **"Flash ESP32-S3"**
+4. Click **"Update HiPhi Dial"**
 5. Select the serial port when prompted
 6. Wait ~30 seconds for flashing to complete
 
@@ -36,17 +36,27 @@ pip install esptool
 
 ### Download Firmware
 
-Download the merged binary from [GitHub Releases](https://github.com/muness/roon-knob/releases/latest):
-- `roon_knob_merged.bin` - ESP32-S3 firmware
+Download the four component files from [GitHub Releases](https://github.com/muness/roon-knob/releases/latest) for a settings-preserving update:
+- `hiphi_dial_bootloader.bin`
+- `hiphi_dial_partition-table.bin`
+- `hiphi_dial_ota_data_initial.bin`
+- `hiphi_dial.bin`
 
-### Flash ESP32-S3
+`roon_knob_merged.bin` is a byte-identical compatibility alias for `hiphi_dial_merged.bin`.
+
+### Update ESP32-S3 Without Erasing Settings
 
 ```bash
 # Put device in download mode first (BOOT + RST)
-esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash 0x0 roon_knob_merged.bin
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
+  0x0 hiphi_dial_bootloader.bin \
+  0x8000 hiphi_dial_partition-table.bin \
+  0xd000 hiphi_dial_ota_data_initial.bin \
+  0x10000 hiphi_dial.bin
 ```
 
-On macOS, the port is typically `/dev/cu.usbserial-*` or `/dev/cu.usbmodem*`.
+These ranges deliberately omit the NVS partition at `0x9000–0xcfff`, preserving
+same-device Wi-Fi and controller settings. On macOS, the port is typically `/dev/cu.usbserial-*` or `/dev/cu.usbmodem*`.
 On Windows, use `COM3` or similar.
 
 ### Erase Flash (Factory Reset)
@@ -55,6 +65,17 @@ To completely erase the flash before flashing (removes WiFi credentials, etc.):
 
 ```bash
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
+```
+
+### Destructive Clean Install
+
+`hiphi_dial_merged.bin` (and its `roon_knob_merged.bin` compatibility alias)
+is a destructive factory image: writing it at offset `0x0` overwrites NVS and
+removes Wi-Fi and controller settings. Use it only when you explicitly want a
+clean install.
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash 0x0 hiphi_dial_merged.bin
 ```
 
 ### Flashing Individual Components
@@ -66,7 +87,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
   0x0 bootloader.bin \
   0x8000 partition-table.bin \
   0xd000 ota_data_initial.bin \
-  0x10000 roon_knob.bin
+  0x10000 hiphi_dial.bin
 ```
 
 ---
@@ -87,7 +108,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
 
 ### "Wrong chip detected"
 - **Flip the USB-C cable 180°** - The USB-C port connects to different chips depending on orientation.
-- Ensure the firmware matches your chip. Roon Knob uses ESP32-S3.
+- Ensure the firmware matches your chip. HiPhi Dial uses ESP32-S3.
 
 ### "Access denied" or "Permission error"
 - On Linux, add your user to the `dialout` group: `sudo usermod -a -G dialout $USER`
@@ -98,7 +119,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
 ## After Flashing
 
 After flashing a fresh device:
-1. The device will create a WiFi access point named **"roon-knob-setup"**
+1. The device will create a WiFi access point named **"hiphi-dial-setup"**
 2. Connect to this network with your phone or computer
 3. A captive portal will open for WiFi configuration
 4. Enter your WiFi credentials
@@ -125,7 +146,7 @@ ESP Web Tools uses JSON manifests to describe firmware:
 
 ```json
 {
-  "name": "Roon Knob",
+  "name": "HiPhi Dial",
   "version": "1.0.0",
   "new_install_prompt_erase": true,
   "builds": [{

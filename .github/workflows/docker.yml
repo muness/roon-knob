@@ -5,16 +5,263 @@ on:
     branches: [master, main]
     tags: ['v*']
   pull_request:
-    branches: [master, main]
+    branches: ['**']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  test-shared:
+    name: test-shared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Test shared configuration contracts
+        run: |
+          python3 scripts/check_dial_identity.py
+          python3 scripts/check_controller_dependencies.py
+          python3 scripts/check_controller_dependencies.py --self-test
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+            -DCONTROLLER_CONFIG_TEST \
+            -Icommon -Iinclude \
+            tests/test_controller_config.c \
+            common/controller_config.c \
+            -o /tmp/test-controller-config
+          /tmp/test-controller-config
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+            -DCONTROLLER_CONFIG_TEST -DTEST_COMPILED_DEFAULTS \
+            '-DCONFIG_RK_DEFAULT_SSID="compiled-ssid"' \
+            '-DCONFIG_RK_DEFAULT_PASS="compiled-pass"' \
+            -Icommon -Iinclude \
+            tests/test_controller_config.c \
+            common/controller_config.c \
+            -o /tmp/test-controller-config-defaults
+          /tmp/test-controller-config-defaults
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -DCONTROLLER_CONFIG_TEST \
+            -Icommon -Iinclude \
+            tests/test_controller_config.c \
+            common/controller_config.c \
+            -o /tmp/test-controller-config-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-config-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+            -DTEST_DIAL_ADAPTER \
+            -Icommon -Iinclude -Iidf_app/main \
+            tests/test_platform_provisioning_adapter.c \
+            idf_app/main/platform_provisioning_dial.c \
+            idf_app/main/http_server_lifecycle.c \
+            -o /tmp/test-provisioning-adapter-dial
+          /tmp/test-provisioning-adapter-dial
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -DTEST_FRAME_ADAPTER \
+            -Icommon -Iframe_app/main \
+            tests/test_platform_provisioning_adapter.c \
+            frame_app/main/platform_provisioning_frame.c \
+            -o /tmp/test-provisioning-adapter-frame
+          /tmp/test-provisioning-adapter-frame
+          sh tests/run_wifi_provisioning_lifecycle.sh
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+            -Icommon -Iinclude \
+            tests/test_controller_input.c \
+            common/controller_input.c \
+            common/platform/platform_task.c \
+            -o /tmp/test-controller-input
+          /tmp/test-controller-input
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon \
+            tests/test_controller_input_mailbox.c \
+            common/controller_input_mailbox.c \
+            -o /tmp/test-controller-input-mailbox
+          /tmp/test-controller-input-mailbox
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -DTEST_DIAL_PROFILE \
+            -Icommon \
+            tests/test_controller_input_profile.c \
+            idf_app/main/controller_input_profile_dial.c \
+            -o /tmp/test-controller-input-profile-dial
+          /tmp/test-controller-input-profile-dial
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -DTEST_FRAME_PROFILE \
+            -Icommon \
+            tests/test_controller_input_profile.c \
+            frame_app/main/controller_input_profile_frame.c \
+            -o /tmp/test-controller-input-profile-frame
+          /tmp/test-controller-input-profile-frame
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -DTEST_DIAL_PROFILE \
+            -Icommon -Iinclude \
+            tests/test_controller_input_profile_resolution.c \
+            common/controller_input.c \
+            idf_app/main/controller_input_profile_dial.c \
+            -o /tmp/test-controller-input-profile-resolution-dial
+          /tmp/test-controller-input-profile-resolution-dial
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -DTEST_FRAME_PROFILE \
+            -Icommon -Iinclude \
+            tests/test_controller_input_profile_resolution.c \
+            common/controller_input.c \
+            frame_app/main/controller_input_profile_frame.c \
+            -o /tmp/test-controller-input-profile-resolution-frame
+          /tmp/test-controller-input-profile-resolution-frame
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -DCONTROLLER_SYSTEM_FRAME_TEST \
+            -Icommon -Iinclude -Iframe_app/main \
+            tests/test_controller_system_frame.c \
+            common/controller_input.c \
+            common/controller_input_mailbox.c \
+            frame_app/main/controller_input_profile_frame.c \
+            frame_app/main/controller_system_frame.c \
+            -o /tmp/test-controller-system-frame
+          /tmp/test-controller-system-frame
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icommon -Iinclude \
+            tests/test_controller_presentation_dial.c \
+            idf_app/main/controller_presentation_dial.c \
+            -o /tmp/test-controller-presentation-dial
+          /tmp/test-controller-presentation-dial
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icommon -Iinclude -Iframe_app/main \
+            tests/test_controller_presentation_frame.c \
+            frame_app/main/controller_presentation_frame.c \
+            -o /tmp/test-controller-presentation-frame
+          /tmp/test-controller-presentation-frame
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon \
+            tests/test_controller_values.c \
+            common/controller_view.c \
+            common/controller_view_compat.c \
+            -o /tmp/test-controller-values
+          /tmp/test-controller-values
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon -Iinclude \
+            tests/test_controller_action_router.c \
+            common/controller_action_router.c \
+            common/controller_input.c \
+            -o /tmp/test-controller-action-router
+          /tmp/test-controller-action-router
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Icommon -Iinclude \
+            tests/test_controller_input.c \
+            common/controller_input.c \
+            common/platform/platform_task.c \
+            -o /tmp/test-controller-input-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-input-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Icommon \
+            tests/test_controller_input_mailbox.c \
+            common/controller_input_mailbox.c \
+            -o /tmp/test-controller-input-mailbox-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-input-mailbox-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -DTEST_DIAL_PROFILE \
+            -Icommon \
+            tests/test_controller_input_profile.c \
+            idf_app/main/controller_input_profile_dial.c \
+            -o /tmp/test-controller-input-profile-dial-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-input-profile-dial-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -DTEST_FRAME_PROFILE \
+            -Icommon \
+            tests/test_controller_input_profile.c \
+            frame_app/main/controller_input_profile_frame.c \
+            -o /tmp/test-controller-input-profile-frame-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-input-profile-frame-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -DTEST_DIAL_PROFILE \
+            -Icommon -Iinclude \
+            tests/test_controller_input_profile_resolution.c \
+            common/controller_input.c \
+            idf_app/main/controller_input_profile_dial.c \
+            -o /tmp/test-controller-input-profile-resolution-dial-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-input-profile-resolution-dial-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -DTEST_FRAME_PROFILE \
+            -Icommon -Iinclude \
+            tests/test_controller_input_profile_resolution.c \
+            common/controller_input.c \
+            frame_app/main/controller_input_profile_frame.c \
+            -o /tmp/test-controller-input-profile-resolution-frame-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-input-profile-resolution-frame-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -DCONTROLLER_SYSTEM_FRAME_TEST \
+            -Icommon -Iinclude -Iframe_app/main \
+            tests/test_controller_system_frame.c \
+            common/controller_input.c \
+            common/controller_input_mailbox.c \
+            frame_app/main/controller_input_profile_frame.c \
+            frame_app/main/controller_system_frame.c \
+            -o /tmp/test-controller-system-frame-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-system-frame-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Icommon -Iinclude \
+            tests/test_controller_action_router.c \
+            common/controller_action_router.c \
+            common/controller_input.c \
+            -o /tmp/test-controller-action-router-sanitized
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            /tmp/test-controller-action-router-sanitized
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon \
+            tests/test_bridge_command_plan.c \
+            common/bridge_command_plan.c \
+            -o /tmp/test-bridge-command-plan
+          /tmp/test-bridge-command-plan
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icommon tests/test_rk_cfg.c -o /tmp/test-rk-cfg
+          /tmp/test-rk-cfg
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icomponents/rk_ble_hid_host/include \
+            tests/test_rk_ble_hid_usage.c \
+            components/rk_ble_hid_host/rk_ble_hid_report.c \
+            -o /tmp/test-rk-ble-hid-usage
+          /tmp/test-rk-ble-hid-usage
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icomponents/rk_ble_hid_host/include \
+            -Icomponents/rk_ble_hid_host \
+            tests/test_rk_ble_hid_policy.c \
+            components/rk_ble_hid_host/rk_ble_hid_policy.c \
+            -o /tmp/test-rk-ble-hid-policy
+          /tmp/test-rk-ble-hid-policy
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icomponents/rk_ble_hid_host/include \
+            tests/test_rk_ble_hid_stub.c \
+            components/rk_ble_hid_host/rk_ble_hid_host_stub.c \
+            -o /tmp/test-rk-ble-hid-stub
+          /tmp/test-rk-ble-hid-stub
+
   build-idf:
     name: build-idf
     runs-on: ubuntu-latest
@@ -31,7 +278,7 @@ jobs:
           else
             VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building firmware version: $VERSION"
 
       - name: Inject version into CMakeLists.txt
@@ -52,6 +299,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-esp-idf-v5.5.5-ccache-
 
+      - name: Restore Dial managed components
+        uses: actions/cache@v5
+        with:
+          path: idf_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
+
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -60,39 +313,202 @@ jobs:
           path: idf_app
           extra_docker_args: >-
             -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
           command: >-
             set -e;
+            ccache --zero-stats;
             idf.py build;
-            grep -Fx 'CONFIG_COMPILER_OPTIMIZATION_PERF=y' sdkconfig;
-            ! grep -Fx 'CONFIG_COMPILER_OPTIMIZATION_DEBUG=y' sdkconfig;
-            grep -Fx 'CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096' sdkconfig
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
+            grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
+            grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" sdkconfig;
+            grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig;
+            grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72" sdkconfig;
+            grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig;
+            grep -F "/components/esp_hid/" build/compile_commands.json;
+            grep -F "/generated/nimble_hidh.c" build/compile_commands.json;
+            grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
+            ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
+            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map;
+            ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map;
+            cp build/hiphi_dial.bin build/roon_knob.bin;
+            cmp build/hiphi_dial.bin build/roon_knob.bin;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_dial_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size 16MB
+            0x0 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_dial.bin;
+            ccache --show-stats
 
-      - name: Create merged flash image for web flashing
+      - name: Verify merged Dial flash image
         run: |
-          pip install esptool
-          esptool --chip esp32s3 merge-bin \
-            -o roon_knob_merged.bin \
-            --flash-mode dio --flash-freq 80m --flash-size 16MB \
-            0x0 idf_app/build/bootloader/bootloader.bin \
-            0x8000 idf_app/build/partition_table/partition-table.bin \
-            0xd000 idf_app/build/ota_data_initial.bin \
-            0x10000 idf_app/build/roon_knob.bin
-          ls -la *.bin
+          # Compatibility aliases remain byte-identical while bridge/release
+          # consumers migrate to the HiPhi Dial artifact names.
+          cp hiphi_dial_merged.bin roon_knob_merged.bin
+          cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin
+          cmp hiphi_dial_merged.bin roon_knob_merged.bin
+          ls -la idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin \
+            hiphi_dial_merged.bin roon_knob_merged.bin
 
       - name: Upload ESP32-S3 artifact
         uses: actions/upload-artifact@v6
         with:
           name: esp32s3-firmware
           path: |
+            idf_app/build/hiphi_dial.bin
             idf_app/build/roon_knob.bin
+            idf_app/build/bootloader/bootloader.bin
+            idf_app/build/partition_table/partition-table.bin
+            idf_app/build/ota_data_initial.bin
+            hiphi_dial_merged.bin
             roon_knob_merged.bin
           retention-days: 30
+
+  build-frame:
+    name: build-frame
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: frame-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building HiPhi Frame firmware version: $VERSION"
+
+      - name: Inject version into Frame CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.frame-version.outputs.version }}")/' frame_app/CMakeLists.txt
+          grep PROJECT_VER frame_app/CMakeLists.txt
+
+      - name: Restore Frame compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache-frame
+          key: ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-
+
+      - name: Restore Frame managed components
+        uses: actions/cache@v5
+        with:
+          path: frame_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
+
+      - name: Build HiPhi Frame with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: frame_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-frame
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
+            grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
+            grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig;
+            grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig;
+            grep -F "/components/esp_hid/" build/compile_commands.json;
+            grep -F "/generated/nimble_hidh.c" build/compile_commands.json;
+            grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
+            ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
+            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_frame.map;
+            ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_frame_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size 16MB
+            0x0 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_frame.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin;
+            ccache --show-stats
+
+      - name: Verify merged HiPhi Frame image
+        run: |
+          # ESP-IDF boots QIO configurations from a DIO image header, then the
+          # second-stage bootloader enables quad mode.
+          test "$(od -An -tu1 -j2 -N1 hiphi_frame_merged.bin | tr -d ' ')" = "2"
+          ls -la frame_app/build/hiphi_frame.bin hiphi_frame_merged.bin
+
+      - name: Upload HiPhi Frame artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-frame-firmware
+          path: |
+            frame_app/build/hiphi_frame.bin
+            frame_app/build/bootloader/bootloader.bin
+            frame_app/build/partition_table/partition-table.bin
+            frame_app/build/ota_data_initial.bin
+            hiphi_frame_merged.bin
+          retention-days: 30
+
+  build-ble-off:
+    name: build-ble-off
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build ESP32-S3 capability-disabled fixture
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: tests/fixtures/rk_ble_hid_off
+          command: >-
+            set -e;
+            idf.py build;
+            ! grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            ! grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
+            ! grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
+            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host_stub/librk_ble_hid_host_stub[.]a[(]rk_ble_hid_host_stub[.]c[.]obj[)][[:space:]]*$" build/rk_ble_hid_off.map;
+            ! grep -F "rk_ble_hid_host.c.obj" build/rk_ble_hid_off.map;
+            ! grep -E "nimble_hidh.c.obj|esp_hidh.c.obj" build/compile_commands.json
 
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-idf]
+    needs: [test-shared, build-idf, build-frame, build-ble-off]
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -104,9 +520,15 @@ jobs:
           name: esp32s3-firmware
           path: esp32s3-artifacts
 
+      - name: Download HiPhi Frame firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-frame-firmware
+          path: frame-artifacts
+
       - name: Get version from tag
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Get release notes from draft
         id: notes
@@ -147,8 +569,27 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
+          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin release-assets/
           cp esp32s3-artifacts/idf_app/build/roon_knob.bin release-assets/
+          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_dial_bootloader.bin
+          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_dial_partition-table.bin
+          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+            release-assets/hiphi_dial_ota_data_initial.bin
+          cp esp32s3-artifacts/hiphi_dial_merged.bin release-assets/
           cp esp32s3-artifacts/roon_knob_merged.bin release-assets/
+          cmp release-assets/hiphi_dial.bin release-assets/roon_knob.bin
+          cmp release-assets/hiphi_dial_merged.bin \
+            release-assets/roon_knob_merged.bin
+          cp frame-artifacts/frame_app/build/hiphi_frame.bin release-assets/
+          cp frame-artifacts/frame_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_frame_bootloader.bin
+          cp frame-artifacts/frame_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_frame_partition-table.bin
+          cp frame-artifacts/frame_app/build/ota_data_initial.bin \
+            release-assets/hiphi_frame_ota_data_initial.bin
+          cp frame-artifacts/hiphi_frame_merged.bin release-assets/
           ls -la release-assets/
 
       - name: Build release body
@@ -166,8 +607,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE_EXISTS=$(gh release view ${{ github.ref_name }} --json assets --jq '.assets | length' 2>/dev/null || echo "0")
-          echo "existing_assets=$RELEASE_EXISTS" >> $GITHUB_OUTPUT
+          RELEASE_EXISTS=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets | length' 2>/dev/null || echo "0")
+          echo "existing_assets=$RELEASE_EXISTS" >> "$GITHUB_OUTPUT"
           if [ "$RELEASE_EXISTS" -gt "0" ]; then
             echo "Release already exists with $RELEASE_EXISTS assets, will only upload missing files"
           fi
@@ -179,8 +620,18 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
           files: |
+            release-assets/hiphi_dial.bin
+            release-assets/hiphi_dial_bootloader.bin
+            release-assets/hiphi_dial_partition-table.bin
+            release-assets/hiphi_dial_ota_data_initial.bin
+            release-assets/hiphi_dial_merged.bin
             release-assets/roon_knob.bin
             release-assets/roon_knob_merged.bin
+            release-assets/hiphi_frame.bin
+            release-assets/hiphi_frame_bootloader.bin
+            release-assets/hiphi_frame_partition-table.bin
+            release-assets/hiphi_frame_ota_data_initial.bin
+            release-assets/hiphi_frame_merged.bin
           body_path: final_body.md
 
       - name: Upload assets to existing release
@@ -204,9 +655,12 @@ jobs:
   # are now built from https://github.com/cloud-atlas-ai/unified-hifi-control
 
   deploy-pr-preview:
-    name: Deploy PR Preview
+    name: Deploy Dial PR Preview
     runs-on: ubuntu-latest
-    needs: [build-idf]
+    # Hardware iteration currently happens on the Dial. Keep Frame and the
+    # BLE-disabled fixture as independent compatibility checks, but do not make
+    # testers wait for either before the Dial flasher is published.
+    needs: [test-shared, build-idf]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
@@ -222,40 +676,98 @@ jobs:
           name: esp32s3-firmware
           path: esp32s3-artifacts
 
+      - name: Read preview commit metadata
+        id: preview-commit
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: commit } = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.payload.pull_request.head.sha,
+            });
+            core.setOutput('subject', commit.commit.message.split(/\r?\n/, 1)[0]);
+
       - name: Prepare PR preview content
         env:
           PR_NUM: ${{ github.event.pull_request.number }}
-          BUILD_SHA: ${{ github.sha }}
+          PREVIEW_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PREVIEW_MERGE_SHA: ${{ github.sha }}
+          PREVIEW_COMMIT_SUBJECT: ${{ steps.preview-commit.outputs.subject }}
+          PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           mkdir -p pr-preview
-          MANIFEST_FILE="manifest-s3-${BUILD_SHA}.json"
-          FLASH_PAGE="flash-${BUILD_SHA}.html"
+          PREVIEW_CREATED_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          PREVIEW_HEAD_SHA_SHORT="${PREVIEW_HEAD_SHA:0:12}"
+          PREVIEW_MERGE_SHA_SHORT="${PREVIEW_MERGE_SHA:0:12}"
+          # The subject is rendered with textContent in the page, so a commit
+          # message can never become page markup.
+          PREVIEW_SUBJECT_B64="$(printf '%s' "${PREVIEW_COMMIT_SUBJECT}" | base64 --wrap=0)"
+          DIAL_MANIFEST_FILE="manifest-s3-${PREVIEW_ID}.json"
+          DIAL_APPLICATION_FILE="hiphi_dial-${PREVIEW_ID}.bin"
+          DIAL_BOOTLOADER_FILE="hiphi_dial_bootloader-${PREVIEW_ID}.bin"
+          DIAL_PARTITION_FILE="hiphi_dial_partition-table-${PREVIEW_ID}.bin"
+          DIAL_OTA_DATA_FILE="hiphi_dial_ota_data_initial-${PREVIEW_ID}.bin"
+          DIAL_LEGACY_APPLICATION_FILE="roon_knob-${PREVIEW_ID}.bin"
+          DIAL_FIRMWARE_FILE="hiphi_dial_merged-${PREVIEW_ID}.bin"
+          DIAL_LEGACY_FIRMWARE_FILE="roon_knob_merged-${PREVIEW_ID}.bin"
+          DIAL_FLASH_PAGE="flash-dial-${PREVIEW_ID}.html"
 
-          # Copy firmware
-          cp esp32s3-artifacts/roon_knob_merged.bin pr-preview/
-
+          # Use immutable names so an older preview can never flash a newer build.
+          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin \
+            "pr-preview/${DIAL_APPLICATION_FILE}"
+          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+            "pr-preview/${DIAL_BOOTLOADER_FILE}"
+          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+            "pr-preview/${DIAL_PARTITION_FILE}"
+          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+            "pr-preview/${DIAL_OTA_DATA_FILE}"
+          cp esp32s3-artifacts/idf_app/build/roon_knob.bin \
+            "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
+          cmp "pr-preview/${DIAL_APPLICATION_FILE}" \
+            "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
+          cp esp32s3-artifacts/hiphi_dial_merged.bin \
+            "pr-preview/${DIAL_FIRMWARE_FILE}"
+          cp esp32s3-artifacts/roon_knob_merged.bin \
+            "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+          cmp "pr-preview/${DIAL_FIRMWARE_FILE}" \
+            "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
           # Immutable preview paths avoid stale GitHub Pages CDN entries.
-          cat > "pr-preview/${MANIFEST_FILE}" << EOF
+          cat > "pr-preview/${DIAL_MANIFEST_FILE}" << EOF
           {
-            "name": "Roon Knob (PR #${PR_NUM} Preview)",
+            "name": "HiPhi Dial Beta (PR #${PR_NUM} Preview)",
             "version": "pr-${PR_NUM}",
             "new_install_prompt_erase": true,
             "builds": [{
               "chipFamily": "ESP32-S3",
-              "parts": [{
-                "path": "roon_knob_merged.bin?sha=${BUILD_SHA}",
-                "offset": 0
-              }]
+              "parts": [
+                { "path": "${DIAL_BOOTLOADER_FILE}", "offset": 0 },
+                { "path": "${DIAL_PARTITION_FILE}", "offset": 32768 },
+                { "path": "${DIAL_OTA_DATA_FILE}", "offset": 53248 },
+                { "path": "${DIAL_APPLICATION_FILE}", "offset": 65536 }
+              ]
             }]
           }
           EOF
 
-          # Create a page that points at the manifest for this exact build.
+          # Create the Dial-only page for this exact build.
           sed \
             -e "s/{{PR_NUMBER}}/${PR_NUM}/g" \
-            -e "s|manifest-s3.json|${MANIFEST_FILE}|g" \
-            web/flash-pr.html > "pr-preview/${FLASH_PAGE}"
+            -e "s/{{TARGET_FILTER}}/dial/g" \
+            -e "s/{{PREVIEW_CREATED_AT}}/${PREVIEW_CREATED_AT}/g" \
+            -e "s/{{PREVIEW_HEAD_SHA}}/${PREVIEW_HEAD_SHA}/g" \
+            -e "s/{{PREVIEW_HEAD_SHA_SHORT}}/${PREVIEW_HEAD_SHA_SHORT}/g" \
+            -e "s/{{PREVIEW_MERGE_SHA_SHORT}}/${PREVIEW_MERGE_SHA_SHORT}/g" \
+            -e "s|{{PREVIEW_RUN_URL}}|${PREVIEW_RUN_URL}|g" \
+            -e "s/{{PREVIEW_RUN_ID}}/${GITHUB_RUN_ID}/g" \
+            -e "s/{{PREVIEW_RUN_ATTEMPT}}/${GITHUB_RUN_ATTEMPT}/g" \
+            -e "s|{{PREVIEW_SUBJECT_B64}}|${PREVIEW_SUBJECT_B64}|g" \
+            -e "s|manifest-s3.json|${DIAL_MANIFEST_FILE}|g" \
+            web/flash-pr.html > "pr-preview/${DIAL_FLASH_PAGE}"
 
+          python3 scripts/check_flash_manifest.py \
+            "pr-preview/${DIAL_MANIFEST_FILE}" --assets-dir pr-preview
           echo "PR preview contents:"
           ls -la pr-preview/
 
@@ -267,14 +779,125 @@ jobs:
           destination_dir: pr/${{ github.event.pull_request.number }}
           keep_files: true
 
+      - name: Verify deployed preview
+        id: verify-preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PREVIEW_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          PREVIEW_BASE="https://roon-knob.muness.com/pr/${PR_NUM}"
+          DIAL_FLASH_PAGE="flash-dial-${PREVIEW_ID}.html"
+          DIAL_MANIFEST_FILE="manifest-s3-${PREVIEW_ID}.json"
+          DIAL_APPLICATION_FILE="hiphi_dial-${PREVIEW_ID}.bin"
+          DIAL_BOOTLOADER_FILE="hiphi_dial_bootloader-${PREVIEW_ID}.bin"
+          DIAL_PARTITION_FILE="hiphi_dial_partition-table-${PREVIEW_ID}.bin"
+          DIAL_OTA_DATA_FILE="hiphi_dial_ota_data_initial-${PREVIEW_ID}.bin"
+          DIAL_LEGACY_APPLICATION_FILE="roon_knob-${PREVIEW_ID}.bin"
+          DIAL_FIRMWARE_FILE="hiphi_dial_merged-${PREVIEW_ID}.bin"
+          DIAL_LEGACY_FIRMWARE_FILE="roon_knob_merged-${PREVIEW_ID}.bin"
+
+          mkdir -p deployed-preview
+
+          # Pushing gh-pages starts a separate Pages build. Do not advertise the
+          # preview until the custom domain serves this exact deployment.
+          # The gh-pages push starts a separate Pages workflow. Under runner
+          # load it can remain queued for several minutes, so the verifier must
+          # outlive that queue while still refusing to advertise a 404.
+          for attempt in $(seq 1 180); do
+            if curl --fail --silent --location \
+              "${PREVIEW_BASE}/${DIAL_FLASH_PAGE}" \
+              --output "deployed-preview/${DIAL_FLASH_PAGE}"; then
+              break
+            fi
+            if [ "$((attempt % 12))" -eq 0 ]; then
+              echo "Waiting for GitHub Pages (${attempt}/180 attempts)..."
+              gh api "repos/${GITHUB_REPOSITORY}/pages/builds/latest" \
+                --jq '{status, commit, created_at, updated_at, error}' || true
+            fi
+            if [ "${attempt}" -eq 180 ]; then
+              echo "Preview did not become available after 15 minutes"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          for asset in \
+            "${DIAL_FLASH_PAGE}" \
+            "${DIAL_MANIFEST_FILE}" \
+            "${DIAL_APPLICATION_FILE}" \
+            "${DIAL_BOOTLOADER_FILE}" \
+            "${DIAL_PARTITION_FILE}" \
+            "${DIAL_OTA_DATA_FILE}" \
+            "${DIAL_LEGACY_APPLICATION_FILE}" \
+            "${DIAL_FIRMWARE_FILE}" \
+            "${DIAL_LEGACY_FIRMWARE_FILE}"; do
+            curl --fail --silent --show-error --location \
+              "${PREVIEW_BASE}/${asset}" \
+              --output "deployed-preview/${asset}"
+          done
+
+          for asset in \
+            "${DIAL_FLASH_PAGE}" \
+            "${DIAL_MANIFEST_FILE}" \
+            "${DIAL_APPLICATION_FILE}" \
+            "${DIAL_BOOTLOADER_FILE}" \
+            "${DIAL_PARTITION_FILE}" \
+            "${DIAL_OTA_DATA_FILE}" \
+            "${DIAL_LEGACY_APPLICATION_FILE}" \
+            "${DIAL_FIRMWARE_FILE}" \
+            "${DIAL_LEGACY_FIRMWARE_FILE}"; do
+            cmp "pr-preview/${asset}" "deployed-preview/${asset}"
+          done
+
+          echo "Verified exact deployed preview assets:"
+          grep -F 'data-target-filter="dial"' \
+            "deployed-preview/${DIAL_FLASH_PAGE}"
+          grep -F "\"path\": \"${DIAL_APPLICATION_FILE}\"" \
+            "deployed-preview/${DIAL_MANIFEST_FILE}"
+          python3 scripts/check_flash_manifest.py \
+            "deployed-preview/${DIAL_MANIFEST_FILE}" --assets-dir deployed-preview
+          sha256sum \
+            "deployed-preview/${DIAL_APPLICATION_FILE}" \
+            "deployed-preview/${DIAL_LEGACY_APPLICATION_FILE}" \
+            "deployed-preview/${DIAL_FIRMWARE_FILE}" \
+            "deployed-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+          cmp "deployed-preview/${DIAL_APPLICATION_FILE}" \
+            "deployed-preview/${DIAL_LEGACY_APPLICATION_FILE}"
+          cmp "deployed-preview/${DIAL_FIRMWARE_FILE}" \
+            "deployed-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+
+          {
+            echo "dial_manifest_url=${PREVIEW_BASE}/${DIAL_MANIFEST_FILE}"
+            echo "dial_firmware_url=${PREVIEW_BASE}/${DIAL_FIRMWARE_FILE}"
+            echo "dial_firmware_sha256=$(sha256sum "deployed-preview/${DIAL_FIRMWARE_FILE}" | awk '{print $1}')"
+            echo "dial_firmware_bytes=$(stat --format=%s "deployed-preview/${DIAL_FIRMWARE_FILE}")"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Post preview URL to PR
         uses: actions/github-script@v8
         env:
-          BUILD_SHA: ${{ github.sha }}
+          PREVIEW_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          DIAL_MANIFEST_URL: ${{ steps.verify-preview.outputs.dial_manifest_url }}
+          DIAL_FIRMWARE_URL: ${{ steps.verify-preview.outputs.dial_firmware_url }}
+          DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.dial_firmware_sha256 }}
+          DIAL_FIRMWARE_BYTES: ${{ steps.verify-preview.outputs.dial_firmware_bytes }}
+          PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PREVIEW_COMMIT_SUBJECT: ${{ steps.preview-commit.outputs.subject }}
+          PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PREVIEW_RUN_ID: ${{ github.run_id }}
+          PREVIEW_RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
-            const previewUrl = `https://roon-knob.muness.com/pr/${prNumber}/flash-${process.env.BUILD_SHA}.html`;
+            const previewBase = `https://roon-knob.muness.com/pr/${prNumber}`;
+            const dialUrl = `${previewBase}/flash-dial-${process.env.PREVIEW_ID}.html`;
+            const dialManifestUrl = process.env.DIAL_MANIFEST_URL;
+            const dialFirmwareUrl = process.env.DIAL_FIRMWARE_URL;
+            const headSha = process.env.PREVIEW_HEAD_SHA;
+            const headShaShort = headSha.slice(0, 12);
+            const commitUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${headSha}`;
+            const builtAt = new Date().toISOString();
 
             // Check if we already posted a comment
             const comments = await github.rest.issues.listComments({
@@ -284,13 +907,28 @@ jobs:
             });
 
             const botComment = comments.data.find(c =>
-              c.user.type === 'Bot' && c.body.includes('Firmware Preview')
+              c.user.type === 'Bot' &&
+              (c.body.includes('<!-- firmware-preview -->') ||
+               c.body.includes('Firmware Preview'))
             );
 
-            const body = `### Firmware Preview
+            const body = `<!-- firmware-preview -->
+            ### Current firmware preview
 
-            Flash this PR's firmware directly in your browser:
-            **${previewUrl}**
+            **Built:** ${builtAt}<br>
+            **Run:** [#${process.env.PREVIEW_RUN_ID}](${process.env.PREVIEW_RUN_URL}) (attempt ${process.env.PREVIEW_RUN_ATTEMPT})<br>
+            **PR head:** [\`${headShaShort}\`](${commitUrl})<br>
+            **Commit:** ${process.env.PREVIEW_COMMIT_SUBJECT}<br>
+            **Maturity:** HiPhi Dial **Beta**; HiPhi Frame **Alpha**
+
+            - [Flash HiPhi Dial](${dialUrl})
+
+            ### Exact-artifact provenance
+
+            - Dial: [flash page](${dialUrl}) · [manifest](${dialManifestUrl}) · [merged binary](${dialFirmwareUrl})
+              — \`${process.env.DIAL_FIRMWARE_SHA256}\` (${process.env.DIAL_FIRMWARE_BYTES} bytes)
+
+            The deployed binary is byte-for-byte identical to its GitHub Actions artifact. The linked HTML page, manifest, and binaries returned HTTP 200 during deployment verification. Frame and BLE-disabled compatibility checks run independently and do not gate this Dial preview. Hardware testing remains the active gate; no merge is authorized.
 
             _Updated: ${new Date().toISOString()}_`;
 
@@ -328,18 +966,75 @@ jobs:
           name: esp32s3-firmware
           path: esp32s3-artifacts
 
+      - name: Download HiPhi Frame firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-frame-firmware
+          path: frame-artifacts
+
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
-          cp web/index.html gh-pages-build/
-          cp web/flash.html gh-pages-build/
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            CHANNEL_LABEL=" Beta"
+            CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Beta and Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+          else
+            CHANNEL_LABEL=""
+            CHANNEL_NOTICE=""
+          fi
+          sed "s|{{RELEASE_CHANNEL_LABEL}}|${CHANNEL_LABEL}|g" web/index.html \
+            > gh-pages-build/index.html
+          sed -e 's/{{TARGET_FILTER}}/all/g' \
+            -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
+            > gh-pages-build/flash.html
+          sed -e 's/{{TARGET_FILTER}}/dial/g' \
+            -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
+            > gh-pages-build/flash-dial.html
+          sed -e 's/{{TARGET_FILTER}}/frame/g' \
+            -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
+            > gh-pages-build/flash-frame.html
           cp web/manifest-s3.json gh-pages-build/
+          cp web/manifest-frame.json gh-pages-build/
+          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
+          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_dial_bootloader.bin
+          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_dial_partition-table.bin
+          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+            gh-pages-build/hiphi_dial_ota_data_initial.bin
+          cp esp32s3-artifacts/idf_app/build/roon_knob.bin gh-pages-build/
+          cmp gh-pages-build/hiphi_dial.bin gh-pages-build/roon_knob.bin
+          cp esp32s3-artifacts/hiphi_dial_merged.bin gh-pages-build/
           cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/
+          cmp gh-pages-build/hiphi_dial_merged.bin \
+            gh-pages-build/roon_knob_merged.bin
+          cp frame-artifacts/hiphi_frame_merged.bin gh-pages-build/
+          cp frame-artifacts/frame_app/build/hiphi_frame.bin gh-pages-build/
+          cp frame-artifacts/frame_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_frame_bootloader.bin
+          cp frame-artifacts/frame_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_frame_partition-table.bin
+          cp frame-artifacts/frame_app/build/ota_data_initial.bin \
+            gh-pages-build/hiphi_frame_ota_data_initial.bin
+          python3 scripts/check_flash_manifest.py \
+            gh-pages-build/manifest-s3.json --assets-dir gh-pages-build
+          python3 scripts/check_flash_manifest.py \
+            gh-pages-build/manifest-frame.json --assets-dir gh-pages-build
           echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
 
-      - name: Deploy to gh-pages
+      - name: Deploy stable firmware to gh-pages root
+        if: ${{ !contains(github.ref_name, '-') }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./gh-pages-build
+          keep_files: true
+
+      - name: Deploy prerelease firmware to beta channel
+        if: ${{ contains(github.ref_name, '-') }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./gh-pages-build
+          destination_dir: beta

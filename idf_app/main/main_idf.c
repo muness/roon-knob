@@ -1,5 +1,6 @@
 #include "app.h"
 #include "battery.h"
+#include "ble_hid_host_dial.h"
 #include "config_server.h"
 #include "display_sleep.h"
 #include "font_manager.h"
@@ -7,10 +8,10 @@
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
 #include "platform/platform_mdns.h"
-#include "platform/platform_storage.h"
 #include "platform/platform_time.h"
 #include "platform_display_idf.h"
 #include "bridge_client.h"
+#include "controller_config.h"
 #include "ui.h"
 #include "ui_network.h"
 #include "wifi_manager.h"
@@ -18,26 +19,102 @@
 #include "lvgl.h"
 
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <stdio.h>
 #include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <stdatomic.h>
 
 static const char *TAG = "main";
 
-// UI task stack size (needs headroom for LVGL rendering + gzip decompression)
-#define UI_LOOP_STACK_SIZE 32768
+// Hardware telemetry with the full network/configuration path reached 13.1 KiB.
+// 16 KiB fits after the Dial's LVGL DMA buffers while retaining measured margin.
+#define UI_LOOP_STACK_SIZE (16 * 1024)
+#define UI_LOOP_CORE 1
+#define LVGL_PSRAM_POOL_SIZE (72 * 1024)
 
 // UI task handle for display sleep management
 static TaskHandle_t g_ui_task_handle = NULL;
 
 // Deferred operations flags (set in event handler, processed in UI task)
 static volatile bool s_ota_check_pending = false;
-static volatile bool s_config_server_start_pending = false;
-static volatile bool s_config_server_stop_pending = false;
+/* These cross the default event-loop/UI-task boundary.  AP teardown wins over
+ * a stale STA start request. */
+static atomic_bool s_config_server_start_pending = ATOMIC_VAR_INIT(false);
+static atomic_bool s_config_server_stop_pending = ATOMIC_VAR_INIT(false);
 static volatile bool s_mdns_init_pending = false;
+static volatile bool s_ble_init_pending = false;
+static bool s_ble_initialized = false;
+static void *s_lvgl_psram_pool_memory = NULL;
+static lv_mem_pool_t s_lvgl_psram_pool = NULL;
+
+static void log_memory(const char *stage) {
+    ESP_LOGI(TAG,
+             "%s: internal free=%u largest=%u DMA free=%u largest=%u PSRAM free=%u largest=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+}
+
+static bool add_lvgl_psram_pool(void) {
+    s_lvgl_psram_pool_memory =
+        heap_caps_aligned_alloc(16, LVGL_PSRAM_POOL_SIZE,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_lvgl_psram_pool_memory) {
+        ESP_LOGE(TAG, "Could not allocate %u-byte LVGL PSRAM pool",
+                 (unsigned)LVGL_PSRAM_POOL_SIZE);
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Allocated LVGL PSRAM pool backing at %p (%u bytes)",
+             s_lvgl_psram_pool_memory, (unsigned)LVGL_PSRAM_POOL_SIZE);
+
+    s_lvgl_psram_pool =
+        lv_mem_add_pool(s_lvgl_psram_pool_memory, LVGL_PSRAM_POOL_SIZE);
+    if (!s_lvgl_psram_pool) {
+        ESP_LOGE(TAG, "Could not register LVGL PSRAM pool at %p (%u bytes)",
+                 s_lvgl_psram_pool_memory, (unsigned)LVGL_PSRAM_POOL_SIZE);
+        heap_caps_free(s_lvgl_psram_pool_memory);
+        s_lvgl_psram_pool_memory = NULL;
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Added %u-byte LVGL PSRAM expansion pool",
+             (unsigned)LVGL_PSRAM_POOL_SIZE);
+    return true;
+}
+
+static void log_lvgl_memory(const char *stage) {
+    lv_mem_monitor_t monitor = {0};
+    lv_mem_monitor(&monitor);
+    ESP_LOGI(TAG,
+             "%s: LVGL total=%u free=%u largest=%u used=%u%% fragmented=%u%%",
+             stage,
+             (unsigned)monitor.total_size,
+             (unsigned)monitor.free_size,
+             (unsigned)monitor.free_biggest_size,
+             (unsigned)monitor.used_pct,
+             (unsigned)monitor.frag_pct);
+}
+
+static void show_config_durability_diagnostic(void) {
+    controller_config_snapshot_t config = {0};
+    if (!controller_config_snapshot(&config)) {
+        return;
+    }
+    if (config.durability == CONTROLLER_CONFIG_DURABILITY_DEGRADED_COMMIT) {
+        ui_set_network_status("Settings saved but could not be verified");
+    } else if (config.durability == CONTROLLER_CONFIG_DURABILITY_VOLATILE_RECOVERY) {
+        ui_set_network_status("Settings storage unavailable; changes may not survive");
+    }
+}
 
 // WiFi retry message alternation
 static esp_timer_handle_t s_wifi_msg_timer = NULL;
@@ -107,7 +184,9 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
         // Defer heavy operations to UI task (sys_evt has limited stack)
         s_mdns_init_pending = true;  // mDNS needs network up first
         s_ota_check_pending = true;
-        s_config_server_start_pending = true;
+        atomic_store_explicit(&s_config_server_start_pending, true,
+                              memory_order_release);
+        s_ble_init_pending = true;
         break;
 
     // All failure events alternate between error reason and retry count
@@ -125,13 +204,16 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     }
 
     case RK_NET_EVT_AP_STARTED:
-        ESP_LOGI(TAG, "WiFi: AP mode started (SSID: roon-knob-setup)");
+        ESP_LOGI(TAG, "WiFi: AP mode started (SSID: hiphi-dial-setup)");
         stop_wifi_msg_alternation();
         // Show setup instructions in main display area (line2 is top, line1 is bottom)
-        ui_update("roon-knob-setup", "Connect to WiFi:", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
+        ui_update("hiphi-dial-setup", "Connect to WiFi:", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         ui_set_zone_name("WiFi Setup");
         bridge_client_set_network_ready(false);
-        s_config_server_stop_pending = true;  // Stop config server in AP mode
+        atomic_store_explicit(&s_config_server_start_pending, false,
+                              memory_order_release);
+        atomic_store_explicit(&s_config_server_stop_pending, true,
+                              memory_order_release);  // Stop config server in AP mode
         break;
 
     case RK_NET_EVT_AP_STOPPED:
@@ -202,7 +284,8 @@ static void check_ota_status(void) {
 
 static void ui_loop_task(void *arg) {
     (void)arg;
-    ESP_LOGI(TAG, "UI loop task started");
+    ESP_LOGI(TAG, "UI loop task started on core %d", xPortGetCoreID());
+    log_memory("UI loop start");
 
     uint32_t ota_check_counter = 0;
 
@@ -222,18 +305,41 @@ static void ui_loop_task(void *arg) {
             check_ota_status();
         }
 
-        // Check stack usage periodically (every 60 seconds = 6000 iterations at 10ms)
+        // Keep early boot telemetry frequent enough to attribute BLE allocations,
+        // then reduce it to once per minute for normal operation.
         static uint32_t stack_check_counter = 0;
-        if (++stack_check_counter >= 6000) {
+        static uint8_t early_telemetry_samples = 0;
+        const uint32_t stack_check_interval =
+            early_telemetry_samples < 6 ? 500 : 6000;
+        if (++stack_check_counter >= stack_check_interval) {
             stack_check_counter = 0;
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             uint32_t free_bytes = hwm * sizeof(StackType_t);
             uint32_t used_bytes = UI_LOOP_STACK_SIZE - free_bytes;
             ESP_LOGI(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
                      (unsigned int)used_bytes, UI_LOOP_STACK_SIZE, (unsigned int)free_bytes);
+            log_lvgl_memory("UI loop watermark");
+            log_memory("UI loop watermark");
+            if (early_telemetry_samples < 6) {
+                early_telemetry_samples++;
+            }
         }
 
-        // Process deferred operations (from WiFi event callback)
+        // Port 80 needs an 8 KiB internal HTTP-server stack. Reserve it before
+        // mDNS and BLE consume/fragment the remaining internal heap.
+        if (atomic_exchange_explicit(&s_config_server_stop_pending, false,
+                                     memory_order_acq_rel)) {
+            config_server_stop();
+        }
+        if (atomic_exchange_explicit(&s_config_server_start_pending, false,
+                                     memory_order_acq_rel) &&
+            !wifi_mgr_is_ap_mode()) {
+            log_memory("before config server start");
+            config_server_start();
+            log_memory("after config server start");
+        }
+
+        // Process remaining deferred operations from the WiFi event callback.
         if (s_mdns_init_pending) {
             s_mdns_init_pending = false;
             ESP_LOGI(TAG, "Initializing mDNS (network is up)...");
@@ -244,13 +350,15 @@ static void ui_loop_task(void *arg) {
             ESP_LOGI(TAG, "Checking for firmware updates...");
             ota_check_for_update(false);  // Auto-check: skip for dev versions
         }
-        if (s_config_server_start_pending) {
-            s_config_server_start_pending = false;
-            config_server_start();
-        }
-        if (s_config_server_stop_pending) {
-            s_config_server_stop_pending = false;
-            config_server_stop();
+        if (s_ble_init_pending) {
+            s_ble_init_pending = false;
+            if (!s_ble_initialized) {
+                ESP_LOGI(TAG, "Initializing BLE media-remote host...");
+                log_memory("before BLE host init");
+                s_ble_initialized = ble_hid_host_dial_start();
+                log_memory(s_ble_initialized ? "after BLE host init" :
+                                                "BLE host init rejected");
+            }
         }
 
         // Yield to lower priority tasks including IDLE
@@ -259,7 +367,7 @@ static void ui_loop_task(void *arg) {
 }
 
 void app_main(void) {
-    ESP_LOGI(TAG, "Roon Knob starting...");
+    ESP_LOGI(TAG, "HiPhi Dial starting...");
 
     // Initialize NVS for configuration storage
     esp_err_t err = nvs_flash_init();
@@ -292,6 +400,9 @@ void app_main(void) {
     // Initialize LVGL library
     ESP_LOGI(TAG, "Initializing LVGL...");
     lv_init();
+    if (!add_lvgl_psram_pool()) {
+        return;
+    }
 
     // Register LVGL display driver and start LVGL task
     ESP_LOGI(TAG, "Registering LVGL display driver...");
@@ -299,6 +410,7 @@ void app_main(void) {
         ESP_LOGE(TAG, "Display driver registration failed!");
         return;
     }
+    log_memory("after LVGL display allocation");
 
     // Initialize font manager (pre-rendered bitmap fonts for Unicode support)
     ESP_LOGI(TAG, "Initializing font manager...");
@@ -309,13 +421,31 @@ void app_main(void) {
     // Now safe to initialize UI (depends on LVGL display being registered)
     ESP_LOGI(TAG, "Initializing UI...");
     ui_init();
+    log_lvgl_memory("after UI initialization");
+    log_memory("after UI initialization");
+
+    // Install the controller action handler before input can be processed.
+    app_controller_init();
 
     // Initialize input (rotary encoder)
     platform_input_init();
 
     // Create UI loop task BEFORE starting WiFi (WiFi events need LVGL task running)
     ESP_LOGI(TAG, "Creating UI loop task");
-    xTaskCreate(ui_loop_task, "ui_loop", UI_LOOP_STACK_SIZE, NULL, 2, &g_ui_task_handle);  // 32KB stack (LVGL + gzip decompression)
+    log_memory("before UI loop task");
+    if (xTaskCreatePinnedToCore(ui_loop_task, "ui_loop", UI_LOOP_STACK_SIZE,
+                                NULL, 2, &g_ui_task_handle,
+                                UI_LOOP_CORE) != pdPASS) {
+        ESP_LOGE(TAG,
+                 "UI loop task creation failed: internal heap free=%u largest=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        return;
+    }
+    ESP_LOGI(TAG, "UI loop task created: internal heap free=%u largest=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    log_memory("after UI loop task");
 
     // Initialize display sleep management now that UI task is created
     ESP_LOGI(TAG, "Initializing display sleep management");
@@ -324,6 +454,8 @@ void app_main(void) {
     // Start application logic
     ESP_LOGI(TAG, "Starting app...");
     app_entry();
+    log_memory("after bridge worker start");
+    show_config_durability_diagnostic();
 
     // Start WiFi AFTER UI task is running (WiFi event callbacks use lv_async_call)
     // Always start WiFi - we always boot into Roon mode now

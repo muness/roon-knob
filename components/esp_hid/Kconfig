@@ -1,0 +1,11 @@
+menu "ESP HID"
+    config ESPHID_TASK_SIZE_BT
+        int "Task stack size for ESP HID BR/EDR"
+        range 2048 10240
+        default 2048
+
+    config ESPHID_TASK_SIZE_BLE
+        int "Task stack size for ESP HID BLE"
+        range 2048 10240
+        default 4096
+endmenu

@@ -14,16 +14,16 @@ Happy path test script for WiFi setup and Roon control functionality.
 ### Steps
 
 1. **Power on device with no saved WiFi credentials**
-   - Device should boot and show "Setup: roon-knob-setup" message
+   - Device should boot and show "Setup: hiphi-dial-setup" message
    - Display shows setup instructions
 
-2. **Connect phone to "roon-knob-setup" WiFi network**
+2. **Connect phone to "hiphi-dial-setup" WiFi network**
    - Network should appear within 30 seconds of boot
    - No password required (open network)
 
 3. **Captive portal should auto-open**
    - If not, navigate to `http://192.168.4.1/`
-   - Should see "Roon Knob - WiFi Setup" form
+   - Should see "HiPhi Dial - WiFi Setup" form
 
 4. **Enter WiFi credentials**
    - SSID: Your home WiFi network name
@@ -41,7 +41,7 @@ Happy path test script for WiFi setup and Roon control functionality.
 - [ ] Form accepts SSID, password, and optional bridge URL
 - [ ] Success message displays after submission
 - [ ] Device reboots automatically
-- [ ] "roon-knob-setup" network disappears
+- [ ] "hiphi-dial-setup" network disappears
 
 ---
 

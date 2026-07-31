@@ -1,6 +1,6 @@
 # Battery Monitoring
 
-This document covers battery voltage monitoring and percentage calculation for the Roon Knob.
+This document covers battery voltage monitoring and percentage calculation for HiPhi Dial.
 
 ## Overview
 

@@ -1,4 +1,4 @@
-// Roon Knob UI - Clean design based on smart-knob approach
+// HiPhi Dial UI - Clean design based on smart-knob approach
 // Uses LVGL default theme + minimal manual styling
 
 #include <stdbool.h>
@@ -10,6 +10,7 @@
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "platform/platform_http.h"
+#include "controller_input.h"
 #include "lvgl.h"
 #include "ui.h"
 #include "bridge_client.h"
@@ -119,7 +120,6 @@ static bool s_message_dirty = false;
 static bool s_zone_name_dirty = false;
 static char s_network_status[128] = "";   // Persistent network status (doesn't auto-clear)
 static bool s_network_status_dirty = false;
-static ui_input_cb_t s_input_cb;
 static char s_last_image_key[128] = "";  // Track last loaded artwork
 static float s_last_predicted_volume = -9999.0f;  // Track user's predicted volume for emphasis suppression
 #ifdef ESP_PLATFORM
@@ -516,7 +516,7 @@ static void build_layout(void) {
     lv_obj_add_style(next_label, &style_button_label, 0);
     lv_obj_center(next_label);
 
-    // Status bar at bottom - for transient messages like "Bridge: Connected"
+    // Status bar at bottom - for transient messages like "Hi-Fi Control: Connected"
     s_status_bar = lv_label_create(s_ui_container);
     lv_label_set_text(s_status_bar, "");
     lv_obj_set_width(s_status_bar, SCREEN_SIZE - 60);
@@ -546,48 +546,50 @@ static void zone_label_event_cb(lv_event_t *e) {
         s_zone_long_pressed = false;
         return;
     }
-    if (s_input_cb) {
-        s_input_cb(UI_INPUT_MENU);
-    }
+    controller_action_t action = controller_action_simple(
+        CONTROLLER_ACTION_OPEN_ZONE_PICKER);
+    (void)controller_input_dispatch_action(&action);
 }
 
 static void zone_label_long_press_cb(lv_event_t *e) {
     (void)e;
     s_zone_long_pressed = true;  // Mark that we handled a long press
-    ui_show_settings();
+    controller_action_t action = controller_action_simple(
+        CONTROLLER_ACTION_SHOW_SETTINGS);
+    (void)controller_input_dispatch_action(&action);
 }
 
 static void btn_prev_event_cb(lv_event_t *e) {
     (void)e;
-    ESP_LOGI(UI_TAG, "btn_prev_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
-    if (s_input_cb) {
-        s_input_cb(UI_INPUT_PREV_TRACK);
-    }
+    ESP_LOGI(UI_TAG, "btn_prev_event_cb triggered");
+    controller_action_t action = controller_action_command(
+        controller_command_make(CONTROLLER_COMMAND_PREVIOUS_TRACK));
+    (void)controller_input_dispatch_action(&action);
 }
 
 static void btn_play_event_cb(lv_event_t *e) {
     (void)e;
-    ESP_LOGI(UI_TAG, "btn_play_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
-    if (s_input_cb) {
-        s_input_cb(UI_INPUT_PLAY_PAUSE);
-    }
+    ESP_LOGI(UI_TAG, "btn_play_event_cb triggered");
+    controller_action_t action = controller_action_command(
+        controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK));
+    (void)controller_input_dispatch_action(&action);
 }
 
 static void btn_next_event_cb(lv_event_t *e) {
     (void)e;
-    ESP_LOGI(UI_TAG, "btn_next_event_cb triggered, s_input_cb=%p", (void*)s_input_cb);
-    if (s_input_cb) {
-        s_input_cb(UI_INPUT_NEXT_TRACK);
-    }
+    ESP_LOGI(UI_TAG, "btn_next_event_cb triggered");
+    controller_action_t action = controller_action_command(
+        controller_command_make(CONTROLLER_COMMAND_NEXT_TRACK));
+    (void)controller_input_dispatch_action(&action);
 }
 
 static void zone_list_item_event_cb(lv_event_t *e) {
     lv_obj_t *btn = lv_event_get_target(e);
     int index = (int)(intptr_t)lv_obj_get_user_data(btn);
     s_zone_picker_selected = index;
-    if (s_input_cb) {
-        s_input_cb(UI_INPUT_PLAY_PAUSE);  // Trigger zone selection
-    }
+    controller_action_t action = controller_action_simple(
+        CONTROLLER_ACTION_SELECT_ZONE_PICKER);
+    (void)controller_input_dispatch_action(&action);
 }
 
 // ============================================================================
@@ -1123,26 +1125,6 @@ void ui_set_network_status(const char *status) {
     os_mutex_unlock(&s_state_lock);
 }
 
-void ui_set_input_callback(ui_input_cb_t cb) {
-    s_input_cb = cb;
-}
-
-void ui_dispatch_input(ui_input_event_t input) {
-    if (s_input_cb) {
-        s_input_cb(input);
-    }
-}
-
-void ui_handle_volume_rotation(int ticks) {
-    if (ui_is_zone_picker_visible()) {
-        // Scroll zone picker instead of changing volume
-        ui_zone_picker_scroll(ticks > 0 ? 1 : -1);
-    } else {
-        // Dispatch velocity-sensitive volume rotation to bridge_client
-        bridge_client_handle_volume_rotation(ticks);
-    }
-}
-
 void ui_set_progress(int seek_ms, int length_ms) {
     os_mutex_lock(&s_state_lock);
     s_pending.seek_position = seek_ms;
@@ -1154,10 +1136,6 @@ void ui_set_progress(int seek_ms, int length_ms) {
 // ============================================================================
 // Backward Compatibility API Wrappers
 // ============================================================================
-
-void ui_set_input_handler(ui_input_cb_t handler) {
-    ui_set_input_callback(handler);
-}
 
 void ui_update(const char *line1, const char *line2, bool playing, float volume, float volume_min, float volume_max, float volume_step, int seek_position, int length) {
     ui_set_track(line1, line2);
@@ -1509,4 +1487,3 @@ void ui_set_controls_visible(bool visible) {
         ESP_LOGI(UI_TAG, "Controls hidden (art mode)");
     }
 }
-

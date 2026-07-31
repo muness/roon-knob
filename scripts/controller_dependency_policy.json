@@ -1,0 +1,621 @@
+{
+  "schema_version": 2,
+  "targets": {
+    "dial": {
+      "cmake": "idf_app/main/CMakeLists.txt",
+      "include_dirs": [
+        "idf_app/main",
+        "idf_app/components/i2c_bsp",
+        "idf_app/components/lcd_touch_bsp",
+        "include",
+        "common",
+        "components/rk_ble_hid_host/include",
+        "components/rk_ble_hid_host"
+      ]
+    },
+    "frame": {
+      "cmake": "frame_app/main/CMakeLists.txt",
+      "include_dirs": [
+        "frame_app/main",
+        "include",
+        "common",
+        "components/rk_ble_hid_host/include",
+        "components/rk_ble_hid_host"
+      ]
+    }
+  },
+  "negative_fixture": {
+    "target": "dial",
+    "source": "tests/fixtures/controller_dependency/common/new_controller.c",
+    "header": "tests/fixtures/controller_dependency/idf_app/main/new_target_ui.h",
+    "unsupported_cmake": [
+      "tests/fixtures/controller_dependency/unsupported_sources.cmake",
+      "tests/fixtures/controller_dependency/inline_source.cmake",
+      "tests/fixtures/controller_dependency/target_sources.cmake",
+      "tests/fixtures/controller_dependency/add_subdirectory.cmake",
+      "tests/fixtures/controller_dependency/include_sources.cmake",
+      "tests/fixtures/controller_dependency/composed_property_source.cmake",
+      "tests/fixtures/controller_dependency/src_dirs.cmake"
+    ]
+  },
+  "expected_edges": [
+    "dial|common/app_main.c|common/app.h",
+    "dial|common/app_main.c|common/bridge_client.h",
+    "dial|common/app_main.c|common/controller_action_router.h",
+    "dial|common/app_main.c|common/controller_config.h",
+    "dial|common/app_main.c|common/controller_input.h",
+    "dial|common/app_main.c|common/platform/platform_log.h",
+    "dial|common/app_main.c|common/platform/platform_mdns.h",
+    "dial|common/bridge_client.c|common/bridge_client.h",
+    "dial|common/bridge_client.c|common/bridge_command_plan.h",
+    "dial|common/bridge_client.c|common/controller_config.h",
+    "dial|common/bridge_client.c|common/controller_presentation.h",
+    "dial|common/bridge_client.c|common/controller_view.h",
+    "dial|common/bridge_client.c|common/controller_view_compat.h",
+    "dial|common/bridge_client.c|common/platform/platform_display.h",
+    "dial|common/bridge_client.c|common/platform/platform_http.h",
+    "dial|common/bridge_client.c|common/platform/platform_log.h",
+    "dial|common/bridge_client.c|common/platform/platform_mdns.h",
+    "dial|common/bridge_client.c|common/platform/platform_task.h",
+    "dial|common/bridge_client.c|common/platform/platform_time.h",
+    "dial|common/bridge_client.c|include/os_mutex.h",
+    "dial|common/bridge_client.h|common/controller_command.h",
+    "dial|common/bridge_command_plan.c|common/bridge_command_plan.h",
+    "dial|common/bridge_command_plan.h|common/controller_command.h",
+    "dial|common/controller_action.h|common/controller_command.h",
+    "dial|common/controller_action_router.c|common/bridge_client.h",
+    "dial|common/controller_action_router.c|common/controller_action_router.h",
+    "dial|common/controller_action_router.c|common/controller_input.h",
+    "dial|common/controller_action_router.c|common/controller_presentation.h",
+    "dial|common/controller_action_router.c|common/platform/platform_task.h",
+    "dial|common/controller_action_router.h|common/controller_action.h",
+    "dial|common/controller_ble_input.c|common/controller_ble_input.h",
+    "dial|common/controller_ble_input.c|common/controller_input.h",
+    "dial|common/controller_ble_input.h|components/rk_ble_hid_host/include/rk_ble_hid_host.h",
+    "dial|common/controller_config.c|common/controller_config.h",
+    "dial|common/controller_config.c|common/platform/platform_storage.h",
+    "dial|common/controller_config.c|include/os_mutex.h",
+    "dial|common/controller_config.h|common/rk_cfg.h",
+    "dial|common/controller_input.c|common/controller_input.h",
+    "dial|common/controller_input.c|common/controller_input_profile.h",
+    "dial|common/controller_input.c|common/platform/platform_task.h",
+    "dial|common/controller_input.h|common/controller_action.h",
+    "dial|common/controller_input_mailbox.c|common/controller_input_mailbox.h",
+    "dial|common/controller_input_mailbox.h|common/controller_input.h",
+    "dial|common/controller_input_profile.h|common/controller_input.h",
+    "dial|common/controller_view.c|common/controller_view.h",
+    "dial|common/controller_view_compat.c|common/controller_presentation.h",
+    "dial|common/controller_view_compat.c|common/controller_view_compat.h",
+    "dial|common/controller_view_compat.h|common/controller_view.h",
+    "dial|common/platform/platform_display.h|common/rk_cfg.h",
+    "dial|common/platform/platform_input.h|common/controller_input.h",
+    "dial|common/platform/platform_log.c|common/platform/platform_log.h",
+    "dial|common/platform/platform_storage.h|common/rk_cfg.h",
+    "dial|common/platform/platform_task.c|common/platform/platform_task.h",
+    "dial|common/platform/platform_task.c|include/os_mutex.h",
+    "dial|common/platform/platform_task.h|include/os_thread.h",
+    "dial|common/platform/platform_time.c|common/platform/platform_time.h",
+    "dial|common/platform/platform_time.c|include/os_time.h",
+    "dial|common/ui.c|common/bridge_client.h",
+    "dial|common/ui.c|common/controller_input.h",
+    "dial|common/ui.c|common/platform/platform_http.h",
+    "dial|common/ui.c|common/platform/platform_task.h",
+    "dial|common/ui.c|common/platform/platform_time.h",
+    "dial|common/ui.c|common/ui.h",
+    "dial|common/ui.c|common/ui_jpeg.h",
+    "dial|common/ui.c|idf_app/main/battery.h",
+    "dial|common/ui.c|idf_app/main/font_manager.h",
+    "dial|common/ui.c|idf_app/main/ota_update.h",
+    "dial|common/ui.c|include/os_mutex.h",
+    "dial|common/ui_jpeg.c|common/ui_jpeg.h",
+    "dial|common/wifi_manager.c|common/controller_config.h",
+    "dial|common/wifi_manager.c|common/platform/platform_identity.h",
+    "dial|common/wifi_manager.c|common/platform/platform_provisioning.h",
+    "dial|common/wifi_manager.c|common/wifi_manager.h",
+    "dial|common/wifi_manager.c|include/os_mutex.h",
+    "dial|common/wifi_manager.h|common/controller_config.h",
+    "dial|idf_app/main/battery.c|common/platform/platform_time.h",
+    "dial|idf_app/main/battery.c|idf_app/main/battery.h",
+    "dial|idf_app/main/ble_hid_host_dial.c|common/controller_ble_input.h",
+    "dial|idf_app/main/ble_hid_host_dial.c|common/platform/platform_task.h",
+    "dial|idf_app/main/ble_hid_host_dial.c|components/rk_ble_hid_host/include/rk_ble_hid_host.h",
+    "dial|idf_app/main/ble_hid_host_dial.c|idf_app/main/ble_hid_host_dial.h",
+    "dial|idf_app/main/ble_hid_host_dial.c|idf_app/main/ui_network.h",
+    "dial|idf_app/main/captive_portal.c|common/controller_config.h",
+    "dial|idf_app/main/captive_portal.c|common/ui.h",
+    "dial|idf_app/main/captive_portal.c|common/wifi_manager.h",
+    "dial|idf_app/main/captive_portal.c|idf_app/main/captive_portal.h",
+    "dial|idf_app/main/captive_portal.c|idf_app/main/dns_server.h",
+    "dial|idf_app/main/captive_portal.c|idf_app/main/http_server_lifecycle.h",
+    "dial|idf_app/main/config_server.c|common/bridge_client.h",
+    "dial|idf_app/main/config_server.c|common/controller_config.h",
+    "dial|idf_app/main/config_server.c|common/platform/platform_mdns.h",
+    "dial|idf_app/main/config_server.c|common/wifi_manager.h",
+    "dial|idf_app/main/config_server.c|components/rk_ble_hid_host/include/rk_ble_hid_host.h",
+    "dial|idf_app/main/config_server.c|idf_app/main/config_server.h",
+    "dial|idf_app/main/config_server.c|idf_app/main/http_server_lifecycle.h",
+    "dial|idf_app/main/controller_input_profile_dial.c|common/controller_input_profile.h",
+    "dial|idf_app/main/controller_presentation_dial.c|common/controller_config.h",
+    "dial|idf_app/main/controller_presentation_dial.c|common/controller_presentation.h",
+    "dial|idf_app/main/controller_presentation_dial.c|common/ui.h",
+    "dial|idf_app/main/display_sleep.c|common/bridge_client.h",
+    "dial|idf_app/main/display_sleep.c|common/platform/platform_display.h",
+    "dial|idf_app/main/display_sleep.c|common/ui.h",
+    "dial|idf_app/main/display_sleep.c|common/wifi_manager.h",
+    "dial|idf_app/main/display_sleep.c|idf_app/main/battery.h",
+    "dial|idf_app/main/display_sleep.c|idf_app/main/captive_portal.h",
+    "dial|idf_app/main/display_sleep.c|idf_app/main/display_sleep.h",
+    "dial|idf_app/main/display_sleep.h|common/rk_cfg.h",
+    "dial|idf_app/main/dns_server.c|idf_app/main/dns_server.h",
+    "dial|idf_app/main/font_manager.c|idf_app/main/font_manager.h",
+    "dial|idf_app/main/http_server_lifecycle.c|idf_app/main/http_server_lifecycle.h",
+    "dial|idf_app/main/http_server_lifecycle.c|include/os_mutex.h",
+    "dial|idf_app/main/main_idf.c|common/app.h",
+    "dial|idf_app/main/main_idf.c|common/bridge_client.h",
+    "dial|idf_app/main/main_idf.c|common/controller_config.h",
+    "dial|idf_app/main/main_idf.c|common/platform/platform_http.h",
+    "dial|idf_app/main/main_idf.c|common/platform/platform_input.h",
+    "dial|idf_app/main/main_idf.c|common/platform/platform_mdns.h",
+    "dial|idf_app/main/main_idf.c|common/platform/platform_time.h",
+    "dial|idf_app/main/main_idf.c|common/ui.h",
+    "dial|idf_app/main/main_idf.c|common/wifi_manager.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/battery.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/ble_hid_host_dial.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/config_server.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/display_sleep.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/font_manager.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/ota_update.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/platform_display_idf.h",
+    "dial|idf_app/main/main_idf.c|idf_app/main/ui_network.h",
+    "dial|idf_app/main/ota_update.c|common/controller_config.h",
+    "dial|idf_app/main/ota_update.c|idf_app/main/ota_update.h",
+    "dial|idf_app/main/platform_display_idf.c|common/bridge_client.h",
+    "dial|idf_app/main/platform_display_idf.c|common/platform/platform_display.h",
+    "dial|idf_app/main/platform_display_idf.c|idf_app/components/i2c_bsp/i2c_bsp.h",
+    "dial|idf_app/main/platform_display_idf.c|idf_app/components/lcd_touch_bsp/lcd_touch_bsp.h",
+    "dial|idf_app/main/platform_display_idf.c|idf_app/main/battery.h",
+    "dial|idf_app/main/platform_display_idf.c|idf_app/main/display_sleep.h",
+    "dial|idf_app/main/platform_display_idf.c|idf_app/main/platform_display_idf.h",
+    "dial|idf_app/main/platform_http_idf.c|common/platform/platform_http.h",
+    "dial|idf_app/main/platform_identity_idf.c|common/platform/platform_identity.h",
+    "dial|idf_app/main/platform_input_idf.c|common/controller_input.h",
+    "dial|idf_app/main/platform_input_idf.c|common/controller_input_mailbox.h",
+    "dial|idf_app/main/platform_input_idf.c|common/platform/platform_input.h",
+    "dial|idf_app/main/platform_input_idf.c|idf_app/main/display_sleep.h",
+    "dial|idf_app/main/platform_log_idf.c|common/platform/platform_log.h",
+    "dial|idf_app/main/platform_mdns_idf.c|common/platform/platform_mdns.h",
+    "dial|idf_app/main/platform_provisioning_dial.c|common/platform/platform_provisioning.h",
+    "dial|idf_app/main/platform_provisioning_dial.c|idf_app/main/captive_portal.h",
+    "dial|idf_app/main/platform_provisioning_dial.c|idf_app/main/config_server.h",
+    "dial|idf_app/main/platform_provisioning_dial.c|idf_app/main/http_server_lifecycle.h",
+    "dial|idf_app/main/platform_storage_idf.c|common/platform/platform_storage.h",
+    "dial|idf_app/main/ui_network.c|common/bridge_client.h",
+    "dial|idf_app/main/ui_network.c|common/controller_config.h",
+    "dial|idf_app/main/ui_network.c|common/controller_presentation.h",
+    "dial|idf_app/main/ui_network.c|common/platform/platform_http.h",
+    "dial|idf_app/main/ui_network.c|common/ui.h",
+    "dial|idf_app/main/ui_network.c|common/wifi_manager.h",
+    "dial|idf_app/main/ui_network.c|idf_app/main/font_manager.h",
+    "dial|idf_app/main/ui_network.c|idf_app/main/ota_update.h",
+    "dial|idf_app/main/ui_network.c|idf_app/main/ui_network.h",
+    "dial|idf_app/main/ui_network.h|common/wifi_manager.h",
+    "frame|common/app_main.c|common/app.h",
+    "frame|common/app_main.c|common/bridge_client.h",
+    "frame|common/app_main.c|common/controller_action_router.h",
+    "frame|common/app_main.c|common/controller_config.h",
+    "frame|common/app_main.c|common/controller_input.h",
+    "frame|common/app_main.c|common/platform/platform_log.h",
+    "frame|common/app_main.c|common/platform/platform_mdns.h",
+    "frame|common/bridge_client.c|common/bridge_client.h",
+    "frame|common/bridge_client.c|common/bridge_command_plan.h",
+    "frame|common/bridge_client.c|common/controller_config.h",
+    "frame|common/bridge_client.c|common/controller_presentation.h",
+    "frame|common/bridge_client.c|common/controller_view.h",
+    "frame|common/bridge_client.c|common/controller_view_compat.h",
+    "frame|common/bridge_client.c|common/platform/platform_display.h",
+    "frame|common/bridge_client.c|common/platform/platform_http.h",
+    "frame|common/bridge_client.c|common/platform/platform_log.h",
+    "frame|common/bridge_client.c|common/platform/platform_mdns.h",
+    "frame|common/bridge_client.c|common/platform/platform_task.h",
+    "frame|common/bridge_client.c|common/platform/platform_time.h",
+    "frame|common/bridge_client.c|include/os_mutex.h",
+    "frame|common/bridge_client.h|common/controller_command.h",
+    "frame|common/bridge_command_plan.c|common/bridge_command_plan.h",
+    "frame|common/bridge_command_plan.h|common/controller_command.h",
+    "frame|common/controller_action.h|common/controller_command.h",
+    "frame|common/controller_action_router.c|common/bridge_client.h",
+    "frame|common/controller_action_router.c|common/controller_action_router.h",
+    "frame|common/controller_action_router.c|common/controller_input.h",
+    "frame|common/controller_action_router.c|common/controller_presentation.h",
+    "frame|common/controller_action_router.c|common/platform/platform_task.h",
+    "frame|common/controller_action_router.h|common/controller_action.h",
+    "frame|common/controller_ble_input.c|common/controller_ble_input.h",
+    "frame|common/controller_ble_input.c|common/controller_input.h",
+    "frame|common/controller_ble_input.h|components/rk_ble_hid_host/include/rk_ble_hid_host.h",
+    "frame|common/controller_config.c|common/controller_config.h",
+    "frame|common/controller_config.c|common/platform/platform_storage.h",
+    "frame|common/controller_config.c|include/os_mutex.h",
+    "frame|common/controller_config.h|common/rk_cfg.h",
+    "frame|common/controller_input.c|common/controller_input.h",
+    "frame|common/controller_input.c|common/controller_input_profile.h",
+    "frame|common/controller_input.c|common/platform/platform_task.h",
+    "frame|common/controller_input.h|common/controller_action.h",
+    "frame|common/controller_input_mailbox.c|common/controller_input_mailbox.h",
+    "frame|common/controller_input_mailbox.h|common/controller_input.h",
+    "frame|common/controller_input_profile.h|common/controller_input.h",
+    "frame|common/controller_view.c|common/controller_view.h",
+    "frame|common/controller_view_compat.c|common/controller_presentation.h",
+    "frame|common/controller_view_compat.c|common/controller_view_compat.h",
+    "frame|common/controller_view_compat.h|common/controller_view.h",
+    "frame|common/platform/platform_display.h|common/rk_cfg.h",
+    "frame|common/platform/platform_input.h|common/controller_input.h",
+    "frame|common/platform/platform_log.c|common/platform/platform_log.h",
+    "frame|common/platform/platform_storage.h|common/rk_cfg.h",
+    "frame|common/platform/platform_task.c|common/platform/platform_task.h",
+    "frame|common/platform/platform_task.c|include/os_mutex.h",
+    "frame|common/platform/platform_task.h|include/os_thread.h",
+    "frame|common/platform/platform_time.c|common/platform/platform_time.h",
+    "frame|common/platform/platform_time.c|include/os_time.h",
+    "frame|common/wifi_manager.c|common/controller_config.h",
+    "frame|common/wifi_manager.c|common/platform/platform_identity.h",
+    "frame|common/wifi_manager.c|common/platform/platform_provisioning.h",
+    "frame|common/wifi_manager.c|common/wifi_manager.h",
+    "frame|common/wifi_manager.c|include/os_mutex.h",
+    "frame|common/wifi_manager.h|common/controller_config.h",
+    "frame|frame_app/main/ble_hid_host_frame.c|common/controller_ble_input.h",
+    "frame|frame_app/main/ble_hid_host_frame.c|common/platform/platform_task.h",
+    "frame|frame_app/main/ble_hid_host_frame.c|components/rk_ble_hid_host/include/rk_ble_hid_host.h",
+    "frame|frame_app/main/ble_hid_host_frame.c|frame_app/main/ble_hid_host_frame.h",
+    "frame|frame_app/main/ble_hid_host_frame.c|frame_app/main/eink_ui.h",
+    "frame|frame_app/main/captive_portal.c|common/bridge_client.h",
+    "frame|frame_app/main/captive_portal.c|common/controller_config.h",
+    "frame|frame_app/main/captive_portal.c|common/wifi_manager.h",
+    "frame|frame_app/main/captive_portal.c|components/rk_ble_hid_host/include/rk_ble_hid_host.h",
+    "frame|frame_app/main/captive_portal.c|frame_app/main/captive_portal.h",
+    "frame|frame_app/main/captive_portal.c|frame_app/main/dns_server.h",
+    "frame|frame_app/main/captive_portal.c|frame_app/main/eink_ui.h",
+    "frame|frame_app/main/captive_portal.c|include/os_mutex.h",
+    "frame|frame_app/main/controller_input_profile_frame.c|common/controller_input_profile.h",
+    "frame|frame_app/main/controller_presentation_frame.c|common/controller_config.h",
+    "frame|frame_app/main/controller_presentation_frame.c|common/controller_presentation.h",
+    "frame|frame_app/main/controller_presentation_frame.c|frame_app/main/eink_ui.h",
+    "frame|frame_app/main/controller_system_frame.c|common/wifi_manager.h",
+    "frame|frame_app/main/controller_system_frame.c|frame_app/main/controller_system_frame.h",
+    "frame|frame_app/main/controller_system_frame.h|common/controller_input.h",
+    "frame|frame_app/main/dns_server.c|frame_app/main/dns_server.h",
+    "frame|frame_app/main/eink_display.c|frame_app/main/eink_display.h",
+    "frame|frame_app/main/eink_dither.c|frame_app/main/eink_dither.h",
+    "frame|frame_app/main/eink_font.c|frame_app/main/eink_display.h",
+    "frame|frame_app/main/eink_font.c|frame_app/main/eink_font.h",
+    "frame|frame_app/main/eink_ui.c|common/bridge_client.h",
+    "frame|frame_app/main/eink_ui.c|common/platform/platform_http.h",
+    "frame|frame_app/main/eink_ui.c|common/platform/platform_log.h",
+    "frame|frame_app/main/eink_ui.c|common/platform/platform_task.h",
+    "frame|frame_app/main/eink_ui.c|common/platform/platform_time.h",
+    "frame|frame_app/main/eink_ui.c|frame_app/main/eink_display.h",
+    "frame|frame_app/main/eink_ui.c|frame_app/main/eink_dither.h",
+    "frame|frame_app/main/eink_ui.c|frame_app/main/eink_font.h",
+    "frame|frame_app/main/eink_ui.c|frame_app/main/eink_ui.h",
+    "frame|frame_app/main/main_frame.c|common/app.h",
+    "frame|frame_app/main/main_frame.c|common/bridge_client.h",
+    "frame|frame_app/main/main_frame.c|common/controller_config.h",
+    "frame|frame_app/main/main_frame.c|common/platform/platform_http.h",
+    "frame|frame_app/main/main_frame.c|common/platform/platform_input.h",
+    "frame|frame_app/main/main_frame.c|common/platform/platform_mdns.h",
+    "frame|frame_app/main/main_frame.c|common/platform/platform_task.h",
+    "frame|frame_app/main/main_frame.c|common/platform/platform_time.h",
+    "frame|frame_app/main/main_frame.c|common/wifi_manager.h",
+    "frame|frame_app/main/main_frame.c|frame_app/main/ble_hid_host_frame.h",
+    "frame|frame_app/main/main_frame.c|frame_app/main/captive_portal.h",
+    "frame|frame_app/main/main_frame.c|frame_app/main/eink_display.h",
+    "frame|frame_app/main/main_frame.c|frame_app/main/eink_ui.h",
+    "frame|frame_app/main/main_frame.c|frame_app/main/pmic_axp2101.h",
+    "frame|frame_app/main/platform_display_frame.c|common/platform/platform_display.h",
+    "frame|frame_app/main/platform_display_frame.c|frame_app/main/pmic_axp2101.h",
+    "frame|frame_app/main/platform_http_frame.c|common/platform/platform_http.h",
+    "frame|frame_app/main/platform_identity_frame.c|common/platform/platform_identity.h",
+    "frame|frame_app/main/platform_input_frame.c|common/controller_input.h",
+    "frame|frame_app/main/platform_input_frame.c|common/controller_input_mailbox.h",
+    "frame|frame_app/main/platform_input_frame.c|common/platform/platform_input.h",
+    "frame|frame_app/main/platform_input_frame.c|frame_app/main/controller_system_frame.h",
+    "frame|frame_app/main/platform_log_frame.c|common/platform/platform_log.h",
+    "frame|frame_app/main/platform_mdns_frame.c|common/platform/platform_mdns.h",
+    "frame|frame_app/main/platform_provisioning_frame.c|common/platform/platform_provisioning.h",
+    "frame|frame_app/main/platform_provisioning_frame.c|frame_app/main/captive_portal.h",
+    "frame|frame_app/main/platform_storage_frame.c|common/platform/platform_storage.h",
+    "frame|frame_app/main/platform_storage_frame.c|common/rk_cfg.h",
+    "frame|frame_app/main/pmic_axp2101.c|frame_app/main/pmic_axp2101.h"
+  ],
+  "grandfathered_edges": [
+    {
+      "edge": "dial|common/ui.c|common/bridge_client.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#132",
+      "reason": "Legacy Dial renderer still queries controller state directly."
+    },
+    {
+      "edge": "dial|common/ui.c|idf_app/main/battery.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#132",
+      "reason": "Shared legacy Dial renderer reaches into a target-only battery API."
+    },
+    {
+      "edge": "dial|common/ui.c|idf_app/main/ota_update.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#170",
+      "reason": "Shared legacy Dial renderer reaches into a target-only OTA API."
+    },
+    {
+      "edge": "dial|idf_app/main/ble_hid_host_dial.c|idf_app/main/ui_network.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#191",
+      "reason": "BLE target adapter directly refreshes the Dial network UI."
+    },
+    {
+      "edge": "dial|idf_app/main/captive_portal.c|common/ui.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Dial provisioning adapter directly controls the legacy renderer."
+    },
+    {
+      "edge": "dial|idf_app/main/display_sleep.c|common/bridge_client.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Dial sleep policy reads controller state through the mixed bridge client."
+    },
+    {
+      "edge": "dial|idf_app/main/display_sleep.c|common/ui.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Dial sleep policy directly controls the legacy renderer."
+    },
+    {
+      "edge": "dial|idf_app/main/display_sleep.c|common/wifi_manager.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#194",
+      "reason": "Dial sleep policy is coupled directly to connectivity state."
+    },
+    {
+      "edge": "dial|idf_app/main/display_sleep.c|idf_app/main/captive_portal.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#194",
+      "reason": "Dial sleep policy is coupled directly to provisioning state."
+    },
+    {
+      "edge": "dial|idf_app/main/platform_display_idf.c|common/bridge_client.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Dial display adapter queries the mixed controller client instead of consuming presentation state."
+    },
+    {
+      "edge": "dial|idf_app/main/platform_display_idf.c|idf_app/main/display_sleep.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#194",
+      "reason": "Dial display adapter owns peer sleep-policy transitions as well as rendering."
+    },
+    {
+      "edge": "dial|idf_app/main/platform_input_idf.c|idf_app/main/display_sleep.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#194",
+      "reason": "Dial input adapter owns display wake behavior as well as input translation."
+    },
+    {
+      "edge": "dial|idf_app/main/ui_network.c|common/bridge_client.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Dial network renderer queries the mixed controller client directly."
+    },
+    {
+      "edge": "dial|idf_app/main/ui_network.c|common/ui.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Dial network renderer is coupled to the legacy UI implementation."
+    },
+    {
+      "edge": "dial|idf_app/main/ui_network.c|common/wifi_manager.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#170",
+      "reason": "Dial network renderer queries connectivity state directly."
+    },
+    {
+      "edge": "dial|idf_app/main/ui_network.c|idf_app/main/ota_update.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#170",
+      "reason": "Dial network renderer queries OTA state directly."
+    },
+    {
+      "edge": "dial|idf_app/main/ui_network.h|common/wifi_manager.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "A target UI header exposes a connectivity implementation type."
+    },
+    {
+      "edge": "frame|frame_app/main/ble_hid_host_frame.c|frame_app/main/eink_ui.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#191",
+      "reason": "BLE target adapter directly refreshes the Frame renderer."
+    },
+    {
+      "edge": "frame|frame_app/main/captive_portal.c|common/bridge_client.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Frame provisioning adapter queries the mixed controller client directly."
+    },
+    {
+      "edge": "frame|frame_app/main/captive_portal.c|frame_app/main/eink_ui.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Frame provisioning adapter directly controls the Frame renderer."
+    },
+    {
+      "edge": "frame|frame_app/main/eink_ui.c|common/bridge_client.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#190",
+      "reason": "Frame renderer queries the mixed controller client directly."
+    },
+    {
+      "edge": "dial|common/ui.c|idf_app/main/font_manager.h",
+      "owner": "controller architecture program",
+      "retirement_issue": "#132",
+      "reason": "Shared legacy Dial renderer reaches into a target-only font implementation."
+    }
+  ],
+  "forbidden_rules": [
+    {
+      "name": "shared_code_must_not_include_target_implementation",
+      "source_patterns": [
+        "common/**"
+      ],
+      "header_patterns": [
+        "idf_app/**",
+        "frame_app/**"
+      ]
+    },
+    {
+      "name": "renderer_must_not_query_controller_or_connectivity",
+      "source_patterns": [
+        "common/ui.c",
+        "idf_app/main/ui_network.c",
+        "idf_app/main/ui_network.h",
+        "frame_app/main/eink_ui.c"
+      ],
+      "header_patterns": [
+        "common/bridge_client.h",
+        "common/wifi_manager.h",
+        "idf_app/main/ota_update.h"
+      ]
+    },
+    {
+      "name": "target_renderer_must_not_include_legacy_renderer",
+      "source_patterns": [
+        "idf_app/main/ui_network.c"
+      ],
+      "header_patterns": [
+        "common/ui.h"
+      ]
+    },
+    {
+      "name": "target_adapter_must_not_control_renderer",
+      "source_patterns": [
+        "idf_app/main/ble_hid_host_dial.c",
+        "idf_app/main/captive_portal.c",
+        "idf_app/main/display_sleep.c",
+        "frame_app/main/ble_hid_host_frame.c",
+        "frame_app/main/captive_portal.c"
+      ],
+      "header_patterns": [
+        "common/ui.h",
+        "idf_app/main/ui_network.h",
+        "frame_app/main/eink_ui.h"
+      ]
+    },
+    {
+      "name": "sleep_policy_must_not_own_controller_connectivity_or_provisioning",
+      "source_patterns": [
+        "idf_app/main/display_sleep.c"
+      ],
+      "header_patterns": [
+        "common/bridge_client.h",
+        "common/wifi_manager.h",
+        "idf_app/main/captive_portal.h"
+      ]
+    },
+    {
+      "name": "hardware_adapter_must_not_own_controller_or_peer_policy",
+      "source_patterns": [
+        "idf_app/main/platform_display_idf.c",
+        "idf_app/main/platform_input_idf.c",
+        "frame_app/main/platform_input_frame.c"
+      ],
+      "header_patterns": [
+        "common/bridge_client.h",
+        "common/wifi_manager.h",
+        "idf_app/main/display_sleep.h"
+      ]
+    },
+    {
+      "name": "provisioning_adapter_must_not_query_controller",
+      "source_patterns": [
+        "frame_app/main/captive_portal.c"
+      ],
+      "header_patterns": [
+        "common/bridge_client.h"
+      ]
+    },
+    {
+      "name": "input_values_and_resolver_must_not_own_effects",
+      "source_patterns": [
+        "common/controller_action.h",
+        "common/controller_input.c",
+        "common/controller_input.h",
+        "common/controller_input_mailbox.c",
+        "common/controller_input_mailbox.h",
+        "common/controller_input_profile.h"
+      ],
+      "header_patterns": [
+        "common/bridge_client.h",
+        "common/controller_presentation.h",
+        "common/wifi_manager.h",
+        "idf_app/**",
+        "frame_app/**"
+      ]
+    },
+    {
+      "name": "privileged_frame_ingress_must_remain_target_input_only",
+      "source_patterns": [
+        "common/**",
+        "idf_app/**",
+        "frame_app/main/ble_hid_host_frame.c",
+        "frame_app/main/captive_portal.c",
+        "frame_app/main/controller_presentation_frame.c",
+        "frame_app/main/eink_ui.c",
+        "frame_app/main/main_frame.c"
+      ],
+      "header_patterns": [
+        "frame_app/main/controller_system_frame.h"
+      ]
+    },
+    {
+      "name": "negative_fixture_shared_code_must_not_include_target_ui",
+      "source_patterns": [
+        "tests/fixtures/controller_dependency/common/**"
+      ],
+      "header_patterns": [
+        "tests/fixtures/controller_dependency/idf_app/**"
+      ]
+    },
+    {
+      "name": "raw_config_storage_is_owner_private",
+      "source_patterns": [
+        "common/**",
+        "idf_app/**",
+        "frame_app/**"
+      ],
+      "header_patterns": [
+        "common/platform/platform_storage.h"
+      ]
+    }
+  ],
+  "authorized_forbidden_edges": [
+    {
+      "edge": "dial|common/controller_config.c|common/platform/platform_storage.h",
+      "owner": "controller configuration boundary",
+      "reason": "The shared owner is the sole production transaction client of the target storage backend."
+    },
+    {
+      "edge": "frame|common/controller_config.c|common/platform/platform_storage.h",
+      "owner": "controller configuration boundary",
+      "reason": "The shared owner is the sole production transaction client of the target storage backend."
+    },
+    {
+      "edge": "dial|idf_app/main/platform_storage_idf.c|common/platform/platform_storage.h",
+      "owner": "Dial storage backend",
+      "reason": "The target backend implements the raw storage port for the shared owner."
+    },
+    {
+      "edge": "frame|frame_app/main/platform_storage_frame.c|common/platform/platform_storage.h",
+      "owner": "Frame storage backend",
+      "reason": "The target backend implements the raw storage port for the shared owner."
+    }
+  ]
+}

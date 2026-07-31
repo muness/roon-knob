@@ -1,5 +1,5 @@
 #include "ota_update.h"
-#include "platform/platform_storage.h"
+#include "controller_config.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -18,11 +18,10 @@ static TaskHandle_t s_ota_task = NULL;
 
 // Get bridge base URL from storage
 static bool get_bridge_url(char *url, size_t len) {
-    rk_cfg_t cfg;
-    if (platform_storage_load(&cfg)) {
-        if (cfg.bridge_base[0]) {
-            strncpy(url, cfg.bridge_base, len - 1);
-            url[len - 1] = '\0';
+    controller_config_snapshot_t snapshot = {0};
+    if (controller_config_snapshot(&snapshot)) {
+        if (snapshot.value.bridge_base[0]) {
+            rk_strlcpy(url, snapshot.value.bridge_base, len);
             return true;
         }
     }
@@ -72,9 +71,10 @@ static void check_update_task(void *arg) {
     strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
 
     if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
-        ESP_LOGE(TAG, "No bridge URL configured");
+        ESP_LOGE(TAG, "No Unified Hi-Fi Control URL configured");
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "No bridge configured", sizeof(s_ota_info.error_msg));
+        strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
+                sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -198,7 +198,8 @@ static void do_update_task(void *arg) {
 
     if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
         s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "No bridge configured", sizeof(s_ota_info.error_msg));
+        strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
+                sizeof(s_ota_info.error_msg));
         s_ota_task = NULL;
         vTaskDelete(NULL);
         return;

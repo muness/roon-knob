@@ -2,7 +2,7 @@
 
 This guide covers two scenarios:
 1. **Building a different app** for the Waveshare ESP32-S3 Knob hardware
-2. **Porting Roon Knob** to a different ESP32-S3 display board
+2. **Porting HiPhi Dial** to a different ESP32-S3 display board
 
 ## Architecture Overview
 
@@ -137,9 +137,9 @@ All pin definitions for this hardware:
 
 ---
 
-## Scenario 2: Roon Knob on Different Hardware
+## Scenario 2: HiPhi Dial on Different Hardware
 
-To port Roon Knob to a different ESP32-S3 display board:
+To port HiPhi Dial to a different ESP32-S3 display board:
 
 ### Files to Modify
 

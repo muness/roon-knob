@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Roon Knob has three components:
+HiPhi Dial has three components:
 
 | Component | Description |
 |-----------|-------------|
@@ -13,7 +13,7 @@ Roon Knob has three components:
 ## Repository Structure
 
 ```
-roon-knob/
+roon-knob/          # Current repository slug; product name is HiPhi Dial
 ├── idf_app/           # ESP32-S3 firmware (ESP-IDF)
 │   ├── main/          # Application code
 │   ├── components/    # Custom ESP-IDF components

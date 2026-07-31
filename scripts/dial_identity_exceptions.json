@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "legacy_tokens": [
+    "Roon Knob",
+    "Roon-Knob",
+    "Roon knob",
+    "roon knob",
+    "roon-knob-setup",
+    "roon_knob",
+    "ROON_KNOB",
+    "_roonknob",
+    "roon-knob"
+  ],
+  "exceptions": [
+    {
+      "id": "identity-migration-records",
+      "category": "historical-provenance",
+      "owner": "#162",
+      "retirement": "Permanent: these records explain the migration and must remain truthful.",
+      "path_globs": [
+        ".oh/dial-rename.md",
+        "docs/meta/decisions/2026-07-30_DECISION_HIPHI_DIAL_IDENTITY_MIGRATION.md"
+      ],
+      "tokens": [
+        "Roon Knob",
+        "Roon-Knob",
+        "Roon knob",
+        "roon knob",
+        "roon-knob-setup",
+        "roon_knob",
+        "ROON_KNOB",
+        "_roonknob",
+        "roon-knob"
+      ],
+      "line_regex": ".*"
+    },
+    {
+      "id": "historical-product-records",
+      "category": "historical-provenance",
+      "owner": "Documentation provenance",
+      "retirement": "Permanent while the referenced historical statement remains accurate.",
+      "path_globs": [
+        "RELEASE_NOTES_v1.3.0.md",
+        "docs/meta/analysis/**",
+        "docs/meta/decisions/2025-12-20_DECISION_ROTATION.md",
+        "docs/dev/IMPLEMENTATION_NOTES.md",
+        "docs/esp/NETWORK_IDENTITY.md",
+        "docs/esp/BLE_HID.md"
+      ],
+      "tokens": [
+        "Roon Knob",
+        "Roon-Knob",
+        "Roon knob",
+        "roon knob",
+        "roon-knob-setup",
+        "roon_knob",
+        "ROON_KNOB",
+        "_roonknob",
+        "roon-knob"
+      ],
+      "line_regex": ".*"
+    },
+    {
+      "id": "historical-docker-output",
+      "category": "historical-provenance",
+      "owner": "Documentation provenance",
+      "retirement": "Permanent while retained as an explicitly labelled historical command capture.",
+      "path_globs": [
+        "docs/usage/GETTING_STARTED.md"
+      ],
+      "tokens": [
+        "roon-knob"
+      ],
+      "line_regex": "Container roon-knob-roon-knob-bridge"
+    },
+    {
+      "id": "historical-image-filename",
+      "category": "historical-provenance",
+      "owner": "#174",
+      "retirement": "Rename only when asset paths are migrated with redirects or all references.",
+      "path_globs": [
+        "README.md"
+      ],
+      "tokens": [
+        "roon-knob"
+      ],
+      "line_regex": "docs/images/roon-knob-photo\\.jpg"
+    },
+    {
+      "id": "legacy-firmware-aliases",
+      "category": "compatibility",
+      "owner": "#162 and open-horizon-labs/unified-hifi-control#277",
+      "retirement": "Only after bridge selection and every release/flasher consumer have migrated and an explicit release decision removes the aliases.",
+      "path_globs": [
+        ".github/workflows/docker.yml",
+        ".github/RELEASE_TEMPLATE.md",
+        "docs/usage/FIRMWARE_FLASHING.md",
+        "docs/usage/GETTING_STARTED.md",
+        "docs/usage/OTA_UPDATES.md"
+      ],
+      "tokens": [
+        "roon_knob"
+      ],
+      "line_regex": "roon_knob(?:_merged)?"
+    },
+    {
+      "id": "legacy-mdns-service",
+      "category": "compatibility",
+      "owner": "#163",
+      "retirement": "Remove only after dual advertise/query compatibility is deployed and old consumers have migrated.",
+      "path_globs": [
+        "idf_app/main/platform_mdns_idf.c",
+        "frame_app/main/platform_mdns_frame.c"
+      ],
+      "tokens": [
+        "_roonknob"
+      ],
+      "line_regex": "_roonknob"
+    },
+    {
+      "id": "repository-and-hosted-flasher-endpoints",
+      "category": "deferred-external-endpoint",
+      "owner": "#164",
+      "retirement": "Change only when repository redirects, Pages CNAME, host checks, captive-portal links, and preview URLs move together.",
+      "path_globs": [
+        "**"
+      ],
+      "tokens": [
+        "roon-knob"
+      ],
+      "line_regex": "(?:github\\.com/(?:muness|open-horizon-labs)/roon-knob|muness/roon-knob|roon-knob\\.muness\\.com)"
+    },
+    {
+      "id": "current-repository-directory-example",
+      "category": "deferred-external-endpoint",
+      "owner": "#164",
+      "retirement": "Change with the repository rename and update the documented checkout layout in the same change.",
+      "path_globs": [
+        "docs/dev/DEVELOPMENT.md"
+      ],
+      "tokens": [
+        "roon-knob"
+      ],
+      "line_regex": "^roon-knob/"
+    }
+  ],
+  "required": [
+    {
+      "path": "idf_app/main/Kconfig.projbuild",
+      "contains": "menu \"HiPhi Dial Defaults\""
+    },
+    {
+      "path": "components/rk_ble_hid_host/Kconfig",
+      "contains": "menu \"Shared BLE HID host\""
+    },
+    {
+      "path": "idf_app/CMakeLists.txt",
+      "contains": "project(hiphi_dial)"
+    },
+    {
+      "path": "idf_app/main/platform_identity_idf.c",
+      "contains": "return \"hiphi-dial\";"
+    },
+    {
+      "path": "idf_app/main/platform_identity_idf.c",
+      "contains": "return \"hiphi-dial-setup\";"
+    },
+    {
+      "path": "idf_app/main/platform_mdns_idf.c",
+      "contains": "{\"product\", \"hiphi-dial\"}"
+    },
+    {
+      "path": "idf_app/main/platform_log_idf.c",
+      "contains": "\"hiphi-dial\""
+    },
+    {
+      "path": "idf_app/sdkconfig.defaults",
+      "contains": "CONFIG_LWIP_LOCAL_HOSTNAME=\"hiphi-dial\""
+    },
+    {
+      "path": "web/manifest-s3.json",
+      "contains": "\"name\": \"HiPhi Dial (Beta)\""
+    },
+    {
+      "path": "web/manifest-s3.json",
+      "contains": "\"path\": \"hiphi_dial.bin\""
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp build/hiphi_dial.bin build/roon_knob.bin"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "release-assets/hiphi_dial_merged.bin"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "release-assets/roon_knob_merged.bin"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cmp release-assets/hiphi_dial.bin release-assets/roon_knob.bin"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "needs: [test-shared, build-idf]"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "DIAL_APPLICATION_FILE=\"hiphi_dial-${PREVIEW_ID}.bin\"",
+      "min_count": 2
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "DIAL_LEGACY_APPLICATION_FILE=\"roon_knob-${PREVIEW_ID}.bin\"",
+      "min_count": 2
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin \\\n            \"pr-preview/${DIAL_APPLICATION_FILE}\""
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin \\\n            \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "DIAL_FIRMWARE_FILE=\"hiphi_dial_merged-${PREVIEW_ID}.bin\""
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "DIAL_LEGACY_FIRMWARE_FILE=\"roon_knob_merged-${PREVIEW_ID}.bin\""
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp esp32s3-artifacts/hiphi_dial_merged.bin gh-pages-build/"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin gh-pages-build/"
+    },
+    {
+      "path": "README.md",
+      "contains": "click \"Flash HiPhi Dial\""
+    },
+    {
+      "path": "docs/usage/FIRMWARE_FLASHING.md",
+      "contains": "Click **\"Update HiPhi Dial\"**"
+    },
+    {
+      "path": "docs/usage/GETTING_STARTED.md",
+      "contains": "**Click \"Flash HiPhi Dial\"**"
+    },
+    {
+      "path": "idf_app/main/platform_mdns_idf.c",
+      "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
+    },
+    {
+      "path": "frame_app/main/platform_mdns_frame.c",
+      "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
+    },
+    {
+      "path": "idf_app/main/platform_storage_idf.c",
+      "contains": "static const char *NAMESPACE = \"rk_cfg\";"
+    },
+    {
+      "path": "idf_app/main/platform_storage_idf.c",
+      "contains": "static const char *KEY = \"cfg\";"
+    },
+    {
+      "path": "common/rk_cfg.h",
+      "contains": "char knob_name[32];"
+    },
+    {
+      "path": "common/rk_cfg.h",
+      "contains": "_Static_assert(sizeof(rk_cfg_t) == 570"
+    }
+  ],
+  "forbidden": [
+    {
+      "path": "web/manifest-s3.json",
+      "contains": "roon_knob"
+    },
+    {
+      "path": "idf_app/main/platform_identity_idf.c",
+      "contains": "roon-knob"
+    },
+    {
+      "path": "idf_app/main/platform_mdns_idf.c",
+      "contains": "{\"product\", \"roon-knob\"}"
+    }
+  ]
+}

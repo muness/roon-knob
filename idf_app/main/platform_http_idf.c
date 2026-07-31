@@ -1,6 +1,7 @@
 #include "platform/platform_http.h"
 
 #include <esp_http_client.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_app_desc.h>
@@ -30,7 +31,17 @@ static const char* get_knob_version(void) {
     return app_desc->version;
 }
 
-static int http_perform(const char *url, const char *body, const char *content_type, char **out, size_t *out_len) {
+static int http_perform(const char *url, const char *body,
+                        const char *content_type, size_t max_response_bytes,
+                        char **out, size_t *out_len) {
+    if (!url || !out || max_response_bytes == 0 ||
+        max_response_bytes == SIZE_MAX) {
+        return -1;
+    }
+    *out = NULL;
+    if (out_len) {
+        *out_len = 0;
+    }
     ESP_LOGD(TAG, "HTTP %s: %s", body ? "POST" : "GET", url);
 
     // Use native request pattern (more reliable than perform() with event handler)
@@ -89,29 +100,83 @@ static int http_perform(const char *url, const char *body, const char *content_t
     int status_code = esp_http_client_get_status_code(client);
     ESP_LOGD(TAG, "HTTP Status=%d, content_length=%d", status_code, content_length);
 
-    // Allocate buffer for response
-    char *buffer = calloc(1, content_length + 1);
+    if ((size_t)content_length > max_response_bytes) {
+        ESP_LOGE(TAG, "Response too large: %d bytes (limit %zu)",
+                 content_length, max_response_bytes);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    size_t buffer_size = content_length > 0 ? (size_t)content_length + 1 : 4096;
+    if (buffer_size > max_response_bytes + 1) {
+        buffer_size = max_response_bytes + 1;
+    }
+    char *buffer = heap_caps_calloc(1, buffer_size,
+                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate response buffer");
+        ESP_LOGE(TAG, "Failed to allocate %zu-byte PSRAM response buffer",
+                 buffer_size);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return -1;
     }
 
-    // Read response
-    int data_read = esp_http_client_read_response(client, buffer, content_length);
-    if (data_read < 0) {
-        ESP_LOGE(TAG, "Failed to read response");
-        free(buffer);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return -1;
+    size_t total_read = 0;
+    while (true) {
+        if (content_length > 0 && total_read == (size_t)content_length) {
+            break;
+        }
+        if (total_read == max_response_bytes) {
+            char excess;
+            int excess_read = esp_http_client_read(client, &excess, 1);
+            if (excess_read == 0) {
+                break;
+            }
+            ESP_LOGE(TAG, "Response exceeded %zu-byte limit",
+                     max_response_bytes);
+            free(buffer);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            return -1;
+        }
+        if (total_read + 1 >= buffer_size) {
+            size_t new_size = buffer_size * 2;
+            if (new_size > max_response_bytes + 1) {
+                new_size = max_response_bytes + 1;
+            }
+            char *grown = heap_caps_realloc(
+                buffer, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!grown) {
+                ESP_LOGE(TAG, "Failed to grow PSRAM response buffer to %zu",
+                         new_size);
+                free(buffer);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return -1;
+            }
+            buffer = grown;
+            buffer_size = new_size;
+        }
+        int data_read = esp_http_client_read(
+            client, buffer + total_read, buffer_size - total_read - 1);
+        if (data_read < 0) {
+            ESP_LOGE(TAG, "Failed to read response");
+            free(buffer);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            return -1;
+        }
+        if (data_read == 0) {
+            break;
+        }
+        total_read += (size_t)data_read;
     }
 
-    buffer[data_read] = '\0';
+    buffer[total_read] = '\0';
     *out = buffer;
     if (out_len) {
-        *out_len = data_read;
+        *out_len = total_read;
     }
 
     esp_http_client_close(client);
@@ -120,11 +185,18 @@ static int http_perform(const char *url, const char *body, const char *content_t
 }
 
 int platform_http_get(const char *url, char **out, size_t *out_len) {
-    return http_perform(url, NULL, NULL, out, out_len);
+    return platform_http_get_bounded(url, PLATFORM_HTTP_JSON_MAX_BYTES,
+                                     out, out_len);
+}
+
+int platform_http_get_bounded(const char *url, size_t max_bytes,
+                              char **out, size_t *out_len) {
+    return http_perform(url, NULL, NULL, max_bytes, out, out_len);
 }
 
 int platform_http_post_json(const char *url, const char *json, char **out, size_t *out_len) {
-    return http_perform(url, json, "application/json", out, out_len);
+    return http_perform(url, json, "application/json",
+                        PLATFORM_HTTP_JSON_MAX_BYTES, out, out_len);
 }
 
 void platform_http_free(char *p) {

@@ -1,0 +1,15 @@
+menu "hiphi-frame Defaults"
+
+config RK_DEFAULT_SSID
+    string "Default WiFi SSID"
+    default ""
+
+config RK_DEFAULT_PASS
+    string "Default WiFi Password"
+    default ""
+
+config RK_DEFAULT_BRIDGE_BASE
+    string "Default Bridge Base URL (leave empty for mDNS discovery)"
+    default ""
+
+endmenu

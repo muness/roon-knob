@@ -1,4 +1,4 @@
-menu "Roon-Knob Defaults"
+menu "HiPhi Dial Defaults"
 
 config RK_DEFAULT_SSID
     string "Default WiFi SSID"

@@ -1,6 +1,6 @@
 # Kconfig Options
 
-This document covers the build-time configuration options available for the Roon Knob firmware.
+This document covers the build-time configuration options available for the HiPhi Dial firmware.
 
 ## Overview
 
@@ -8,7 +8,7 @@ ESP-IDF uses Kconfig for compile-time configuration. Options are defined in `Kco
 
 ## Project-Specific Options
 
-### Roon-Knob Defaults Menu
+### HiPhi Dial Defaults Menu
 
 Options for development and testing. In production, these are typically left empty (WiFi is configured via captive portal, bridge via mDNS).
 
@@ -22,7 +22,7 @@ Options for development and testing. In production, these are typically left emp
 
 ```bash
 idf.py menuconfig
-# Navigate to: Roon-Knob Defaults
+# Navigate to: HiPhi Dial Defaults
 # Set your home WiFi credentials
 ```
 

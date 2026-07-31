@@ -1,0 +1,14 @@
+{
+  "name": "HiPhi Frame (Alpha)",
+  "version": "latest",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [
+      { "path": "hiphi_frame_bootloader.bin", "offset": 0 },
+      { "path": "hiphi_frame_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_frame_ota_data_initial.bin", "offset": 53248 },
+      { "path": "hiphi_frame.bin", "offset": 65536 }
+    ]
+  }]
+}

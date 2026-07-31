@@ -32,7 +32,7 @@ void platform_mdns_init(const char *hostname) {
         ESP_LOGE(TAG, "mdns init failed: %s", esp_err_to_name(err));
         return;
     }
-    const char *host = (hostname && hostname[0]) ? hostname : "roon-knob";
+    const char *host = (hostname && hostname[0]) ? hostname : "hiphi-dial";
     ESP_LOGI(TAG, "mDNS hostname: %s", host);
     mdns_hostname_set(host);
 
@@ -44,7 +44,7 @@ void platform_mdns_init(const char *hostname) {
 
     // Also advertise device info for compatibility
     mdns_txt_item_t txt[] = {
-        {"product", "roon-knob"},
+        {"product", "hiphi-dial"},
     };
     mdns_service_add(NULL, "_device-info", "_udp", 9, txt, sizeof(txt) / sizeof(txt[0]));
 }
