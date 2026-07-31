@@ -15,7 +15,6 @@ idf_app/managed_components/*
 idf_app/sdkconfig.override
 frame_app/managed_components/*
 frame_app/sdkconfig.override
-rlcd_app/managed_components/*
-rlcd_app/sdkconfig.override
+tough_app/managed_components/*
 .claude/
 .oh/.cache/
