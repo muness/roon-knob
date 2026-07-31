@@ -1,0 +1,121 @@
+# hiphi-tough (M5Stack Tough, SKU K034) sdkconfig defaults
+#
+# Target: classic ESP32 (ESP32-D0WDQ6-V3), NOT ESP32-S3.
+# `CONFIG_IDF_TARGET` is not itself an sdkconfig.defaults knob that switches
+# toolchains -- it must be selected once with `idf.py set-target esp32`
+# (or via the `target: esp32` input to espressif/esp-idf-ci-action in CI)
+# before the first `idf.py build`. The line below documents the expected
+# value and lets ESP-IDF flag a mismatch if someone reconfigures in place.
+CONFIG_IDF_TARGET="esp32"
+
+# Partition table: factory-only, no OTA app slots. This mirrors frame_app's
+# precedent (see frame_app/partitions.csv) -- the `otadata` partition below
+# is still present because it is normal ESP-IDF bootloader boilerplate
+# (selects which app partition to boot), not an indication that OTA updates
+# are supported. This Alpha has no update path; a device must be reflashed
+# over USB to get new firmware.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+CONFIG_PARTITION_TABLE_MD5=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# This repo's release-profile policy (see AGENTS.md): never ship a debug
+# optimization build.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Shared configuration startup (controller_config.c) canonicalizes the
+# 570-byte V3 compatibility record through nested storage/read-back frames,
+# and provisioning starts the captive portal from the default event-loop
+# task. Match Dial/Frame's proven stack budgets rather than ESP-IDF defaults.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# PSRAM Configuration -- Tough's PSRAM is wired for QUAD SPI, not the OCTAL
+# mode used by the ESP32-S3 targets (Dial/Frame). Do not copy their
+# CONFIG_SPIRAM_MODE_OCT lines; classic ESP32 PSRAM does not support octal
+# mode at all.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# Required by the explicitly PSRAM-backed, network-only bridge worker stack
+# (same rationale as Dial/Frame -- shared controller code, not Tough-specific).
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
+
+# Wi-Fi buffer tuning: Dial and Frame bump these because BLE (NimBLE) is also
+# enabled on those targets and competes for the same internal/DMA-capable
+# heap. Tough has BLE permanently off for this Alpha (see below), so there is
+# no competing radio stack and no concrete reason to deviate from ESP-IDF's
+# ordinary Wi-Fi buffer defaults. Left unset intentionally.
+
+# Network identity
+CONFIG_LWIP_LOCAL_HOSTNAME="hiphi-tough"
+CONFIG_LWIP_NETIF_HOSTNAME=y
+
+# Brownout detection.
+# TODO(hardware-verify): classic ESP32 exposes brownout detector level
+# selection under different Kconfig symbol names than ESP32-S3
+# (Dial/Frame use CONFIG_ESP32S3_BROWNOUT_DET_LVL_SEL_4 /
+# CONFIG_ESP32S3_BROWNOUT_DET_LVL). The equivalent classic-ESP32 symbols are
+# believed to be CONFIG_ESP32_BROWNOUT_DET_LVL_SEL_4 / CONFIG_ESP32_BROWNOUT_DET_LVL,
+# but no ESP-IDF toolchain is available in this environment to menuconfig an
+# esp32-target sdkconfig and confirm the exact generated symbol names. Only
+# the generic, target-independent symbols are set below; verify the
+# target-specific ones against a real `idf.py set-target esp32 && idf.py
+# menuconfig` before relying on a non-default brownout level on hardware.
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_4=y
+CONFIG_ESP_BROWNOUT_DET_LVL=4
+
+# HTTP Server - larger header buffer for captive portal (same rationale as
+# Dial/Frame)
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# Console via UART (matches Frame's rationale: USB_SERIAL_JTAG is not present
+# on classic ESP32 in the same form as ESP32-S3 native USB, and Tough's CH9102
+# USB-UART bridge expects a plain UART console).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# Power Management
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+
+# LVGL configuration
+# LVGL JPEG Decoder - Disabled; this Alpha renders no artwork, unlike Dial.
+# CONFIG_LV_USE_TJPGD is not set
+# LVGL Examples - Disabled (unused, bloats build)
+# CONFIG_LV_BUILD_EXAMPLES is not set
+# Built-in Montserrat fonts for touch_ui.c's plain-text widgets (no
+# pre-rendered bitmap font pipeline exists for Tough in this Alpha).
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+# Keep a small latency-sensitive LVGL base heap in internal SRAM; main_tough.c
+# adds a PSRAM expansion pool before creating display/UI objects. Tough's
+# screen is smaller (320x240 vs Dial's 360x360 round display) and this Alpha
+# has fewer/simpler widgets (no artwork, no arcs, no bitmap fonts), so a
+# conservative 40 KiB PSRAM pool is used here instead of copying Dial's
+# measured 72 KiB figure verbatim.
+# TODO(hardware-verify): this has not been measured on real Tough hardware;
+# watch the "UI loop stack usage"/LVGL memory-monitor log lines in
+# main_tough.c on first bring-up and raise this if watermarks run tight,
+# per this project's practice of only trusting measured watermarks.
+CONFIG_LV_MEM_SIZE_KILOBYTES=16
+CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=40
+
+# --- Bluetooth: intentionally OFF ---
+# BLE is permanently disabled for this Tough Alpha slice pending #193/#191
+# classic-ESP32 Wi-Fi/BLE coexistence evidence. Classic ESP32 (unlike
+# ESP32-S3) also supports Classic Bluetooth (BR/EDR) in addition to BLE, which
+# changes the coexistence story again; until that is characterized on real
+# Tough hardware, no NimBLE/BT config is enabled here. Do NOT add
+# CONFIG_RK_BLE_HID_HOST, CONFIG_BT_ENABLED, or any CONFIG_BT_NIMBLE_* lines
+# to this file, and do not add any BLE component references to
+# tough_app/main/CMakeLists.txt or idf_component.yml.
