@@ -12,6 +12,9 @@
 static const char *TAG = "platform_mdns";
 static const char *SERVICE_TYPE = "_roonknob";
 static const char *SERVICE_PROTO = "_tcp";
+#ifndef PLATFORM_MDNS_PRODUCT
+#define PLATFORM_MDNS_PRODUCT "hiphi-frame"
+#endif
 static volatile bool s_mdns_ready = false;
 
 static void copy_str(char *dst, size_t len, const char *src) {
@@ -29,7 +32,7 @@ void platform_mdns_init(const char *hostname) {
         ESP_LOGE(TAG, "mdns init failed: %s", esp_err_to_name(err));
         return;
     }
-    const char *host = (hostname && hostname[0]) ? hostname : "hiphi-frame";
+    const char *host = (hostname && hostname[0]) ? hostname : PLATFORM_MDNS_PRODUCT;
     ESP_LOGI(TAG, "mDNS hostname: %s", host);
     mdns_hostname_set(host);
     mdns_instance_name_set(host);
@@ -37,7 +40,7 @@ void platform_mdns_init(const char *hostname) {
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 
     mdns_txt_item_t txt[] = {
-        {"product", "hiphi-frame"},
+        {"product", PLATFORM_MDNS_PRODUCT},
     };
     mdns_service_add(NULL, "_device-info", "_udp", 9, txt, sizeof(txt) / sizeof(txt[0]));
     s_mdns_ready = true;

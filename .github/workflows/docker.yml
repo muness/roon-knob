@@ -136,6 +136,30 @@ jobs:
             -o /tmp/test-controller-presentation-frame
           /tmp/test-controller-presentation-frame
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Irlcd_app/main \
+            rlcd_app/tests/rlcd_art_dither_test.c \
+            rlcd_app/main/rlcd_art_dither.c \
+            -o /tmp/test-rlcd-art-dither
+          /tmp/test-rlcd-art-dither
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Irlcd_app/main \
+            rlcd_app/tests/rlcd_st7305_window_test.c \
+            rlcd_app/main/rlcd_st7305_window.c \
+            -o /tmp/test-rlcd-st7305-window
+          /tmp/test-rlcd-st7305-window
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Irlcd_app/main \
+            rlcd_app/tests/rlcd_text_test.c \
+            rlcd_app/main/rlcd_text.c \
+            -o /tmp/test-rlcd-text
+          /tmp/test-rlcd-text
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon \
+            rlcd_app/tests/rlcd_input_profile_test.c \
+            rlcd_app/main/controller_input_profile_rlcd.c \
+            -o /tmp/test-rlcd-input-profile
+          /tmp/test-rlcd-input-profile
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Icommon \
             tests/test_controller_values.c \
             common/controller_view.c \
@@ -477,6 +501,91 @@ jobs:
             hiphi_frame_merged.bin
           retention-days: 30
 
+  build-rlcd:
+    name: build-rlcd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: rlcd-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep 'set(PROJECT_VER' rlcd_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Inject version into RLCD CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.rlcd-version.outputs.version }}")/' rlcd_app/CMakeLists.txt
+          grep PROJECT_VER rlcd_app/CMakeLists.txt
+
+      - name: Restore RLCD compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache-rlcd
+          key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-
+
+      - name: Restore RLCD managed components
+        uses: actions/cache@v5
+        with:
+          path: rlcd_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
+
+      - name: Build HiPhi RLCD with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: rlcd_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-rlcd
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM=y" sdkconfig;
+            grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
+            cp build/hiphi_rlcd_42.bin ../hiphi_rlcd.bin;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_rlcd_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size 16MB
+            0x0 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_rlcd_42.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin;
+            ccache --show-stats
+
+      - name: Verify merged HiPhi RLCD image
+        run: |
+          test "$(od -An -tu1 -j2 -N1 hiphi_rlcd_merged.bin | tr -d ' ')" = "2"
+          ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd.bin hiphi_rlcd_merged.bin
+
+      - name: Upload HiPhi RLCD artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-rlcd-firmware
+          path: |
+            rlcd_app/build/hiphi_rlcd_42.bin
+            rlcd_app/build/bootloader/bootloader.bin
+            rlcd_app/build/partition_table/partition-table.bin
+            rlcd_app/build/ota_data_initial.bin
+            hiphi_rlcd.bin
+            hiphi_rlcd_merged.bin
+          retention-days: 30
+
   build-ble-off:
     name: build-ble-off
     runs-on: ubuntu-latest
@@ -505,7 +614,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-ble-off]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -525,6 +634,12 @@ jobs:
         with:
           name: hiphi-frame-firmware
           path: frame-artifacts
+
+      - name: Download HiPhi RLCD firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-rlcd-firmware
+          path: rlcd-artifacts
 
       - name: Get version from tag
         id: version
@@ -590,6 +705,14 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin \
             release-assets/hiphi_frame_ota_data_initial.bin
           cp frame-artifacts/hiphi_frame_merged.bin release-assets/
+          cp rlcd-artifacts/hiphi_rlcd.bin release-assets/
+          cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_rlcd_bootloader.bin
+          cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_rlcd_partition-table.bin
+          cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin \
+            release-assets/hiphi_rlcd_ota_data_initial.bin
+          cp rlcd-artifacts/hiphi_rlcd_merged.bin release-assets/
           ls -la release-assets/
 
       - name: Build release body
@@ -632,6 +755,11 @@ jobs:
             release-assets/hiphi_frame_partition-table.bin
             release-assets/hiphi_frame_ota_data_initial.bin
             release-assets/hiphi_frame_merged.bin
+            release-assets/hiphi_rlcd.bin
+            release-assets/hiphi_rlcd_bootloader.bin
+            release-assets/hiphi_rlcd_partition-table.bin
+            release-assets/hiphi_rlcd_ota_data_initial.bin
+            release-assets/hiphi_rlcd_merged.bin
           body_path: final_body.md
 
       - name: Upload assets to existing release
@@ -972,6 +1100,12 @@ jobs:
           name: hiphi-frame-firmware
           path: frame-artifacts
 
+      - name: Download HiPhi RLCD firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-rlcd-firmware
+          path: rlcd-artifacts
+
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
@@ -993,8 +1127,12 @@ jobs:
           sed -e 's/{{TARGET_FILTER}}/frame/g' \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-frame.html
+          sed -e 's/{{TARGET_FILTER}}/rlcd/g' \
+            -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
+            > gh-pages-build/flash-rlcd.html
           cp web/manifest-s3.json gh-pages-build/
           cp web/manifest-frame.json gh-pages-build/
+          cp web/manifest-rlcd.json gh-pages-build/
           cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
           cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_dial_bootloader.bin
@@ -1016,10 +1154,20 @@ jobs:
             gh-pages-build/hiphi_frame_partition-table.bin
           cp frame-artifacts/frame_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_frame_ota_data_initial.bin
+          cp rlcd-artifacts/hiphi_rlcd_merged.bin gh-pages-build/
+          cp rlcd-artifacts/hiphi_rlcd.bin gh-pages-build/
+          cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_rlcd_bootloader.bin
+          cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_rlcd_partition-table.bin
+          cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin \
+            gh-pages-build/hiphi_rlcd_ota_data_initial.bin
           python3 scripts/check_flash_manifest.py \
             gh-pages-build/manifest-s3.json --assets-dir gh-pages-build
           python3 scripts/check_flash_manifest.py \
             gh-pages-build/manifest-frame.json --assets-dir gh-pages-build
+          python3 scripts/check_flash_manifest.py \
+            gh-pages-build/manifest-rlcd.json --assets-dir gh-pages-build
           echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
 

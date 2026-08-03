@@ -3,6 +3,10 @@
 
 #include "platform/platform_http.h"
 
+#ifndef PLATFORM_HTTP_DEVICE_TYPE
+#define PLATFORM_HTTP_DEVICE_TYPE "frame"
+#endif
+
 #include <esp_http_client.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -66,7 +70,7 @@ static int http_perform(const char *url, const char *body,
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", "frame");
+    esp_http_client_set_header(client, "X-Device-Type", PLATFORM_HTTP_DEVICE_TYPE);
 
     esp_err_t err = esp_http_client_open(client, body ? strlen(body) : 0);
     if (err != ESP_OK) {
@@ -95,6 +99,13 @@ static int http_perform(const char *url, const char *body,
 
     int status_code = esp_http_client_get_status_code(client);
     ESP_LOGD(TAG, "HTTP Status=%d, content_length=%d", status_code, content_length);
+
+    if (status_code < 200 || status_code >= 300) {
+        ESP_LOGW(TAG, "HTTP request failed with status %d", status_code);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
 
     if ((size_t)content_length > max_response_bytes) {
         ESP_LOGE(TAG, "Response too large: %d bytes (limit %zu)",
@@ -292,7 +303,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", "frame");
+    esp_http_client_set_header(client, "X-Device-Type", PLATFORM_HTTP_DEVICE_TYPE);
 
     if (esp_http_client_open(client, 0) != ESP_OK) {
         esp_http_client_cleanup(client);

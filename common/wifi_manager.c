@@ -177,6 +177,10 @@ static void provisioning_stop_effect(void) {
     unlock_provisioning_effect();
 }
 
+#ifndef PLATFORM_HOSTNAME_FROM_BRIDGE_NAME
+#define PLATFORM_HOSTNAME_FROM_BRIDGE_NAME 1
+#endif
+
 static void copy_str(char *dst, size_t dst_len, const char *src) {
     if (!dst || dst_len == 0) {
         return;
@@ -192,6 +196,7 @@ static void copy_str(char *dst, size_t dst_len, const char *src) {
     dst[in_len] = '\0';
 }
 
+#if PLATFORM_HOSTNAME_FROM_BRIDGE_NAME
 // Sanitize hostname: only alphanumeric + hyphen, convert to lowercase
 static void sanitize_hostname(const char *input, char *output, size_t output_len) {
     size_t j = 0;
@@ -228,6 +233,7 @@ static void sanitize_hostname(const char *input, char *output, size_t output_len
         snprintf(output, output_len, "%s", platform_device_slug());
     }
 }
+#endif
 
 // Get device hostname (cached, generated once per boot)
 // Priority: bridge-configured knob_name → MAC-based → platform default slug
@@ -237,7 +243,8 @@ static const char *get_device_hostname(void) {
         return s_device_hostname;
     }
 
-    // If the server has set a custom name, use a copied owner snapshot.
+#if PLATFORM_HOSTNAME_FROM_BRIDGE_NAME
+    // Targets that opt in may use the control server's friendly name.
     controller_config_snapshot_t config;
     if (controller_config_snapshot(&config) && config.value.knob_name[0] != '\0') {
         sanitize_hostname(config.value.knob_name, s_device_hostname,
@@ -245,6 +252,7 @@ static const char *get_device_hostname(void) {
         ESP_LOGI(TAG, "Hostname from bridge config: %s", s_device_hostname);
         return s_device_hostname;
     }
+#endif
 
     // Fallback to MAC-based hostname (last 3 bytes for uniqueness)
     uint8_t mac[6];
@@ -704,7 +712,9 @@ static void start_ap_mode(void) {
     ap_config.ap.authmode = WIFI_AUTH_OPEN;
     ap_config.ap.beacon_interval = 100;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    /* Keep the STA interface available while provisioning so the setup web
+     * page can scan for 2.4 GHz networks without taking its AP offline. */
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     if (lock_wifi_state()) {
@@ -1106,6 +1116,74 @@ void wifi_mgr_set_power_save(bool enable) {
         ESP_LOGW(TAG, "Failed to set WiFi power save: %s", esp_err_to_name(err));
     }
     unlock_wifi_effect();
+}
+
+size_t wifi_mgr_scan_2g(rk_wifi_network_t *out, size_t capacity) {
+    if (!out || capacity == 0 || !lock_wifi_effect()) {
+        return 0;
+    }
+    if (capacity > RK_WIFI_SCAN_MAX_NETWORKS) {
+        capacity = RK_WIFI_SCAN_MAX_NETWORKS;
+    }
+    bool started = false;
+    if (lock_wifi_state()) {
+        started = s_started;
+        unlock_wifi_state();
+    }
+    if (!started) {
+        unlock_wifi_effect();
+        return 0;
+    }
+
+    wifi_scan_config_t config = {
+        .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active = {.min = 50, .max = 120},
+    };
+    esp_err_t err = esp_wifi_scan_start(&config, true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
+        unlock_wifi_effect();
+        return 0;
+    }
+
+    uint16_t found = 0;
+    err = esp_wifi_scan_get_ap_num(&found);
+    if (err != ESP_OK || found == 0) {
+        unlock_wifi_effect();
+        return 0;
+    }
+    wifi_ap_record_t records[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+    uint16_t requested = found > RK_WIFI_SCAN_MAX_NETWORKS
+                             ? RK_WIFI_SCAN_MAX_NETWORKS : found;
+    err = esp_wifi_scan_get_ap_records(&requested, records);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not read WiFi scan results: %s", esp_err_to_name(err));
+        unlock_wifi_effect();
+        return 0;
+    }
+
+    size_t count = 0;
+    for (uint16_t i = 0; i < requested && count < capacity; ++i) {
+        if (records[i].primary > 14 || records[i].ssid[0] == '\0') {
+            continue;
+        }
+        bool duplicate = false;
+        for (size_t j = 0; j < count; ++j) {
+            if (strcmp(out[j].ssid, (const char *)records[i].ssid) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            copy_str(out[count].ssid, sizeof(out[count].ssid),
+                     (const char *)records[i].ssid);
+            out[count].rssi = records[i].rssi;
+            ++count;
+        }
+    }
+    unlock_wifi_effect();
+    return count;
 }
 
 __attribute__((weak)) void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {

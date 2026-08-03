@@ -62,7 +62,9 @@ static void show_picker_for_zones(const bridge_zone_t *zones,
     const char *names[BRIDGE_CLIENT_MAX_ZONES + 2];
     const char *ids[BRIDGE_CLIENT_MAX_ZONES + 2];
     int count = 0;
-    int selected = 1;
+    /* With no zones available, Back must be the safe default rather than the
+     * Settings sentinel. */
+    int selected = 0;
 
     names[count] = s_back_name;
     ids[count++] = s_back_id;
@@ -112,6 +114,10 @@ static bool select_picker_entry(void) {
     char selected_id[sizeof(((bridge_zone_t *)0)->id)] = {0};
     controller_presentation_zone_picker_get_selected_id(
         selected_id, sizeof(selected_id));
+
+    if (selected_id[0] == '\0') {
+        return hide_picker(CONTROLLER_INTERACTION_CONTEXT_MEDIA);
+    }
 
     if (strcmp(selected_id, ZONE_ID_BACK) == 0) {
         return hide_picker(CONTROLLER_INTERACTION_CONTEXT_MEDIA);

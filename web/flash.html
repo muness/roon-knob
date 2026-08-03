@@ -149,6 +149,33 @@
       </div>
     </div>
 
+    <!-- HiPhi RLCD -->
+    <div class="card" id="rlcd-card">
+      <h2>HiPhi RLCD <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 reflective LCD</span></h2>
+      <p class="description">
+        A dedicated now-playing controller for the Waveshare ESP32-S3-RLCD-4.2.
+      </p>
+      <p class="warning"><strong>Alpha firmware:</strong> RLCD support is hardware-tested, but remains an early target.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-rlcd.json">
+          <button slot="activate">Update HiPhi RLCD Alpha</button>
+          <span slot="unsupported">Not supported</span>
+          <span slot="not-allowed">HTTPS required</span>
+        </esp-web-install-button>
+        <span class="version-info" id="rlcd-version">Loading...</span>
+      </div>
+      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
+      <div class="steps">
+        <strong>Steps:</strong>
+        <ol>
+          <li>Connect the RLCD to your computer over USB-C</li>
+          <li>Click "Flash HiPhi RLCD" and select its serial port</li>
+          <li>Wait for flashing and the reflective display to start</li>
+          <li>Connect to <code>hiphi-rlcd-setup</code> to configure Wi-Fi</li>
+        </ol>
+      </div>
+    </div>
+
     <!-- HiPhi Frame -->
     <div class="card" id="frame-card">
       <h2>HiPhi Frame <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 e-ink</span></h2>
@@ -179,7 +206,8 @@
     <div class="warning">
       <strong>First time?</strong><br>
       HiPhi Dial creates <code>hiphi-dial-setup</code>; HiPhi Frame creates
-      <code>hiphi-frame-setup</code>. Connect to the matching network to configure WiFi.
+      <code>hiphi-frame-setup</code>; HiPhi RLCD creates <code>hiphi-rlcd-setup</code>.
+      Connect to the matching network to configure Wi-Fi.
     </div>
 
     <div class="requirements">
@@ -196,10 +224,16 @@
     const targetFilter = document.body.dataset.targetFilter;
     if (targetFilter === 'dial') {
       document.getElementById('frame-card').remove();
+      document.getElementById('rlcd-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi Dial Firmware';
     } else if (targetFilter === 'frame') {
       document.getElementById('dial-card').remove();
+      document.getElementById('rlcd-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi Frame Firmware';
+    } else if (targetFilter === 'rlcd') {
+      document.getElementById('dial-card').remove();
+      document.getElementById('frame-card').remove();
+      document.querySelector('h1').textContent = 'Flash HiPhi RLCD Firmware';
     }
 
     if (!('serial' in navigator)) {
@@ -210,10 +244,12 @@
       .then(data => {
         document.getElementById('s3-version').textContent = `v${data.version}`;
         document.getElementById('frame-version').textContent = `v${data.version}`;
+        document.getElementById('rlcd-version').textContent = `v${data.version}`;
       })
       .catch(() => {
         document.getElementById('s3-version').textContent = '(bundled)';
         document.getElementById('frame-version').textContent = '(bundled)';
+        document.getElementById('rlcd-version').textContent = '(bundled)';
       });
 
     // Dynamic back link: / on hosted web, /admin on bridge

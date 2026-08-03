@@ -17,6 +17,13 @@ typedef enum {
     RK_NET_EVT_AUTH_TIMEOUT,     // Authentication timeout
 } rk_net_evt_t;
 
+#define RK_WIFI_SCAN_MAX_NETWORKS 20
+
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+} rk_wifi_network_t;
+
 void wifi_mgr_start(void);                   // call once at boot
 void wifi_mgr_stop(void);                    // full stop (for BLE mode switch)
 /* Apply a copied, already-committed local-connectivity projection. This never
@@ -34,6 +41,9 @@ const char *wifi_mgr_get_last_error(void);   // get last disconnect reason strin
 int wifi_mgr_get_retry_count(void);          // get current retry attempt count (0 = connected)
 int wifi_mgr_get_retry_max(void);            // get max retries before AP mode
 void wifi_mgr_set_power_save(bool enable);   // enable/disable WiFi modem sleep
+/* Synchronously scan for visible 2.4 GHz networks. Safe while the setup AP
+ * is running; callers provide storage for up to RK_WIFI_SCAN_MAX_NETWORKS. */
+size_t wifi_mgr_scan_2g(rk_wifi_network_t *out, size_t capacity);
 
 // weak callback the UI can override (or register separately)
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);

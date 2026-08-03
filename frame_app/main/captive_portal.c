@@ -284,7 +284,7 @@ static bool get_form_field(const char *data, const char *field, char *out,
 
   // Decode before truncating: a 64-character password may occupy up to
   // 192 bytes while URL encoded.
-  char encoded[256];
+  char encoded[512];
   if (len >= sizeof(encoded)) {
     len = sizeof(encoded) - 1;
   }
@@ -332,7 +332,21 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
 
 // Validate URL is safe for href embedding (must start with http:// or https://)
 static bool is_safe_url(const char *url) {
-  return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
+  if (!url || !(strncmp(url, "http://", 7) == 0 ||
+                strncmp(url, "https://", 8) == 0)) {
+    return false;
+  }
+  const char *host = strstr(url, "://");
+  host = host ? host + 3 : NULL;
+  if (!host || !*host || *host == '/' || *host == ':') {
+    return false;
+  }
+  for (const char *p = url; *p; ++p) {
+    if ((unsigned char)*p <= ' ' || (unsigned char)*p == 0x7f) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Handler for POST /wifi-remove
@@ -396,6 +410,24 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
   const rk_cfg_t *cfg = &snapshot.value;
 
+  char query[32] = {0};
+  char scan_value[4] = {0};
+  bool scan_requested =
+      httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "scan", scan_value,
+                            sizeof(scan_value)) == ESP_OK &&
+      scan_value[0] == '1';
+  rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+  size_t network_count = scan_requested
+                             ? wifi_mgr_scan_2g(networks, RK_WIFI_SCAN_MAX_NETWORKS)
+                             : 0;
+
+  char escaped_bridge_base[sizeof(cfg->bridge_base) * 6] = "";
+  if (cfg->bridge_base[0] && is_safe_url(cfg->bridge_base)) {
+    html_escape(cfg->bridge_base, escaped_bridge_base,
+                sizeof(escaped_bridge_base));
+  }
+
   char wifi_html[1024] = "";
   int pos = 0;
   for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
@@ -410,6 +442,28 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         "</form></div>",
         escaped, i);
     if (pos >= (int)sizeof(wifi_html)) pos = (int)sizeof(wifi_html) - 1;
+  }
+
+  char scan_html[3072] = "";
+  if (scan_requested) {
+    int scan_pos = snprintf(scan_html, sizeof(scan_html),
+        "<h2>Nearby 2.4 GHz networks</h2><div class='section'>");
+    for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
+      char escaped[sizeof(networks[i].ssid) * 6] = "";
+      html_escape(networks[i].ssid, escaped, sizeof(escaped));
+      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+          "<button type='button' class='wifi-choice' data-ssid='%s' "
+          "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+          "%s <small>%d dBm</small></button>",
+          escaped, escaped, networks[i].rssi);
+    }
+    if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+          "<p>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
+    }
+    if (scan_pos < (int)sizeof(scan_html)) {
+      snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos, "</div>");
+    }
   }
 
   size_t html_size = 10240;  // Extra room for base64 favicon
@@ -446,18 +500,27 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
     "margin-top:20px;font-size:13px;}"
     ".note a{color:#4fc3f7;}"
+    ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;"
+    "color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
+    ".wifi-choice small{color:#aaa;float:right;}"
     "</style>"
     "%s"
     "</head><body>"
     "<h1>hiphi frame</h1>"
     "<p>WiFi Setup</p>"
-    "%s%s%s"
+    "%s%s%s%s"
+    "<p><a href='/?scan=1'>Scan nearby 2.4 GHz networks</a> or type an SSID below.</p>"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
-    "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    "<input id='ssid' type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
+    "<h2>Unified Hi-Fi Control</h2>"
+    "<label>Server address (optional)</label>"
+    "<input type='text' name='bridge_base' maxlength='127' value='%s' "
+    "placeholder='http://uhc.local:8088'>"
+    "<p>Leave blank to use network discovery.</p>"
     "<input type='submit' value='Connect'>"
     "</form>"
     "<div class='note'>"
@@ -469,7 +532,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     FAVICON_LINK,
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
-    cfg->wifi_count > 0 ? "</div>" : "");
+    cfg->wifi_count > 0 ? "</div>" : "",
+    scan_html,
+    escaped_bridge_base);
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
@@ -479,7 +544,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 
 // Handler for POST /configure - save credentials
 static esp_err_t configure_post_handler(httpd_req_t *req) {
-  char buf[384] = {0};
+  char buf[768] = {0};
   int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
   if (received <= 0) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
@@ -489,6 +554,7 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 
   char ssid[33] = {0};
   char pass[65] = {0};
+  char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
 
   if (!get_form_field(buf, "ssid", ssid, sizeof(ssid))) {
     ESP_LOGE(TAG, "Missing SSID");
@@ -496,6 +562,12 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   get_form_field(buf, "pass", pass, sizeof(pass));
+  get_form_field(buf, "bridge_base", bridge_base, sizeof(bridge_base));
+  if (bridge_base[0] && !is_safe_url(bridge_base)) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                        "Server address must start with http:// or https://");
+    return ESP_FAIL;
+  }
 
   ESP_LOGI(TAG, "Configuring WiFi: SSID='%s', pass=***", ssid);
 
@@ -555,6 +627,15 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
    * captive HTTP server from inside its own request handler; the next boot
    * will connect with the promoted network. */
   apply_committed_wifi(false);
+
+  controller_config_write_result_t endpoint_result =
+      controller_config_set_endpoint(bridge_base, false, NULL);
+  if (endpoint_result == CONTROLLER_CONFIG_NOT_COMMITTED) {
+    ESP_LOGE(TAG, "WiFi saved but Hi-Fi Control address was not saved");
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "WiFi saved, but the Hi-Fi Control address could not be saved");
+    return ESP_FAIL;
+  }
 
   httpd_resp_send_chunk(req, HTML_SUCCESS_HEAD, HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, FAVICON_LINK, HTTPD_RESP_USE_STRLEN);
@@ -685,7 +766,262 @@ static const char *STA_CSS =
     ".device{display:flex;justify-content:space-between;align-items:center;"
     "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;}"
     ".device form{display:inline;margin:0;}"
+    "label{display:block;margin:15px 0 5px;color:#aaa;}"
+    "input[type=text]{width:100%;padding:10px;border:1px solid #333;"
+    "border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
+    ".btn{padding:10px 14px;background:#4fc3f7;color:#000;border:0;"
+    "border-radius:5px;font-weight:bold;cursor:pointer;margin-top:14px;}"
     ;
+
+// ── STA-mode Unified Hi-Fi Control settings (GET/POST /settings) ──────────
+
+static esp_err_t sta_settings_handler(httpd_req_t *req) {
+  controller_config_snapshot_t snapshot = {0};
+  if (!controller_config_snapshot(&snapshot)) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Settings are unavailable");
+    return ESP_FAIL;
+  }
+
+  char escaped_bridge_base[sizeof(snapshot.value.bridge_base) * 6] = "";
+  if (snapshot.value.bridge_base[0] && is_safe_url(snapshot.value.bridge_base)) {
+    html_escape(snapshot.value.bridge_base, escaped_bridge_base,
+                sizeof(escaped_bridge_base));
+  }
+  uint32_t art_mode_timeout = snapshot.value.art_mode_battery_enabled
+                                  ? snapshot.value.art_mode_battery_timeout_sec
+                                  : 0;
+  const size_t html_size = 8192;
+  char *html = heap_caps_malloc(html_size,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!html) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
+  int length = snprintf(html, html_size,
+      "<!DOCTYPE html><html><head>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<title>hiphi frame - Settings</title><style>%s</style>%s</head><body>"
+      "<h1>hiphi frame</h1>"
+      "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+      "<a href='/settings'>Settings</a></nav>"
+      "<div class='card'><h2>Unified Hi-Fi Control</h2>"
+      "<p class='status'>Enter the address of your Unified Hi-Fi Control server. "
+      "Leave it blank to use network discovery.</p>"
+      "<form method='POST' action='/api/endpoint'>"
+      "<label>Server address</label>"
+      "<input type='text' name='bridge_base' maxlength='127' value='%s' "
+      "placeholder='http://uhc.local:8088'>"
+      "<button type='submit' class='btn'>Save server address</button>"
+      "</form></div>"
+      "<div class='card'><h2>Album art display</h2>"
+      "<p class='status'>After this many seconds without input, show album art full-screen. "
+      "Use 0 to keep the controls visible.</p>"
+      "<form method='POST' action='/api/display'>"
+      "<label>Album art timeout (seconds)</label>"
+      "<input type='number' name='art_mode_timeout_sec' min='0' max='86400' value='%lu'>"
+      "<button type='submit' class='btn'>Save display setting</button>"
+      "</form></div></body></html>",
+      STA_CSS, FAVICON_LINK, escaped_bridge_base,
+      (unsigned long)art_mode_timeout);
+  if (length < 0) length = 0;
+  if (length >= (int)html_size) length = (int)html_size - 1;
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, length);
+  free(html);
+  return ESP_OK;
+}
+
+static esp_err_t sta_endpoint_set_handler(httpd_req_t *req) {
+  char body[512] = {0};
+  int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+    return ESP_FAIL;
+  }
+  body[received] = '\0';
+
+  char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
+  if (!get_form_field(body, "bridge_base", bridge_base, sizeof(bridge_base))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing server address");
+    return ESP_FAIL;
+  }
+  if (bridge_base[0] && !is_safe_url(bridge_base)) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                        "Server address must start with http:// or https://");
+    return ESP_FAIL;
+  }
+
+  controller_config_write_result_t result =
+      controller_config_set_endpoint(bridge_base, false, NULL);
+  if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Could not save server address");
+    return ESP_FAIL;
+  }
+  ESP_LOGI(TAG, "Web UI: %s Hi-Fi Control server address",
+           bridge_base[0] ? "updated" : "cleared");
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/settings");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+static esp_err_t sta_display_set_handler(httpd_req_t *req) {
+  char body[256] = {0};
+  int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+    return ESP_FAIL;
+  }
+  body[received] = '\0';
+
+  char timeout_text[16] = {0};
+  if (!get_form_field(body, "art_mode_timeout_sec", timeout_text,
+                      sizeof(timeout_text))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing album art timeout");
+    return ESP_FAIL;
+  }
+  char *end = NULL;
+  unsigned long timeout = strtoul(timeout_text, &end, 10);
+  if (end == timeout_text || *end != '\0' || timeout > 86400UL) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                        "Album art timeout must be 0-86400 seconds");
+    return ESP_FAIL;
+  }
+
+  controller_remote_preferences_t preferences = {0};
+  preferences.present = CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_ENABLED |
+                        CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_TIMEOUT;
+  preferences.art_mode_battery_enabled = timeout != 0;
+  preferences.art_mode_battery_timeout_sec = (uint32_t)timeout;
+  controller_config_write_result_t result =
+      controller_config_merge_remote_preferences(&preferences, NULL);
+  if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Could not save display settings");
+    return ESP_FAIL;
+  }
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/settings");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
+// ── STA-mode Wi-Fi settings (GET/POST /wifi) ───────────────────────────────
+
+static esp_err_t sta_wifi_handler(httpd_req_t *req) {
+  controller_config_snapshot_t snapshot = {0};
+  if (!controller_config_snapshot(&snapshot)) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Settings are unavailable");
+    return ESP_FAIL;
+  }
+  char query[32] = {0};
+  char scan_value[4] = {0};
+  bool scan_requested =
+      httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "scan", scan_value,
+                            sizeof(scan_value)) == ESP_OK &&
+      scan_value[0] == '1';
+  rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+  size_t network_count = scan_requested
+                             ? wifi_mgr_scan_2g(networks, RK_WIFI_SCAN_MAX_NETWORKS)
+                             : 0;
+
+  char saved_html[1024] = "";
+  int saved_pos = 0;
+  for (int i = 0; i < snapshot.value.wifi_count && i < RK_MAX_WIFI; ++i) {
+    char escaped[sizeof(snapshot.value.wifi[i].ssid) * 6] = "";
+    html_escape(snapshot.value.wifi[i].ssid, escaped, sizeof(escaped));
+    saved_pos += snprintf(saved_html + saved_pos, sizeof(saved_html) - saved_pos,
+                          "<div class='device'><span>%s%s</span></div>", escaped,
+                          i == 0 ? " (current)" : "");
+    if (saved_pos >= (int)sizeof(saved_html)) {
+      saved_pos = (int)sizeof(saved_html) - 1;
+      break;
+    }
+  }
+  char scan_html[3072] = "";
+  if (scan_requested) {
+    int scan_pos = snprintf(scan_html, sizeof(scan_html),
+                            "<h2>Nearby 2.4 GHz networks</h2>");
+    for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
+      char escaped[sizeof(networks[i].ssid) * 6] = "";
+      html_escape(networks[i].ssid, escaped, sizeof(escaped));
+      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+          "<button type='button' class='wifi-choice' data-ssid='%s' "
+          "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+          "%s <small>%d dBm</small></button>", escaped, escaped, networks[i].rssi);
+    }
+    if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+      snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+               "<p class='status'>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
+    }
+  }
+
+  const size_t html_size = 12288;
+  char *html = heap_caps_malloc(html_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!html) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
+  int length = snprintf(html, html_size,
+      "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<title>hiphi frame - Wi-Fi</title><style>%s"
+      ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;color:#eee;"
+      "border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
+      ".wifi-choice small{color:#aaa;float:right;}</style>%s</head><body>"
+      "<h1>hiphi frame</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+      "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a></nav>"
+      "<div class='card'><h2>Saved Wi-Fi networks</h2>%s</div>"
+      "<div class='card'><h2>Add a Wi-Fi network</h2>"
+      "<p class='status'><a href='/wifi?scan=1'>Scan nearby 2.4 GHz networks</a> or type a hidden network below.</p>"
+      "%s<form method='POST' action='/api/wifi'>"
+      "<label>Wi-Fi network (SSID)</label><input id='ssid' type='text' name='ssid' required maxlength='32'>"
+      "<label>Password</label><input type='text' name='pass' maxlength='64'>"
+      "<button type='submit' class='btn'>Save network</button></form></div></body></html>",
+      STA_CSS, FAVICON_LINK, saved_html[0] ? saved_html : "<p class='status'>None saved.</p>",
+      scan_html);
+  if (length < 0) length = 0;
+  if (length >= (int)html_size) length = (int)html_size - 1;
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, length);
+  free(html);
+  return ESP_OK;
+}
+
+static esp_err_t sta_wifi_add_handler(httpd_req_t *req) {
+  char body[384] = {0};
+  int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+    return ESP_FAIL;
+  }
+  body[received] = '\0';
+  char ssid[33] = {0};
+  char pass[65] = {0};
+  if (!get_form_field(body, "ssid", ssid, sizeof(ssid))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
+    return ESP_FAIL;
+  }
+  get_form_field(body, "pass", pass, sizeof(pass));
+  controller_config_write_result_t result =
+      controller_config_upsert_wifi(ssid, pass, false, NULL);
+  if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
+    httpd_resp_set_status(req, "409 Conflict");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req,
+                       "Could not save network; remove a saved network first");
+    return ESP_FAIL;
+  }
+  apply_committed_wifi(false);
+  ESP_LOGI(TAG, "Web UI: saved additional WiFi network '%s'", ssid);
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/wifi");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
 
 // ── STA-mode zone picker page (GET /zones) ─────────────────────────────────
 
@@ -718,7 +1054,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<title>hiphi frame - Zones</title>"
     "<style>%s</style>%s</head><body>"
     "<h1>hiphi frame</h1>"
-    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -854,7 +1190,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<title>hiphi frame - BLE Remote</title>"
     "<style>%s</style>%s%s</head><body>"
     "<h1>hiphi frame</h1>"
-    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>BLE Media Remote</h2>",
@@ -1172,6 +1508,21 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t restart = {.uri = "/api/restart", .method = HTTP_POST, .handler = sta_restart_handler};
   if (!register_uri_handler(&restart)) goto fail;
+
+  httpd_uri_t settings = {.uri = "/settings", .method = HTTP_GET, .handler = sta_settings_handler};
+  if (!register_uri_handler(&settings)) goto fail;
+
+  httpd_uri_t endpoint = {.uri = "/api/endpoint", .method = HTTP_POST, .handler = sta_endpoint_set_handler};
+  if (!register_uri_handler(&endpoint)) goto fail;
+
+  httpd_uri_t display = {.uri = "/api/display", .method = HTTP_POST, .handler = sta_display_set_handler};
+  if (!register_uri_handler(&display)) goto fail;
+
+  httpd_uri_t wifi = {.uri = "/wifi", .method = HTTP_GET, .handler = sta_wifi_handler};
+  if (!register_uri_handler(&wifi)) goto fail;
+
+  httpd_uri_t wifi_add = {.uri = "/api/wifi", .method = HTTP_POST, .handler = sta_wifi_add_handler};
+  if (!register_uri_handler(&wifi_add)) goto fail;
 
   s_server_mode = WEB_SERVER_STA_CONFIG;
   ESP_LOGI(TAG, "STA web server started (zone picker + BLE config)");

@@ -208,9 +208,13 @@ static bool start_bridge_poll_task(void) {
         LOGI("Bridge worker internal heap before start: free=%zu largest=%zu",
              heap_before, largest_before);
     }
-    if (platform_task_start_external_stack("bridge_poll",
-                                           BRIDGE_POLL_TASK_STACK_SIZE,
-                                           bridge_poll_thread, NULL) == 0) {
+    /* The poller can persist a discovered or selected zone.  NVS temporarily
+     * disables the external-memory cache, so this task must have an internal
+     * RAM stack; the external-stack API is explicitly only for non-persisting
+     * background work. */
+    if (platform_task_start_configured("bridge_poll",
+                                       BRIDGE_POLL_TASK_STACK_SIZE,
+                                       bridge_poll_thread, NULL) == 0) {
         size_t heap_after = platform_task_internal_heap_free_bytes();
         size_t largest_after =
             platform_task_internal_heap_largest_free_block_bytes();
@@ -686,9 +690,18 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     platform_http_get_knob_id(knob_id, sizeof(knob_id));
 
     char url[384];
-    snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_level=%d&battery_charging=%d&knob_id=%s",
-             bridge_base, zone_id, battery_level, battery_charging ? 1 : 0, knob_id);
-
+    if (battery_level >= 0 && battery_level <= 100) {
+        snprintf(url, sizeof(url),
+                 "%s/now_playing?zone_id=%s&battery_level=%d&battery_charging=%d&knob_id=%s",
+                 bridge_base, zone_id, battery_level, battery_charging ? 1 : 0,
+                 knob_id);
+    } else {
+        /* Some mains-powered targets have no battery gauge.  Omitting the
+         * optional field is valid; sending -1 makes UHC's u8 query parser
+         * reject the whole request. */
+        snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_charging=%d&knob_id=%s",
+                 bridge_base, zone_id, battery_charging ? 1 : 0, knob_id);
+    }
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_get(url, &resp, &resp_len);
@@ -1179,7 +1192,7 @@ void bridge_client_start(void) {
     platform_task_init();
     lock_state();
     strncpy(s_state.zone_label,
-            cfg.zone_id[0] ? cfg.zone_id : "Tap here to select zone",
+            cfg.zone_id[0] ? cfg.zone_id : "Choose a zone in device controls",
             sizeof(s_state.zone_label) - 1);
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     char initial_zone_label[MAX_ZONE_NAME];
