@@ -22,6 +22,7 @@ typedef void (*esp_event_handler_t)(void *, esp_event_base_t, int32_t, void *);
 #define IP_EVENT 2
 #define WIFI_EVENT_STA_START 1
 #define WIFI_EVENT_STA_DISCONNECTED 2
+#define WIFI_EVENT_SCAN_DONE 3
 #define IP_EVENT_STA_GOT_IP 1
 #define ESP_EVENT_ANY_ID (-1)
 
@@ -80,6 +81,25 @@ typedef struct {
     } ap;
 } wifi_config_t;
 
+typedef struct {
+    uint16_t min;
+    uint16_t max;
+} wifi_active_scan_time_t;
+
+typedef struct {
+    bool show_hidden;
+    int scan_type;
+    union {
+        wifi_active_scan_time_t active;
+    } scan_time;
+} wifi_scan_config_t;
+
+typedef struct {
+    uint8_t ssid[33];
+    int8_t rssi;
+    uint8_t primary;
+} wifi_ap_record_t;
+
 typedef struct { int unused; } wifi_init_config_t;
 typedef struct { uint8_t reason; } wifi_event_sta_disconnected_t;
 typedef struct { struct { esp_ip4_addr_t ip; } ip_info; } ip_event_got_ip_t;
@@ -89,6 +109,8 @@ typedef struct { struct { esp_ip4_addr_t ip; } ip_info; } ip_event_got_ip_t;
 #define WIFI_AUTH_OPEN 0
 #define WIFI_MODE_STA 1
 #define WIFI_MODE_AP 2
+#define WIFI_MODE_APSTA 3
+#define WIFI_SCAN_TYPE_ACTIVE 0
 #define WIFI_PS_NONE 0
 #define WIFI_PS_MIN_MODEM 1
 #define WIFI_REASON_NO_AP_FOUND 10
@@ -115,6 +137,11 @@ esp_err_t esp_wifi_stop(void);
 esp_err_t esp_wifi_connect(void);
 esp_err_t esp_wifi_disconnect(void);
 esp_err_t esp_wifi_set_max_tx_power(int power);
+esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block);
+esp_err_t esp_wifi_scan_get_ap_num(uint16_t *number);
+esp_err_t esp_wifi_scan_get_ap_records(uint16_t *number,
+                                       wifi_ap_record_t *records);
+esp_err_t esp_wifi_clear_ap_list(void);
 
 #define WIFI_IF_STA 0
 #define WIFI_IF_AP 1

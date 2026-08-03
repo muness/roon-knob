@@ -23,7 +23,11 @@ static int s_provisioning_start_calls;
 static int s_provisioning_stop_calls;
 static int s_wifi_connect_calls;
 static wifi_config_t s_last_sta_config;
-static esp_event_handler_t s_wifi_handler;
+static struct {
+    int32_t event_id;
+    esp_event_handler_t handler;
+} s_wifi_handlers[2];
+static size_t s_wifi_handler_count;
 static esp_event_handler_t s_ip_handler;
 static pthread_mutex_t s_fixture_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_fixture_cond = PTHREAD_COND_INITIALIZER;
@@ -45,7 +49,8 @@ void fixture_reset(void) {
     s_provisioning_stop_calls = 0;
     s_wifi_connect_calls = 0;
     memset(&s_last_sta_config, 0, sizeof(s_last_sta_config));
-    s_wifi_handler = NULL;
+    memset(s_wifi_handlers, 0, sizeof(s_wifi_handlers));
+    s_wifi_handler_count = 0;
     s_ip_handler = NULL;
     pthread_mutex_lock(&s_fixture_lock);
     s_block_task_delay = false;
@@ -113,15 +118,16 @@ void fixture_timer_fire(const char *name) {
 }
 
 void fixture_emit_sta_start(void) {
-    if (s_wifi_handler) {
-        s_wifi_handler(NULL, WIFI_EVENT, WIFI_EVENT_STA_START, NULL);
+    for (size_t i = 0; i < s_wifi_handler_count; ++i) {
+        s_wifi_handlers[i].handler(NULL, WIFI_EVENT, WIFI_EVENT_STA_START, NULL);
     }
 }
 
 void fixture_emit_sta_disconnected(uint8_t reason) {
-    if (s_wifi_handler) {
-        wifi_event_sta_disconnected_t event = {.reason = reason};
-        s_wifi_handler(NULL, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &event);
+    wifi_event_sta_disconnected_t event = {.reason = reason};
+    for (size_t i = 0; i < s_wifi_handler_count; ++i) {
+        s_wifi_handlers[i].handler(NULL, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
+                                    &event);
     }
 }
 
@@ -198,10 +204,13 @@ const char *esp_err_to_name(esp_err_t err) {
 esp_err_t esp_event_loop_create_default(void) { return ESP_OK; }
 esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id,
                                      esp_event_handler_t handler, void *arg) {
-    (void)id;
     (void)arg;
     if (base == WIFI_EVENT) {
-        s_wifi_handler = handler;
+        if (s_wifi_handler_count < sizeof(s_wifi_handlers) / sizeof(s_wifi_handlers[0])) {
+            s_wifi_handlers[s_wifi_handler_count].event_id = id;
+            s_wifi_handlers[s_wifi_handler_count].handler = handler;
+            ++s_wifi_handler_count;
+        }
     } else if (base == IP_EVENT) {
         s_ip_handler = handler;
     }
@@ -210,7 +219,15 @@ esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id,
 esp_err_t esp_event_handler_unregister(esp_event_base_t base, int32_t id,
                                        esp_event_handler_t handler) {
     if (base == WIFI_EVENT) {
-        s_wifi_handler = NULL;
+        for (size_t i = 0; i < s_wifi_handler_count; ++i) {
+            if (s_wifi_handlers[i].event_id == id &&
+                s_wifi_handlers[i].handler == handler) {
+                memmove(&s_wifi_handlers[i], &s_wifi_handlers[i + 1],
+                        (s_wifi_handler_count - i - 1) * sizeof(s_wifi_handlers[0]));
+                --s_wifi_handler_count;
+                break;
+            }
+        }
     } else if (base == IP_EVENT) {
         s_ip_handler = NULL;
     }
@@ -267,7 +284,7 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t timeout_us) {
 esp_err_t esp_wifi_init(const wifi_init_config_t *cfg) { (void)cfg; return ESP_OK; }
 esp_err_t esp_wifi_deinit(void) { return ESP_OK; }
 esp_err_t esp_wifi_set_mode(int mode) {
-    if (mode == WIFI_MODE_AP) {
+    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
         pthread_mutex_lock(&s_fixture_lock);
         s_ap_mode_sequence = ++s_effect_sequence;
         pthread_mutex_unlock(&s_fixture_lock);
@@ -292,6 +309,26 @@ esp_err_t esp_wifi_connect(void) {
 }
 esp_err_t esp_wifi_disconnect(void) { return ESP_OK; }
 esp_err_t esp_wifi_set_max_tx_power(int power) { (void)power; return ESP_OK; }
+esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block) {
+    (void)config;
+    (void)block;
+    return ESP_OK;
+}
+esp_err_t esp_wifi_scan_get_ap_num(uint16_t *number) {
+    if (number) {
+        *number = 0;
+    }
+    return ESP_OK;
+}
+esp_err_t esp_wifi_scan_get_ap_records(uint16_t *number,
+                                       wifi_ap_record_t *records) {
+    (void)records;
+    if (number) {
+        *number = 0;
+    }
+    return ESP_OK;
+}
+esp_err_t esp_wifi_clear_ap_list(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 void vTaskDelay(unsigned ticks) {
     (void)ticks;
