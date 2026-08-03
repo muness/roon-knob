@@ -206,10 +206,39 @@
       </div>
     </div>
 
+    <!-- HiPhi RLCD -->
+    <div class="card" id="rlcd-card">
+      <h2>HiPhi RLCD <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 RLCD</span></h2>
+      <p class="description">
+        The reflective LCD now-playing controller with physical BOOT, KEY, and
+        power buttons, artwork, playback, volume, and zone controls.
+      </p>
+      <p class="warning"><strong>Alpha firmware:</strong> RLCD is under active hardware testing. Install for early testing and expect rough edges.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-rlcd.json">
+          <button slot="activate">Update HiPhi RLCD Alpha</button>
+          <span slot="unsupported">Not supported</span>
+          <span slot="not-allowed">HTTPS required</span>
+        </esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
+      <div class="steps">
+        <strong>Steps:</strong>
+        <ol>
+          <li>Connect the RLCD to your computer over USB-C</li>
+          <li>Click "Flash HiPhi RLCD" and select its serial port</li>
+          <li>Wait for flashing and the first reflective LCD refresh to complete</li>
+          <li>Connect to <code>hiphi-rlcd-setup</code> to configure WiFi</li>
+        </ol>
+      </div>
+    </div>
+
     <div class="warning">
       <strong>First time?</strong><br>
       HiPhi Dial creates <code>hiphi-dial-setup</code>; HiPhi Frame creates
-      <code>hiphi-frame-setup</code>. Connect to the matching network to configure WiFi.
+      <code>hiphi-frame-setup</code>; HiPhi RLCD creates <code>hiphi-rlcd-setup</code>.
+      Connect to the matching network to configure WiFi.
     </div>
 
     <div class="requirements">
@@ -228,10 +257,16 @@
     previewSubject.textContent = atob(previewSubject.dataset.subjectB64);
     if (targetFilter === 'dial') {
       document.getElementById('frame-card').remove();
+      document.getElementById('rlcd-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi Dial Firmware';
     } else if (targetFilter === 'frame') {
       document.getElementById('dial-card').remove();
+      document.getElementById('rlcd-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi Frame Firmware';
+    } else if (targetFilter === 'rlcd') {
+      document.getElementById('dial-card').remove();
+      document.getElementById('frame-card').remove();
+      document.querySelector('h1').textContent = 'Flash HiPhi RLCD Firmware';
     }
 
     if (!('serial' in navigator)) {
