@@ -78,6 +78,10 @@ static lv_image_dsc_t s_artwork_dsc;
 static lv_image_dsc_t s_artwork_full_dsc;
 static bool s_art_mode;
 static bool s_art_mode_rendered;
+/* A controller full refresh must be paired with a full LVGL repaint.  The
+ * panel's framebuffer can otherwise contain a stale/partially rendered image
+ * even though the ST7305 is about to transmit all of it. */
+static bool s_full_redraw_pending;
 static bool s_key_track_mode;
 static uint32_t s_art_mode_timeout_seconds = RK_DEFAULT_ART_MODE_BATTERY_TIMEOUT_SEC;
 static uint64_t s_art_mode_deadline_ms;
@@ -100,6 +104,11 @@ static bool set_text_if_changed(char *out, size_t length, const char *in) {
 static void mark_dirty(void) {
     s_view.dirty = true;
     s_view.last_change_ms = now_ms();
+}
+
+static void request_full_redraw(void) {
+    rlcd_display_request_full_refresh();
+    s_full_redraw_pending = true;
 }
 
 static void hide_meters(void) {
@@ -525,7 +534,7 @@ void rlcd_ui_process(void) {
         now_ms() >= s_art_mode_deadline_ms) {
         s_art_mode = true;
         s_art_mode_rendered = false;
-        rlcd_display_request_full_refresh();
+        request_full_redraw();
         s_view.dirty = true;
     }
     if (!s_view.dirty) return;
@@ -537,12 +546,19 @@ void rlcd_ui_process(void) {
     if (!s_view.picker_visible &&
         now_ms() - s_view.last_change_ms < RLCD_REFRESH_DEBOUNCE_MS) return;
     s_view.dirty = false;
+    bool full_redraw = s_full_redraw_pending;
+    if (full_redraw) {
+        lv_obj_invalidate(s_screen);
+    }
     apply_view();
     /* This panel has no animations or touch input.  Do not run LVGL's normal
      * periodic render loop: it can invalidate and reflush autonomously.  A
      * state transition explicitly renders once, then the ST7305 is left
      * undisturbed until the next visible transition. */
     lv_refr_now(s_display);
+    if (full_redraw) {
+        s_full_redraw_pending = false;
+    }
     rlcd_display_refresh();
 }
 
@@ -556,7 +572,7 @@ void rlcd_ui_set_art_mode_timeout(uint32_t timeout_seconds) {
         now_ms() + (uint64_t)timeout_seconds * 1000ULL : 0;
     if (!timeout_seconds && s_art_mode) {
         s_art_mode = false;
-        rlcd_display_request_full_refresh();
+        request_full_redraw();
     }
 }
 bool rlcd_ui_handle_activity(void) {
@@ -572,7 +588,7 @@ bool rlcd_ui_handle_activity(void) {
     s_art_mode_rendered = false;
     s_art_mode_deadline_ms = s_art_mode_timeout_seconds ?
         now_ms() + (uint64_t)s_art_mode_timeout_seconds * 1000ULL : 0;
-    rlcd_display_request_full_refresh();
+    request_full_redraw();
     mark_dirty();
     return true;
 }
@@ -588,7 +604,7 @@ bool rlcd_ui_enter_art_mode(void) {
     }
     s_art_mode = true;
     s_art_mode_rendered = false;
-    rlcd_display_request_full_refresh();
+    request_full_redraw();
     mark_dirty();
     return true;
 }
@@ -604,7 +620,7 @@ void rlcd_ui_set_network_status(const char *value) {
 void rlcd_ui_set_setup_mode(bool enabled) {
     if (s_view.setup_mode != enabled) {
         s_view.setup_mode = enabled;
-        rlcd_display_request_full_refresh();
+        request_full_redraw();
         mark_dirty();
     }
 }
@@ -616,7 +632,7 @@ void rlcd_ui_set_artwork(const char *value) {
     } else if (!key[0]) {
         s_artwork_dsc.data = NULL;
     }
-    rlcd_display_request_full_refresh();
+    request_full_redraw();
     if (key[0] && s_art_mode_timeout_seconds) {
         s_art_mode_deadline_ms = now_ms() +
             (uint64_t)s_art_mode_timeout_seconds * 1000ULL;
@@ -628,7 +644,7 @@ void rlcd_ui_set_artwork(const char *value) {
 bool rlcd_ui_dismiss_usage_key(void) {
     if (!s_view.usage_key_visible) return false;
     s_view.usage_key_visible = false;
-    rlcd_display_request_full_refresh();
+    request_full_redraw();
     mark_dirty();
     return true;
 }
@@ -656,14 +672,14 @@ void rlcd_ui_show_zone_picker(const char **names, const char **ids,
                   ids && ids[i] ? ids[i] : "");
     }
     s_view.picker_visible = true;
-    rlcd_display_request_full_refresh();
+    request_full_redraw();
     mark_dirty();
 }
 
 void rlcd_ui_hide_zone_picker(void) {
     if (s_view.picker_visible) {
         s_view.picker_visible = false;
-        rlcd_display_request_full_refresh();
+        request_full_redraw();
         mark_dirty();
     }
 }
