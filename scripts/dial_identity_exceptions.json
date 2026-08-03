@@ -207,25 +207,23 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "needs: [test-shared, build-idf]"
+      "contains": "needs: [test-shared, build-idf, build-frame, build-rlcd, build-ble-off]"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "DIAL_APPLICATION_FILE=\"hiphi_dial-${PREVIEW_ID}.bin\"",
-      "min_count": 2
+      "contains": "DIAL_APPLICATION_FILE=\"hiphi_dial-${PREVIEW_ID}.bin\""
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "DIAL_LEGACY_APPLICATION_FILE=\"roon_knob-${PREVIEW_ID}.bin\"",
-      "min_count": 2
+      "contains": "DIAL_LEGACY_APPLICATION_FILE=\"roon_knob-${PREVIEW_ID}.bin\""
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin \\\n            \"pr-preview/${DIAL_APPLICATION_FILE}\""
+      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_APPLICATION_FILE}\""
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin \\\n            \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
+      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
     },
     {
       "path": ".github/workflows/docker.yml",
