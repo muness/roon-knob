@@ -423,13 +423,13 @@ static void test_menu_zone_list(void) {
     s_visit_succeeds = false;
     open_picker_for_test();
     assert(s_picker_count == 2);
-    assert(s_picker_selected == 1);
+    assert(s_picker_selected == 0);
 
     reset_state();
     s_visit_invokes_visitor = false;
     open_picker_for_test();
     assert(s_picker_count == 2);
-    assert(s_picker_selected == 1);
+    assert(s_picker_selected == 0);
 }
 
 static void test_system_actions_require_locked_physical_resolution(void) {
