@@ -48,5 +48,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PLATFORM_HTTP_DEVICE_TYPE="rlcd-42"
     PLATFORM_MDNS_PRODUCT="hiphi-rlcd-42"
     PLATFORM_HOSTNAME_FROM_BRIDGE_NAME=0
+    PLATFORM_PORTAL_PRODUCT_NAME="HiPhi RLCD"
+    PLATFORM_PORTAL_PRODUCT_SLUG="hiphi rlcd"
 )
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)

@@ -9,6 +9,7 @@
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <nvs_flash.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "controller_config.h"
@@ -107,6 +108,9 @@ static bool s_wifi_mode_transitioning;
 static int s_sta_fail_count;     // consecutive STA connection failures
 static char s_device_hostname[32] = {0};  // cached network hostname
 static int s_wifi_idx;           // index into this device's saved WiFi list
+static rk_wifi_scan_state_t s_scan_state = RK_WIFI_SCAN_IDLE;
+static rk_wifi_network_t s_scan_results[RK_WIFI_SCAN_MAX_NETWORKS];
+static size_t s_scan_count;
 
 #ifdef ESP_PLATFORM
 /* os_mutex_lock() provides convenient lazy allocation on ESP, but that
@@ -619,6 +623,97 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     }
 }
 
+static void wifi_scan_done_handler(void *arg, esp_event_base_t event_base,
+                                   int32_t event_id, void *event_data) {
+    (void)arg;
+    (void)event_data;
+    if (event_base != WIFI_EVENT || event_id != WIFI_EVENT_SCAN_DONE) {
+        return;
+    }
+
+    uint16_t found = 0;
+    esp_err_t err = esp_wifi_scan_get_ap_num(&found);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not read WiFi scan count: %s", esp_err_to_name(err));
+        (void)esp_wifi_clear_ap_list();
+        if (lock_wifi_state()) {
+            s_scan_count = 0;
+            s_scan_state = RK_WIFI_SCAN_FAILED;
+            unlock_wifi_state();
+        }
+        return;
+    }
+
+    const uint16_t requested_limit = found > RK_WIFI_SCAN_MAX_NETWORKS
+                                         ? RK_WIFI_SCAN_MAX_NETWORKS
+                                         : found;
+    wifi_ap_record_t *records = requested_limit
+                                    ? calloc(requested_limit, sizeof(*records))
+                                    : NULL;
+    if (requested_limit && !records) {
+        ESP_LOGW(TAG, "Could not allocate WiFi scan result buffer");
+        (void)esp_wifi_clear_ap_list();
+        if (lock_wifi_state()) {
+            s_scan_count = 0;
+            s_scan_state = RK_WIFI_SCAN_FAILED;
+            unlock_wifi_state();
+        }
+        return;
+    }
+
+    uint16_t received = requested_limit;
+    if (requested_limit) {
+        err = esp_wifi_scan_get_ap_records(&received, records);
+        if (err == ESP_OK && received < found) {
+            /* We cap the copied list; release any records left in the
+             * driver's scan list as required by the ESP-IDF API. */
+            (void)esp_wifi_clear_ap_list();
+        }
+    } else {
+        (void)esp_wifi_clear_ap_list();
+        /* An empty scan is a valid result, not a scan failure. */
+        err = ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not read WiFi scan results: %s", esp_err_to_name(err));
+        (void)esp_wifi_clear_ap_list();
+        free(records);
+        if (lock_wifi_state()) {
+            s_scan_count = 0;
+            s_scan_state = RK_WIFI_SCAN_FAILED;
+            unlock_wifi_state();
+        }
+        return;
+    }
+
+    if (lock_wifi_state()) {
+        s_scan_count = 0;
+        for (uint16_t i = 0; i < received && s_scan_count < RK_WIFI_SCAN_MAX_NETWORKS; ++i) {
+            if (records[i].primary > 14 || records[i].ssid[0] == '\0') {
+                continue;
+            }
+            bool duplicate = false;
+            for (size_t j = 0; j < s_scan_count; ++j) {
+                if (strcmp(s_scan_results[j].ssid,
+                           (const char *)records[i].ssid) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                copy_str(s_scan_results[s_scan_count].ssid,
+                         sizeof(s_scan_results[s_scan_count].ssid),
+                         (const char *)records[i].ssid);
+                s_scan_results[s_scan_count].rssi = records[i].rssi;
+                ++s_scan_count;
+            }
+        }
+        s_scan_state = RK_WIFI_SCAN_READY;
+        unlock_wifi_state();
+    }
+    free(records);
+}
+
 static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     (void)arg;
     if (event_base != IP_EVENT || event_id != IP_EVENT_STA_GOT_IP) {
@@ -817,6 +912,8 @@ void wifi_mgr_start(void) {
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,
+                                                &wifi_scan_done_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
 
     const esp_timer_create_args_t retry_args = {
@@ -1009,6 +1106,8 @@ void wifi_mgr_stop(void) {
     s_sta_fail_count = 0;
     s_wifi_idx = 0;
     s_ip[0] = '\0';
+    s_scan_count = 0;
+    s_scan_state = RK_WIFI_SCAN_IDLE;
     unlock_wifi_state();
     cancel_provisioning_retry();
     provisioning_stop_effect();
@@ -1025,6 +1124,8 @@ void wifi_mgr_stop(void) {
 
     // Unregister event handlers FIRST to prevent reconnect attempts
     esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler);
+    esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,
+                                 &wifi_scan_done_handler);
     esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler);
 
     // Stop retry timer
@@ -1118,71 +1219,64 @@ void wifi_mgr_set_power_save(bool enable) {
     unlock_wifi_effect();
 }
 
-size_t wifi_mgr_scan_2g(rk_wifi_network_t *out, size_t capacity) {
-    if (!out || capacity == 0 || !lock_wifi_effect()) {
+bool wifi_mgr_scan_start(void) {
+    if (!lock_wifi_effect()) {
+        return false;
+    }
+    if (!lock_wifi_state()) {
+        unlock_wifi_effect();
+        return false;
+    }
+    const bool ready = s_started && !s_wifi_mode_transitioning;
+    const bool already_running = s_scan_state == RK_WIFI_SCAN_RUNNING;
+    if (ready && !already_running) {
+        s_scan_count = 0;
+        s_scan_state = RK_WIFI_SCAN_RUNNING;
+    }
+    unlock_wifi_state();
+    if (!ready || already_running) {
+        unlock_wifi_effect();
+        return ready && already_running;
+    }
+
+    const wifi_scan_config_t config = {
+        .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active = {.min = 50, .max = 120},
+    };
+    const esp_err_t err = esp_wifi_scan_start(&config, false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi scan failed to start: %s", esp_err_to_name(err));
+        if (lock_wifi_state()) {
+            s_scan_state = RK_WIFI_SCAN_FAILED;
+            unlock_wifi_state();
+        }
+        unlock_wifi_effect();
+        return false;
+    }
+    unlock_wifi_effect();
+    return true;
+}
+
+rk_wifi_scan_state_t wifi_mgr_scan_state(void) {
+    if (!lock_wifi_state()) {
+        return RK_WIFI_SCAN_FAILED;
+    }
+    const rk_wifi_scan_state_t state = s_scan_state;
+    unlock_wifi_state();
+    return state;
+}
+
+size_t wifi_mgr_scan_results_copy(rk_wifi_network_t *out, size_t capacity) {
+    if (!out || capacity == 0 || !lock_wifi_state()) {
         return 0;
     }
     if (capacity > RK_WIFI_SCAN_MAX_NETWORKS) {
         capacity = RK_WIFI_SCAN_MAX_NETWORKS;
     }
-    bool started = false;
-    if (lock_wifi_state()) {
-        started = s_started;
-        unlock_wifi_state();
-    }
-    if (!started) {
-        unlock_wifi_effect();
-        return 0;
-    }
-
-    wifi_scan_config_t config = {
-        .show_hidden = false,
-        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        .scan_time.active = {.min = 50, .max = 120},
-    };
-    esp_err_t err = esp_wifi_scan_start(&config, true);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
-        unlock_wifi_effect();
-        return 0;
-    }
-
-    uint16_t found = 0;
-    err = esp_wifi_scan_get_ap_num(&found);
-    if (err != ESP_OK || found == 0) {
-        unlock_wifi_effect();
-        return 0;
-    }
-    wifi_ap_record_t records[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
-    uint16_t requested = found > RK_WIFI_SCAN_MAX_NETWORKS
-                             ? RK_WIFI_SCAN_MAX_NETWORKS : found;
-    err = esp_wifi_scan_get_ap_records(&requested, records);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Could not read WiFi scan results: %s", esp_err_to_name(err));
-        unlock_wifi_effect();
-        return 0;
-    }
-
-    size_t count = 0;
-    for (uint16_t i = 0; i < requested && count < capacity; ++i) {
-        if (records[i].primary > 14 || records[i].ssid[0] == '\0') {
-            continue;
-        }
-        bool duplicate = false;
-        for (size_t j = 0; j < count; ++j) {
-            if (strcmp(out[j].ssid, (const char *)records[i].ssid) == 0) {
-                duplicate = true;
-                break;
-            }
-        }
-        if (!duplicate) {
-            copy_str(out[count].ssid, sizeof(out[count].ssid),
-                     (const char *)records[i].ssid);
-            out[count].rssi = records[i].rssi;
-            ++count;
-        }
-    }
-    unlock_wifi_effect();
+    const size_t count = s_scan_count < capacity ? s_scan_count : capacity;
+    memcpy(out, s_scan_results, count * sizeof(*out));
+    unlock_wifi_state();
     return count;
 }
 

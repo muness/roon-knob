@@ -3,6 +3,14 @@
 #include "controller_config.h"
 #include "eink_ui.h"
 #include "wifi_manager.h"
+
+#ifndef PLATFORM_PORTAL_PRODUCT_NAME
+#define PLATFORM_PORTAL_PRODUCT_NAME "HiPhi Frame"
+#endif
+
+#ifndef PLATFORM_PORTAL_PRODUCT_SLUG
+#define PLATFORM_PORTAL_PRODUCT_SLUG "hiphi frame"
+#endif
 #include "bridge_client.h"
 #include "rk_ble_hid_host.h"
 #include "os_mutex.h"
@@ -218,7 +226,7 @@ static const char *HTML_SUCCESS_HEAD =
     "<meta name='viewport' content='width=device-width,initial-scale=1'>";
 
 static const char *HTML_SUCCESS_BODY =
-    "<title>hiphi frame - Saved</title>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Saved</title>"
     "<style>"
     "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
     "text-align:center;}"
@@ -230,7 +238,7 @@ static const char *HTML_SUCCESS_BODY =
     "left;}"
     ".next li{margin:8px 0;}"
     "</style></head><body>"
-    "<h1>hiphi frame</h1>"
+    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
     "<div class='status'>"
     "<p><strong>WiFi credentials saved!</strong></p>"
     "</div>"
@@ -239,7 +247,7 @@ static const char *HTML_SUCCESS_BODY =
     "<ol>"
     "<li>This setup network will disappear in a few seconds</li>"
     "<li>Reconnect your phone to your home WiFi</li>"
-    "<li>The hiphi frame will connect and start displaying</li>"
+    "<li>The " PLATFORM_PORTAL_PRODUCT_SLUG " will connect and start displaying</li>"
     "</ol>"
     "</div></body></html>";
 
@@ -411,15 +419,23 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   const rk_cfg_t *cfg = &snapshot.value;
 
   char query[32] = {0};
-  char scan_value[4] = {0};
+  char scan_value[8] = {0};
   bool scan_requested =
       httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
       httpd_query_key_value(query, "scan", scan_value,
                             sizeof(scan_value)) == ESP_OK &&
-      scan_value[0] == '1';
+      (scan_value[0] == '1' || strcmp(scan_value, "again") == 0);
+  const bool scan_again_requested = strcmp(scan_value, "again") == 0;
   rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
-  size_t network_count = scan_requested
-                             ? wifi_mgr_scan_2g(networks, RK_WIFI_SCAN_MAX_NETWORKS)
+  rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+  if (scan_requested && (scan_again_requested ||
+                         scan_state == RK_WIFI_SCAN_IDLE ||
+                         scan_state == RK_WIFI_SCAN_FAILED)) {
+    (void)wifi_mgr_scan_start();
+    scan_state = wifi_mgr_scan_state();
+  }
+  size_t network_count = scan_state == RK_WIFI_SCAN_READY
+                             ? wifi_mgr_scan_results_copy(networks, RK_WIFI_SCAN_MAX_NETWORKS)
                              : 0;
 
   char escaped_bridge_base[sizeof(cfg->bridge_base) * 6] = "";
@@ -448,18 +464,26 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   if (scan_requested) {
     int scan_pos = snprintf(scan_html, sizeof(scan_html),
         "<h2>Nearby 2.4 GHz networks</h2><div class='section'>");
-    for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
-      char escaped[sizeof(networks[i].ssid) * 6] = "";
-      html_escape(networks[i].ssid, escaped, sizeof(escaped));
+    if (scan_state == RK_WIFI_SCAN_RUNNING) {
       scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
-          "<button type='button' class='wifi-choice' data-ssid='%s' "
-          "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
-          "%s <small>%d dBm</small></button>",
-          escaped, escaped, networks[i].rssi);
-    }
-    if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+          "<p>Scanning nearby networks&hellip; refresh this page in a moment.</p>");
+    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
       scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
-          "<p>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
+          "<p>Scan failed. You can still type an SSID manually.</p>");
+    } else {
+      for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
+        char escaped[sizeof(networks[i].ssid) * 6] = "";
+        html_escape(networks[i].ssid, escaped, sizeof(escaped));
+        scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+            "<button type='button' class='wifi-choice' data-ssid='%s' "
+            "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+            "%s <small>%d dBm</small></button>",
+            escaped, escaped, networks[i].rssi);
+      }
+      if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+        scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+            "<p>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
+      }
     }
     if (scan_pos < (int)sizeof(scan_html)) {
       snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos, "</div>");
@@ -471,7 +495,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, "<h1>hiphi frame</h1><p>Out of memory</p>", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><p>Out of memory</p>", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
   }
 
@@ -479,7 +503,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>hiphi frame Setup</title>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " Setup</title>"
     "<style>"
     "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
     "h1{color:#4fc3f7;margin-bottom:5px;}"
@@ -506,10 +530,10 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "</style>"
     "%s"
     "</head><body>"
-    "<h1>hiphi frame</h1>"
+    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
     "<p>WiFi Setup</p>"
     "%s%s%s%s"
-    "<p><a href='/?scan=1'>Scan nearby 2.4 GHz networks</a> or type an SSID below.</p>"
+    "<p><a href='/?scan=%s'>%s nearby 2.4 GHz networks</a> or type an SSID below.</p>"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
@@ -524,7 +548,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<input type='submit' value='Connect'>"
     "</form>"
     "<div class='note'>"
-    "<strong>Note:</strong> HiPhi Frame requires Unified Hi-Fi Control on your network. "
+    "<strong>Note:</strong> " PLATFORM_PORTAL_PRODUCT_NAME " requires Unified Hi-Fi Control on your network. "
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
@@ -534,6 +558,8 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     wifi_html,
     cfg->wifi_count > 0 ? "</div>" : "",
     scan_html,
+    scan_state == RK_WIFI_SCAN_READY ? "again" : "1",
+    scan_state == RK_WIFI_SCAN_READY ? "Scan again" : "Scan",
     escaped_bridge_base);
 
   httpd_resp_set_type(req, "text/html");
@@ -606,7 +632,7 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
       "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
       "text-align:center;}h1{color:#4fc3f7;}.error{padding:20px;margin:20px "
       "auto;border-radius:10px;max-width:300px;background:#c62828;}</style></head><body>"
-      "<h1>hiphi frame</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
+      "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
       "<p>Please try again.</p></div></body></html>",
       HTTPD_RESP_USE_STRLEN);
     eink_ui_post_network_status("SAVE FAILED!");
@@ -801,8 +827,8 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
   int length = snprintf(html, html_size,
       "<!DOCTYPE html><html><head>"
       "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-      "<title>hiphi frame - Settings</title><style>%s</style>%s</head><body>"
-      "<h1>hiphi frame</h1>"
+      "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Settings</title><style>%s</style>%s</head><body>"
+      "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
       "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/settings'>Settings</a></nav>"
       "<div class='card'><h2>Unified Hi-Fi Control</h2>"
@@ -918,15 +944,23 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   char query[32] = {0};
-  char scan_value[4] = {0};
+  char scan_value[8] = {0};
   bool scan_requested =
       httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
       httpd_query_key_value(query, "scan", scan_value,
                             sizeof(scan_value)) == ESP_OK &&
-      scan_value[0] == '1';
+      (scan_value[0] == '1' || strcmp(scan_value, "again") == 0);
+  const bool scan_again_requested = strcmp(scan_value, "again") == 0;
   rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
-  size_t network_count = scan_requested
-                             ? wifi_mgr_scan_2g(networks, RK_WIFI_SCAN_MAX_NETWORKS)
+  rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+  if (scan_requested && (scan_again_requested ||
+                         scan_state == RK_WIFI_SCAN_IDLE ||
+                         scan_state == RK_WIFI_SCAN_FAILED)) {
+    (void)wifi_mgr_scan_start();
+    scan_state = wifi_mgr_scan_state();
+  }
+  size_t network_count = scan_state == RK_WIFI_SCAN_READY
+                             ? wifi_mgr_scan_results_copy(networks, RK_WIFI_SCAN_MAX_NETWORKS)
                              : 0;
 
   char saved_html[1024] = "";
@@ -946,17 +980,25 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
   if (scan_requested) {
     int scan_pos = snprintf(scan_html, sizeof(scan_html),
                             "<h2>Nearby 2.4 GHz networks</h2>");
-    for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
-      char escaped[sizeof(networks[i].ssid) * 6] = "";
-      html_escape(networks[i].ssid, escaped, sizeof(escaped));
+    if (scan_state == RK_WIFI_SCAN_RUNNING) {
       scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
-          "<button type='button' class='wifi-choice' data-ssid='%s' "
-          "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
-          "%s <small>%d dBm</small></button>", escaped, escaped, networks[i].rssi);
-    }
-    if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
-      snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
-               "<p class='status'>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
+                           "<p class='status'>Scanning nearby networks&hellip; refresh this page in a moment.</p>");
+    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
+      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+                           "<p class='status'>Scan failed. You can still type an SSID manually.</p>");
+    } else {
+      for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
+        char escaped[sizeof(networks[i].ssid) * 6] = "";
+        html_escape(networks[i].ssid, escaped, sizeof(escaped));
+        scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+            "<button type='button' class='wifi-choice' data-ssid='%s' "
+            "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+            "%s <small>%d dBm</small></button>", escaped, escaped, networks[i].rssi);
+      }
+      if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+        snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+                 "<p class='status'>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
+      }
     }
   }
 
@@ -968,20 +1010,22 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
   }
   int length = snprintf(html, html_size,
       "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-      "<title>hiphi frame - Wi-Fi</title><style>%s"
+      "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Wi-Fi</title><style>%s"
       ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;color:#eee;"
       "border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
       ".wifi-choice small{color:#aaa;float:right;}</style>%s</head><body>"
-      "<h1>hiphi frame</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+      "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a></nav>"
       "<div class='card'><h2>Saved Wi-Fi networks</h2>%s</div>"
       "<div class='card'><h2>Add a Wi-Fi network</h2>"
-      "<p class='status'><a href='/wifi?scan=1'>Scan nearby 2.4 GHz networks</a> or type a hidden network below.</p>"
+      "<p class='status'><a href='/wifi?scan=%s'>%s nearby 2.4 GHz networks</a> or type a hidden network below.</p>"
       "%s<form method='POST' action='/api/wifi'>"
       "<label>Wi-Fi network (SSID)</label><input id='ssid' type='text' name='ssid' required maxlength='32'>"
       "<label>Password</label><input type='text' name='pass' maxlength='64'>"
       "<button type='submit' class='btn'>Save network</button></form></div></body></html>",
       STA_CSS, FAVICON_LINK, saved_html[0] ? saved_html : "<p class='status'>None saved.</p>",
+      scan_state == RK_WIFI_SCAN_READY ? "again" : "1",
+      scan_state == RK_WIFI_SCAN_READY ? "Scan again" : "Scan",
       scan_html);
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
@@ -1051,9 +1095,9 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
   int pos = snprintf(html, html_size,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>hiphi frame - Zones</title>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Zones</title>"
     "<style>%s</style>%s</head><body>"
-    "<h1>hiphi frame</h1>"
+    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
     "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
     "%s%s%s"
     "</nav>"
@@ -1187,9 +1231,9 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   int pos = snprintf(html, html_size,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>hiphi frame - BLE Remote</title>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - BLE Remote</title>"
     "<style>%s</style>%s%s</head><body>"
-    "<h1>hiphi frame</h1>"
+    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
     "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
     "%s%s%s"
     "</nav>"
