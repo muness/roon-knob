@@ -3,10 +3,8 @@
 // Tough has no physical rotational control and no software-visible physical
 // buttons (see tough_capabilities.h / docs/esp/hw-reference/board-tough.md --
 // power/reset are hardware-only per M5Stack docs, not GPIO-routable). The
-// only input surface is the CHSC6540 touchscreen, and touch is wired
-// directly into LVGL as a pointer input device by
-// platform_display_register_lvgl_driver() (see platform_display_tough.c),
-// with touch_ui.c's LVGL widget event callbacks emitting controller actions
+// only input surface is the M5Unified touchscreen, and touch is consumed
+// directly by touch_ui.cpp with M5GFX callbacks emitting controller actions
 // directly -- exactly the same seam-bypass pattern Dial uses for its own
 // touch input (see idf_app: touch never round-trips through
 // controller_input_mailbox either; only the rotary encoder does).
@@ -23,7 +21,7 @@ void platform_input_init(void) {
 
 void platform_input_process_events(void) {
     // No queued physical-control events exist on this target; touch input is
-    // consumed directly by LVGL indev callbacks, not through this seam.
+// consumed directly by M5Unified callbacks, not through this seam.
 }
 
 void platform_input_shutdown(void) {

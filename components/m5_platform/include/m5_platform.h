@@ -1,0 +1,47 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    M5_PLATFORM_BOARD_UNKNOWN = 0,
+    M5_PLATFORM_BOARD_TOUGH = 1,
+} m5_platform_board_t;
+
+typedef enum {
+    M5_PLATFORM_TOUCH_NONE = 0,
+    M5_PLATFORM_TOUCH_PRESSED = 1,
+    M5_PLATFORM_TOUCH_CLICKED = 2,
+    M5_PLATFORM_TOUCH_DRAGGING = 3,
+    M5_PLATFORM_TOUCH_RELEASED = 4,
+} m5_platform_touch_state_t;
+
+typedef struct {
+    int16_t x;
+    int16_t y;
+    int16_t delta_x;
+    int16_t delta_y;
+    m5_platform_touch_state_t state;
+} m5_platform_touch_event_t;
+
+bool m5_platform_begin(void);
+void m5_platform_update(void);
+m5_platform_board_t m5_platform_board(void);
+const char *m5_platform_board_name(void);
+uint16_t m5_platform_display_width(void);
+uint16_t m5_platform_display_height(void);
+bool m5_platform_touch_event(m5_platform_touch_event_t *out);
+
+/* Target-neutral display power primitives used by the shared controller
+ * timeout policy and M5-family renderers. They must run on the UI task. */
+void m5_platform_set_brightness(uint8_t brightness);
+void m5_platform_display_sleep(void);
+void m5_platform_display_wake(void);
+
+#ifdef __cplusplus
+}
+#endif

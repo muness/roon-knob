@@ -289,7 +289,9 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) return -1;
 
-    esp_http_client_set_header(client, "Accept-Encoding", "gzip");
+    /* Keep artwork responses uncompressed. The RGB565 payload is already
+     * bounded and avoids doing gzip allocation/decompression on the Tough's
+     * background worker. */
     char knob_id[16];
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);

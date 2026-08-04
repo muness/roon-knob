@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define BRIDGE_CLIENT_MAX_ZONES 64
 
 /* Reads the already-published controller configuration snapshot. */
@@ -56,3 +60,7 @@ bool bridge_client_visit_zones(bridge_zone_list_visitor_t visitor, void *ctx);
 bridge_zone_selection_result_t bridge_client_select_zone_value(
     const char *zone_id);
 bool bridge_client_set_zone(const char *zone_id);
+
+#ifdef __cplusplus
+}
+#endif
