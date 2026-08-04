@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <inttypes.h>
 
 static const char *TAG = "m5_ui";
 
@@ -249,6 +250,24 @@ void artwork_fetch_task(void *arg) {
     char url[384];
     const char *art_url = bridge_client_get_artwork_url_for_format(
         url, sizeof(url), kArtworkWidth, kArtworkHeight, 0, "rgb565");
+    if (art_url) {
+        /* The bridge endpoint is keyed by zone and dimensions, while the
+         * response changes with the now-playing image key. Ensure an HTTP
+         * cache cannot hand us the previous track's pixels. The bridge may
+         * ignore this query parameter; proxies still see a distinct URL. */
+        uint32_t cache_key = 2166136261u;
+        for (const unsigned char *p =
+                 reinterpret_cast<const unsigned char *>(job->key); *p; ++p) {
+            cache_key ^= *p;
+            cache_key *= 16777619u;
+        }
+        const size_t url_len = strlen(url);
+        if (url_len < sizeof(url)) {
+            snprintf(url + url_len, sizeof(url) - url_len,
+                     "&cache_bust=%08" PRIx32, cache_key);
+        }
+        ESP_LOGI(TAG, "Fetching artwork key '%s'", job->key);
+    }
     char *raw = nullptr;
     size_t raw_len = 0;
     const size_t expected = static_cast<size_t>(kArtworkWidth) *
