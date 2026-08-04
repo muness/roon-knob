@@ -250,22 +250,6 @@ void start_artwork_fetch(void) {
     }
 }
 
-void draw_artwork_crop(int x, int y, int width, int height) {
-    if (!s_state.artwork_pixels || s_state.artwork_width <= 0 ||
-        s_state.artwork_height <= 0) {
-        return;
-    }
-    const int src_x = std::max(0, (s_state.artwork_width - width) / 2);
-    const int src_y = std::max(0, (s_state.artwork_height - height) / 2);
-    const int copy_width = std::min(width, s_state.artwork_width - src_x);
-    const int copy_height = std::min(height, s_state.artwork_height - src_y);
-    for (int row = 0; row < copy_height; ++row) {
-        const uint16_t *src = s_state.artwork_pixels +
-            (src_y + row) * s_state.artwork_width + src_x;
-        s_draw_target->pushImage(x, y + row, copy_width, 1, src);
-    }
-}
-
 uint16_t dim_rgb565(uint16_t pixel) {
     const uint16_t r = (pixel >> 11) & 0x1f;
     const uint16_t g = (pixel >> 5) & 0x3f;
@@ -281,17 +265,22 @@ void draw_artwork_scaled(int x, int y, int width, int height, bool muted) {
         return;
     }
     uint16_t row[320];
-    const int src_x0 = std::max(0, (s_state.artwork_width -
-                                   std::min(s_state.artwork_width, width)) / 2);
-    const int src_y0 = std::max(0, (s_state.artwork_height -
-                                   std::min(s_state.artwork_height, height)) / 2);
+    /* Scale-to-cover, then center-crop. Independent X/Y scaling visibly
+     * stretches album art, especially in the 320x240 Art mode. */
+    int crop_width = s_state.artwork_width;
+    int crop_height = s_state.artwork_height;
+    if (width * s_state.artwork_height > height * s_state.artwork_width) {
+        crop_height = std::max(1, s_state.artwork_width * height / width);
+    } else {
+        crop_width = std::max(1, s_state.artwork_height * width / height);
+    }
+    const int src_x0 = (s_state.artwork_width - crop_width) / 2;
+    const int src_y0 = (s_state.artwork_height - crop_height) / 2;
     for (int dy = 0; dy < height; ++dy) {
-        const int sy = src_y0 + (dy * std::min(s_state.artwork_height, height)) /
-                                  std::max(1, height);
+        const int sy = src_y0 + (dy * crop_height) / height;
         const uint16_t *src = s_state.artwork_pixels + sy * s_state.artwork_width;
         for (int dx = 0; dx < width; ++dx) {
-            const int sx = src_x0 + (dx * std::min(s_state.artwork_width, width)) /
-                                      std::max(1, width);
+            const int sx = src_x0 + (dx * crop_width) / width;
             uint16_t pixel = src[sx];
             row[dx] = muted ? dim_rgb565(pixel) : pixel;
         }
@@ -383,7 +372,7 @@ void draw_main(void) {
     const int h = static_cast<int>(m5_platform_display_height());
     s_draw_target->fillScreen(0x101018);
     if (s_state.artwork_pixels) {
-        draw_artwork_crop(8, 34, 112, 100);
+        draw_artwork_scaled(8, 34, 112, 100, false);
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x5a5a68);
     }
 
