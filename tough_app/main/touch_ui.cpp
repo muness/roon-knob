@@ -61,10 +61,10 @@ struct UiState {
     bool picker = false;
     bool settings = false;
     /* A mode switch must consume the gesture that caused it. M5Unified can
-     * report the click and release across adjacent update cycles; without a
-     * guard, the newly shown mode sees that same gesture and immediately
-     * toggles back. */
-    bool consume_touch_until_press = false;
+     * report press/click/release across adjacent update cycles; without a
+     * short quarantine, the newly shown mode sees that same gesture and
+     * immediately toggles back. */
+    int64_t consume_touch_until_us = 0;
     bool dirty = true;
     char artwork_key[kMaxText] = {};
     uint16_t *artwork_pixels = nullptr;
@@ -579,12 +579,11 @@ void handle_touch(const m5_platform_touch_event_t &event) {
     if (event.state == M5_PLATFORM_TOUCH_NONE) {
         return;
     }
-    if (s_state.consume_touch_until_press) {
-        if (event.state == M5_PLATFORM_TOUCH_PRESSED) {
-            s_state.consume_touch_until_press = false;
-        } else {
-            return;
-        }
+    if (s_state.consume_touch_until_us != 0) {
+        const int64_t now = esp_timer_get_time();
+        if (now < s_state.consume_touch_until_us) return;
+        s_state.consume_touch_until_us = 0;
+        if (event.state != M5_PLATFORM_TOUCH_PRESSED) return;
     }
     if (s_state.power_state == PowerState::Sleep) {
         reset_activity();
@@ -595,7 +594,7 @@ void handle_touch(const m5_platform_touch_event_t &event) {
         if (event.state == M5_PLATFORM_TOUCH_CLICKED ||
             event.state == M5_PLATFORM_TOUCH_HELD) {
             set_power_state(PowerState::Normal);
-            s_state.consume_touch_until_press = true;
+            s_state.consume_touch_until_us = esp_timer_get_time() + 500000;
         }
         return;
     }
@@ -663,7 +662,7 @@ void handle_touch(const m5_platform_touch_event_t &event) {
     } else if (event.y >= 34 && event.y < 134 && event.x < 126 &&
                s_state.artwork_pixels) {
         set_power_state(PowerState::Art);
-        s_state.consume_touch_until_press = true;
+        s_state.consume_touch_until_us = esp_timer_get_time() + 500000;
     } else if (event.y >= 135 && event.y < 178 && event.x < 95) {
         dispatch_volume(-1);
     } else if (event.y >= 135 && event.y < 178 && event.x > w - 95) {
