@@ -111,6 +111,24 @@ void draw_text(const char *text, int x, int y, int size, uint32_t color) {
     s_draw_target->drawString(text ? text : "", x, y);
 }
 
+void draw_scrolling_text(const char *text, int x, int y, int width, int size,
+                         uint32_t color) {
+    const char *value = text ? text : "";
+    s_draw_target->setTextSize(size);
+    const int text_width = s_draw_target->textWidth(value);
+    if (text_width <= width) {
+        draw_text(value, x, y, size, color);
+        return;
+    }
+    const int64_t phase_ms = (esp_timer_get_time() / 1000) % 9000;
+    const int travel = text_width - width + 28;
+    const int offset = phase_ms < 900 ? 0 :
+        std::min(travel, static_cast<int>((phase_ms - 900) * 34 / 1000));
+    s_draw_target->setClipRect(x, y, width, size * 9 + 4);
+    draw_text(value, x - offset, y, size, color);
+    s_draw_target->clearClipRect();
+}
+
 void draw_center(const char *text, int x, int y, int size, uint32_t color) {
     s_draw_target->setTextSize(size);
     s_draw_target->setTextColor(color);
@@ -366,15 +384,15 @@ void draw_main(void) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x5a5a68);
     }
 
-    draw_text(s_state.zone, 10, 7, 2, 0xfafafa);
+    draw_scrolling_text(s_state.zone, 10, 7, w - 34, 2, 0xfafafa);
     s_draw_target->fillCircle(w - 15, 15, 5, s_state.online ? 0x00c853 : 0x666666);
     if (!s_state.artwork_pixels) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x3a3a48);
         draw_center("No artwork", 64, 82, 1, 0x888888);
     }
-    draw_text(s_state.track, 132, 42, 2, 0xfafafa);
-    draw_text(s_state.artist, 132, 69, 1, 0xaaaaaa);
-    draw_text(s_state.album, 132, 88, 1, 0x888888);
+    draw_scrolling_text(s_state.track, 132, 42, w - 142, 2, 0xfafafa);
+    draw_scrolling_text(s_state.artist, 132, 69, w - 142, 1, 0xaaaaaa);
+    draw_scrolling_text(s_state.album, 132, 88, w - 142, 1, 0x888888);
 
     char volume[20];
     if (s_state.volume_step > 0.0f && s_state.volume_step < 1.0f) {
@@ -404,9 +422,8 @@ void draw_art_mode(void) {
     s_draw_target->fillScreen(0x080808);
     if (s_state.artwork_pixels) draw_artwork_scaled(0, 0, w, h, false);
     s_draw_target->fillRectAlpha(0, h - 34, w, 34, 190, 0x101018);
-    draw_text(s_state.track, 10, h - 29, 1, 0xfafafa);
-    draw_text(s_state.artist, 10, h - 14, 1, 0xaaaaaa);
-    draw_center("tap to wake", w - 55, h - 17, 1, 0x888888);
+    draw_scrolling_text(s_state.track, 10, h - 29, w - 20, 1, 0xfafafa);
+    draw_scrolling_text(s_state.artist, 10, h - 14, w - 20, 1, 0xaaaaaa);
 }
 
 void draw_provisioning(void) {
@@ -453,7 +470,8 @@ void draw_picker(void) {
         const int y = first_y + row * row_h;
         const uint32_t bg = index == s_state.zone_selected ? 0x2a4a6a : 0x181818;
         s_draw_target->fillRoundRect(6, y, w - 18, row_h - 3, 5, bg);
-        draw_text(s_state.zone_names[index], 14, y + 7, 1, 0xfafafa);
+        draw_scrolling_text(s_state.zone_names[index], 14, y + 7, w - 32, 1,
+                            0xfafafa);
     }
     if (s_state.zone_count > visible) {
         const int track_y = first_y;
@@ -488,7 +506,7 @@ void draw_settings(void) {
              ssid, ip, bridge, desc->version);
     int y = 58;
     for (char *line = strtok(text, "\n"); line; line = strtok(nullptr, "\n")) {
-        draw_text(line, 12, y, 1, 0xcccccc);
+        draw_scrolling_text(line, 12, y, w - 24, 1, 0xcccccc);
         y += 20;
     }
     draw_button(10, h - 48, 140, 34, "FORGET WIFI", 0x7f1d1d);
@@ -522,6 +540,10 @@ void handle_touch(const m5_platform_touch_event_t &event) {
     }
     reset_activity();
     if (s_state.power_state == PowerState::Art) {
+        if (event.state == M5_PLATFORM_TOUCH_CLICKED ||
+            event.state == M5_PLATFORM_TOUCH_HELD) {
+            set_power_state(PowerState::Normal);
+        }
         return;
     }
     if (s_state.picker) {
@@ -530,8 +552,8 @@ void handle_touch(const m5_platform_touch_event_t &event) {
             s_state.zone_touch_dragged = false;
             s_state.zone_touch_last_y = event.y;
             s_state.zone_drag_remainder = 0;
-        } else if (event.state == M5_PLATFORM_TOUCH_DRAGGING &&
-                   s_state.zone_touch_active) {
+        } else if ((event.state == M5_PLATFORM_TOUCH_DRAGGING ||
+                    event.delta_y != 0) && s_state.zone_touch_active) {
             constexpr int row_h = 30;
             const int delta_y = event.y - s_state.zone_touch_last_y;
             s_state.zone_touch_last_y = event.y;
@@ -575,11 +597,19 @@ void handle_touch(const m5_platform_touch_event_t &event) {
         }
         return;
     }
+    if (event.state == M5_PLATFORM_TOUCH_HELD && event.y < 110) {
+        s_state.settings = true;
+        s_state.dirty = true;
+        return;
+    }
     if (event.state != M5_PLATFORM_TOUCH_CLICKED) return;
     if (event.y < 38) {
         /* Open through the shared action router so the renderer receives the
          * bridge-owned zone list (including its shared label fallback). */
         dispatch_simple(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
+    } else if (event.y >= 34 && event.y < 134 && event.x < 126 &&
+               s_state.artwork_pixels) {
+        set_power_state(PowerState::Art);
     } else if (event.y >= 135 && event.y < 178 && event.x < 95) {
         dispatch_volume(-1);
     } else if (event.y >= 135 && event.y < 178 && event.x > w - 95) {
@@ -663,6 +693,11 @@ extern "C" void touch_ui_process(void) {
     m5_platform_touch_event_t event = {};
     if (m5_platform_touch_event(&event)) handle_touch(event);
     update_power_state();
+    /* Marquee text is time-based; repaint only while there is content that
+     * can actually move, keeping ordinary control frames inexpensive. */
+    if (s_state.track[0] || s_state.artist[0] || s_state.album[0]) {
+        s_state.dirty = true;
+    }
     redraw();
 }
 

@@ -19,6 +19,7 @@ typedef enum {
     M5_PLATFORM_TOUCH_CLICKED = 2,
     M5_PLATFORM_TOUCH_DRAGGING = 3,
     M5_PLATFORM_TOUCH_RELEASED = 4,
+    M5_PLATFORM_TOUCH_HELD = 5,
 } m5_platform_touch_state_t;
 
 typedef struct {
