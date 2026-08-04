@@ -176,6 +176,34 @@
       </div>
     </div>
 
+    <!-- HiPhi Tough -->
+    <div class="card" id="tough-card">
+      <h2>HiPhi Tough <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32 touch LCD</span></h2>
+      <p class="description">
+        A rugged M5Stack Tough touchscreen controller with Wi-Fi playback,
+        zones, artwork, and touch-first controls.
+      </p>
+      <p class="warning"><strong>Alpha firmware:</strong> Tough is an early hardware target. Keep the USB cable connected during flashing.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-tough.json">
+          <button slot="activate">Update HiPhi Tough Alpha</button>
+          <span slot="unsupported">Not supported</span>
+          <span slot="not-allowed">HTTPS required</span>
+        </esp-web-install-button>
+        <span class="version-info" id="tough-version">Loading...</span>
+      </div>
+      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
+      <div class="steps">
+        <strong>Steps:</strong>
+        <ol>
+          <li>Connect the M5Stack Tough over USB</li>
+          <li>Click "Flash HiPhi Tough" and select its serial port</li>
+          <li>Wait for flashing and the touchscreen to restart</li>
+          <li>Connect to <code>hiphi-tough-setup</code> to configure Wi-Fi</li>
+        </ol>
+      </div>
+    </div>
+
     <!-- HiPhi Frame -->
     <div class="card" id="frame-card">
       <h2>HiPhi Frame <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 e-ink</span></h2>
@@ -225,15 +253,23 @@
     if (targetFilter === 'dial') {
       document.getElementById('frame-card').remove();
       document.getElementById('rlcd-card').remove();
+      document.getElementById('tough-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi Dial Firmware';
     } else if (targetFilter === 'frame') {
       document.getElementById('dial-card').remove();
       document.getElementById('rlcd-card').remove();
+      document.getElementById('tough-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi Frame Firmware';
     } else if (targetFilter === 'rlcd') {
       document.getElementById('dial-card').remove();
       document.getElementById('frame-card').remove();
+      document.getElementById('tough-card').remove();
       document.querySelector('h1').textContent = 'Flash HiPhi RLCD Firmware';
+    } else if (targetFilter === 'tough') {
+      document.getElementById('dial-card').remove();
+      document.getElementById('frame-card').remove();
+      document.getElementById('rlcd-card').remove();
+      document.querySelector('h1').textContent = 'Flash HiPhi Tough Firmware';
     }
 
     if (!('serial' in navigator)) {
@@ -245,11 +281,13 @@
         document.getElementById('s3-version').textContent = `v${data.version}`;
         document.getElementById('frame-version').textContent = `v${data.version}`;
         document.getElementById('rlcd-version').textContent = `v${data.version}`;
+        document.getElementById('tough-version').textContent = `v${data.version}`;
       })
       .catch(() => {
         document.getElementById('s3-version').textContent = '(bundled)';
         document.getElementById('frame-version').textContent = '(bundled)';
         document.getElementById('rlcd-version').textContent = '(bundled)';
+        document.getElementById('tough-version').textContent = '(bundled)';
       });
 
     // Dynamic back link: / on hosted web, /admin on bridge

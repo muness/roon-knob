@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--assets-dir", type=Path, required=True)
     parser.add_argument("--nvs-offset", type=lambda value: int(value, 0), default=0x9000)
     parser.add_argument("--nvs-size", type=lambda value: int(value, 0), default=0x4000)
+    parser.add_argument("--bootloader-offset", type=lambda value: int(value, 0), default=0)
     args = parser.parse_args()
 
     try:
@@ -50,8 +51,9 @@ def main() -> None:
             fail(f"{path} range 0x{offset:x}-0x{end - 1:x} overlaps NVS")
         offsets.append(offset)
 
-    if tuple(sorted(offsets)) != REQUIRED_OFFSETS:
-        fail("parts must be exactly at 0x0, 0x8000, 0xd000, and 0x10000")
+    required_offsets = (args.bootloader_offset, *REQUIRED_OFFSETS[1:])
+    if tuple(sorted(offsets)) != tuple(sorted(required_offsets)):
+        fail("parts must use the target bootloader offset plus 0x8000, 0xd000, and 0x10000")
 
     print(f"flash manifest check passed: {args.manifest} preserves NVS")
 

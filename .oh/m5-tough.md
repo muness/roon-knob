@@ -683,6 +683,21 @@ allocates there, the bridge response is explicitly RGB565 and was fetched at
 240x240, and the settings route now survives a real POST. Keep the web form
 small and treat any future format as a negotiated shared contract.
 
+## Ship (2026-08-04)
+
+**Shipped:** Tough firmware CI artifact and release GitHub Pages flasher.
+**Target:** `build-tough` on PR/tag workflows, tagged release assets, and
+`flash-tough.html` at the Pages root.
+**Path:** source → `build-tough` → `hiphi-tough-firmware` artifact → tagged
+release → `deploy-pages` → browser upload page.
+
+- Tough CI selects classic ESP32 and emits the correct `0x1000` bootloader,
+  `0x8000` partition, `0xd000` OTA data, and `0x10000` application layout.
+- `manifest-tough.json` is checked for NVS preservation with the target-specific
+  bootloader offset.
+- Delivery-path tax remains physical hardware validation: CI and Pages prove
+  artifact provenance, but a tagged release still needs a Tough stability check.
+
 ## Rebase and RLCD integration (2026-08-04)
 
 - Rebased the Tough work onto `origin/master` at `575ec312`, which already
