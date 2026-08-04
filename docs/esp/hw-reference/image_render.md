@@ -4,13 +4,17 @@ Goal
 - Deliver now‑playing artwork from the sidecar to the ESP32‑S3 reliably and cheaply in RAM/CPU, then render it with LVGL on a 360×360 panel.
 
 Constraints on ESP32‑S3
-- RAM: app has 16 MB PSRAM, but avoid large contiguous allocations. Our current HTTP helper allocates a single buffer sized to `Content-Length`.
+- RAM: Dial has 8 MB PSRAM, but internal/DMA SRAM remains the scarce resource.
+  Image payloads and decoded pixels belong in PSRAM and still require hard size
+  limits.
 - CPU: JPEG decode is OK if using a lightweight decoder; PNG is heavier on CPU/RAM.
 - Networking: stable when requests are short‑lived and responses are < ~64 KB.
 
 Transport Recommendations (HTTP)
 - Endpoint: `GET /now_playing/image?zone_id=…&width=…&height=…&scale=fit&format=jpeg`
-- Always return `Content-Length` (not chunked) so the client can pre‑allocate the buffer.
+- Prefer `Content-Length` so the client can allocate once. The current helper
+  also handles chunked/unknown-length responses by growing a buffer up to its
+  hard ceiling.
 - Set `Content-Type: image/jpeg` (baseline), and target ≤ ~30–50 KB per image at thumbnail sizes (e.g., 128–256 px square).
 - Add caching: `ETag: <image_key>-<w>x<h>-<scale>` and `Cache-Control: public, max-age=60`.
 - Support `If-None-Match` on the server to return `304 Not Modified` when unchanged.
@@ -36,7 +40,8 @@ Client (ESP32‑S3) Options
      - ESP‑IDF: `esp_jpeg` component (IDF examples exist), or TinyJPG/TJpgDec port.
      - LVGL: register a JPEG decoder (lvgl 9: external decoder modules).
    - Flow:
-     - HTTP GET image → buffer (cap size to, say, 64 KB). Our `platform_http_idf` allocates exactly `Content-Length`.
+     - HTTP GET image → PSRAM-preferred buffer with a hard cap (currently 1 MB
+       on the image path; use substantially smaller server payloads).
      - Decode to RGB565 lines; blit into an LVGL image or canvas buffer sized to the chosen thumbnail (e.g., 180×180).
      - Free the network buffer promptly.
 
@@ -49,9 +54,12 @@ Sizing & Layout on 360×360
 - Place art under the zone label; push line1/line2 below the image (see UI layout task).
 
 HTTP client notes (our implementation)
-- `platform_http_idf` calls `esp_http_client_fetch_headers()` then allocates a buffer equal to `Content-Length` and reads once. Implications:
-  - Server MUST provide `Content-Length`. Avoid chunked responses.
-  - Keep images small; we free the buffer after decode.
+- The JSON path explicitly allocates in PSRAM and supports known-length and
+  chunked/unknown-length responses under a 256 KiB default ceiling.
+- The image path reads in chunks and rejects growth beyond 1 MB. Prefer
+  `Content-Length` and thumbnails around 30–50 KiB to avoid reallocations.
+- Free transport and decompression buffers promptly after decode; retain only
+  the bounded decoded artwork buffer needed by the active view.
 - Timeouts: keep request timeout ~3 s; reduce on idle refreshes.
 
 Caching on device
@@ -72,4 +80,5 @@ References
 - RoonApiImage: `get_image(image_key, {scale,width,height,format}, cb)` (proxied by sidecar)
 - LVGL image decoder docs; ESP‑IDF `esp_jpeg` example
 - **Color Configuration**: See `docs/references/COLORTEST_HELLOWORLD.md` for SH8601 display byte order and LVGL 9 color format setup
-
+- **Memory policy**: See [../MEMORY.md](../MEMORY.md) for PSRAM ownership,
+  split LVGL pools, and acceptance telemetry.

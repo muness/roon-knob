@@ -436,7 +436,7 @@ If this shows correct name but router doesn't, it's a router display issue (not 
 
 ---
 
-## Complete Working Example (Roon Knob Implementation)
+## Historical Working Example (Roon Knob Implementation)
 
 **Files:**
 - `idf_app/main/wifi_manager.c` - Hostname generation and DHCP setup
@@ -553,7 +553,7 @@ When hostname doesn't appear in router:
 
 ---
 
-## Key Learnings from Roon Knob
+## Key Learnings from Historical Roon Knob
 
 ### The "Toothless Flicker" Issue
 
@@ -584,7 +584,7 @@ When hostname doesn't appear in router:
 
 ---
 
-## Roon Knob Implementation
+## Historical Roon Knob Implementation
 
 See working implementation:
 - `idf_app/main/wifi_manager.c:99-165` - Hostname generation with sanitization

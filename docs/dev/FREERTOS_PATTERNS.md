@@ -1,6 +1,6 @@
 # FreeRTOS Patterns
 
-This document covers the FreeRTOS patterns used in the Roon Knob firmware: tasks, queues, semaphores, and timers.
+This document covers the FreeRTOS patterns used in the HiPhi Dial firmware: tasks, queues, semaphores, and timers.
 
 ## Overview
 

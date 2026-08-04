@@ -1,5 +1,6 @@
 #include "platform/platform_input.h"
-#include "ui.h"
+#include "controller_input.h"
+#include "controller_input_mailbox.h"
 #include "display_sleep.h"
 
 #include "driver/gpio.h"
@@ -16,6 +17,9 @@ static const char *TAG = "input";
 
 // Input event queue (for ISR-safe dispatch)
 static QueueHandle_t s_input_queue = NULL;
+static portMUX_TYPE s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
+static controller_input_mailbox_stats_t s_mailbox_stats;
+static uint32_t s_last_logged_overflow;
 
 // ============================================================================
 // Hardware Pin Configuration
@@ -59,6 +63,27 @@ static encoder_state_t s_encoder = {0};
 // ============================================================================
 // Rotary Encoder Implementation (Software Quadrature Decoding)
 // ============================================================================
+
+static void record_queue_result(bool accepted) {
+    taskENTER_CRITICAL(&s_stats_lock);
+    if (accepted) {
+        controller_input_stats_add_saturating(
+            &s_mailbox_stats.accepted, 1);
+    } else {
+        controller_input_stats_add_saturating(
+            &s_mailbox_stats.dropped, 1);
+        controller_input_stats_add_saturating(
+            &s_mailbox_stats.overflow, 1);
+    }
+    taskEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void record_coalesced(uint32_t count) {
+    taskENTER_CRITICAL(&s_stats_lock);
+    controller_input_stats_add_saturating(
+        &s_mailbox_stats.coalesced, count);
+    taskEXIT_CRITICAL(&s_stats_lock);
+}
 
 static esp_err_t encoder_init(void) {
     ESP_LOGI(TAG, "Initializing rotary encoder on GPIOs %d and %d", ENCODER_GPIO_A, ENCODER_GPIO_B);
@@ -133,7 +158,8 @@ static void encoder_read_and_dispatch(void) {
 
         // Queue the delta - main loop will coalesce multiple deltas
         // Note: esp_timer callbacks run in task context, not ISR, so use xQueueSend
-        (void)xQueueSend(s_input_queue, &delta, 0);
+        record_queue_result(
+            xQueueSend(s_input_queue, &delta, 0) == pdTRUE);
     }
 }
 
@@ -173,6 +199,11 @@ static esp_err_t poll_timer_init(void) {
 void platform_input_init(void) {
     ESP_LOGI(TAG, "Initializing platform input (encoder only - touch handled by LVGL)");
 
+    taskENTER_CRITICAL(&s_stats_lock);
+    s_mailbox_stats = (controller_input_mailbox_stats_t){0};
+    taskEXIT_CRITICAL(&s_stats_lock);
+    s_last_logged_overflow = 0;
+
     // Create input event queue (holds up to 10 batched tick counts)
     s_input_queue = xQueueCreate(10, sizeof(int));
     if (!s_input_queue) {
@@ -198,13 +229,31 @@ void platform_input_init(void) {
 }
 
 void platform_input_process_events(void) {
+    if (!s_input_queue) {
+        return;
+    }
+
     int ticks;
-    int total_ticks = 0;
+    int32_t total_ticks = 0;
+    uint32_t drained = 0;
 
     // Drain all queued batches and coalesce into single total
     // This prevents HTTP request queue buildup when turning quickly
     while (xQueueReceive(s_input_queue, &ticks, 0) == pdTRUE) {
-        total_ticks += ticks;
+        total_ticks = controller_input_saturating_add(total_ticks, ticks);
+        drained++;
+    }
+    if (drained > 1) {
+        record_coalesced(drained - 1);
+    }
+
+    controller_input_mailbox_stats_t stats =
+        platform_input_mailbox_stats();
+    if (stats.overflow != s_last_logged_overflow) {
+        ESP_LOGW(TAG,
+                 "Encoder queue overflow: %lu event(s) dropped total",
+                 (unsigned long)stats.dropped);
+        s_last_logged_overflow = stats.overflow;
     }
 
     if (total_ticks != 0) {
@@ -216,9 +265,24 @@ void platform_input_process_events(void) {
             return;
         }
 
-        // Dispatch single volume rotation with coalesced tick count
-        ui_handle_volume_rotation(total_ticks);
+        controller_physical_event_t event = {
+            .source_id = CONTROLLER_INPUT_SOURCE_DIAL_BUILTIN,
+            .control_id = CONTROLLER_INPUT_CONTROL_DIAL_ROTATION,
+            .kind = CONTROLLER_PHYSICAL_EVENT_ROTATION,
+            .gesture = CONTROLLER_PHYSICAL_GESTURE_NONE,
+            .value = total_ticks,
+            .sequence = 0,
+            .flags = CONTROLLER_PHYSICAL_EVENT_FLAG_NONE,
+        };
+        (void)controller_input_dispatch_physical(&event);
     }
+}
+
+controller_input_mailbox_stats_t platform_input_mailbox_stats(void) {
+    taskENTER_CRITICAL(&s_stats_lock);
+    controller_input_mailbox_stats_t stats = s_mailbox_stats;
+    taskEXIT_CRITICAL(&s_stats_lock);
+    return stats;
 }
 
 void platform_input_shutdown(void) {
@@ -228,6 +292,11 @@ void platform_input_shutdown(void) {
         esp_timer_stop(s_poll_timer);
         esp_timer_delete(s_poll_timer);
         s_poll_timer = NULL;
+    }
+
+    if (s_input_queue) {
+        vQueueDelete(s_input_queue);
+        s_input_queue = NULL;
     }
 
     // Reset encoder GPIOs

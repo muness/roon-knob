@@ -18,6 +18,8 @@ endif()
 # Suppress CMake warnings (ESP-IDF internal component validation issues)
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
 
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
+
 # Detect when an existing sdkconfig was generated from different defaults. Without
 # this, ESP-IDF silently retains old values (including debug optimization).
 set(_DEFAULTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults")
@@ -38,4 +40,4 @@ if(EXISTS "${_DEFAULTS_FILE}")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(roon_knob)
+project(hiphi_dial)

@@ -51,7 +51,10 @@ static esp_timer_handle_t s_lvgl_tick_timer = NULL;
 #define LCD_HOST SPI2_HOST
 #define LCD_H_RES 360
 #define LCD_V_RES 360
-#define LVGL_BUF_HEIGHT (LCD_V_RES / 10)
+/* Two 36-row DMA buffers consumed 51,840 bytes and left Wi-Fi with no
+ * DMA-capable heap once BLE was connected. Twenty-four rows retains partial,
+ * double-buffered rendering while returning 17,280 bytes to the radio path. */
+#define LVGL_BUF_HEIGHT 24
 #define PIN_NUM_LCD_CS      ((gpio_num_t)14)
 #define PIN_NUM_LCD_PCLK    ((gpio_num_t)13)
 #define PIN_NUM_LCD_DATA0   ((gpio_num_t)15)
@@ -662,6 +665,14 @@ void platform_display_set_rotation(uint16_t degrees) {
 
     ESP_LOGI(TAG, "Setting display rotation to %d degrees", s_current_rotation);
     lv_display_set_rotation(s_display, rotation);
+}
+
+void platform_display_apply_config(const rk_cfg_t *cfg, bool is_charging) {
+    if (!cfg) {
+        return;
+    }
+    display_update_timeouts(cfg, is_charging);
+    display_update_power_settings(cfg);
 }
 
 bool platform_battery_is_charging(void) {

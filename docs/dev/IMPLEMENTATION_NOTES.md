@@ -214,7 +214,11 @@ idf.py -p PORT flash monitor
 
 **Dependencies:** ESP-IDF v5.x+, LVGL, esp_lcd_sh8601
 
-### PC Simulator
+### Historical PC Simulator
+
+The simulator source is no longer present in the repository. This command
+capture preserves the name used by that historical target:
+
 ```bash
 cmake -B build/pc_sim pc_sim
 cmake --build build/pc_sim

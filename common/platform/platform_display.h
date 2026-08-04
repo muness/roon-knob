@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "rk_cfg.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,6 +20,9 @@ bool platform_display_is_sleeping(void);
  * @param degrees Rotation in degrees (0, 90, 180, 270)
  */
 void platform_display_set_rotation(uint16_t degrees);
+
+/** Apply target-specific display power/time-out configuration. */
+void platform_display_apply_config(const rk_cfg_t *cfg, bool is_charging);
 
 /**
  * @brief Check if device is charging or on USB power

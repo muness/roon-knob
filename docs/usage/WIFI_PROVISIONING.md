@@ -1,6 +1,6 @@
 # WiFi Provisioning
 
-This document covers how the Roon Knob connects to WiFi and handles provisioning when credentials are missing or invalid.
+This document covers how HiPhi Dial connects to WiFi and handles provisioning when credentials are missing or invalid.
 
 ## Overview
 
@@ -9,7 +9,7 @@ The device operates in two WiFi modes:
 | Mode | Purpose | SSID |
 |------|---------|------|
 | **STA (Station)** | Normal operation - connects to your home network | Your WiFi |
-| **AP (Access Point)** | Provisioning - creates a setup network | `roon-knob-setup` |
+| **AP (Access Point)** | Provisioning - creates a setup network | `hiphi-dial-setup` |
 
 On first boot or after failed connections, the device creates an open WiFi network for configuration via a captive portal.
 
@@ -114,7 +114,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);
 ### Device Name on Network
 
 Your router's client list will show the device as:
-- **Default:** `roon-knob-a1b2c3` (unique ID based on device MAC)
+- **Default:** `hiphi-dial-a1b2c3` (unique ID based on device MAC)
 - **Custom:** Set a friendly name like "Kitchen Knob" via the bridge admin UI
 
 **To set a custom name:**
@@ -136,7 +136,7 @@ Your router's client list will show the device as:
 
 | Setting | Value |
 |---------|-------|
-| SSID | `roon-knob-setup` |
+| SSID | `hiphi-dial-setup` |
 | Password | (none - open network) |
 | IP Address | `192.168.4.1` |
 | Max Connections | 2 |
@@ -154,7 +154,7 @@ The captive portal provides a web-based configuration interface.
 
 ### How It Works
 
-1. User connects phone/laptop to `roon-knob-setup` network
+1. User connects phone/laptop to `hiphi-dial-setup` network
 2. DNS server responds to ALL queries with `192.168.4.1`
 3. Phone detects captive portal (connectivity check fails)
 4. Phone auto-opens browser to `http://192.168.4.1/`
@@ -267,12 +267,12 @@ These are applied when NVS has no saved configuration.
 
 ## Troubleshooting FAQ
 
-### I connected to `roon-knob-setup` but nothing happened — where do I enter my WiFi details?
+### I connected to `hiphi-dial-setup` but nothing happened — where do I enter my WiFi details?
 
 The device runs a captive portal that *should* pop up automatically, but some phones don't detect it. Here's what to do:
 
 1. **Turn off mobile data** on your phone (this is the most common fix — with cellular on, your phone bypasses the captive portal detection)
-2. Connect to the `roon-knob-setup` WiFi network
+2. Connect to the `hiphi-dial-setup` WiFi network
 3. If the portal still doesn't pop up, **open a browser and go to `http://192.168.4.1`**
 4. You'll see a form asking for your WiFi SSID and password — fill it in and submit
 5. The device will reboot and connect to your home network
@@ -281,12 +281,12 @@ The device runs a captive portal that *should* pop up automatically, but some ph
 
 ### The captive portal page won't load
 
-- Make sure you're still connected to `roon-knob-setup` (some phones auto-disconnect from networks without internet)
+- Make sure you're still connected to `hiphi-dial-setup` (some phones auto-disconnect from networks without internet)
 - Double-check mobile data is off
 - Try `http://192.168.4.1` in a private/incognito browser window (avoids cached redirects)
 - On iPhone, try opening Safari specifically — the built-in captive portal browser can be finicky
 
-### I don't see the `roon-knob-setup` network at all
+### I don't see the `hiphi-dial-setup` network at all
 
 - The device only creates the setup network when it has no saved WiFi credentials (first boot) or after 5 failed connection attempts
 - If it previously connected to a network, it may be trying to reconnect — wait about 30 seconds for it to give up and switch to AP mode

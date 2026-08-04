@@ -7,12 +7,15 @@ sdkconfig
 sdkconfig.old
 sdkconfig.local
 idf_*.log
-idf_app/dependencies.lock
-.ci/ccache/
+.ci/ccache*/
 
 # Node modules
 
 idf_app/managed_components/*
 idf_app/sdkconfig.override
+frame_app/managed_components/*
+frame_app/sdkconfig.override
+rlcd_app/managed_components/*
+rlcd_app/sdkconfig.override
 .claude/
 .oh/.cache/

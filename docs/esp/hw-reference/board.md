@@ -43,9 +43,13 @@
 - **No physical buttons** - use touch for play/pause, menus
 
 ### Memory
-- 8 MB PSRAM allows generous LVGL buffers
-- DMA-capable internal RAM for display transfers
-- PSRAM for artwork caching, network buffers
+- 8 MB PSRAM holds artwork, bounded network/JSON payloads, inactive UI models,
+  and part of LVGL's object heap.
+- QSPI DMA draw buffers and cache-sensitive task stacks remain in internal
+  SRAM; free PSRAM cannot satisfy those allocations.
+- Dial uses a 24 KiB internal + 72 KiB PSRAM split LVGL object heap. See
+  [ESP32-S3 Memory Architecture](../MEMORY.md) for the allocation policy and
+  measured failure history.
 
 ## Related Docs
 
@@ -53,3 +57,4 @@
 - Touch controller: [cst816d.md](cst816d.md)
 - Rotary encoder: [encoder.md](encoder.md)
 - Display colors: [COLORTEST_HELLOWORLD.md](COLORTEST_HELLOWORLD.md)
+- Memory allocation policy: [../MEMORY.md](../MEMORY.md)

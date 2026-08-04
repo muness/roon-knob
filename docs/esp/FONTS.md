@@ -1,6 +1,6 @@
 # Font System
 
-This document describes the font implementation for the Roon Knob display.
+This document describes the font implementation for the HiPhi Dial display.
 
 ## Overview
 
@@ -26,8 +26,8 @@ We initially implemented TinyTTF for runtime TTF rendering, which would have pro
 However, TinyTTF proved **unstable on ESP32-S3** due to memory constraints:
 
 1. **Glyph rasterization requires significant heap memory** - Each glyph at 36-40px can transiently need 10-30KB during rasterization
-2. **LVGL's internal heap is limited** - Must reside in internal SRAM (~170KB max available), not PSRAM
-3. **PSRAM not suitable for font heap** - SPI latency causes watchdog timeouts during glyph rendering
+2. **Runtime glyph rasterization has a large transient heap demand** - It competed with display and radio allocations in internal SRAM
+3. **Moving TinyTTF rasterization to PSRAM was not sufficient** - SPI latency caused watchdog timeouts during glyph rendering
 4. **Crash symptom**: `assert failed: stbtt__new_active stb_truetype_htcw.h:3160` - memory allocation failure during glyph rasterization
 
 ### Bitmap Font Benefits
@@ -35,6 +35,12 @@ However, TinyTTF proved **unstable on ESP32-S3** due to memory constraints:
 - **Zero runtime memory pressure** - Glyphs are pre-rendered, no allocation during draw
 - **Predictable performance** - No rasterization delays or watchdog risks
 - **Reliable operation** - Eliminates crash-prone TinyTTF code path
+
+This TinyTTF result does not prohibit all LVGL allocations in PSRAM. Dial uses
+pre-rendered bitmap fonts and registers a 72 KiB PSRAM expansion pool for LVGL
+widget/object allocations, backed by a 24 KiB internal base pool. Display DMA
+buffers and the UI task stack remain internal; runtime TTF rasterization remains
+disabled.
 
 ### Tradeoffs
 

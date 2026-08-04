@@ -11,7 +11,7 @@ export ROON_BRIDGE_BASE
 mkdir -p build/pc_sim
 cmake -S pc_sim -B build/pc_sim -G Ninja
 cmake --build build/pc_sim
-BUILD_BIN=build/pc_sim/roon_knob_pc
+BUILD_BIN=build/pc_sim/hiphi_dial_pc
 if [[ ! -x "$BUILD_BIN" ]]; then
   echo "expected binary $BUILD_BIN"
   exit 1

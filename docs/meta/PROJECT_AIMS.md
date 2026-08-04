@@ -1,12 +1,12 @@
 # Project Aims Alignment
 
-How roon-knob connects to broader goals and how to use that connection when prioritizing work.
+How HiPhi Dial connects to broader goals and how to use that connection when prioritizing work.
 
 This document applies the [Open Horizons](https://muness.com/posts/open-horizons/) framework—specifically its principle of **nested feedback loops** operating at different scales. Small-scale decisions (what to fix this week) should reinforce larger-scale aims (what this project is for), and vice versa.
 
 ## Why This Project Exists
 
-Roon Knob turns a $50 commodity device into a purpose-built physical controller for Roon. It's a side project that demonstrates technology as a force-multiplier: taking off-the-shelf hardware and firmware expertise and compressing them into something non-developers can use.
+HiPhi Dial turns a $50 commodity device into a purpose-built physical controller for Roon. It's a side project that demonstrates technology as a force-multiplier: taking off-the-shelf hardware and firmware expertise and compressing them into something non-developers can use.
 
 It's also a **learning platform** for:
 - AI coding agents (Claude Code workflows)

@@ -7,7 +7,8 @@
 #include <string.h>
 
 #include "platform/platform_http.h"
-#include "platform/platform_storage.h"
+#include "controller_config.h"
+#include "controller_presentation.h"
 #include "wifi_manager.h"
 #include "ota_update.h"
 #include "bridge_client.h"
@@ -47,6 +48,7 @@ struct ui_net_widgets {
     lv_obj_t *ip_value;
     lv_obj_t *version_label;
     lv_obj_t *status_label;
+    lv_obj_t *ble_value;
     lv_obj_t *wifi_form;
     lv_obj_t *wifi_ssid;
     lv_obj_t *wifi_pass;
@@ -56,6 +58,7 @@ struct ui_net_widgets {
 
 static struct ui_net_widgets s_widgets;
 static lv_obj_t *s_reset_confirm_dialog = NULL;
+static char s_ble_status[96] = "Unavailable";
 
 // Forward declarations
 static void set_status_text(const char *msg);
@@ -153,20 +156,24 @@ static void show_reset_confirm_dialog(void) {
 }
 
 static void refresh_labels(void) {
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
+    controller_config_snapshot_t snapshot = {0};
+    if (!controller_config_snapshot(&snapshot)) {
+        set_status_text("Settings unavailable");
+        return;
+    }
+    const rk_cfg_t *cfg = &snapshot.value;
 
     if (s_widgets.name_value) {
-        if (cfg.knob_name[0]) {
-            lv_label_set_text_fmt(s_widgets.name_value, "%s", cfg.knob_name);
+        if (cfg->knob_name[0]) {
+            lv_label_set_text_fmt(s_widgets.name_value, "%s", cfg->knob_name);
         } else {
             lv_label_set_text_fmt(s_widgets.name_value, "%s", wifi_mgr_get_hostname());
         }
     }
 
     if (s_widgets.ssid_value) {
-        if (cfg.ssid[0]) {
-            lv_label_set_text_fmt(s_widgets.ssid_value, "%s", cfg.ssid);
+        if (cfg->ssid[0]) {
+            lv_label_set_text_fmt(s_widgets.ssid_value, "%s", cfg->ssid);
         } else {
             lv_label_set_text(s_widgets.ssid_value, "<unset>");
         }
@@ -210,18 +217,22 @@ static void factory_reset_cb(lv_event_t *e) {
 
 static void test_bridge_cb(lv_event_t *e) {
     (void)e;
-    rk_cfg_t cfg = {0};
-    platform_storage_load(&cfg);
+    controller_config_snapshot_t snapshot = {0};
+    if (!controller_config_snapshot(&snapshot)) {
+        set_status_text("Settings unavailable");
+        return;
+    }
+    const rk_cfg_t *cfg = &snapshot.value;
 
-    if (cfg.bridge_base[0] == '\0') {
-        set_status_text("No bridge URL");
+    if (cfg->bridge_base[0] == '\0') {
+        set_status_text("No Hi-Fi Control URL");
         return;
     }
 
     set_status_text("Testing...");
 
     char url[256];
-    snprintf(url, sizeof(url), "%s/zones", cfg.bridge_base);
+    snprintf(url, sizeof(url), "%s/zones", cfg->bridge_base);
 
     char *response = NULL;
     size_t response_len = 0;
@@ -229,11 +240,11 @@ static void test_bridge_cb(lv_event_t *e) {
     platform_http_free(response);
 
     if (result == 0 && response_len > 0) {
-        set_status_text("Bridge OK!");
-        ESP_LOGI(TAG, "Bridge test passed: %s", cfg.bridge_base);
+        set_status_text("Hi-Fi Control OK!");
+        ESP_LOGI(TAG, "Bridge test passed: %s", cfg->bridge_base);
     } else {
-        set_status_text("Bridge FAILED");
-        ESP_LOGW(TAG, "Bridge test failed: %s (error %d)", cfg.bridge_base, result);
+        set_status_text("Hi-Fi Control FAILED");
+        ESP_LOGW(TAG, "Bridge test failed: %s (error %d)", cfg->bridge_base, result);
     }
 }
 
@@ -242,6 +253,16 @@ static void hide_panel_cb(lv_event_t *e) {
     if (s_widgets.panel) {
         lv_obj_add_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static const char *firmware_channel_suffix(const char *version) {
+    if (version && strstr(version, "-beta") != NULL) {
+        return " (Beta)";
+    }
+    if (version && strstr(version, "-alpha") != NULL) {
+        return " (Alpha)";
+    }
+    return "";
 }
 
 static void update_version_label(void) {
@@ -253,24 +274,29 @@ static void update_version_label(void) {
             lv_label_set_text(s_widgets.version_label, "Checking...");
             break;
         case OTA_STATUS_AVAILABLE:
-            lv_label_set_text_fmt(s_widgets.version_label, "v%s -> v%s",
-                info->current_version, info->available_version);
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s%s -> v%s",
+                info->current_version,
+                firmware_channel_suffix(info->current_version),
+                info->available_version);
             break;
         case OTA_STATUS_DOWNLOADING:
             lv_label_set_text_fmt(s_widgets.version_label, "Updating %d%%",
                 info->progress_percent);
             break;
         case OTA_STATUS_UP_TO_DATE:
-            lv_label_set_text_fmt(s_widgets.version_label, "v%s (latest)",
-                info->current_version);
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s%s (latest)",
+                info->current_version,
+                firmware_channel_suffix(info->current_version));
             break;
         case OTA_STATUS_ERROR:
-            lv_label_set_text_fmt(s_widgets.version_label, "v%s (error)",
-                info->current_version);
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s%s (error)",
+                info->current_version,
+                firmware_channel_suffix(info->current_version));
             break;
         default:
-            lv_label_set_text_fmt(s_widgets.version_label, "v%s",
-                info->current_version);
+            lv_label_set_text_fmt(s_widgets.version_label, "v%s%s",
+                info->current_version,
+                firmware_channel_suffix(info->current_version));
             break;
     }
 }
@@ -332,7 +358,9 @@ static void ensure_panel(void) {
     lv_obj_clear_flag(ver_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_label_set_text(lv_label_create(ver_row), "Version:");
     s_widgets.version_label = lv_label_create(ver_row);
-    lv_label_set_text_fmt(s_widgets.version_label, "v%s", ota_get_current_version());
+    const char *current_version = ota_get_current_version();
+    lv_label_set_text_fmt(s_widgets.version_label, "v%s%s", current_version,
+        firmware_channel_suffix(current_version));
 
     lv_obj_t *ssid_row = lv_obj_create(s_widgets.panel);
     lv_obj_set_size(ssid_row, lv_pct(100), LV_SIZE_CONTENT);
@@ -356,16 +384,27 @@ static void ensure_panel(void) {
     lv_obj_set_flex_flow(bridge_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_all(bridge_row, 4, 0);
     lv_obj_clear_flag(bridge_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_label_set_text(lv_label_create(bridge_row), "Bridge:");
+    lv_label_set_text(lv_label_create(bridge_row), "Hi-Fi Control:");
     s_widgets.bridge_value = lv_label_create(bridge_row);
     lv_obj_set_width(s_widgets.bridge_value, 120);  // Constrain width to enable scroll
     lv_label_set_long_mode(s_widgets.bridge_value, LV_LABEL_LONG_SCROLL_CIRCULAR);
+
+    lv_obj_t *ble_row = lv_obj_create(s_widgets.panel);
+    lv_obj_set_size(ble_row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(ble_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all(ble_row, 4, 0);
+    lv_obj_clear_flag(ble_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_label_set_text(lv_label_create(ble_row), "BLE:");
+    s_widgets.ble_value = lv_label_create(ble_row);
+    lv_obj_set_width(s_widgets.ble_value, 140);
+    lv_label_set_long_mode(s_widgets.ble_value, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(s_widgets.ble_value, s_ble_status);
 
     s_widgets.status_label = lv_label_create(s_widgets.panel);
     lv_label_set_text(s_widgets.status_label, "Wi-Fi idle");
 
     create_button(s_widgets.panel, "Check for Update", check_update_cb);
-    create_button(s_widgets.panel, "Test Bridge", test_bridge_cb);
+    create_button(s_widgets.panel, "Test Hi-Fi Control", test_bridge_cb);
     create_button(s_widgets.panel, "Factory Reset", factory_reset_cb);
     create_button(s_widgets.panel, "Back", hide_panel_cb);
 }
@@ -388,16 +427,16 @@ static void apply_evt_async(void *data) {
             if (ssid[0]) {
                 char buf[64];
                 snprintf(buf, sizeof(buf), "WiFi: %s...", ssid);
-                ui_set_network_status(buf);
+                controller_presentation_set_network_status(buf);
             } else {
-                ui_set_network_status("WiFi: Connecting...");
+                controller_presentation_set_network_status("WiFi: Connecting...");
             }
             break;
         case RK_NET_EVT_GOT_IP:
             set_status_text("Online");
             set_ip_text(msg->ip);
             // Clear main screen status on successful connection
-            ui_set_network_status(NULL);
+            controller_presentation_set_network_status(NULL);
             break;
         case RK_NET_EVT_FAIL:
             // Generic failure - show reason if provided
@@ -406,40 +445,40 @@ static void apply_evt_async(void *data) {
                 // Show on main screen
                 char buf[80];
                 snprintf(buf, sizeof(buf), "WiFi: %s", msg->ip);
-                ui_set_network_status(buf);
+                controller_presentation_set_network_status(buf);
             } else {
                 set_status_text("Retrying...");
-                ui_set_network_status("WiFi: Retrying...");
+                controller_presentation_set_network_status("WiFi: Retrying...");
             }
             break;
         case RK_NET_EVT_WRONG_PASSWORD:
             set_status_text("Wrong password");
-            ui_set_network_status("WiFi: Wrong password");
+            controller_presentation_set_network_status("WiFi: Wrong password");
             break;
         case RK_NET_EVT_NO_AP_FOUND:
             set_status_text("Network not found");
             if (ssid[0]) {
                 char buf[64];
                 snprintf(buf, sizeof(buf), "WiFi: '%s' not found", ssid);
-                ui_set_network_status(buf);
+                controller_presentation_set_network_status(buf);
             } else {
-                ui_set_network_status("WiFi: Network not found");
+                controller_presentation_set_network_status("WiFi: Network not found");
             }
             break;
         case RK_NET_EVT_AUTH_TIMEOUT:
             set_status_text("Auth timeout");
-            ui_set_network_status("WiFi: Auth timeout");
+            controller_presentation_set_network_status("WiFi: Auth timeout");
             break;
         case RK_NET_EVT_AP_STARTED:
-            set_status_text("Setup: roon-knob-setup");
+            set_status_text("Setup: hiphi-dial-setup");
             set_ip_text("192.168.4.1");
             // Show setup instructions on main screen
-            ui_set_network_status("Setup: Connect to 'roon-knob-setup'");
+            ui_set_network_status("Setup: Connect to 'hiphi-dial-setup'");
             break;
         case RK_NET_EVT_AP_STOPPED:
             set_status_text("Connecting...");
             set_ip_text("");
-            ui_set_network_status("WiFi: Connecting...");
+            controller_presentation_set_network_status("WiFi: Connecting...");
             break;
         default:
             break;
@@ -468,6 +507,14 @@ void ui_network_on_event(rk_net_evt_t evt, const char *ip_opt) {
     msg->evt = evt;
     copy_str(msg->ip, sizeof(msg->ip), ip_opt ?: "");
     lv_async_call(apply_evt_async, msg);
+}
+
+void ui_network_set_ble_status(const char *status) {
+    const char *value = status && status[0] ? status : "Unavailable";
+    copy_str(s_ble_status, sizeof(s_ble_status), value);
+    if (s_widgets.ble_value) {
+        lv_label_set_text(s_widgets.ble_value, s_ble_status);
+    }
 }
 
 void ui_show_settings(void) {
@@ -503,6 +550,10 @@ void ui_network_register_menu(void) {
 void ui_network_on_event(rk_net_evt_t evt, const char *ip_opt) {
     (void)evt;
     (void)ip_opt;
+}
+
+void ui_network_set_ble_status(const char *status) {
+    (void)status;
 }
 
 void ui_show_settings(void) {

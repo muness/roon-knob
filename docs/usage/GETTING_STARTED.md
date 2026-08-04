@@ -1,10 +1,10 @@
 # Getting Started from Scratch
 
-This guide walks you through setting up Roon Knob step-by-step, assuming no prior experience with Docker or embedded devices.
+This guide walks you through setting up HiPhi Dial step-by-step, assuming no prior experience with Docker or embedded devices.
 
 ## What You're Setting Up
 
-Roon Knob has two parts that work together:
+HiPhi Dial has two parts that work together:
 
 1. **The Knob** - A small physical device ([Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm)) that sits on your desk. You'll install custom firmware on it.
 
@@ -36,7 +36,7 @@ The easiest way to flash—no software to install.
 1. **Turn on the knob** (power slider towards the USB-C port)
 2. **Connect via USB-C** to your computer
 3. **Open the [Web Flasher](https://roon-knob.muness.com/flash.html)** in Chrome or Edge
-4. **Click "Flash ESP32-S3"** and select the serial port when prompted
+4. **Click "Flash HiPhi Dial"** and select the serial port when prompted
 5. **Wait ~30 seconds** for flashing to complete
 
 The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
@@ -95,7 +95,7 @@ pip3 install esptool
 
 ### Step 2: Download the Firmware
 
-Go to the [latest release](https://github.com/muness/roon-knob/releases/latest) and download **`roon_knob.bin`**.
+Go to the [latest release](https://github.com/muness/roon-knob/releases/latest) and download **`hiphi_dial.bin`**. `roon_knob.bin` is a byte-identical compatibility alias.
 
 Save it somewhere easy to find (like your Downloads folder).
 
@@ -147,20 +147,20 @@ Make sure you're connected to the **ESP32-S3** (see Step 4), then run:
 ```bash
 esptool.py --chip esp32s3 -p YOUR_PORT -b 460800 \
   --before default-reset --after hard-reset \
-  write_flash 0x10000 roon_knob.bin
+  write_flash 0x10000 hiphi_dial.bin
 ```
 
 Example with a real port:
 ```bash
 esptool.py --chip esp32s3 -p /dev/tty.usbmodem101 -b 460800 \
   --before default-reset --after hard-reset \
-  write_flash 0x10000 roon_knob.bin
+  write_flash 0x10000 hiphi_dial.bin
 ```
 
 #### On Windows:
 
 ```cmd
-esptool.py --chip esp32s3 -p COM3 -b 460800 --before default-reset --after hard-reset write_flash 0x10000 roon_knob.bin
+esptool.py --chip esp32s3 -p COM3 -b 460800 --before default-reset --after hard-reset write_flash 0x10000 hiphi_dial.bin
 ```
 
 ### What Success Looks Like
@@ -194,7 +194,7 @@ The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
 
 The control service (Unified Hi-Fi Control) connects your music source to your knob. It supports Roon, Lyrion Music Server (LMS), and OpenHome renderers. It needs to run on an always-on device (NAS, Raspberry Pi, etc.) on your network.
 
-**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?** Just find "Roon Knob" in the extension list and install it (Roon-only mode). Skip to [Part 3](#part-3-connect-everything).
+**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?** Just find "Unified Hi-Fi Control" in the extension list and install it (Roon-only mode). Skip to [Part 3](#part-3-connect-everything).
 
 For everyone else, we'll use Docker.
 
@@ -230,10 +230,10 @@ Most modern NAS devices have Docker support built in. Check your NAS's package c
 
 Docker Compose uses a configuration file to know what to run. You need to create this file.
 
-1. Create a folder for your Roon Knob configuration:
+1. Create a folder for your HiPhi Dial configuration:
    ```bash
-   mkdir -p ~/roon-knob
-   cd ~/roon-knob
+   mkdir -p ~/hiphi-dial
+   cd ~/hiphi-dial
    ```
 
 2. Create a file called `docker-compose.yml` (you can use any text editor):
@@ -282,6 +282,8 @@ This downloads the bridge image (first time only) and starts it running in the b
 
 ### What Success Looks Like
 
+Historical Docker Compose output (legacy project/container name):
+
 ```
 [+] Running 1/1
  ✔ Container roon-knob-roon-knob-bridge-1  Started
@@ -308,12 +310,12 @@ docker compose logs -f
 1. Open the Roon app on your phone, tablet, or computer
 2. Go to **Settings** (gear icon)
 3. Go to **Extensions**
-4. Find **"Roon Knob Bridge"** and click **Enable**
+4. Find **"Unified Hi-Fi Control"** and click **Enable**
 
 ### Step 2: Connect the Knob to WiFi
 
 1. The knob should show "WiFi: Setup Mode" on its screen
-2. On your phone or computer, look for a WiFi network called **"roon-knob-setup"**
+2. On your phone or computer, look for a WiFi network called **"hiphi-dial-setup"**
 3. Connect to that network
 4. A setup page should appear automatically (if not, open a browser and go to `192.168.4.1`)
 5. Enter your home WiFi name and password
@@ -365,7 +367,7 @@ After the initial setup, firmware updates happen automatically. When a new versi
 ### Updating the Bridge
 
 ```bash
-cd ~/roon-knob
+cd ~/hiphi-dial
 docker compose pull
 docker compose up -d
 ```

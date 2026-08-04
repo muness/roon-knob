@@ -1,10 +1,10 @@
 # NVS Storage
 
-This document covers how the Roon Knob persists configuration using ESP-IDF's Non-Volatile Storage (NVS).
+This document covers how HiPhi Dial persists configuration using ESP-IDF's Non-Volatile Storage (NVS).
 
 ## Overview
 
-NVS is a key-value store built into ESP-IDF that persists data to flash memory. The Roon Knob uses it to store:
+NVS is a key-value store built into ESP-IDF that persists data to flash memory. HiPhi Dial uses it to store:
 
 - WiFi credentials (SSID, password)
 - Bridge URL (optional, mDNS used if empty)
@@ -54,7 +54,7 @@ The struct size is checked at compile time to catch accidental changes that woul
 
 **Hostname behavior:**
 - `knob_name` is sanitized to RFC 1123 (lowercase alphanumeric + hyphens)
-- If empty, defaults to MAC-based name (`roon-knob-a1b2c3`)
+- If empty, defaults to MAC-based name (`hiphi-dial-a1b2c3`)
 - Hostname changes require reboot (cache invalidated on boot)
 
 ## API Reference
