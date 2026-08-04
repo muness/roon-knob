@@ -411,10 +411,10 @@ void update_power_state(void) {
     if (s_state.power_state == PowerState::Sleep) {
         return;
     }
+    const bool art_eligible = s_state.artwork_key[0] &&
+        bridge_client_is_ready_for_art_mode() && s_state.art_timeout_sec > 0;
     const uint32_t timeout = s_state.power_state == PowerState::Normal
-        ? (s_state.artwork_key[0] && bridge_client_is_ready_for_art_mode()
-               ? s_state.art_timeout_sec
-               : s_state.dim_timeout_sec)
+        ? (art_eligible ? s_state.art_timeout_sec : s_state.dim_timeout_sec)
         : (s_state.power_state == PowerState::Art
                ? s_state.dim_timeout_sec
                : s_state.sleep_timeout_sec);
