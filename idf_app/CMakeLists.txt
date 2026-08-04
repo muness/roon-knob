@@ -20,6 +20,12 @@ set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
 
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 
+# M5Unified/M5GFX are specific to the M5 Tough target.  This generic Dial
+# project has its own display and input drivers, so exclude the Tough-only
+# platform component from discovery instead of making its dependency graph
+# part of every ESP32 build.
+set(EXCLUDE_COMPONENTS m5_platform)
+
 # Detect when an existing sdkconfig was generated from different defaults. Without
 # this, ESP-IDF silently retains old values (including debug optimization).
 set(_DEFAULTS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults")
