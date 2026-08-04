@@ -365,6 +365,7 @@ void set_power_state(PowerState state) {
     if (s_state.power_state == state) {
         return;
     }
+    const PowerState previous = s_state.power_state;
     s_state.power_state = state;
     s_display_sleeping.store(state == PowerState::Sleep);
     ESP_LOGI(TAG, "Power state -> %s",
@@ -388,6 +389,9 @@ void set_power_state(PowerState state) {
     case PowerState::Sleep:
         m5_platform_display_sleep();
         break;
+    }
+    if (state == PowerState::Normal && previous != PowerState::Normal) {
+        bridge_client_request_poll();
     }
     s_state.dirty = true;
 }

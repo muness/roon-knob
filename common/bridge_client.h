@@ -12,6 +12,8 @@ extern "C" {
 
 /* Reads the already-published controller configuration snapshot. */
 void bridge_client_start(void);
+/* Wake the polling worker after a display sleep/power-save interval. */
+void bridge_client_request_poll(void);
 bool bridge_client_execute_command(const controller_command_t *command);
 void bridge_client_set_network_ready(bool ready);
 const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height);

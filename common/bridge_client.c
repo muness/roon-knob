@@ -165,6 +165,10 @@ static int s_bridge_fail_count = 0;
 static int s_mdns_fail_count = 0;
 static char s_device_ip[16] = {0};  // Device IP for recovery messages
 
+void bridge_client_request_poll(void) {
+    s_trigger_poll = true;
+}
+
 /* The network worker has a PSRAM stack, so it must never enter NVS/flash
  * persistence. A single static mailbox moves discovered-endpoint commits onto
  * the internal UI stack without creating another heap allocation. */
