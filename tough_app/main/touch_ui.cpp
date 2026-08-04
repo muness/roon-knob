@@ -122,10 +122,19 @@ void draw_scrolling_text(const char *text, int x, int y, int width, int size,
     }
     const int gap = 28;
     const int cycle = text_width + gap;
+    const int travel_ms = std::max(1, cycle * 1000 / 34);
+    const int pause_ms = 700;
     const int64_t phase_ms = (esp_timer_get_time() / 1000) %
-                             (cycle * 1000 / 34 + 1200);
-    const int offset = phase_ms < 600 ? 0 :
-        static_cast<int>(((phase_ms - 600) * 34 / 1000) % cycle);
+                             (2 * pause_ms + travel_ms);
+    int offset = 0;
+    if (phase_ms >= pause_ms && phase_ms < pause_ms + travel_ms) {
+        offset = std::min(cycle, static_cast<int>(
+            (phase_ms - pause_ms) * 34 / 1000));
+    } else if (phase_ms >= pause_ms + travel_ms) {
+        /* Hold at the seam. The second copy is aligned at x, so resetting to
+         * offset 0 shows the same pixels rather than jumping backward. */
+        offset = cycle;
+    }
     s_draw_target->setClipRect(x, y, width, size * 9 + 4);
     draw_text(value, x - offset, y, size, color);
     draw_text(value, x - offset + cycle, y, size, color);
