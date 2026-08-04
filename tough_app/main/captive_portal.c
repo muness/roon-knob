@@ -320,8 +320,21 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
   const rk_cfg_t *cfg = &snapshot.value;
 
-  wifi_mgr_scan_result_t scan[WIFI_MGR_MAX_SCAN_RESULTS];
-  size_t scan_count = wifi_mgr_get_scan_results(scan, WIFI_MGR_MAX_SCAN_RESULTS);
+  char query[32] = {0};
+  char scan_value[8] = {0};
+  const bool scan_requested =
+      httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "scan", scan_value, sizeof(scan_value)) == ESP_OK;
+  rk_wifi_network_t scan[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+  rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+  if (scan_requested && (scan_state == RK_WIFI_SCAN_IDLE ||
+                         scan_state == RK_WIFI_SCAN_FAILED)) {
+    (void)wifi_mgr_scan_start();
+    scan_state = wifi_mgr_scan_state();
+  }
+  size_t scan_count = scan_state == RK_WIFI_SCAN_READY
+                          ? wifi_mgr_scan_results_copy(scan, RK_WIFI_SCAN_MAX_NETWORKS)
+                          : 0;
   char scan_options[3072] = "";
   int scan_pos = 0;
   for (size_t i = 0; i < scan_count && scan_pos < (int)sizeof(scan_options) - 1; ++i) {
@@ -511,9 +524,9 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t wifi_scan_handler(httpd_req_t *req) {
-  (void)wifi_mgr_start_scan();
+  (void)wifi_mgr_scan_start();
   httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+  httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/?scan=1");
   httpd_resp_send(req, NULL, 0);
   return ESP_OK;
 }

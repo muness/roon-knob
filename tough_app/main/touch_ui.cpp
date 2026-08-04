@@ -418,8 +418,14 @@ void draw_provisioning(void) {
     draw_center(platform_provisioning_ssid(), w / 2, 64, 2, 0x4fc3f7);
     draw_center("Open 192.168.4.1", w / 2, 91, 1, 0xfafafa);
     draw_center("Choose a network + enter password", w / 2, 111, 1, 0xaaaaaa);
-    wifi_mgr_scan_result_t scan[6];
-    const size_t count = wifi_mgr_get_scan_results(scan, 6);
+    rk_wifi_network_t scan[6] = {};
+    const rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+    if (scan_state == RK_WIFI_SCAN_IDLE || scan_state == RK_WIFI_SCAN_FAILED) {
+        (void)wifi_mgr_scan_start();
+    }
+    const size_t count = scan_state == RK_WIFI_SCAN_READY
+                             ? wifi_mgr_scan_results_copy(scan, 6)
+                             : 0;
     int y = 135;
     if (count == 0) {
         draw_center("Scanning...", w / 2, y, 1, 0xffd54f);

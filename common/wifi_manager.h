@@ -5,6 +5,10 @@
 
 #include "controller_config.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     RK_NET_EVT_CONNECTING,   // Attempting STA connection
     RK_NET_EVT_GOT_IP,       // STA connected with IP
@@ -57,3 +61,7 @@ size_t wifi_mgr_scan_results_copy(rk_wifi_network_t *out, size_t capacity);
 
 // weak callback the UI can override (or register separately)
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);
+
+#ifdef __cplusplus
+}
+#endif
