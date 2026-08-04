@@ -77,12 +77,16 @@ extern "C" bool m5_platform_touch_event(m5_platform_touch_event_t *out) {
     out->delta_y = static_cast<int16_t>(detail.deltaY());
     if (detail.wasPressed()) {
         out->state = M5_PLATFORM_TOUCH_PRESSED;
+    } else if (detail.isDragging() || detail.isFlicking() ||
+               (detail.isPressed() && (out->delta_x != 0 || out->delta_y != 0))) {
+        /* M5Unified's documented drag state is deliberately conservative: it
+         * starts after the hold threshold. Preserve raw pressed samples with
+         * movement so a normal quick swipe remains scrollable. */
+        out->state = M5_PLATFORM_TOUCH_DRAGGING;
     } else if (detail.wasHold()) {
         out->state = M5_PLATFORM_TOUCH_HELD;
     } else if (detail.wasClicked()) {
         out->state = M5_PLATFORM_TOUCH_CLICKED;
-    } else if (detail.isDragging()) {
-        out->state = M5_PLATFORM_TOUCH_DRAGGING;
     } else if (detail.wasReleased()) {
         out->state = M5_PLATFORM_TOUCH_RELEASED;
     } else {
