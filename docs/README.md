@@ -46,12 +46,15 @@ ESP32 hardware-specific documentation.
 - [ROTARY_ENCODER.md](esp/ROTARY_ENCODER.md) - Quadrature encoder handling
 - [BATTERY_MONITORING.md](esp/BATTERY_MONITORING.md) - ADC-based battery level
 - [FONTS.md](esp/FONTS.md) - LVGL font configuration
+- [M5STACK.md](esp/M5STACK.md) - M5Stack target profiles and Tough flashing
+- [WIFI_SCAN.md](esp/WIFI_SCAN.md) - Asynchronous scan behavior and quirks
 
 ### Hardware Reference
 
 Pin mappings, datasheets, component details.
 
 - [board.md](esp/hw-reference/board.md) - Board overview and specs
+- [board-tough.md](esp/hw-reference/board-tough.md) - M5Stack Tough hardware reference
 - [HARDWARE_PINS.md](esp/hw-reference/HARDWARE_PINS.md) - GPIO assignments
 - [COLORTEST_HELLOWORLD.md](esp/hw-reference/COLORTEST_HELLOWORLD.md) - Display color format
 - [cst816d.md](esp/hw-reference/cst816d.md) - Touch controller details

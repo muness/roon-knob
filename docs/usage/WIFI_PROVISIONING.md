@@ -140,7 +140,7 @@ Your router's client list will show the device as:
 | Password | (none - open network) |
 | IP Address | `192.168.4.1` |
 | Max Connections | 2 |
-| Channel | 1 |
+| Channel | 6 |
 
 ### Components Started in AP Mode
 
@@ -149,6 +149,13 @@ Your router's client list will show the device as:
 3. **DNS Server** - Hijacks all DNS queries for captive portal detection
 
 ## Captive Portal
+
+Network selection is asynchronous: the first page load may show “Scanning…”
+while the radio is collecting results. The scan lists visible 2.4 GHz networks
+only, omits hidden SSIDs, and caps the shared result list at 20 unique names.
+Keep the client connected to the setup AP while it runs; if the list is empty,
+reload once or enter the SSID manually. See the detailed [scan behavior
+notes](../esp/WIFI_SCAN.md).
 
 The captive portal provides a web-based configuration interface.
 
