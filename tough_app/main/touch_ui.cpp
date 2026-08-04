@@ -65,6 +65,7 @@ struct UiState {
      * short quarantine, the newly shown mode sees that same gesture and
      * immediately toggles back. */
     int64_t consume_touch_until_us = 0;
+    int64_t art_reentry_block_until_us = 0;
     bool dirty = true;
     char artwork_key[kMaxText] = {};
     uint16_t *artwork_pixels = nullptr;
@@ -589,15 +590,16 @@ void handle_touch(const m5_platform_touch_event_t &event) {
         reset_activity();
         return;
     }
-    reset_activity();
     if (s_state.power_state == PowerState::Art) {
         if (event.state == M5_PLATFORM_TOUCH_CLICKED ||
             event.state == M5_PLATFORM_TOUCH_HELD) {
             set_power_state(PowerState::Normal);
             s_state.consume_touch_until_us = esp_timer_get_time() + 500000;
+            s_state.art_reentry_block_until_us = esp_timer_get_time() + 1000000;
         }
         return;
     }
+    reset_activity();
     if (s_state.picker) {
         if (event.state == M5_PLATFORM_TOUCH_PRESSED) {
             s_state.zone_touch_active = true;
@@ -660,7 +662,8 @@ void handle_touch(const m5_platform_touch_event_t &event) {
          * bridge-owned zone list (including its shared label fallback). */
         dispatch_simple(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
     } else if (event.y >= 34 && event.y < 134 && event.x < 126 &&
-               s_state.artwork_pixels) {
+               s_state.artwork_pixels &&
+               esp_timer_get_time() >= s_state.art_reentry_block_until_us) {
         set_power_state(PowerState::Art);
         s_state.consume_touch_until_us = esp_timer_get_time() + 500000;
     } else if (event.y >= 135 && event.y < 178 && event.x < 95) {
