@@ -682,3 +682,16 @@ flicker boundary, the current device has 4 MiB mapped PSRAM and the canvas
 allocates there, the bridge response is explicitly RGB565 and was fetched at
 240x240, and the settings route now survives a real POST. Keep the web form
 small and treat any future format as a negotiated shared contract.
+
+## Rebase and RLCD integration (2026-08-04)
+
+- Rebased the Tough work onto `origin/master` at `575ec312`, which already
+  carries the Waveshare ESP32-S3-RLCD-4.2 target from #225.
+- Kept the shared asynchronous Wi-Fi scan contract (`wifi_mgr_scan_start`,
+  `wifi_mgr_scan_state`, `wifi_mgr_scan_results_copy`) as the only scan API;
+  updated Tough's portal and on-device setup view to use it.
+- Added C linkage guards to `common/wifi_manager.h` for the M5 C++ renderer.
+- Excluded the Tough-only `m5_platform` component from the RLCD build so the
+  target does not resolve M5Unified/M5GFX dependencies.
+- Verified both target builds and `tests/run_wifi_provisioning_lifecycle.sh`
+  under ESP-IDF 5.5.5.
