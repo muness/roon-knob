@@ -1,15 +1,15 @@
 set(SRC_FILES
     "main_tough.c"
-    "touch_ui.c"
+    "touch_ui.cpp"
     "controller_input_profile_tough.c"
     "controller_presentation_tough.c"
-    "platform_display_tough.c"
     "platform_input_tough.c"
     "platform_http_tough.c"
     "platform_storage_tough.c"
     "platform_mdns_tough.c"
     "platform_log_tough.c"
     "platform_identity_tough.c"
+    "platform_display_m5.c"
     "platform_provisioning_tough.c"
     "captive_portal.c"
     "dns_server.c"
@@ -43,11 +43,7 @@ idf_component_register(
         esp_timer
         esp_wifi
         wpa_supplicant
-        esp_lcd
-        lvgl__lvgl
-        espressif__esp_lcd_ili9341
-        esp_driver_i2c
-        esp_driver_gpio
+        m5_platform
     PRIV_REQUIRES
         nvs_flash
         esp_http_client
@@ -58,6 +54,8 @@ idf_component_register(
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
 # Match the shipping Dial/Frame targets until ESP-IDF 6.0/Picolibc removes the

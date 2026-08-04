@@ -14,7 +14,7 @@ struct fake_timer {
     uint64_t delay_us;
 };
 
-static struct fake_timer s_timers[2];
+static struct fake_timer s_timers[8];
 static size_t s_timer_count;
 static esp_netif_t s_sta_netif;
 static esp_netif_t s_ap_netif;
@@ -267,7 +267,7 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t timeout_us) {
 esp_err_t esp_wifi_init(const wifi_init_config_t *cfg) { (void)cfg; return ESP_OK; }
 esp_err_t esp_wifi_deinit(void) { return ESP_OK; }
 esp_err_t esp_wifi_set_mode(int mode) {
-    if (mode == WIFI_MODE_AP) {
+    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
         pthread_mutex_lock(&s_fixture_lock);
         s_ap_mode_sequence = ++s_effect_sequence;
         pthread_mutex_unlock(&s_fixture_lock);
@@ -292,6 +292,23 @@ esp_err_t esp_wifi_connect(void) {
 }
 esp_err_t esp_wifi_disconnect(void) { return ESP_OK; }
 esp_err_t esp_wifi_set_max_tx_power(int power) { (void)power; return ESP_OK; }
+
+esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block) {
+    (void)config;
+    (void)block;
+    return ESP_OK;
+}
+
+esp_err_t esp_wifi_scan_get_ap_num(uint16_t *number) {
+    if (number) *number = 0;
+    return ESP_OK;
+}
+
+esp_err_t esp_wifi_scan_get_ap_records(uint16_t *number, wifi_ap_record_t *records) {
+    (void)records;
+    if (number) *number = 0;
+    return ESP_OK;
+}
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 void vTaskDelay(unsigned ticks) {
     (void)ticks;

@@ -75,7 +75,10 @@ static void show_picker_for_zones(const bridge_zone_t *zones,
     }
 
     for (int i = 0; i < zone_count; ++i) {
-        names[count] = zones[i].name;
+        /* Zone labels are shared semantic data. Never hand a target a blank
+         * picker row: the stable zone id is the honest fallback when a
+         * provider omitted its display name. */
+        names[count] = zones[i].name[0] ? zones[i].name : zones[i].id;
         ids[count] = zones[i].id;
         if (current_zone_id &&
             strcmp(zones[i].id, current_zone_id) == 0) {

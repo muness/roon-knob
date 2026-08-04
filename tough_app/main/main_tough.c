@@ -1,12 +1,12 @@
 // main_tough.c -- hiphi tough entry point
-// Boot sequence: NVS -> AXP192/SPI/I2C display+touch bring-up -> LVGL ->
-// touch_ui_init -> controller -> UI loop -> app_entry -> WiFi
+// Boot sequence: NVS -> M5Unified/M5GFX board bring-up -> touch UI ->
+// controller -> UI loop -> app_entry -> WiFi
 
 #include "app.h"
 #include "bridge_client.h"
 #include "controller_config.h"
 #include "captive_portal.h"
-#include "platform_display_tough.h"
+#include "m5_platform.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_input.h"
 #include "platform/platform_mdns.h"
@@ -14,8 +14,6 @@
 #include "platform/platform_time.h"
 #include "touch_ui.h"
 #include "wifi_manager.h"
-
-#include "lvgl.h"
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -165,18 +163,9 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(err);
 
-  ESP_LOGI(TAG, "Initializing display/touch hardware...");
-  if (!platform_display_init()) {
-    ESP_LOGE(TAG, "Display/touch hardware init failed!");
-    return;
-  }
-
-  ESP_LOGI(TAG, "Initializing LVGL...");
-  lv_init();
-
-  ESP_LOGI(TAG, "Registering LVGL display/touch driver...");
-  if (!platform_display_register_lvgl_driver()) {
-    ESP_LOGE(TAG, "LVGL driver registration failed!");
+  ESP_LOGI(TAG, "Initializing M5Unified/M5GFX hardware...");
+  if (!m5_platform_begin()) {
+    ESP_LOGE(TAG, "M5 hardware qualification failed!");
     return;
   }
 
@@ -188,8 +177,9 @@ void app_main(void) {
 
   platform_input_init();
 
-  ESP_LOGI(TAG, "Creating UI loop task");
-  if (xTaskCreate(ui_loop_task, "ui_loop", UI_LOOP_STACK_SIZE, NULL, 2, NULL) != pdPASS) {
+  ESP_LOGI(TAG, "Creating internal-RAM UI loop task");
+  if (platform_task_start_internal_stack("ui_loop", UI_LOOP_STACK_SIZE,
+                                         ui_loop_task, NULL) != 0) {
     ESP_LOGE(TAG, "FATAL: Failed to create UI loop task");
     return;
   }

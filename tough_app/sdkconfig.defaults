@@ -57,7 +57,6 @@ CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 
 # Network identity
 CONFIG_LWIP_LOCAL_HOSTNAME="hiphi-tough"
-CONFIG_LWIP_NETIF_HOSTNAME=y
 
 # Brownout detection.
 # TODO(hardware-verify): classic ESP32 exposes brownout detector level
@@ -87,28 +86,8 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 
-# LVGL configuration
-# LVGL JPEG Decoder - Disabled; this Alpha renders no artwork, unlike Dial.
-# CONFIG_LV_USE_TJPGD is not set
-# LVGL Examples - Disabled (unused, bloats build)
-# CONFIG_LV_BUILD_EXAMPLES is not set
-# Built-in Montserrat fonts for touch_ui.c's plain-text widgets (no
-# pre-rendered bitmap font pipeline exists for Tough in this Alpha).
-CONFIG_LV_FONT_MONTSERRAT_14=y
-CONFIG_LV_FONT_MONTSERRAT_20=y
-CONFIG_LV_FONT_MONTSERRAT_28=y
-# Keep a small latency-sensitive LVGL base heap in internal SRAM; main_tough.c
-# adds a PSRAM expansion pool before creating display/UI objects. Tough's
-# screen is smaller (320x240 vs Dial's 360x360 round display) and this Alpha
-# has fewer/simpler widgets (no artwork, no arcs, no bitmap fonts), so a
-# conservative 40 KiB PSRAM pool is used here instead of copying Dial's
-# measured 72 KiB figure verbatim.
-# TODO(hardware-verify): this has not been measured on real Tough hardware;
-# watch the "UI loop stack usage"/LVGL memory-monitor log lines in
-# main_tough.c on first bring-up and raise this if watermarks run tight,
-# per this project's practice of only trusting measured watermarks.
-CONFIG_LV_MEM_SIZE_KILOBYTES=16
-CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=40
+# M5Unified/M5GFX owns the display and touch buffers. Keep UI state and task
+# stacks bounded; the target adapter reports watermarks during bring-up.
 
 # --- Bluetooth: intentionally OFF ---
 # BLE is permanently disabled for this Tough Alpha slice pending #193/#191
