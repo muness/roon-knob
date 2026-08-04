@@ -120,12 +120,15 @@ void draw_scrolling_text(const char *text, int x, int y, int width, int size,
         draw_text(value, x, y, size, color);
         return;
     }
-    const int64_t phase_ms = (esp_timer_get_time() / 1000) % 9000;
-    const int travel = text_width - width + 28;
-    const int offset = phase_ms < 900 ? 0 :
-        std::min(travel, static_cast<int>((phase_ms - 900) * 34 / 1000));
+    const int gap = 28;
+    const int cycle = text_width + gap;
+    const int64_t phase_ms = (esp_timer_get_time() / 1000) %
+                             (cycle * 1000 / 34 + 1200);
+    const int offset = phase_ms < 600 ? 0 :
+        static_cast<int>(((phase_ms - 600) * 34 / 1000) % cycle);
     s_draw_target->setClipRect(x, y, width, size * 9 + 4);
     draw_text(value, x - offset, y, size, color);
+    draw_text(value, x - offset + cycle, y, size, color);
     s_draw_target->clearClipRect();
 }
 
