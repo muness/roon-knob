@@ -1,5 +1,5 @@
 // Tough implementation of the target-neutral controller presentation seam.
-// Thin adapter over touch_ui.c's LVGL-based renderer, mirroring
+// Thin adapter over touch_ui.cpp's M5GFX renderer, mirroring
 // frame_app/main/controller_presentation_frame.c's structure exactly
 // (including the config_durability_warning() pattern, which is shared
 // boilerplate copied from Frame/Dial, not Frame-specific).
@@ -49,7 +49,7 @@ void controller_presentation_set_network_status(const char *status) {
 }
 
 void controller_presentation_set_artwork(const char *image_key) {
-    touch_ui_set_artwork(image_key);
+    touch_ui_post_artwork(image_key);
 }
 
 void controller_presentation_show_volume_change(float volume, float volume_step) {

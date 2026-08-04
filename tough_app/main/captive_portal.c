@@ -10,6 +10,7 @@
 #include "touch_ui.h"
 #include "wifi_manager.h"
 #include "bridge_client.h"
+#include "platform/platform_display.h"
 #include "os_mutex.h"
 
 #include <esp_err.h>
@@ -319,6 +320,18 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
   const rk_cfg_t *cfg = &snapshot.value;
 
+  wifi_mgr_scan_result_t scan[WIFI_MGR_MAX_SCAN_RESULTS];
+  size_t scan_count = wifi_mgr_get_scan_results(scan, WIFI_MGR_MAX_SCAN_RESULTS);
+  char scan_options[3072] = "";
+  int scan_pos = 0;
+  for (size_t i = 0; i < scan_count && scan_pos < (int)sizeof(scan_options) - 1; ++i) {
+    char escaped[128];
+    html_escape(scan[i].ssid, escaped, sizeof(escaped));
+    scan_pos += snprintf(scan_options + scan_pos, sizeof(scan_options) - scan_pos,
+                         "<option value='%s'>%s (%d dBm)</option>",
+                         escaped, escaped, (int)scan[i].rssi);
+  }
+
   char wifi_html[1024] = "";
   int pos = 0;
   for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
@@ -368,6 +381,8 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
     "margin-top:20px;font-size:13px;}"
     ".note a{color:#4fc3f7;}"
+    "select{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;"
+    "background:#0f0f1a;color:#fff;box-sizing:border-box;}"
     "</style>"
     "</head><body>"
     "<h1>hiphi tough</h1>"
@@ -376,7 +391,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
-    "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    "<select id='ssid_scan' name='ssid'><option value=''>Choose a scanned network</option>%s</select>"
+    "<label>Or enter a hidden network</label>"
+    "<input id='ssid_manual' type='text' name='ssid_manual' maxlength='32' placeholder='Hidden WiFi name'>"
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<input type='submit' value='Connect'>"
@@ -386,10 +403,12 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
-    "</div></body></html>",
+    "</div><script>document.getElementById('ssid_scan').addEventListener('change',function(){"
+    "if(this.value)document.getElementById('ssid_manual').value=this.value;});</script></body></html>",
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
-    cfg->wifi_count > 0 ? "</div>" : "");
+    cfg->wifi_count > 0 ? "</div>" : "",
+    scan_options);
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
@@ -399,7 +418,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 
 // Handler for POST /configure - save credentials
 static esp_err_t configure_post_handler(httpd_req_t *req) {
-  char buf[384] = {0};
+  char buf[512] = {0};
   int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
   if (received <= 0) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
@@ -410,7 +429,10 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   char ssid[33] = {0};
   char pass[65] = {0};
 
-  if (!get_form_field(buf, "ssid", ssid, sizeof(ssid))) {
+  if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || ssid[0] == '\0') {
+    (void)get_form_field(buf, "ssid_manual", ssid, sizeof(ssid));
+  }
+  if (ssid[0] == '\0') {
     ESP_LOGE(TAG, "Missing SSID");
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
     return ESP_FAIL;
@@ -488,6 +510,14 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+static esp_err_t wifi_scan_handler(httpd_req_t *req) {
+  (void)wifi_mgr_start_scan();
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
 // Captive portal redirect
 static esp_err_t captive_redirect_handler(httpd_req_t *req) {
   ESP_LOGI(TAG, "Redirect request: %s", req->uri);
@@ -529,7 +559,7 @@ bool captive_portal_start(void) {
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 10;
+  config.max_uri_handlers = 12;
   config.stack_size = 8192;
 
   ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);
@@ -545,6 +575,9 @@ bool captive_portal_start(void) {
 
   httpd_uri_t configure = {.uri = "/configure", .method = HTTP_POST, .handler = configure_post_handler};
   if (!register_uri_handler(&configure)) goto fail;
+
+  httpd_uri_t wifi_scan = {.uri = "/wifi-scan", .method = HTTP_GET, .handler = wifi_scan_handler};
+  if (!register_uri_handler(&wifi_scan)) goto fail;
 
   httpd_uri_t wifi_remove = {.uri = "/wifi-remove", .method = HTTP_POST, .handler = wifi_remove_handler};
   if (!register_uri_handler(&wifi_remove)) goto fail;
@@ -632,7 +665,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<title>hiphi tough - Zones</title>"
     "<style>%s</style></head><body>"
     "<h1>hiphi tough</h1>"
-    "<nav><a href='/zones'>Zones</a>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -681,6 +714,143 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, pos);
   free(html);
+  return ESP_OK;
+}
+
+static uint32_t setting_u32(const char *body, const char *name,
+                            uint32_t fallback) {
+  char value[16] = {0};
+  if (!get_form_field(body, name, value, sizeof(value)) || !value[0]) {
+    return fallback;
+  }
+  char *end = NULL;
+  unsigned long parsed = strtoul(value, &end, 10);
+  if (!end || *end != '\0' || parsed > UINT16_MAX) {
+    return fallback;
+  }
+  return (uint32_t)parsed;
+}
+
+static void add_power_preference(controller_remote_preferences_t *prefs,
+                                 uint32_t enabled_bit, uint32_t timeout_bit,
+                                 uint8_t *enabled, uint32_t *timeout,
+                                 const char *body, const char *enabled_name,
+                                 const char *timeout_name) {
+  if (!prefs || !enabled || !timeout) return;
+  char enabled_value[2] = {0};
+  *enabled = get_form_field(body, enabled_name, enabled_value,
+                            sizeof(enabled_value)) ? 1 : 0;
+  *timeout = setting_u32(body, timeout_name, 0);
+  prefs->present |= enabled_bit | timeout_bit;
+}
+
+static esp_err_t sta_settings_handler(httpd_req_t *req) {
+  controller_config_snapshot_t snapshot = {0};
+  if (!controller_config_snapshot(&snapshot)) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Configuration unavailable");
+    return ESP_FAIL;
+  }
+  const rk_cfg_t *cfg = &snapshot.value;
+  char *html = heap_caps_calloc(1, 12288,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!html) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
+  int pos = snprintf(html, 12288,
+    "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>hiphi tough - Display</title><style>%s"
+    "label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0;}"
+    "input[type=number]{width:88px;padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
+    "input[type=checkbox]{width:22px;height:22px;}small{color:#aaa;}"
+    "</style></head><body><h1>hiphi tough</h1>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a></nav>"
+    "<div class='card'><h2>Display and power</h2>"
+    "<p class='status'>Artwork mode keeps the album visible; dim and sleep are the subsequent power-saving stages.</p>"
+    "<form method='POST' action='/api/settings'><h3>On battery</h3>"
+    "<label>Album art mode <input type='checkbox' name='art_battery_enabled' %s></label>"
+    "<label>Art seconds <input type='number' min='0' max='65535' name='art_battery_timeout' value='%u'></label>"
+    "<label>Dim display <input type='checkbox' name='dim_battery_enabled' %s></label>"
+    "<label>Dim seconds <input type='number' min='0' max='65535' name='dim_battery_timeout' value='%u'></label>"
+    "<label>Sleep display <input type='checkbox' name='sleep_battery_enabled' %s></label>"
+    "<label>Sleep seconds <input type='number' min='0' max='65535' name='sleep_battery_timeout' value='%u'></label>"
+    "<h3>On USB power</h3>"
+    "<label>Album art mode <input type='checkbox' name='art_charging_enabled' %s></label>"
+    "<label>Art seconds <input type='number' min='0' max='65535' name='art_charging_timeout' value='%u'></label>"
+    "<label>Dim display <input type='checkbox' name='dim_charging_enabled' %s></label>"
+    "<label>Dim seconds <input type='number' min='0' max='65535' name='dim_charging_timeout' value='%u'></label>"
+    "<label>Sleep display <input type='checkbox' name='sleep_charging_enabled' %s></label>"
+    "<label>Sleep seconds <input type='number' min='0' max='65535' name='sleep_charging_timeout' value='%u'></label>"
+    "<p><small>Zero seconds disables a stage. Deep sleep is intentionally not enabled on Tough until its wake source is qualified.</small></p>"
+    "<button class='btn' type='submit'>Save display settings</button></form></div>"
+    "</body></html>", STA_CSS,
+    cfg->art_mode_battery_enabled ? "checked" : "", cfg->art_mode_battery_timeout_sec,
+    cfg->dim_battery_enabled ? "checked" : "", cfg->dim_battery_timeout_sec,
+    cfg->sleep_battery_enabled ? "checked" : "", cfg->sleep_battery_timeout_sec,
+    cfg->art_mode_charging_enabled ? "checked" : "", cfg->art_mode_charging_timeout_sec,
+    cfg->dim_charging_enabled ? "checked" : "", cfg->dim_charging_timeout_sec,
+    cfg->sleep_charging_enabled ? "checked" : "", cfg->sleep_charging_timeout_sec);
+  if (pos < 0) pos = 0;
+  if (pos >= 12288) pos = 12287;
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, pos);
+  free(html);
+  return ESP_OK;
+}
+
+static esp_err_t sta_settings_save_handler(httpd_req_t *req) {
+  char body[1024] = {0};
+  int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No settings data");
+    return ESP_FAIL;
+  }
+  body[received] = '\0';
+  controller_remote_preferences_t prefs = {0};
+  add_power_preference(&prefs,
+      CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_ENABLED,
+      CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_TIMEOUT,
+      &prefs.art_mode_battery_enabled, &prefs.art_mode_battery_timeout_sec,
+      body, "art_battery_enabled", "art_battery_timeout");
+  add_power_preference(&prefs,
+      CONTROLLER_REMOTE_PREFERENCE_DIM_BATTERY_ENABLED,
+      CONTROLLER_REMOTE_PREFERENCE_DIM_BATTERY_TIMEOUT,
+      &prefs.dim_battery_enabled, &prefs.dim_battery_timeout_sec,
+      body, "dim_battery_enabled", "dim_battery_timeout");
+  add_power_preference(&prefs,
+      CONTROLLER_REMOTE_PREFERENCE_SLEEP_BATTERY_ENABLED,
+      CONTROLLER_REMOTE_PREFERENCE_SLEEP_BATTERY_TIMEOUT,
+      &prefs.sleep_battery_enabled, &prefs.sleep_battery_timeout_sec,
+      body, "sleep_battery_enabled", "sleep_battery_timeout");
+  add_power_preference(&prefs,
+      CONTROLLER_REMOTE_PREFERENCE_ART_MODE_CHARGING_ENABLED,
+      CONTROLLER_REMOTE_PREFERENCE_ART_MODE_CHARGING_TIMEOUT,
+      &prefs.art_mode_charging_enabled, &prefs.art_mode_charging_timeout_sec,
+      body, "art_charging_enabled", "art_charging_timeout");
+  add_power_preference(&prefs,
+      CONTROLLER_REMOTE_PREFERENCE_DIM_CHARGING_ENABLED,
+      CONTROLLER_REMOTE_PREFERENCE_DIM_CHARGING_TIMEOUT,
+      &prefs.dim_charging_enabled, &prefs.dim_charging_timeout_sec,
+      body, "dim_charging_enabled", "dim_charging_timeout");
+  add_power_preference(&prefs,
+      CONTROLLER_REMOTE_PREFERENCE_SLEEP_CHARGING_ENABLED,
+      CONTROLLER_REMOTE_PREFERENCE_SLEEP_CHARGING_TIMEOUT,
+      &prefs.sleep_charging_enabled, &prefs.sleep_charging_timeout_sec,
+      body, "sleep_charging_enabled", "sleep_charging_timeout");
+
+  controller_config_snapshot_t committed = {0};
+  if (controller_config_merge_remote_preferences(&prefs, &committed) ==
+      CONTROLLER_CONFIG_NOT_COMMITTED) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Settings could not be saved");
+    return ESP_FAIL;
+  }
+  platform_display_apply_config(&committed.value,
+                                platform_battery_is_charging());
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/settings");
+  httpd_resp_send(req, NULL, 0);
   return ESP_OK;
 }
 
@@ -756,7 +926,7 @@ bool captive_portal_start_sta(void) {
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.max_uri_handlers = 8;
-  config.stack_size = 8192;
+  config.stack_size = 16384;
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
 
@@ -771,6 +941,12 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t zones = {.uri = "/zones", .method = HTTP_GET, .handler = sta_zones_handler};
   if (!register_uri_handler(&zones)) goto fail;
+
+  httpd_uri_t settings = {.uri = "/settings", .method = HTTP_GET, .handler = sta_settings_handler};
+  if (!register_uri_handler(&settings)) goto fail;
+
+  httpd_uri_t settings_save = {.uri = "/api/settings", .method = HTTP_POST, .handler = sta_settings_save_handler};
+  if (!register_uri_handler(&settings_save)) goto fail;
 
   httpd_uri_t zone_set = {.uri = "/api/zone", .method = HTTP_POST, .handler = sta_zone_set_handler};
   if (!register_uri_handler(&zone_set)) goto fail;
