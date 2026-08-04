@@ -5,6 +5,10 @@
 
 #include "controller_config.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     RK_NET_EVT_CONNECTING,   // Attempting STA connection
     RK_NET_EVT_GOT_IP,       // STA connected with IP
@@ -17,6 +21,13 @@ typedef enum {
     RK_NET_EVT_AUTH_TIMEOUT,     // Authentication timeout
 } rk_net_evt_t;
 
+#define WIFI_MGR_MAX_SCAN_RESULTS 24
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    uint8_t authmode;
+} wifi_mgr_scan_result_t;
+
 void wifi_mgr_start(void);                   // call once at boot
 void wifi_mgr_stop(void);                    // full stop (for BLE mode switch)
 /* Apply a copied, already-committed local-connectivity projection. This never
@@ -28,6 +39,8 @@ bool wifi_mgr_get_ip(char *buf, size_t n);   // "a.b.c.d"
 void wifi_mgr_get_ssid(char *buf, size_t n);
 bool wifi_mgr_is_ap_mode(void);              // true if in AP provisioning mode
 bool wifi_mgr_start_provisioning(void);       // true only when setup AP mode can start
+bool wifi_mgr_start_scan(void);               // APSTA scan; results are cached
+size_t wifi_mgr_get_scan_results(wifi_mgr_scan_result_t *out, size_t max);
 const char *wifi_mgr_get_hostname(void);     // get device hostname (for mDNS, logs)
 void wifi_mgr_stop_ap(void);                 // stop AP mode, attempt STA connection
 const char *wifi_mgr_get_last_error(void);   // get last disconnect reason string
@@ -37,3 +50,7 @@ void wifi_mgr_set_power_save(bool enable);   // enable/disable WiFi modem sleep
 
 // weak callback the UI can override (or register separately)
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);
+
+#ifdef __cplusplus
+}
+#endif

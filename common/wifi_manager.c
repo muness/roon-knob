@@ -93,6 +93,9 @@ static esp_netif_t *s_sta_netif;
 static esp_netif_t *s_ap_netif;
 static esp_timer_handle_t s_retry_timer;
 static esp_timer_handle_t s_provisioning_retry_timer;
+static esp_timer_handle_t s_scan_timer;
+static esp_timer_handle_t s_ap_mode_timer;
+static esp_timer_handle_t s_connect_timer;
 static size_t s_backoff_idx;
 static size_t s_provisioning_retry_idx;
 static bool s_started;
@@ -107,6 +110,9 @@ static bool s_wifi_mode_transitioning;
 static int s_sta_fail_count;     // consecutive STA connection failures
 static char s_device_hostname[32] = {0};  // cached network hostname
 static int s_wifi_idx;           // index into this device's saved WiFi list
+static wifi_mgr_scan_result_t s_scan_results[WIFI_MGR_MAX_SCAN_RESULTS];
+static size_t s_scan_result_count;
+static bool s_scan_in_progress;
 
 #ifdef ESP_PLATFORM
 /* os_mutex_lock() provides convenient lazy allocation on ESP, but that
@@ -340,6 +346,112 @@ static void schedule_retry(void);
 static void start_ap_mode(void);
 static void start_provisioning_service(void);
 static void cancel_provisioning_retry(void);
+static void scan_timer_cb(void *arg);
+static void ap_mode_timer_cb(void *arg);
+static void connect_timer_cb(void *arg);
+static void connect_now(void);
+
+static void request_connect(void) {
+#ifdef ESP_PLATFORM
+    if (s_connect_timer) {
+        esp_timer_stop(s_connect_timer);
+        if (esp_timer_start_once(s_connect_timer, 100000) == ESP_OK) {
+            return;
+        }
+    }
+#endif
+    connect_now();
+}
+
+static void request_ap_mode(void) {
+#ifdef ESP_PLATFORM
+    if (s_ap_mode_timer) {
+        esp_timer_stop(s_ap_mode_timer);
+        if (esp_timer_start_once(s_ap_mode_timer, 100000) == ESP_OK) {
+            return;
+        }
+    }
+#endif
+    /* Only used during very early startup before timers exist. */
+    start_ap_mode();
+}
+
+bool wifi_mgr_start_scan(void) {
+    if (!lock_wifi_effect()) {
+        return false;
+    }
+    if (!lock_wifi_state()) {
+        unlock_wifi_effect();
+        return false;
+    }
+    const bool allowed = s_started && s_ap_mode && !s_scan_in_progress;
+    if (allowed) {
+        s_scan_in_progress = true;
+    }
+    unlock_wifi_state();
+    if (!allowed) {
+        unlock_wifi_effect();
+        return false;
+    }
+    /* APSTA promotion is deliberately outside the Wi-Fi system-event
+     * callback.  esp_wifi_set_mode() plus scan setup is too deep for the
+     * default sys_evt stack on this ESP32 target. */
+    esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (mode_err != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi APSTA mode failed: %s", esp_err_to_name(mode_err));
+        if (lock_wifi_state()) {
+            s_scan_in_progress = false;
+            unlock_wifi_state();
+        }
+        unlock_wifi_effect();
+        return false;
+    }
+    wifi_scan_config_t config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active = {.min = 100, .max = 300},
+    };
+    esp_err_t err = esp_wifi_scan_start(&config, false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi scan start failed: %s", esp_err_to_name(err));
+        if (lock_wifi_state()) {
+            s_scan_in_progress = false;
+            unlock_wifi_state();
+        }
+    } else {
+        ESP_LOGI(TAG, "Wi-Fi scan started while setup AP remains available");
+    }
+    unlock_wifi_effect();
+    return err == ESP_OK;
+}
+
+static void scan_timer_cb(void *arg) {
+    (void)arg;
+    (void)wifi_mgr_start_scan();
+}
+
+static void ap_mode_timer_cb(void *arg) {
+    (void)arg;
+    start_ap_mode();
+}
+
+static void connect_timer_cb(void *arg) {
+    (void)arg;
+    connect_now();
+}
+
+size_t wifi_mgr_get_scan_results(wifi_mgr_scan_result_t *out, size_t max) {
+    if (!out || max == 0 || !lock_wifi_state()) {
+        return 0;
+    }
+    size_t count = s_scan_result_count < max ? s_scan_result_count : max;
+    memcpy(out, s_scan_results, count * sizeof(*out));
+    unlock_wifi_state();
+    return count;
+}
 
 static void connect_now(void) {
     ensure_wifi_loaded();
@@ -369,7 +481,7 @@ static void connect_now(void) {
     if (!have_active || active.ssid[0] == '\0') {
         unlock_wifi_effect();
         ESP_LOGW(TAG, "SSID empty; starting AP mode for provisioning");
-        start_ap_mode();
+        request_ap_mode();
         return;
     }
     // Set hostname before connection (with delay per Arduino pattern)
@@ -555,7 +667,7 @@ static void schedule_retry_with_reason(uint8_t reason) {
                      prior_ssid,
                      STA_FAIL_THRESHOLD,
                      next_ssid);
-            connect_now();
+            request_connect();
             return;
         }
         const size_t wifi_count = s_wifi_cfg.count;
@@ -563,7 +675,7 @@ static void schedule_retry_with_reason(uint8_t reason) {
         unlock_wifi_state();
         ESP_LOGW(TAG, "All %d saved WiFi networks failed; starting provisioning",
                  (int)wifi_count);
-        start_ap_mode();
+        request_ap_mode();
         return;
     }
 
@@ -583,7 +695,13 @@ static void schedule_retry_with_reason(uint8_t reason) {
         }
     } else {
         ESP_LOGW(TAG, "retry timer missing; reconnect immediately");
+#ifdef ESP_PLATFORM
+        request_connect();
+#else
+        /* Native lifecycle fixture has no timer task; keep its synchronous
+         * event model while ESP defers this off sys_evt. */
         connect_now();
+#endif
     }
     // Emit specific event for UI (e.g., RK_NET_EVT_WRONG_PASSWORD)
     rk_net_evt_cb(evt, last_error);
@@ -596,13 +714,42 @@ static void schedule_retry(void) {
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     (void)arg;
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
+        uint16_t count = 0;
+        if (esp_wifi_scan_get_ap_num(&count) == ESP_OK) {
+            wifi_ap_record_t records[WIFI_MGR_MAX_SCAN_RESULTS] = {0};
+            uint16_t take = count > WIFI_MGR_MAX_SCAN_RESULTS ?
+                WIFI_MGR_MAX_SCAN_RESULTS : count;
+            if (take > 0 && esp_wifi_scan_get_ap_records(&take, records) != ESP_OK) {
+                take = 0;
+            }
+            if (lock_wifi_state()) {
+                s_scan_result_count = 0;
+                for (uint16_t i = 0; i < take; ++i) {
+                    if (records[i].ssid[0] == '\0') continue;
+                    copy_str(s_scan_results[s_scan_result_count].ssid,
+                             sizeof(s_scan_results[0].ssid),
+                             (const char *)records[i].ssid);
+                    s_scan_results[s_scan_result_count].rssi = records[i].rssi;
+                    s_scan_results[s_scan_result_count].authmode = records[i].authmode;
+                    ++s_scan_result_count;
+                }
+                s_scan_in_progress = false;
+                unlock_wifi_state();
+            }
+            ESP_LOGI(TAG, "Wi-Fi scan complete: %u visible networks", (unsigned)take);
+        }
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         reset_backoff();
         if (lock_wifi_state()) {
             s_last_error = NULL;  // Clear last error on new connection attempt
             unlock_wifi_state();
         }
+#ifdef ESP_PLATFORM
+        request_connect();
+#else
         connect_now();
+#endif
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         // Extract disconnect reason from event data
         wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
@@ -704,6 +851,8 @@ static void start_ap_mode(void) {
     ap_config.ap.authmode = WIFI_AUTH_OPEN;
     ap_config.ap.beacon_interval = 100;
 
+    /* Start AP first; the timer task promotes to APSTA and scans after this
+     * system-event callback has returned, keeping the portal reachable. */
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -726,6 +875,9 @@ static void start_ap_mode(void) {
 
     unlock_wifi_effect();
     start_provisioning_service();
+    if (s_scan_timer) {
+        esp_timer_start_once(s_scan_timer, 100000);
+    }
 }
 
 bool wifi_mgr_start_provisioning(void) {
@@ -738,7 +890,7 @@ bool wifi_mgr_start_provisioning(void) {
         ESP_LOGW(TAG, "Provisioning requested before WiFi manager is ready");
         return false;
     }
-    start_ap_mode();
+    request_ap_mode();
     return true;
 }
 
@@ -822,9 +974,30 @@ void wifi_mgr_start(void) {
     esp_timer_handle_t provisioning_retry_timer = NULL;
     ESP_ERROR_CHECK(esp_timer_create(&provisioning_retry_args,
                                      &provisioning_retry_timer));
+    const esp_timer_create_args_t scan_args = {
+        .callback = &scan_timer_cb,
+        .name = "wifi_scan",
+    };
+    esp_timer_handle_t scan_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&scan_args, &scan_timer));
+    const esp_timer_create_args_t ap_mode_args = {
+        .callback = &ap_mode_timer_cb,
+        .name = "wifi_ap_mode",
+    };
+    esp_timer_handle_t ap_mode_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&ap_mode_args, &ap_mode_timer));
+    const esp_timer_create_args_t connect_args = {
+        .callback = &connect_timer_cb,
+        .name = "wifi_connect",
+    };
+    esp_timer_handle_t connect_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&connect_args, &connect_timer));
     if (lock_wifi_state()) {
         s_retry_timer = retry_timer;
         s_provisioning_retry_timer = provisioning_retry_timer;
+        s_scan_timer = scan_timer;
+        s_ap_mode_timer = ap_mode_timer;
+        s_connect_timer = connect_timer;
         unlock_wifi_state();
     }
 
@@ -990,11 +1163,16 @@ void wifi_mgr_stop(void) {
     }
     const bool started = s_started;
     const esp_timer_handle_t retry_timer = s_retry_timer;
+    const esp_timer_handle_t scan_timer = s_scan_timer;
+    const esp_timer_handle_t ap_mode_timer = s_ap_mode_timer;
+    const esp_timer_handle_t connect_timer = s_connect_timer;
     s_provisioning_ready = false;
     s_provisioning_service_ready = false;
     s_provisioning_service_starting = false;
     s_started = false;
     s_ap_mode = false;
+    s_scan_in_progress = false;
+    s_scan_result_count = 0;
     s_wifi_mode_transitioning = true;
     s_sta_fail_count = 0;
     s_wifi_idx = 0;
@@ -1020,6 +1198,15 @@ void wifi_mgr_stop(void) {
     // Stop retry timer
     if (retry_timer) {
         esp_timer_stop(retry_timer);
+    }
+    if (scan_timer) {
+        esp_timer_stop(scan_timer);
+    }
+    if (ap_mode_timer) {
+        esp_timer_stop(ap_mode_timer);
+    }
+    if (connect_timer) {
+        esp_timer_stop(connect_timer);
     }
 
     // Stop WiFi
@@ -1053,6 +1240,8 @@ void wifi_mgr_stop_ap(void) {
     s_provisioning_service_ready = false;
     s_provisioning_service_starting = false;
     s_ap_mode = false;
+    s_scan_in_progress = false;
+    s_scan_result_count = 0;
     s_wifi_mode_transitioning = true;
     s_sta_fail_count = 0;
     s_wifi_idx = 0;
@@ -1062,6 +1251,15 @@ void wifi_mgr_stop_ap(void) {
     ESP_LOGI(TAG, "Stopping AP mode, switching to STA");
 
     cancel_provisioning_retry();
+    if (s_scan_timer) {
+        esp_timer_stop(s_scan_timer);
+    }
+    if (s_ap_mode_timer) {
+        esp_timer_stop(s_ap_mode_timer);
+    }
+    if (s_connect_timer) {
+        esp_timer_stop(s_connect_timer);
+    }
     provisioning_stop_effect();
     // Stop AP
     esp_wifi_stop();

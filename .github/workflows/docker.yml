@@ -477,6 +477,95 @@ jobs:
             hiphi_frame_merged.bin
           retention-days: 30
 
+  # M5Stack Tough (#165) Alpha target. Deliberately NOT added to `release`,
+  # `deploy-pr-preview`, or `deploy-pages`'s `needs:` below -- this compiles
+  # and is verified in CI, but has not passed exact-artifact hardware
+  # validation on physical Tough hardware (#193) and must not reach any
+  # public flash channel until it does. See docs/esp/hw-reference/board-tough.md.
+  build-tough:
+    name: build-tough
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: tough-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep 'set(PROJECT_VER' tough_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building HiPhi Tough firmware version: $VERSION"
+
+      - name: Inject version into Tough CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.tough-version.outputs.version }}")/' tough_app/CMakeLists.txt
+          grep PROJECT_VER tough_app/CMakeLists.txt
+
+      - name: Restore Tough compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache-tough
+          key: ${{ runner.os }}-esp-idf-v5.5.5-tough-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-tough-ccache-
+
+      - name: Restore Tough managed components
+        uses: actions/cache@v5
+        with:
+          path: tough_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-tough-components-${{ hashFiles('tough_app/dependencies.lock') }}
+
+      - name: Build HiPhi Tough with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32
+          path: tough_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-tough
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            grep -Fx "CONFIG_IDF_TARGET_ESP32=y" sdkconfig;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" sdkconfig;
+            ! grep -q "CONFIG_SPIRAM_MODE_OCT" sdkconfig;
+            ! grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            ! grep -q "CONFIG_RK_BLE_HID_HOST" sdkconfig;
+            ! grep -q "rk_ble_hid_host" build/compile_commands.json;
+            ! grep -qi "/bt/" build/compile_commands.json;
+            esptool.py --chip esp32 image_info build/bootloader/bootloader.bin;
+            esptool.py --chip esp32 image_info build/hiphi_tough.bin;
+            esptool.py --chip esp32 merge_bin
+            -o ../hiphi_tough_merged.bin
+            --flash_mode dio --flash_freq 40m --flash_size 16MB
+            0x1000 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_tough.bin;
+            ccache --show-stats
+
+      - name: Upload HiPhi Tough artifact (CI-verified, hardware validation pending)
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-tough-firmware-unverified
+          path: |
+            tough_app/build/hiphi_tough.bin
+            tough_app/build/bootloader/bootloader.bin
+            tough_app/build/partition_table/partition-table.bin
+            tough_app/build/ota_data_initial.bin
+            hiphi_tough_merged.bin
+          retention-days: 30
+
   build-ble-off:
     name: build-ble-off
     runs-on: ubuntu-latest

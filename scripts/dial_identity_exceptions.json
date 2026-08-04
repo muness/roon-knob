@@ -110,7 +110,8 @@
       "retirement": "Remove only after dual advertise/query compatibility is deployed and old consumers have migrated.",
       "path_globs": [
         "idf_app/main/platform_mdns_idf.c",
-        "frame_app/main/platform_mdns_frame.c"
+        "frame_app/main/platform_mdns_frame.c",
+        "tough_app/main/platform_mdns_tough.c"
       ],
       "tokens": [
         "_roonknob"
@@ -269,6 +270,10 @@
     },
     {
       "path": "frame_app/main/platform_mdns_frame.c",
+      "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
+    },
+    {
+      "path": "tough_app/main/platform_mdns_tough.c",
       "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
     },
     {

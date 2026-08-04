@@ -2,6 +2,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define PLATFORM_HTTP_JSON_MAX_BYTES (256U * 1024U)
 
 int platform_http_get(const char *url, char **out, size_t *out_len);
@@ -19,3 +23,7 @@ void platform_http_free(char *p);
  * @param len Buffer length
  */
 void platform_http_get_knob_id(char *out, size_t len);
+
+#ifdef __cplusplus
+}
+#endif

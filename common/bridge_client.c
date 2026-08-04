@@ -34,6 +34,16 @@ static void check_config_sha(const char *new_sha);
 static void check_zones_sha(const char *new_sha);
 static void check_charging_state_change(void);
 
+static bool json_bool_true(const char *json, const char *key) {
+    const char *value = json && key ? strstr(json, key) : NULL;
+    if (!value) return false;
+    const char *colon = strchr(value, ':');
+    if (!colon) return false;
+    ++colon;
+    while (*colon && isspace((unsigned char)*colon)) ++colon;
+    return strncmp(colon, "true", 4) == 0;
+}
+
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
 #define MAX_ZONES BRIDGE_CLIENT_MAX_ZONES
@@ -208,7 +218,10 @@ static bool start_bridge_poll_task(void) {
         LOGI("Bridge worker internal heap before start: free=%zu largest=%zu",
              heap_before, largest_before);
     }
-    if (platform_task_start_external_stack("bridge_poll",
+    /* Bridge discovery and remote preference refresh can promote durable
+     * config (endpoint/zone/preferences). Keep this worker's stack in
+     * internal RAM so NVS cache-off writes cannot see a PSRAM stack. */
+    if (platform_task_start_internal_stack("bridge_poll",
                                            BRIDGE_POLL_TASK_STACK_SIZE,
                                            bridge_poll_thread, NULL) == 0) {
         size_t heap_after = platform_task_internal_heap_free_bytes();
@@ -678,7 +691,16 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     }
 
     // Get battery status for reporting to bridge
+    /* The bridge query contract is decimal digits. Targets without a battery
+     * (or without a qualified gauge yet) report -1 from the shared platform
+     * seam; encode that as the neutral numeric value rather than poisoning the
+     * request and turning a healthy now-playing response into "Idle". */
     int battery_level = platform_battery_get_level();
+    if (battery_level < 0) {
+        battery_level = 0;
+    } else if (battery_level > 100) {
+        battery_level = 100;
+    }
     bool battery_charging = platform_battery_is_charging();
 
     // Get knob ID for config_sha lookup
@@ -714,7 +736,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (line3) {
         extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
     }
-    state->is_playing = strstr(resp, "\"is_playing\":true") != NULL;
+    state->is_playing = json_bool_true(resp, "\"is_playing\"");
 
     const char *vol_key = strstr(resp, "\"volume\"");
     if (vol_key) {
