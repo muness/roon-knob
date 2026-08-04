@@ -111,10 +111,48 @@ void draw_text(const char *text, int x, int y, int size, uint32_t color) {
     s_draw_target->drawString(text ? text : "", x, y);
 }
 
+struct MarqueeState {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int size = 0;
+    char value[256] = {};
+    int64_t started_us = 0;
+};
+
+static MarqueeState s_marquees[32];
+
 void draw_scrolling_text(const char *text, int x, int y, int width, int size,
                          uint32_t color) {
     const char *value = text ? text : "";
     s_draw_target->setTextSize(size);
+    MarqueeState *marquee = nullptr;
+    for (MarqueeState &candidate : s_marquees) {
+        if (candidate.started_us != 0 && candidate.x == x && candidate.y == y &&
+            candidate.width == width && candidate.size == size) {
+            marquee = &candidate;
+            break;
+        }
+    }
+    if (!marquee) {
+        for (MarqueeState &candidate : s_marquees) {
+            if (candidate.started_us == 0) {
+                marquee = &candidate;
+                break;
+            }
+        }
+    }
+    if (marquee) {
+        if (marquee->started_us == 0 || strcmp(marquee->value, value) != 0) {
+            strncpy(marquee->value, value, sizeof(marquee->value) - 1);
+            marquee->value[sizeof(marquee->value) - 1] = '\0';
+            marquee->x = x;
+            marquee->y = y;
+            marquee->width = width;
+            marquee->size = size;
+            marquee->started_us = esp_timer_get_time();
+        }
+    }
     const int text_width = s_draw_target->textWidth(value);
     if (text_width <= width) {
         draw_text(value, x, y, size, color);
@@ -124,7 +162,8 @@ void draw_scrolling_text(const char *text, int x, int y, int width, int size,
     const int cycle = text_width + gap;
     const int travel_ms = std::max(1, cycle * 1000 / 34);
     const int pause_ms = 700;
-    const int64_t phase_ms = (esp_timer_get_time() / 1000) %
+    const int64_t started_us = marquee ? marquee->started_us : esp_timer_get_time();
+    const int64_t phase_ms = ((esp_timer_get_time() - started_us) / 1000) %
                              (2 * pause_ms + travel_ms);
     int offset = 0;
     if (phase_ms >= pause_ms && phase_ms < pause_ms + travel_ms) {

@@ -73,6 +73,31 @@ static lv_obj_t *s_background;         // Light background container
 static lv_obj_t *s_artwork_container;  // Container for artwork layers
 static lv_obj_t *s_artwork_image;      // Album art image
 static lv_obj_t *s_ui_container;       // Container for all UI widgets
+static lv_anim_t s_marquee_anim;
+static bool s_marquee_anim_ready = false;
+
+static void configure_marquee(lv_obj_t *label)
+{
+    if(!s_marquee_anim_ready) {
+        lv_anim_init(&s_marquee_anim);
+        lv_anim_set_repeat_delay(&s_marquee_anim, 700);
+        s_marquee_anim_ready = true;
+    }
+    lv_obj_set_style_anim(label, &s_marquee_anim, LV_PART_MAIN);
+}
+
+/* LVGL preserves a label's scroll offset when its text changes. Reset the
+ * scroll mode around new phrases so a new track always starts at offset zero. */
+static void set_marquee_text(lv_obj_t *label, const char *text)
+{
+    const char *next = text ? text : "";
+    const char *current = lv_label_get_text(label);
+    if(current && strcmp(current, next) == 0) return;
+
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
+    lv_label_set_text(label, next);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+}
 
 // Reusable styles - smart-knob inspired
 static lv_style_t style_button_primary;    // Center play/pause button
@@ -427,9 +452,10 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_artist_label, font_small(), 0);
     lv_obj_set_style_text_align(s_artist_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_artist_label, lv_color_hex(0xaaaaaa), 0);
-    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_anim_time(s_artist_label, 25000, LV_PART_MAIN);
-    lv_label_set_text(s_artist_label, s_pending.line2);
+    configure_marquee(s_artist_label);
+    set_marquee_text(s_artist_label, s_pending.line2);
 
     // Track label - larger font, primary text
     s_track_label = lv_label_create(now_playing);
@@ -437,9 +463,10 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
     lv_obj_set_style_text_align(s_track_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_track_label, lv_color_hex(0xfafafa), 0);
-    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_anim_time(s_track_label, 25000, LV_PART_MAIN);
-    lv_label_set_text(s_track_label, s_pending.line1);
+    configure_marquee(s_track_label);
+    set_marquee_text(s_track_label, s_pending.line1);
 
     // Controls row - flex row for transport buttons
     lv_obj_t *controls = lv_obj_create(now_playing);
@@ -599,10 +626,10 @@ static void zone_list_item_event_cb(lv_event_t *e) {
 static void apply_state(const struct ui_state *state) {
     // Update track/artist labels
     if (s_track_label && s_artist_label) {
-        lv_label_set_text(s_track_label, state->line1);
+        set_marquee_text(s_track_label, state->line1);
         lv_obj_invalidate(s_track_label);
 
-        lv_label_set_text(s_artist_label, state->line2);
+        set_marquee_text(s_artist_label, state->line2);
         lv_obj_invalidate(s_artist_label);
     } else {
         ESP_LOGE(UI_TAG, "Label pointers are NULL! track=%p artist=%p", s_track_label, s_artist_label);
