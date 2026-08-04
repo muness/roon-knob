@@ -722,7 +722,6 @@ void set_artwork_impl(const char *image_key) {
         return;
     }
     copy_text(s_state.artwork_key, sizeof(s_state.artwork_key), key);
-    reset_activity();
     if (!s_state.artwork_key[0]) {
         free(s_state.artwork_pixels);
         s_state.artwork_pixels = nullptr;
