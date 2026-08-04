@@ -145,10 +145,10 @@ Finished those myself:
   NOT added to `release`/`deploy-pr-preview`/`deploy-pages`'s `needs:` --
   verified those three `needs:` lists are unchanged. Ran the exact CI command
   sequence locally end-to-end before committing it.
-- Two small shared-file touches beyond tough_app/: added Tough's mdns
-  `_roonknob` string to the existing `legacy-mdns-service` identity exception
-  (same rule Dial/Frame already use) and reworded this file's own "roon-knob"
-  mention to "HiPhi" so `scripts/check_dial_identity.py` passes.
+- Two small shared-file touches beyond tough_app/: added Tough's mDNS
+  compatibility identifier to the existing `legacy-mdns-service` identity
+  exception (the same rule Dial/Frame already use), then reworded this
+  session note so `scripts/check_dial_identity.py` passes.
 
 Remaining/blocked: physical hardware validation (#193) -- board-marking
 confirmation and actual flash/boot/touch/Wi-Fi test on the owner's unit. This
