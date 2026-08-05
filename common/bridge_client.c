@@ -1422,6 +1422,31 @@ int bridge_client_fetch_artwork(const char *image_key, int width, int height, co
     return platform_http_get_image(url, out, out_len);
 }
 
+int bridge_client_stream_artwork(const char *image_key, int width, int height,
+                                 const char *format, size_t max_bytes,
+                                 platform_http_stream_callback_t callback,
+                                 void *ctx, size_t *out_len) {
+    if (width <= 0 || height <= 0 || max_bytes == 0 || !callback) return -1;
+
+    char url[512];
+    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
+                                                   height, 0, format)) {
+        return -1;
+    }
+
+    uint32_t cache_key = 2166136261u;
+    for (const unsigned char *p =
+             (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
+        cache_key ^= *p;
+        cache_key *= 16777619u;
+    }
+    size_t len = strlen(url);
+    if (len + 20 >= sizeof(url)) return -1;
+    snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
+             (unsigned)cache_key);
+    return platform_http_stream(url, max_bytes, callback, ctx, out_len);
+}
+
 bool bridge_client_is_ready_for_art_mode(void) {
     lock_state();
     bool ready = s_state.zone_count > 0;

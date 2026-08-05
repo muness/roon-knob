@@ -15,6 +15,7 @@
 #include <esp_timer.h>
 #include <esp_app_desc.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <algorithm>
 #include <atomic>
@@ -26,11 +27,18 @@ namespace {
 constexpr const char *TAG = "atom_ui";
 constexpr int W = 128;
 constexpr int H = 128;
-constexpr int ART = 128;
+constexpr int THUMB = 72;
+constexpr int FULL_ART = 128;
+constexpr int ART_TILE_ROWS = 4;
+constexpr size_t ART_TILE_BYTES = static_cast<size_t>(FULL_ART) * ART_TILE_ROWS *
+                                  sizeof(uint16_t);
 constexpr int MAX_TEXT = 96;
 constexpr int DEADZONE = 28;
+constexpr int64_t VOLUME_REPEAT_INITIAL_US = 220000;
+constexpr int64_t VOLUME_REPEAT_INTERVAL_US = 100000;
+constexpr int64_t ACTION_ACK_DURATION_US = 1400000;
 
-int axis_direction(uint8_t value) {
+int axis_direction(uint16_t value) {
     if (value < 128 - DEADZONE) return -1;
     if (value > 128 + DEADZONE) return 1;
     return 0;
@@ -50,6 +58,8 @@ struct State {
     int zone_current = -1;
     int zone_offset = 0;
     float volume = 0;
+    float volume_min = -80;
+    float volume_max = 0;
     float volume_step = 1;
     bool playing = false;
     bool online = false;
@@ -63,7 +73,10 @@ struct State {
     bool right_hold_fired = false;
     int64_t top_right_started_us = 0;
     bool top_right_hold_fired = false;
+    bool suppress_top_right_release_open = false;
     int64_t last_input_us = 0;
+    int volume_repeat_direction = 0;
+    int64_t volume_next_repeat_us = 0;
     int64_t power_started_us = 0;
     uint32_t dim_timeout = 0;
     uint32_t sleep_timeout = 0;
@@ -73,88 +86,222 @@ struct State {
     rk_wifi_scan_state_t wifi_scan_state = RK_WIFI_SCAN_IDLE;
     int64_t last_draw_us = 0;
     int64_t last_artwork_retry_us = 0;
-    uint16_t *artwork = nullptr;
-    char artwork_result_key[MAX_TEXT] = {};
+    bool artwork_available = false;
+    bool artwork_visible = false;
+    char action_ack[MAX_TEXT] = {};
+    int64_t action_ack_until_us = 0;
+    bool action_ack_volume = false;
 };
 
 State s;
 std::atomic_bool s_artwork_loading{false};
-M5Canvas s_canvas(&M5.Display);
+std::atomic_uint32_t s_artwork_generation{0};
 lgfx::LovyanGFX *s_draw_target = &M5.Display;
-bool s_canvas_ready = false;
+SemaphoreHandle_t s_display_mutex = nullptr;
 
 void copy_text(char *out, size_t len, const char *in) {
     if (out && len) snprintf(out, len, "%s", in ? in : "");
 }
 
-void command(controller_command_t command) {
+bool command(controller_command_t command) {
     controller_action_t action = controller_action_command(command);
-    controller_input_dispatch_action(&action);
+    return controller_input_dispatch_action(&action);
 }
 
-void button_action(controller_action_kind_t kind) {
+bool button_action(controller_action_kind_t kind) {
     controller_action_t action = controller_action_simple(kind);
-    controller_input_dispatch_action(&action);
+    return controller_input_dispatch_action(&action);
 }
 
-struct ArtworkResult { char key[MAX_TEXT]; uint16_t *pixels; };
+void acknowledge(const char *text) {
+    if (!text || s.art_mode) return;
+    copy_text(s.action_ack, sizeof(s.action_ack), text);
+    s.action_ack_volume = false;
+    s.action_ack_until_us = esp_timer_get_time() + ACTION_ACK_DURATION_US;
+    s.dirty = true;
+}
+
+void fetch_artwork(void);
+
+struct ArtworkResult {
+    char key[MAX_TEXT];
+    int width;
+    int height;
+    uint32_t generation;
+    bool available;
+};
+
+struct ArtworkRequest {
+    char key[MAX_TEXT];
+    uint32_t generation;
+    bool art_mode;
+};
 
 void artwork_applied(void *arg) {
     ArtworkResult *r = static_cast<ArtworkResult *>(arg);
     if (!r) return;
-    if (strcmp(r->key, s.artwork_key) == 0 && r->pixels) {
-        free(s.artwork);
-        s.artwork = r->pixels;
-        r->pixels = nullptr;
+    const bool current = r->generation == s_artwork_generation.load() &&
+                         strcmp(r->key, s.artwork_key) == 0;
+    const int desired_size = s.art_mode ? FULL_ART : THUMB;
+    const bool desired = current && r->width == desired_size &&
+                         r->height == desired_size;
+    if (desired && r->available) {
+        s.artwork_available = true;
+        /* The worker already painted the tiles into the display. A separate
+         * visibility flag lets full-screen settings screens invalidate those
+         * pixels without retaining a second copy of the artwork. */
+        s.artwork_visible = true;
         s.dirty = true;
     }
-    free(r->pixels);
+    const uint32_t owner = s_artwork_generation.load();
+    if (owner == r->generation) {
+        s_artwork_loading.store(false);
+    } else {
+        /* The old worker is the only owner that can still be running: a new
+         * worker cannot start while the loading latch is set. Release that
+         * old ownership before starting the current generation. */
+        s_artwork_loading.store(false);
+    }
+    const bool needs_current_fetch = (!current || !desired) &&
+                                     s.artwork_key[0] &&
+                                     !s.artwork_visible;
+    const bool stale_owner = owner != r->generation;
     free(r);
-    s_artwork_loading.store(false);
+    if ((needs_current_fetch || stale_owner) && s.artwork_key[0] &&
+        !s.artwork_visible) {
+        /* A track change can arrive while the previous image is streaming.
+         * Do not wait for the periodic retry window to fetch the current key. */
+        fetch_artwork();
+    }
+}
+
+struct ArtworkStream {
+    uint8_t tile[ART_TILE_BYTES] = {};
+    int width = 0;
+    int height = 0;
+    int dest_x = 0;
+    int dest_y = 0;
+    size_t tile_capacity = 0;
+    size_t tile_bytes = 0;
+    size_t total_bytes = 0;
+    int tile_y = 0;
+    uint32_t generation = 0;
+};
+
+int artwork_stream_chunk(const void *data, size_t len, void *ctx) {
+    ArtworkStream *stream = static_cast<ArtworkStream *>(ctx);
+    if (!stream || !data || len == 0) return -1;
+    if (s_artwork_generation.load() != stream->generation) return -1;
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
+    if (stream->total_bytes == 0 && len >= 2 && bytes[0] == 0x1f &&
+        bytes[1] == 0x8b) {
+        return -1;
+    }
+    while (len > 0) {
+        const size_t copy_len = std::min(len, stream->tile_capacity - stream->tile_bytes);
+        memcpy(stream->tile + stream->tile_bytes, bytes, copy_len);
+        stream->tile_bytes += copy_len;
+        stream->total_bytes += copy_len;
+        bytes += copy_len;
+        len -= copy_len;
+        if (stream->tile_bytes == stream->tile_capacity) {
+            if (stream->tile_y >= stream->height) return -1;
+            M5.Display.pushImage(stream->dest_x, stream->dest_y + stream->tile_y,
+                                 stream->width, ART_TILE_ROWS,
+                                 reinterpret_cast<const uint16_t *>(stream->tile));
+            stream->tile_y += ART_TILE_ROWS;
+            stream->tile_bytes = 0;
+        }
+    }
+    return 0;
 }
 
 void artwork_task(void *arg) {
-    char key[MAX_TEXT] = {};
-    copy_text(key, sizeof(key), static_cast<const char *>(arg));
+    ArtworkRequest request = {};
+    memcpy(&request, arg, sizeof(request));
     free(arg);
-    const size_t expected = ART * ART * sizeof(uint16_t);
+    const char *key = request.key;
+    const uint32_t generation = request.generation;
+    const bool requested_art_mode = request.art_mode;
+    const int width = requested_art_mode ? FULL_ART : THUMB;
+    const int height = width;
+    const int dest_x = requested_art_mode ? 0 : 4;
+    const int dest_y = requested_art_mode ? 0 : 18;
+    const size_t expected = static_cast<size_t>(width) * height * sizeof(uint16_t);
+    bool fetched = false;
     for (int attempt = 0; attempt < 3; ++attempt) {
-        char *raw = nullptr;
+        ArtworkStream stream;
+        stream.width = width;
+        stream.height = height;
+        stream.dest_x = dest_x;
+        stream.dest_y = dest_y;
+        stream.generation = generation;
+        stream.tile_capacity = static_cast<size_t>(width) * ART_TILE_ROWS *
+                                sizeof(uint16_t);
         size_t raw_len = 0;
-        const int http_result = bridge_client_fetch_artwork(
-            key, ART, ART, "rgb565", &raw, &raw_len);
+        bool display_locked = false;
+        if (s_display_mutex &&
+            xSemaphoreTake(s_display_mutex, portMAX_DELAY) == pdTRUE) {
+            display_locked = true;
+            M5.Display.startWrite();
+        }
+        const int http_result = bridge_client_stream_artwork(
+            key, width, height, "rgb565", expected, artwork_stream_chunk, &stream,
+            &raw_len);
+        const bool success = http_result == 0 && raw_len == expected &&
+                             stream.tile_y == height && stream.tile_bytes == 0;
+        fetched = success;
+        if (success && generation == s_artwork_generation.load() &&
+            requested_art_mode == s.art_mode &&
+            strcmp(key, s.artwork_key) == 0) {
+            /* Publish visibility before releasing the display mutex. The UI
+             * may redraw immediately after the tile transaction; without
+             * this ordering it can clear the freshly rendered artwork before
+             * the queued completion callback runs. */
+            s.artwork_available = true;
+            s.artwork_visible = true;
+        }
+        if (display_locked) {
+            M5.Display.endWrite();
+            xSemaphoreGive(s_display_mutex);
+        }
         ESP_LOGI(TAG, "artwork fetch result=%d bytes=%u", http_result,
                  static_cast<unsigned>(raw_len));
-        if (http_result == 0 && raw_len == expected) {
-            ArtworkResult *r = static_cast<ArtworkResult *>(calloc(1, sizeof(*r)));
-            if (r) {
-                copy_text(r->key, sizeof(r->key), key);
-                /* Transfer the HTTP buffer directly. */
-                r->pixels = reinterpret_cast<uint16_t *>(raw);
-                raw = nullptr;
-                if (r->pixels) {
-                    const bool posted = platform_task_post_to_ui(artwork_applied, r);
-                    if (posted) r = nullptr;
-                }
-                if (r) { free(r->pixels); free(r); }
-            }
-            platform_http_free(raw);
-            break;
-        }
-        platform_http_free(raw);
+        if (success) break;
         vTaskDelay(pdMS_TO_TICKS(400));
     }
-    s_artwork_loading.store(false);
+    ArtworkResult *r = static_cast<ArtworkResult *>(calloc(1, sizeof(*r)));
+    if (r) {
+        copy_text(r->key, sizeof(r->key), key);
+        r->width = width;
+        r->height = height;
+        r->generation = generation;
+        r->available = fetched;
+        if (platform_task_post_to_ui(artwork_applied, r)) r = nullptr;
+        free(r);
+    } else if (generation == s_artwork_generation.load()) {
+        s_artwork_loading.store(false);
+    }
     vTaskDelete(nullptr);
 }
 
 void fetch_artwork(void) {
     if (!s.artwork_key[0] || s_artwork_loading.exchange(true)) return;
-    char *key = strdup(s.artwork_key);
-    if (!key || platform_task_start_internal_stack("atom_art", 4096,
-                                                   artwork_task, key) != 0) {
+    struct ArtworkRequest {
+        char key[MAX_TEXT];
+        uint32_t generation;
+        bool art_mode;
+    };
+    ArtworkRequest *request = static_cast<ArtworkRequest *>(calloc(1, sizeof(*request)));
+    if (request) {
+        copy_text(request->key, sizeof(request->key), s.artwork_key);
+        request->generation = s_artwork_generation.load();
+        request->art_mode = s.art_mode;
+    }
+    if (!request || platform_task_start_internal_stack("atom_art", 8192,
+                                                       artwork_task, request) != 0) {
         ESP_LOGW(TAG, "artwork worker start failed");
-        free(key);
+        free(request);
         s_artwork_loading.store(false);
     }
 }
@@ -164,28 +311,100 @@ void draw_text(const char *text, int x, int y, int size, uint32_t color) {
     // Use M5GFX's transparent text overload. Supplying a background color
     // paints opaque glyph cells and makes changing labels look like flicker.
     s_draw_target->setTextColor(color);
+    s_draw_target->setTextDatum(lgfx::top_left);
     s_draw_target->drawString(text ? text : "", x, y);
 }
 
-void draw_crop(void) {
-    if (!s.artwork) return;
-    uint16_t row[72];
-    for (int y = 0; y < 72; ++y) {
-        for (int x = 0; x < 72; ++x) {
-            row[x] = s.artwork[(y * ART / 72) * ART + (x * ART / 72)];
+struct MarqueeState {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int size = 0;
+    char value[MAX_TEXT] = {};
+    int64_t started_us = 0;
+};
+
+MarqueeState s_marquees[3];
+
+void draw_scrolling_text(const char *text, int x, int y, int width, int size,
+                         uint32_t color) {
+    const char *value = text ? text : "";
+    s_draw_target->setTextSize(size);
+    MarqueeState *marquee = nullptr;
+    for (MarqueeState &candidate : s_marquees) {
+        if (candidate.started_us != 0 && candidate.x == x && candidate.y == y &&
+            candidate.width == width && candidate.size == size) {
+            marquee = &candidate;
+            break;
         }
-        s_draw_target->pushImage(4, 18 + y, 72, 1, row);
     }
+    if (!marquee) {
+        for (MarqueeState &candidate : s_marquees) {
+            if (candidate.started_us == 0) { marquee = &candidate; break; }
+        }
+    }
+    if (marquee && (marquee->started_us == 0 || strcmp(marquee->value, value) != 0)) {
+        copy_text(marquee->value, sizeof(marquee->value), value);
+        marquee->x = x;
+        marquee->y = y;
+        marquee->width = width;
+        marquee->size = size;
+        marquee->started_us = esp_timer_get_time();
+    }
+    const int text_width = s_draw_target->textWidth(value);
+    if (text_width <= width) { draw_text(value, x, y, size, color); return; }
+    const int gap = 18;
+    const int cycle = text_width + gap;
+    const int travel_ms = std::max(1, cycle * 1000 / 34);
+    const int pause_ms = 700;
+    const int64_t started_us = marquee ? marquee->started_us : esp_timer_get_time();
+    const int64_t phase_ms = ((esp_timer_get_time() - started_us) / 1000) %
+                             (2 * pause_ms + travel_ms);
+    int offset = 0;
+    if (phase_ms >= pause_ms && phase_ms < pause_ms + travel_ms) {
+        offset = std::min(cycle, static_cast<int>((phase_ms - pause_ms) * 34 / 1000));
+    } else if (phase_ms >= pause_ms + travel_ms) {
+        offset = cycle;
+    }
+    s_draw_target->setClipRect(x, y, width, size * 9 + 4);
+    draw_text(value, x - offset, y, size, color);
+    draw_text(value, x - offset + cycle, y, size, color);
+    s_draw_target->clearClipRect();
 }
 
 void draw_art_mode(void) {
-    s_draw_target->fillScreen(0x05070b);
-    if (s.artwork) {
-        s_draw_target->pushImage(0, 0, ART, ART, s.artwork);
-    } else draw_text("NO ART", 42, 58, 1, 0x94a3b8);
-    s_draw_target->fillRectAlpha(0, 100, 128, 28, 190, 0x08111d);
-    draw_text(s.track, 4, 105, 1, 0xf8fafc);
-    draw_text(s.artist, 4, 118, 1, 0x94a3b8);
+    /* Artwork mode is deliberately a pure image surface. If the stream is
+     * unavailable, redraw() has already cleared the display; do not replace
+     * that honest blank state with metadata or a placeholder label. */
+}
+
+void draw_action_ack(void) {
+    if (s.art_mode || s.action_ack_until_us == 0) return;
+    const int64_t now = esp_timer_get_time();
+    if (now >= s.action_ack_until_us) return;
+
+    /* Keep feedback in the metadata band, never over the streamed thumbnail.
+     * The normal redraw path clears this band when the acknowledgement ends. */
+    s_draw_target->fillRect(0, 90, W, H - 90, 0x102a43);
+    if (s.action_ack_volume) {
+        draw_text(s.action_ack, 4, 94, 1, 0xf8fafc);
+        const float range = s.volume_max - s.volume_min;
+        const float fraction = range > 0.0f
+                                   ? (s.volume - s.volume_min) / range
+                                   : 0.0f;
+        const int bar = std::max(0, std::min(120,
+            static_cast<int>(fraction * 120.0f)));
+        s_draw_target->fillRect(4, 111, 120, 5, 0x1e293b);
+        s_draw_target->fillRect(4, 111, bar, 5, 0x38bdf8);
+        char min_text[24] = {};
+        snprintf(min_text, sizeof(min_text), "MIN %.1f", s.volume_min);
+        draw_text(min_text, 4, 119, 1, 0x94a3b8);
+        char max_text[24] = {};
+        snprintf(max_text, sizeof(max_text), "MAX %.1f", s.volume_max);
+        draw_text(max_text, 78, 119, 1, 0x94a3b8);
+    } else {
+        draw_scrolling_text(s.action_ack, 4, 104, W - 8, 1, 0xf8fafc);
+    }
 }
 
 void draw_wifi_setup(void) {
@@ -224,27 +443,30 @@ void redraw(void) {
         s.dirty = false;
         return;
     }
-    // A canvas is an off-screen framebuffer.  Drawing it inside a display
-    // transaction is unnecessary and can make the panel visibly flicker on
-    // the Atom's small SPI display.  Keep the transaction only for the
-    // direct-display fallback.
     const int64_t now_us = esp_timer_get_time();
     if (s.last_draw_us != 0 && now_us - s.last_draw_us < 100000) return;
-    const bool direct_display = !s_canvas_ready;
-    if (direct_display) s_draw_target->startWrite();
-    s_draw_target->fillScreen(0x08111d);
+    if (!s_display_mutex || xSemaphoreTake(s_display_mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    s_draw_target->startWrite();
+    const bool preserves_artwork = s.artwork_visible && !s.picker &&
+                                   !s.settings && !wifi_mgr_is_ap_mode();
+    if (!preserves_artwork) s_draw_target->fillScreen(0x08111d);
     if (s.sleeping) {
-        if (direct_display) s_draw_target->endWrite();
-        if (s_canvas_ready) s_canvas.pushSprite(&M5.Display, 0, 0);
+        s.artwork_visible = false;
+        s_draw_target->endWrite();
+        xSemaphoreGive(s_display_mutex);
         s.dirty = false;
         s.last_draw_us = now_us;
         return;
     }
     if (wifi_mgr_is_ap_mode()) {
+        s.artwork_visible = false;
         draw_wifi_setup();
     } else if (s.art_mode) {
         draw_art_mode();
     } else if (s.picker) {
+        s.artwork_visible = false;
         draw_text("SELECT ZONE", 4, 3, 1, 0x7dd3fc);
         for (int row = 0; row < 4; ++row) {
             int i = s.zone_offset + row;
@@ -254,6 +476,7 @@ void redraw(void) {
         }
         draw_text("A SELECT  B BACK", 3, 113, 1, 0x64748b);
     } else if (s.settings) {
+        s.artwork_visible = false;
         draw_text("SETTINGS", 5, 5, 2, 0x7dd3fc);
         controller_config_snapshot_t snapshot = {};
         char ssid[33] = "(none)";
@@ -273,18 +496,29 @@ void redraw(void) {
         draw_text(version, 5, 99, 1, 0xf8fafc);
         draw_text("Hold top-right", 5, 115, 1, 0x64748b);
     } else {
-        draw_text(s.zone, 3, 3, 1, s.online ? 0x7dd3fc : 0xf87171);
-        draw_crop();
-        /* A playing zone offers pause, while a stopped zone offers play. */
-        if (!s.artwork) draw_text(s.playing ? "||" : ">", 58, 45, 2, 0x38bdf8);
-        draw_text(s.track, 3, 94, 1, 0xf8fafc);
-        draw_text(s.artist, 3, 106, 1, 0x94a3b8);
+        if (s.artwork_visible) {
+            /* The display itself is the artwork cache. On the control page
+             * the bridge sends a native 72x72 tile at (4,18); on art mode it
+             * sends a native 128x128 frame. Clear only pixels outside the
+             * control-page thumbnail so no framebuffer is needed. */
+            s_draw_target->fillRect(0, 0, W, 18, 0x08111d);
+            s_draw_target->fillRect(76, 18, W - 76, THUMB, 0x08111d);
+            s_draw_target->fillRect(0, 90, W, H - 90, 0x08111d);
+        }
+        draw_text(s.zone, 3, 7, 1, s.online ? 0x7dd3fc : 0xf87171);
+        /* Preserve the control-page state glyph: paused/stopped is shown as
+         * the pause bars, while active playback shows the play marker. */
+        draw_text(s.playing ? ">" : "||", 58, 45, 2, 0x38bdf8);
+        draw_scrolling_text(s.track, 3, 94, W - 6, 1, 0xf8fafc);
+        draw_scrolling_text(s.artist, 3, 106, W - 6, 1, 0xaaaaaa);
+        draw_scrolling_text(s.album, 3, 118, W - 6, 1, 0x888888);
         int bar = std::max(0, std::min(116, static_cast<int>(s.volume + 60)));
         s_draw_target->fillRect(4, 122, 120, 3, 0x1e293b);
         s_draw_target->fillRect(4, 122, bar, 3, 0x38bdf8);
+        draw_action_ack();
     }
-    if (direct_display) s_draw_target->endWrite();
-    if (s_canvas_ready) s_canvas.pushSprite(&M5.Display, 0, 0);
+    s_draw_target->endWrite();
+    xSemaphoreGive(s_display_mutex);
     s.dirty = false;
     s.last_draw_us = now_us;
     if (wifi_scanning) s.wifi_scan_frame_drawn = true;
@@ -301,10 +535,20 @@ void wake(void) {
 
 void toggle_art_mode(void) {
     s.art_mode = !s.art_mode;
-    /* Do not wait for a bridge poll to repaint the other paradigm. The
-     * current zone, metadata, and artwork are already cached locally. */
+    s.action_ack_until_us = 0;
+    s.action_ack[0] = '\0';
+    s.action_ack_volume = false;
+    /* The two layouts intentionally request different native dimensions.
+     * Invalidate the display cache and let the existing worker stream the
+     * newly requested size without allocating a full frame. */
+    s.artwork_available = false;
+    s.artwork_visible = false;
+    s_artwork_generation.fetch_add(1);
+    s.last_artwork_retry_us = 0;
     s.last_draw_us = 0;
     s.dirty = true;
+    if (!s.art_mode) acknowledge("CONTROL");
+    fetch_artwork();
 }
 
 void process_input(void) {
@@ -317,14 +561,17 @@ void process_input(void) {
             s.art_mode = false;
             s.dirty = true;
         } else if (surface.clicked) {
-            /* Artwork mode is a distinct UI paradigm. The dedicated
-             * top-left button is its only mode toggle; a surface tap must
-             * never bounce back to control mode. */
+            if (!s.picker && !s.settings) {
+                if (command(controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK))) {
+                    acknowledge(s.playing ? "PAUSE" : "PLAY");
+                }
+            }
         }
     }
     m5_platform_joystick_state_t js = {};
     if (!m5_platform_joystick_state(&js)) return;
     const int64_t now = esp_timer_get_time();
+    const int left_x = axis_direction(js.left_x);
     const int left_y = axis_direction(js.left_y);
     const int right_x = axis_direction(js.right_x);
     const int right_y = axis_direction(js.right_y);
@@ -341,6 +588,7 @@ void process_input(void) {
                             (js.top_right_pressed ? 2 : 0) |
                             (js.left_stick_pressed ? 4 : 0) |
                             (js.right_stick_pressed ? 8 : 0);
+    const bool picker_was_open = s.picker;
     if (buttons != s.last_buttons) {
         wake();
         const uint8_t pressed = buttons & static_cast<uint8_t>(~s.last_buttons);
@@ -353,9 +601,22 @@ void process_input(void) {
             s.top_right_started_us = now;
             s.top_right_hold_fired = false;
         }
-        if (s.picker) {
+        const bool picker_context =
+            s.picker || controller_input_get_context() ==
+                            CONTROLLER_INTERACTION_CONTEXT_ZONE_PICKER;
+        if (picker_context) {
             if (pressed & 4) button_action(CONTROLLER_ACTION_SELECT_ZONE_PICKER);
-            if (released & 8 && s.right_press_started_us && !s.right_hold_fired) button_action(CONTROLLER_ACTION_CLOSE_ZONE_PICKER);
+            if (pressed & 2) {
+                /* Consume the whole physical R press. The router updates the
+                 * shared context synchronously, but the release is sampled
+                 * later and must not be reinterpreted as the media-page
+                 * short-press that opens the picker. */
+                s.suppress_top_right_release_open = true;
+                s.top_right_hold_fired = true;
+                if (button_action(CONTROLLER_ACTION_CLOSE_ZONE_PICKER)) {
+                    acknowledge("ZONE");
+                }
+            }
         } else if (s.settings) {
             // Settings is toggled by holding the physical top-right button.
             // The other top button is intentionally reserved for a future
@@ -364,7 +625,20 @@ void process_input(void) {
             if (pressed & 1) {
                 toggle_art_mode();
             }
-            if (pressed & 4) command(controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK));
+            if (pressed & 4 &&
+                command(controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK))) {
+                acknowledge(s.playing ? "PAUSE" : "PLAY");
+            }
+        }
+        if (released & 2) {
+            const bool suppress_open = s.suppress_top_right_release_open;
+            s.suppress_top_right_release_open = false;
+            if (!suppress_open && !s.top_right_hold_fired &&
+                !picker_was_open && !s.settings) {
+                button_action(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
+                s.art_mode = false;
+                s.dirty = true;
+            }
         }
         s.last_buttons = buttons;
     }
@@ -389,30 +663,76 @@ void process_input(void) {
         s.dirty = true;
     }
     if (s.picker && now - s.last_input_us > 180000) {
+        s.volume_repeat_direction = 0;
+        s.volume_next_repeat_us = 0;
         /* Prefer the right stick for zone navigation; accept the left stick
          * as a hardware-tolerant fallback so a marginal coprocessor axis
          * cannot make the selector unreachable. */
-        const int picker_axis = right_y != 0 ? right_y : left_y;
+        /* Prefer the right stick when it moves. Some Atom JoyStick firmware
+         * revisions expose its physical vertical movement on the other
+         * sampled axis, so accept whichever right-stick axis is active before
+         * falling back to either axis of the left stick. */
+        const int picker_axis = right_y != 0 ? right_y :
+                                right_x != 0 ? right_x :
+                                left_y != 0 ? left_y : left_x;
         if (picker_axis != 0) {
             controller_action_t action = controller_action_picker_scroll(picker_axis);
             controller_input_dispatch_action(&action);
             s.last_input_us = now;
         }
-    } else if (!s.picker && !s.settings && now - s.last_input_us > 180000) {
-        /* The JoyStick Y axis increases when pushed physically down.  Map
-         * the user-facing direction (up = more, down = less), not the raw
-         * ADC sign. */
-        if (left_y < 0) { command(controller_command_adjust_volume(1)); s.last_input_us = now; }
-        if (left_y > 0) { command(controller_command_adjust_volume(-1)); s.last_input_us = now; }
-        if (right_x < 0) { command(controller_command_make(CONTROLLER_COMMAND_PREVIOUS_TRACK)); s.last_input_us = now; }
-        if (right_x > 0) { command(controller_command_make(CONTROLLER_COMMAND_NEXT_TRACK)); s.last_input_us = now; }
+    } else if (!s.picker && !s.settings) {
+        /* The JoyStick Y axis increases when pushed physically down. Map the
+         * user-facing direction (up = more, down = less), not the raw ADC
+         * sign. A held direction is a sequence of virtual presses: respond
+         * immediately, then repeat once after a short hold and at a useful
+         * steady cadence. The shared helper keeps each virtual press aligned
+         * with Dial's signed volume-step policy. */
+        const int volume_direction = left_y < 0 ? 1 : (left_y > 0 ? -1 : 0);
+        bool volume_direction_changed = false;
+        if (volume_direction == 0) {
+            s.volume_repeat_direction = 0;
+            s.volume_next_repeat_us = 0;
+        } else if (volume_direction != s.volume_repeat_direction) {
+            s.volume_repeat_direction = volume_direction;
+            s.volume_next_repeat_us = now;
+            volume_direction_changed = true;
+        }
+        if (volume_direction != 0 && now >= s.volume_next_repeat_us) {
+            const int32_t volume_steps =
+                controller_input_accelerated_steps(volume_direction);
+            if (volume_steps) {
+                if (command(controller_command_adjust_volume(volume_steps))) {
+                    /* The authoritative value arrives through
+                     * touch_ui_show_volume_change; this acknowledgement is
+                     * deliberately not painted here to avoid showing a
+                     * predicted value as confirmed. */
+                }
+                s.last_input_us = now;
+                s.volume_next_repeat_us = now +
+                    (volume_direction_changed
+                         ? VOLUME_REPEAT_INITIAL_US
+                         : VOLUME_REPEAT_INTERVAL_US);
+            }
+        }
+        if (right_x < 0 && command(controller_command_make(CONTROLLER_COMMAND_PREVIOUS_TRACK))) {
+            acknowledge("PREVIOUS"); s.last_input_us = now;
+        }
+        if (right_x > 0 && command(controller_command_make(CONTROLLER_COMMAND_NEXT_TRACK))) {
+            acknowledge("NEXT"); s.last_input_us = now;
+        }
+    } else {
+        /* Picker/settings own the sticks; never carry a media-page repeat
+         * into those contexts. */
+        s.volume_repeat_direction = 0;
+        s.volume_next_repeat_us = 0;
     }
 }
 
 void update_power(void) {
     if (s.sleeping || !s.dim_timeout) return;
     const int64_t elapsed = esp_timer_get_time() - s.power_started_us;
-    if (elapsed >= static_cast<int64_t>(s.dim_timeout) * 1000000 && !s.artwork) {
+    if (elapsed >= static_cast<int64_t>(s.dim_timeout) * 1000000 &&
+        !s.artwork_available) {
         m5_platform_set_brightness(28);
     }
     if (s.sleep_timeout && elapsed >= static_cast<int64_t>(s.sleep_timeout) * 1000000) {
@@ -425,14 +745,11 @@ void update_power(void) {
 
 extern "C" void touch_ui_init(void) {
     s = State{};
+    s_artwork_generation.store(0);
+    s_artwork_loading.store(false);
     s.power_started_us = esp_timer_get_time();
-    s_canvas.setColorDepth(16);
-    // M5Canvas(parent) defaults to PSRAM, but the original AtomS3 has no
-    // PSRAM. Use internal DMA-capable RAM so the full-frame sprite succeeds.
-    s_canvas.setPsram(false);
-    s_canvas.setSwapBytes(true);
-    s_canvas_ready = s_canvas.createSprite(W, H) != nullptr;
-    if (s_canvas_ready) s_draw_target = &s_canvas;
+    s_display_mutex = xSemaphoreCreateMutex();
+    s_draw_target = &M5.Display;
     M5.Display.setTextDatum(lgfx::middle_left);
     M5.Display.setTextFont(1);
     M5.Display.setTextWrap(false);
@@ -446,7 +763,14 @@ extern "C" void touch_ui_process(void) {
      * first fetch races bridge readiness, retry the same key here rather
      * than waiting for another metadata change. */
     const int64_t now_us = esp_timer_get_time();
-    if (s.artwork_key[0] && !s.artwork && !s_artwork_loading.load() &&
+    if (s.action_ack_until_us != 0 && now_us >= s.action_ack_until_us) {
+        s.action_ack_until_us = 0;
+        s.action_ack[0] = '\0';
+        s.action_ack_volume = false;
+        s.dirty = true;
+    }
+    if (s.artwork_key[0] && !s.artwork_visible && !s_artwork_loading.load() &&
+        !s.settings && !s.picker && !wifi_mgr_is_ap_mode() && !s.sleeping &&
         now_us - s.last_artwork_retry_us >= 5000000) {
         s.last_artwork_retry_us = now_us;
         fetch_artwork();
@@ -458,6 +782,12 @@ extern "C" void touch_ui_process(void) {
         s.dirty = true;
     }
     update_power();
+    if (!s.art_mode && !s.picker && !s.settings && !wifi_mgr_is_ap_mode() &&
+        s.artwork_visible) {
+        /* Keep the three metadata rows moving without redrawing faster than
+         * the display can reasonably update. */
+        s.dirty = true;
+    }
     redraw();
 }
 extern "C" void touch_ui_set_status(bool v) { if (s.online != v) { s.online = v; s.dirty = true; } }
@@ -471,15 +801,16 @@ extern "C" void touch_ui_set_artwork(const char *v) {
     if (strcmp(s.artwork_key, key) == 0) {
         /* A transient HTTP failure must not strand the current track in NO
          * ART forever; retry when the same track is shown again. */
-        if (key[0] && !s.artwork) fetch_artwork();
+        if (key[0] && !s.artwork_available) fetch_artwork();
         return;
     }
+    s_artwork_generation.fetch_add(1);
     copy_text(s.artwork_key, sizeof(s.artwork_key), key);
     /* Never leave the previous track's pixels presented while the new
      * request is in flight. A failed fetch should produce an honest NO ART
      * state, not stale artwork that looks like a playback update failure. */
-    free(s.artwork);
-    s.artwork = nullptr;
+    s.artwork_available = false;
+    s.artwork_visible = false;
     s.dirty = true;
     if (!s.artwork_key[0]) {
         return;
@@ -487,14 +818,27 @@ extern "C" void touch_ui_set_artwork(const char *v) {
     fetch_artwork();
 }
 extern "C" void touch_ui_post_artwork(const char *v) { char *c = strdup(v ? v : ""); platform_task_post_to_ui([](void *p){ touch_ui_set_artwork(static_cast<char *>(p)); free(p); }, c); }
-extern "C" void touch_ui_show_volume_change(float v, float step) { s.volume = v; s.volume_step = step; s.dirty = true; }
-extern "C" void touch_ui_update(const char *a, const char *b, const char *c, bool p, float v, float, float, float step, int, int) {
+extern "C" void touch_ui_show_volume_change(float v, float step) {
+    s.volume = v;
+    s.volume_step = step;
+    if (s.art_mode) return;
+    char volume_text[32] = {};
+    snprintf(volume_text, sizeof(volume_text), "VOL %.1f / %.1f dB",
+             s.volume, s.volume_max);
+    copy_text(s.action_ack, sizeof(s.action_ack), volume_text);
+    s.action_ack_volume = true;
+    s.action_ack_until_us = esp_timer_get_time() + ACTION_ACK_DURATION_US;
+    s.dirty = true;
+}
+extern "C" void touch_ui_update(const char *a, const char *b, const char *c, bool p, float v, float volume_min, float volume_max, float step, int, int) {
     const bool changed = strcmp(s.track, a ? a : "") != 0 ||
         strcmp(s.artist, b ? b : "") != 0 || strcmp(s.album, c ? c : "") != 0 ||
-        s.playing != p || s.volume != v || s.volume_step != step;
+        s.playing != p || s.volume != v || s.volume_min != volume_min ||
+        s.volume_max != volume_max || s.volume_step != step;
     if (!changed) return;
     copy_text(s.track, sizeof(s.track), a); copy_text(s.artist, sizeof(s.artist), b);
     copy_text(s.album, sizeof(s.album), c); s.playing = p; s.volume = v;
+    s.volume_min = volume_min; s.volume_max = volume_max;
     s.volume_step = step; s.dirty = true;
 }
 extern "C" void touch_ui_show_zone_picker(const char **n, const char **i, int count, int selected) { s.zone_count = std::min(count, 24); s.zone_selected = selected; s.zone_current = selected; s.zone_offset = std::max(0, selected - 2); for (int x=0;x<s.zone_count;x++){copy_text(s.zone_names[x],MAX_TEXT,n[x]);copy_text(s.zone_ids[x],MAX_TEXT,i[x]);} s.picker=true;s.dirty=true; }

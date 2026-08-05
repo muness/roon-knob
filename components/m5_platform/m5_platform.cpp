@@ -2,6 +2,7 @@
 
 #include <M5Unified.h>
 
+#include <algorithm>
 #include <esp_log.h>
 
 static const char *TAG = "m5_platform";
@@ -13,9 +14,19 @@ namespace {
 constexpr uint8_t kJoystickAddress = 0x59;
 constexpr gpio_num_t kJoystickSda = GPIO_NUM_38;
 constexpr gpio_num_t kJoystickScl = GPIO_NUM_39;
+constexpr uint8_t kRightStickX12Register = 0x20;
+constexpr uint8_t kRightStickY12Register = 0x22;
 
 bool joystick_read(uint8_t reg, uint8_t *data, size_t len) {
     return M5.In_I2C.readRegister(kJoystickAddress, reg, data, len, 400000);
+}
+
+uint8_t joystick_adc12_to_u8(const uint8_t *data) {
+    uint16_t value = static_cast<uint16_t>(data[0]) |
+                     (static_cast<uint16_t>(data[1]) << 8);
+    value = std::min<uint16_t>(value, 4095);
+    return static_cast<uint8_t>((static_cast<uint32_t>(value) * 255 + 2047) /
+                                4095);
 }
 }
 
@@ -132,19 +143,21 @@ extern "C" bool m5_platform_joystick_state(m5_platform_joystick_state_t *out) {
     uint8_t left_y = 0;
     uint8_t right_x = 0;
     uint8_t right_y = 0;
+    uint8_t right_x_12[2] = {};
+    uint8_t right_y_12[2] = {};
     uint8_t buttons[4] = {};
-    /* The coprocessor exposes each stick as its own 8-bit X/Y register
-     * block.  0x30 is the right stick only; reading four bytes from there
-     * made the Joy appear to have no left-stick input at all. */
-    /* Read each 8-bit register separately. The Atom-JoyStick protocol
-     * defines X/Y as adjacent registers, but its coprocessor firmware is
-     * more reliable with a fresh register transaction for each byte than
-     * with a multi-byte read (especially while a stick is moving). */
+    /* The official Atom-JoyStick protocol exposes the right stick's 12-bit
+     * X/Y values at 0x20 and 0x22. Read those values at the platform boundary
+     * and normalize them to the existing 8-bit UI contract. This avoids
+     * depending on the coprocessor's separate 8-bit summary registers, which
+     * are not updating reliably on the firmware revision in this device. */
     if (!joystick_read(0x10, &left_x, 1) ||
         !joystick_read(0x11, &left_y, 1) ||
-        !joystick_read(0x30, &right_x, 1) ||
-        !joystick_read(0x31, &right_y, 1) ||
+        !joystick_read(kRightStickX12Register, right_x_12, sizeof(right_x_12)) ||
+        !joystick_read(kRightStickY12Register, right_y_12, sizeof(right_y_12)) ||
         !joystick_read(0x70, buttons, sizeof(buttons))) return false;
+    right_x = joystick_adc12_to_u8(right_x_12);
+    right_y = joystick_adc12_to_u8(right_y_12);
     out->left_x = left_x;
     out->left_y = left_y;
     out->right_x = right_x;

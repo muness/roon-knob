@@ -9,8 +9,11 @@ joystick base's STM32 coprocessor through the documented I²C interface.
 - Host: M5Stack AtomS3 (`m5::board_t::board_M5AtomS3`), ESP32-S3.
 - Display: 128×128 color LCD, owned by M5GFX.
 - Joystick coprocessor: address `0x59`, SDA GPIO38, SCL GPIO39, 400 kHz.
-- Registers used by this target: dual-stick 8-bit values at `0x30` and button
-  values at `0x70`.
+- Registers used by this target: left-stick 8-bit values at `0x10`, right-stick
+  12-bit values at `0x20`/`0x22`, and button values at `0x70`. The 12-bit right
+  stick reads are normalized at the platform boundary to the UI's 8-bit axis
+  contract because the separate right-stick 8-bit summary registers were not
+  updating reliably on the qualified firmware revision.
 - Four button bits are exposed by `M5Platform` as left, right, A, and B.
 
 The controller UI is glance-first: album art and now-playing text share the

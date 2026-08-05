@@ -93,12 +93,10 @@ controller_interaction_context_t controller_input_get_context(void) {
     return s_context;
 }
 
-static bool resolve_volume_ticks(int32_t ticks,
-                                 controller_action_t *out_action) {
-    if (ticks == 0 || !out_action) {
-        return false;
+int32_t controller_input_accelerated_steps(int32_t ticks) {
+    if (ticks == 0) {
+        return 0;
     }
-
     int64_t magnitude = ticks;
     if (magnitude < 0) {
         magnitude = -magnitude;
@@ -116,6 +114,15 @@ static bool resolve_volume_ticks(int32_t ticks,
         steps = -steps;
     }
 
+    return steps;
+}
+
+static bool resolve_volume_ticks(int32_t ticks,
+                                 controller_action_t *out_action) {
+    const int32_t steps = controller_input_accelerated_steps(ticks);
+    if (steps == 0 || !out_action) {
+        return false;
+    }
     *out_action = controller_action_command(
         controller_command_adjust_volume(steps));
     return true;

@@ -8,11 +8,20 @@ extern "C" {
 
 #define PLATFORM_HTTP_JSON_MAX_BYTES (256U * 1024U)
 
+typedef int (*platform_http_stream_callback_t)(const void *data, size_t len,
+                                               void *ctx);
+
 int platform_http_get(const char *url, char **out, size_t *out_len);
 /* Fetches a response into PSRAM with a hard ceiling. Adaptive-screen callers
  * should select the smallest limit their schema permits. */
 int platform_http_get_bounded(const char *url, size_t max_bytes,
                               char **out, size_t *out_len);
+/* Streams a response without retaining the body. The callback must consume
+ * each chunk before returning; a non-zero callback result aborts the request.
+ */
+int platform_http_stream(const char *url, size_t max_bytes,
+                         platform_http_stream_callback_t callback, void *ctx,
+                         size_t *out_len);
 int platform_http_get_image(const char *url, char **out, size_t *out_len);
 int platform_http_post_json(const char *url, const char *json, char **out, size_t *out_len);
 void platform_http_free(char *p);

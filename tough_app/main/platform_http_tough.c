@@ -189,6 +189,99 @@ int platform_http_get_bounded(const char *url, size_t max_bytes,
     return http_perform(url, NULL, NULL, max_bytes, out, out_len);
 }
 
+int platform_http_stream(const char *url, size_t max_bytes,
+                         platform_http_stream_callback_t callback, void *ctx,
+                         size_t *out_len) {
+    if (!url || max_bytes == 0 || !callback) return -1;
+    if (out_len) *out_len = 0;
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = 5000,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "stream client init failed");
+        return -1;
+    }
+
+    esp_http_client_set_header(client, "Accept", "application/octet-stream");
+    esp_http_client_set_header(client, "Accept-Encoding", "identity");
+    char knob_id[16];
+    get_knob_id(knob_id, sizeof(knob_id));
+    esp_http_client_set_header(client, "X-Knob-Id", knob_id);
+    esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
+
+    int result = -1;
+    size_t total_read = 0;
+    if (esp_http_client_open(client, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "stream open failed url=%s", url);
+        goto cleanup;
+    }
+
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length < 0) {
+        ESP_LOGE(TAG, "stream fetch headers failed");
+        goto cleanup;
+    }
+    if (esp_http_client_get_status_code(client) != 200) {
+        ESP_LOGE(TAG, "HTTP stream request failed: status=%d",
+                 esp_http_client_get_status_code(client));
+        goto cleanup;
+    }
+    if (content_length > 0 && (size_t)content_length > max_bytes) {
+        ESP_LOGE(TAG, "stream response too large: %d bytes (limit %zu)",
+                 content_length, max_bytes);
+        goto cleanup;
+    }
+
+    char *content_encoding = NULL;
+    esp_http_client_get_header(client, "Content-Encoding", &content_encoding);
+    if (content_encoding && content_encoding[0] &&
+        strcmp(content_encoding, "identity") != 0) {
+        ESP_LOGE(TAG, "cannot stream encoded response: %s", content_encoding);
+        goto cleanup;
+    }
+
+    {
+        uint8_t chunk[1024];
+        while (1) {
+            int read_len = esp_http_client_read(client, (char *)chunk,
+                                                sizeof(chunk));
+            if (read_len < 0) {
+                ESP_LOGE(TAG, "stream read failed after=%zu", total_read);
+                goto cleanup;
+            }
+            if (read_len == 0) break;
+            if (total_read + (size_t)read_len > max_bytes) {
+                ESP_LOGE(TAG, "stream response exceeded %zu-byte limit",
+                         max_bytes);
+                goto cleanup;
+            }
+            if (callback(chunk, (size_t)read_len, ctx) != 0) {
+                ESP_LOGE(TAG, "stream callback rejected response after=%zu",
+                         total_read);
+                goto cleanup;
+            }
+            total_read += (size_t)read_len;
+        }
+    }
+    if (content_length > 0 && total_read != (size_t)content_length) {
+        ESP_LOGE(TAG, "stream truncated: got=%zu expected=%d", total_read,
+                 content_length);
+        goto cleanup;
+    }
+    if (out_len) *out_len = total_read;
+    result = 0;
+
+cleanup:
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return result;
+}
+
 int platform_http_post_json(const char *url, const char *json, char **out, size_t *out_len) {
     return http_perform(url, json, "application/json",
                         PLATFORM_HTTP_JSON_MAX_BYTES, out, out_len);
