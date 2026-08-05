@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cmake -S pc_sim -B build_pc_ci
-cmake --build build_pc_ci
+if [[ -d pc_sim ]]; then
+  cmake -S pc_sim -B build_pc_ci
+  cmake --build build_pc_ci
+else
+  echo "Skipping pc_sim build: pc_sim/ is not present in this checkout."
+fi
 
-pushd idf_app >/dev/null
-idf.py build
-popd >/dev/null
+if [[ -n "${IDF_PATH:-}" ]] && command -v idf.py >/dev/null 2>&1; then
+  pushd idf_app >/dev/null
+  idf.py build
+  popd >/dev/null
+else
+  echo "Skipping idf_app build: ESP-IDF is not loaded in this environment."
+fi
 
 WARNINGS=$(rg -n --glob '*.[ch]' "#include <esp_" common || true)
 if [[ -n "$WARNINGS" ]]; then

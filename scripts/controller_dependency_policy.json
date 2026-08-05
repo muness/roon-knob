@@ -22,8 +22,116 @@
         "components/rk_ble_hid_host/include",
         "components/rk_ble_hid_host"
       ]
+    },
+    "atom": {
+      "cmake": "atom_app/main/CMakeLists.txt",
+      "edge_mode": "composition",
+      "include_dirs": [
+        "atom_app/main",
+        "include",
+        "common",
+        "tough_app/main"
+      ]
+    },
+    "tough": {
+      "cmake": "tough_app/main/CMakeLists.txt",
+      "edge_mode": "composition",
+      "include_dirs": [
+        "tough_app/main",
+        "include",
+        "common"
+      ]
     }
   },
+  "target_roots": {
+    "dial": "idf_app/main",
+    "frame": "frame_app/main",
+    "atom": "atom_app/main",
+    "tough": "tough_app/main"
+  },
+  "legacy_composition_edges": [
+    {
+      "target": "atom",
+      "kind": "include",
+      "source": "atom_app/main/main_atom.c",
+      "value": "tough_app/main/main_tough.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom currently reuses the Tough composition root; split the target roots before removing this exact edge."
+    },
+    {
+      "target": "atom",
+      "kind": "include_dir",
+      "source": "-",
+      "value": "tough_app/main",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom currently resolves shared services through the Tough source directory."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/captive_portal.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough captive portal implementation."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/dns_server.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough DNS implementation."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/platform_http_tough.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough HTTP adapter."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/platform_log_tough.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough logging adapter."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/platform_mdns_tough.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough mDNS adapter."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/platform_provisioning_tough.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough provisioning adapter."
+    },
+    {
+      "target": "atom",
+      "kind": "source",
+      "source": "-",
+      "value": "tough_app/main/platform_storage_tough.c",
+      "owner": "Atom firmware migration",
+      "retirement_issue": "#191",
+      "reason": "Atom CMake currently compiles the Tough storage adapter."
+    }
+  ],
   "negative_fixture": {
     "target": "dial",
     "source": "tests/fixtures/controller_dependency/common/new_controller.c",
@@ -60,6 +168,7 @@
     "dial|common/bridge_client.c|common/platform/platform_time.h",
     "dial|common/bridge_client.c|include/os_mutex.h",
     "dial|common/bridge_client.h|common/controller_command.h",
+    "dial|common/bridge_client.h|common/platform/platform_http.h",
     "dial|common/bridge_command_plan.c|common/bridge_command_plan.h",
     "dial|common/bridge_command_plan.h|common/controller_command.h",
     "dial|common/controller_action.h|common/controller_command.h",
@@ -220,6 +329,7 @@
     "frame|common/bridge_client.c|common/platform/platform_time.h",
     "frame|common/bridge_client.c|include/os_mutex.h",
     "frame|common/bridge_client.h|common/controller_command.h",
+    "frame|common/bridge_client.h|common/platform/platform_http.h",
     "frame|common/bridge_command_plan.c|common/bridge_command_plan.h",
     "frame|common/bridge_command_plan.h|common/controller_command.h",
     "frame|common/controller_action.h|common/controller_command.h",

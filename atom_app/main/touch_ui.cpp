@@ -32,6 +32,9 @@ constexpr int FULL_ART = 128;
 constexpr int ART_TILE_ROWS = 4;
 constexpr size_t ART_TILE_BYTES = static_cast<size_t>(FULL_ART) * ART_TILE_ROWS *
                                   sizeof(uint16_t);
+constexpr int TOP_STRIP_H = 18;
+constexpr int METADATA_Y = 90;
+constexpr int METADATA_H = H - METADATA_Y;
 constexpr int MAX_TEXT = 96;
 constexpr int DEADZONE = 28;
 constexpr int64_t VOLUME_REPEAT_INITIAL_US = 220000;
@@ -61,11 +64,15 @@ struct State {
     float volume_min = -80;
     float volume_max = 0;
     float volume_step = 1;
+    int seek_position = 0;
+    int seek_length = 0;
+    int64_t seek_updated_us = 0;
     bool playing = false;
     bool online = false;
     bool picker = false;
     bool settings = false;
     bool art_mode = false;
+    bool art_surface_needs_clear = false;
     bool dirty = true;
     bool charging = false;
     uint8_t last_buttons = 0;
@@ -98,6 +105,32 @@ std::atomic_bool s_artwork_loading{false};
 std::atomic_uint32_t s_artwork_generation{0};
 lgfx::LovyanGFX *s_draw_target = &M5.Display;
 SemaphoreHandle_t s_display_mutex = nullptr;
+lgfx::LGFX_Sprite s_top_strip(&M5.Display);
+lgfx::LGFX_Sprite s_metadata_band(&M5.Display);
+bool s_region_buffers_ready = false;
+bool s_region_buffers_failed = false;
+
+bool ensure_region_buffers(void) {
+    if (s_region_buffers_ready) return true;
+    if (s_region_buffers_failed) return false;
+
+    s_top_strip.setColorDepth(16);
+    s_metadata_band.setColorDepth(16);
+    if (!s_top_strip.createSprite(W, TOP_STRIP_H) ||
+        !s_metadata_band.createSprite(W, METADATA_H)) {
+        s_top_strip.deleteSprite();
+        s_metadata_band.deleteSprite();
+        s_region_buffers_failed = true;
+        ESP_LOGW(TAG, "region sprite allocation failed");
+        return false;
+    }
+    s_top_strip.setTextFont(1);
+    s_top_strip.setTextWrap(false);
+    s_metadata_band.setTextFont(1);
+    s_metadata_band.setTextWrap(false);
+    s_region_buffers_ready = true;
+    return true;
+}
 
 void copy_text(char *out, size_t len, const char *in) {
     if (out && len) snprintf(out, len, "%s", in ? in : "");
@@ -308,11 +341,25 @@ void fetch_artwork(void) {
 
 void draw_text(const char *text, int x, int y, int size, uint32_t color) {
     s_draw_target->setTextSize(size);
-    // Use M5GFX's transparent text overload. Supplying a background color
-    // paints opaque glyph cells and makes changing labels look like flicker.
+    // In M5GFX the one-color overload leaves the background transparent. The
+    // two-color overload is intentionally not used here because each region
+    // is already painted atomically from its backing sprite.
     s_draw_target->setTextColor(color);
     s_draw_target->setTextDatum(lgfx::top_left);
     s_draw_target->drawString(text ? text : "", x, y);
+}
+
+void draw_clipped_text(const char *text, int x, int y, int width, int size,
+                       uint32_t color) {
+    int32_t old_x = 0;
+    int32_t old_y = 0;
+    int32_t old_w = 0;
+    int32_t old_h = 0;
+    s_draw_target->getClipRect(&old_x, &old_y, &old_w, &old_h);
+    s_draw_target->setTextSize(size);
+    s_draw_target->setClipRect(x, y, width, s_draw_target->fontHeight());
+    draw_text(text, x, y, size, color);
+    s_draw_target->setClipRect(old_x, old_y, old_w, old_h);
 }
 
 struct MarqueeState {
@@ -324,7 +371,63 @@ struct MarqueeState {
     int64_t started_us = 0;
 };
 
-MarqueeState s_marquees[3];
+// Three metadata rows plus the transient acknowledgement need independent
+// phase state.  Keep these keyed by their geometry so an overlay never steals
+// and restarts a scrolling metadata row.
+MarqueeState s_marquees[4];
+
+bool metadata_marquee_needed(void) {
+    if (s.art_mode || s.picker || s.settings || wifi_mgr_is_ap_mode() ||
+        s.sleeping) return false;
+    s_draw_target->setTextSize(1);
+    return s_draw_target->textWidth(s.track) > W - 6 ||
+           s_draw_target->textWidth(s.artist) > W - 6 ||
+           s_draw_target->textWidth(s.album) > W - 6;
+}
+
+int current_seek_position(void) {
+    if (s.seek_length <= 0 || s.seek_position < 0) return 0;
+    int position = s.seek_position;
+    if (s.playing && s.seek_updated_us > 0) {
+        position += static_cast<int>((esp_timer_get_time() - s.seek_updated_us) /
+                                     1000000);
+    }
+    return std::max(0, std::min(s.seek_length, position));
+}
+
+void draw_seek_indicator(int y) {
+    const int width = 120;
+    s_draw_target->fillRect(4, y, width, 2, 0x1e293b);
+    if (s.seek_length <= 0) return;
+    const int position = current_seek_position();
+    const int filled = std::max(0, std::min(width,
+        static_cast<int>((static_cast<int64_t>(position) * width) /
+                         s.seek_length)));
+    if (filled > 0) s_draw_target->fillRect(4, y, filled, 2, 0x38bdf8);
+}
+
+void draw_ellipsized_text(const char *text, int x, int y, int width, int size,
+                          uint32_t color) {
+    const char *value = text ? text : "";
+    s_draw_target->setTextSize(size);
+    if (s_draw_target->textWidth(value) <= width) {
+        draw_text(value, x, y, size, color);
+        return;
+    }
+    char bounded[MAX_TEXT] = {};
+    copy_text(bounded, sizeof(bounded), value);
+    while (bounded[0] && s_draw_target->textWidth(bounded) > width) {
+        const size_t len = strlen(bounded);
+        if (len <= 3) break;
+        bounded[len - 1] = '\0';
+    }
+    if (strlen(bounded) > 3) {
+        bounded[strlen(bounded) - 3] = '.';
+        bounded[strlen(bounded) - 2] = '.';
+        bounded[strlen(bounded) - 1] = '.';
+    }
+    draw_clipped_text(bounded, x, y, width, size, color);
+}
 
 void draw_scrolling_text(const char *text, int x, int y, int width, int size,
                          uint32_t color) {
@@ -366,10 +469,15 @@ void draw_scrolling_text(const char *text, int x, int y, int width, int size,
     } else if (phase_ms >= pause_ms + travel_ms) {
         offset = cycle;
     }
-    s_draw_target->setClipRect(x, y, width, size * 9 + 4);
+    int32_t old_x = 0;
+    int32_t old_y = 0;
+    int32_t old_w = 0;
+    int32_t old_h = 0;
+    s_draw_target->getClipRect(&old_x, &old_y, &old_w, &old_h);
+    s_draw_target->setClipRect(x, y, width, s_draw_target->fontHeight());
     draw_text(value, x - offset, y, size, color);
     draw_text(value, x - offset + cycle, y, size, color);
-    s_draw_target->clearClipRect();
+    s_draw_target->setClipRect(old_x, old_y, old_w, old_h);
 }
 
 void draw_art_mode(void) {
@@ -378,33 +486,73 @@ void draw_art_mode(void) {
      * that honest blank state with metadata or a placeholder label. */
 }
 
-void draw_action_ack(void) {
+void draw_action_ack(int y_origin) {
     if (s.art_mode || s.action_ack_until_us == 0) return;
     const int64_t now = esp_timer_get_time();
     if (now >= s.action_ack_until_us) return;
 
-    /* Keep feedback in the metadata band, never over the streamed thumbnail.
-     * The normal redraw path clears this band when the acknowledgement ends. */
-    s_draw_target->fillRect(0, 90, W, H - 90, 0x102a43);
+    /* Feedback is composed into the metadata band, never painted over the
+     * streamed thumbnail or as a second pass over the display. */
     if (s.action_ack_volume) {
-        draw_text(s.action_ack, 4, 94, 1, 0xf8fafc);
+        draw_text(s.action_ack, 4, y_origin + 4, 1, 0xf8fafc);
         const float range = s.volume_max - s.volume_min;
         const float fraction = range > 0.0f
                                    ? (s.volume - s.volume_min) / range
                                    : 0.0f;
         const int bar = std::max(0, std::min(120,
             static_cast<int>(fraction * 120.0f)));
-        s_draw_target->fillRect(4, 111, 120, 5, 0x1e293b);
-        s_draw_target->fillRect(4, 111, bar, 5, 0x38bdf8);
+        s_draw_target->fillRect(4, y_origin + 21, 120, 5, 0x1e293b);
+        s_draw_target->fillRect(4, y_origin + 21, bar, 5, 0x38bdf8);
         char min_text[24] = {};
         snprintf(min_text, sizeof(min_text), "MIN %.1f", s.volume_min);
-        draw_text(min_text, 4, 119, 1, 0x94a3b8);
+        draw_text(min_text, 4, y_origin + 29, 1, 0x94a3b8);
         char max_text[24] = {};
         snprintf(max_text, sizeof(max_text), "MAX %.1f", s.volume_max);
-        draw_text(max_text, 78, 119, 1, 0x94a3b8);
+        draw_text(max_text, 78, y_origin + 29, 1, 0x94a3b8);
     } else {
-        draw_scrolling_text(s.action_ack, 4, 104, W - 8, 1, 0xf8fafc);
+        draw_clipped_text(s.action_ack, 4, y_origin + 14, W - 8, 1,
+                          0xf8fafc);
     }
+}
+
+void draw_top_strip(void) {
+    if (!ensure_region_buffers()) {
+        draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
+                             s.online ? 0x7dd3fc : 0xf87171);
+        return;
+    }
+    lgfx::LovyanGFX *previous = s_draw_target;
+    s_draw_target = &s_top_strip;
+    s_top_strip.fillScreen(0x08111d);
+    draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
+                         s.online ? 0x7dd3fc : 0xf87171);
+    s_draw_target = previous;
+    s_top_strip.pushSprite(&M5.Display, 0, 0);
+}
+
+void draw_metadata_band(void) {
+    if (!ensure_region_buffers()) {
+        draw_scrolling_text(s.track, 3, 94, W - 6, 1, 0xf8fafc);
+        draw_scrolling_text(s.artist, 3, 106, W - 6, 1, 0xaaaaaa);
+        draw_scrolling_text(s.album, 3, 112, W - 6, 1, 0x888888);
+        draw_seek_indicator(125);
+        return;
+    }
+    lgfx::LovyanGFX *previous = s_draw_target;
+    s_draw_target = &s_metadata_band;
+    const bool ack_active = s.action_ack_until_us != 0 &&
+                            esp_timer_get_time() < s.action_ack_until_us;
+    s_metadata_band.fillScreen(ack_active ? 0x102a43 : 0x08111d);
+    if (ack_active) {
+        draw_action_ack(0);
+    } else {
+        draw_scrolling_text(s.track, 3, 4, W - 6, 1, 0xf8fafc);
+        draw_scrolling_text(s.artist, 3, 16, W - 6, 1, 0xaaaaaa);
+        draw_scrolling_text(s.album, 3, 22, W - 6, 1, 0x888888);
+        draw_seek_indicator(36);
+    }
+    s_draw_target = previous;
+    s_metadata_band.pushSprite(&M5.Display, 0, METADATA_Y);
 }
 
 void draw_wifi_setup(void) {
@@ -449,9 +597,24 @@ void redraw(void) {
         return;
     }
     s_draw_target->startWrite();
-    const bool preserves_artwork = s.artwork_visible && !s.picker &&
-                                   !s.settings && !wifi_mgr_is_ap_mode();
-    if (!preserves_artwork) s_draw_target->fillScreen(0x08111d);
+    const bool normal_control = !wifi_mgr_is_ap_mode() && !s.art_mode &&
+                                !s.picker && !s.settings && !s.sleeping;
+    const bool clear_art_surface = s.art_surface_needs_clear;
+    if (clear_art_surface) {
+        /* Full-screen artwork is streamed directly to the panel, so leaving
+         * that mode requires one explicit surface invalidation. Keep this
+         * transition clear out of marquee and overlay redraws. */
+        s_draw_target->fillScreen(0x08111d);
+        s.art_surface_needs_clear = false;
+    }
+    // Normal updates are region updates.  Clearing the whole panel here makes
+    // every marquee tick visibly flash, especially while artwork is absent.
+    if (normal_control && !s.artwork_visible && !clear_art_surface) {
+        s_draw_target->fillRect(0, 0, THUMB, THUMB, 0x08111d);
+    } else if (!clear_art_surface && !normal_control && !s.sleeping &&
+               !(s.art_mode && s.artwork_visible)) {
+        s_draw_target->fillScreen(0x08111d);
+    }
     if (s.sleeping) {
         s.artwork_visible = false;
         s_draw_target->endWrite();
@@ -496,26 +659,11 @@ void redraw(void) {
         draw_text(version, 5, 99, 1, 0xf8fafc);
         draw_text("Hold top-right", 5, 115, 1, 0x64748b);
     } else {
-        if (s.artwork_visible) {
-            /* The display itself is the artwork cache. On the control page
-             * the bridge sends a native 72x72 tile at (4,18); on art mode it
-             * sends a native 128x128 frame. Clear only pixels outside the
-             * control-page thumbnail so no framebuffer is needed. */
-            s_draw_target->fillRect(0, 0, W, 18, 0x08111d);
-            s_draw_target->fillRect(76, 18, W - 76, THUMB, 0x08111d);
-            s_draw_target->fillRect(0, 90, W, H - 90, 0x08111d);
-        }
-        draw_text(s.zone, 3, 7, 1, s.online ? 0x7dd3fc : 0xf87171);
-        /* Preserve the control-page state glyph: paused/stopped is shown as
-         * the pause bars, while active playback shows the play marker. */
-        draw_text(s.playing ? ">" : "||", 58, 45, 2, 0x38bdf8);
-        draw_scrolling_text(s.track, 3, 94, W - 6, 1, 0xf8fafc);
-        draw_scrolling_text(s.artist, 3, 106, W - 6, 1, 0xaaaaaa);
-        draw_scrolling_text(s.album, 3, 118, W - 6, 1, 0x888888);
-        int bar = std::max(0, std::min(116, static_cast<int>(s.volume + 60)));
-        s_draw_target->fillRect(4, 122, 120, 3, 0x1e293b);
-        s_draw_target->fillRect(4, 122, bar, 3, 0x38bdf8);
-        draw_action_ack();
+        /* The display itself is the artwork cache. The changing top and
+         * metadata regions are composed below; artwork remains direct to the
+         * display so no framebuffer is needed. */
+        draw_top_strip();
+        draw_metadata_band();
     }
     s_draw_target->endWrite();
     xSemaphoreGive(s_display_mutex);
@@ -533,17 +681,31 @@ void wake(void) {
     s.dirty = true;
 }
 
+void leave_art_mode(void) {
+    if (!s.art_mode) return;
+    s.art_mode = false;
+    s.artwork_available = false;
+    s.artwork_visible = false;
+    s_artwork_generation.fetch_add(1);
+    s.art_surface_needs_clear = true;
+    s.dirty = true;
+}
+
 void toggle_art_mode(void) {
-    s.art_mode = !s.art_mode;
+    if (s.art_mode) {
+        leave_art_mode();
+    } else {
+        s.art_mode = true;
+        s.artwork_available = false;
+        s.artwork_visible = false;
+        s_artwork_generation.fetch_add(1);
+    }
     s.action_ack_until_us = 0;
     s.action_ack[0] = '\0';
     s.action_ack_volume = false;
     /* The two layouts intentionally request different native dimensions.
      * Invalidate the display cache and let the existing worker stream the
      * newly requested size without allocating a full frame. */
-    s.artwork_available = false;
-    s.artwork_visible = false;
-    s_artwork_generation.fetch_add(1);
     s.last_artwork_retry_us = 0;
     s.last_draw_us = 0;
     s.dirty = true;
@@ -558,7 +720,7 @@ void process_input(void) {
         if (surface.held) {
             s.settings = !s.settings;
             s.picker = false;
-            s.art_mode = false;
+            leave_art_mode();
             s.dirty = true;
         } else if (surface.clicked) {
             if (!s.picker && !s.settings) {
@@ -636,7 +798,7 @@ void process_input(void) {
             if (!suppress_open && !s.top_right_hold_fired &&
                 !picker_was_open && !s.settings) {
                 button_action(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
-                s.art_mode = false;
+                leave_art_mode();
                 s.dirty = true;
             }
         }
@@ -648,7 +810,7 @@ void process_input(void) {
         wake();
         s.settings = !s.settings;
         s.picker = false;
-        s.art_mode = false;
+        leave_art_mode();
         s.dirty = true;
     }
     if (js.right_stick_pressed && s.right_press_started_us &&
@@ -659,7 +821,7 @@ void process_input(void) {
          * never persists a zone implicitly. */
         button_action(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
         s.settings = false;
-        s.art_mode = false;
+        leave_art_mode();
         s.dirty = true;
     }
     if (s.picker && now - s.last_input_us > 180000) {
@@ -750,6 +912,8 @@ extern "C" void touch_ui_init(void) {
     s.power_started_us = esp_timer_get_time();
     s_display_mutex = xSemaphoreCreateMutex();
     s_draw_target = &M5.Display;
+    s_region_buffers_ready = false;
+    s_region_buffers_failed = false;
     M5.Display.setTextDatum(lgfx::middle_left);
     M5.Display.setTextFont(1);
     M5.Display.setTextWrap(false);
@@ -782,10 +946,12 @@ extern "C" void touch_ui_process(void) {
         s.dirty = true;
     }
     update_power();
-    if (!s.art_mode && !s.picker && !s.settings && !wifi_mgr_is_ap_mode() &&
-        s.artwork_visible) {
-        /* Keep the three metadata rows moving without redrawing faster than
-         * the display can reasonably update. */
+    if (metadata_marquee_needed()) {
+        /* Marquee animation must continue even when no artwork is available. */
+        s.dirty = true;
+    }
+    if (s.playing && s.seek_length > 0 && !s.art_mode && !s.picker &&
+        !s.settings && !wifi_mgr_is_ap_mode() && !s.sleeping) {
         s.dirty = true;
     }
     redraw();
@@ -830,16 +996,21 @@ extern "C" void touch_ui_show_volume_change(float v, float step) {
     s.action_ack_until_us = esp_timer_get_time() + ACTION_ACK_DURATION_US;
     s.dirty = true;
 }
-extern "C" void touch_ui_update(const char *a, const char *b, const char *c, bool p, float v, float volume_min, float volume_max, float step, int, int) {
+extern "C" void touch_ui_update(const char *a, const char *b, const char *c, bool p, float v, float volume_min, float volume_max, float step, int pos, int length) {
     const bool changed = strcmp(s.track, a ? a : "") != 0 ||
         strcmp(s.artist, b ? b : "") != 0 || strcmp(s.album, c ? c : "") != 0 ||
         s.playing != p || s.volume != v || s.volume_min != volume_min ||
-        s.volume_max != volume_max || s.volume_step != step;
+        s.volume_max != volume_max || s.volume_step != step ||
+        s.seek_position != pos || s.seek_length != length;
     if (!changed) return;
     copy_text(s.track, sizeof(s.track), a); copy_text(s.artist, sizeof(s.artist), b);
     copy_text(s.album, sizeof(s.album), c); s.playing = p; s.volume = v;
     s.volume_min = volume_min; s.volume_max = volume_max;
-    s.volume_step = step; s.dirty = true;
+    s.volume_step = step;
+    s.seek_position = std::max(0, pos);
+    s.seek_length = std::max(0, length);
+    s.seek_updated_us = esp_timer_get_time();
+    s.dirty = true;
 }
 extern "C" void touch_ui_show_zone_picker(const char **n, const char **i, int count, int selected) { s.zone_count = std::min(count, 24); s.zone_selected = selected; s.zone_current = selected; s.zone_offset = std::max(0, selected - 2); for (int x=0;x<s.zone_count;x++){copy_text(s.zone_names[x],MAX_TEXT,n[x]);copy_text(s.zone_ids[x],MAX_TEXT,i[x]);} s.picker=true;s.dirty=true; }
 extern "C" void touch_ui_hide_zone_picker(void) { s.picker=false;s.dirty=true; }
@@ -853,6 +1024,6 @@ extern "C" bool touch_ui_is_display_sleeping(void){return s.sleeping;}
 extern "C" void touch_ui_show_settings(void){
     s.settings = true;
     s.picker = false;
-    s.art_mode = false;
+    leave_art_mode();
     wake();
 }

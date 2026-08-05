@@ -1,5 +1,11 @@
 Distributing Album Art to ESP32‑S3 – Practical Guide
 
+> **Target note:** This document describes the older LVGL/360×360 image path.
+> The no-PSRAM M5Stack AtomS3 Joystick target does not use the full-frame
+> buffers, JPEG decode path, or 360×360 dimensions described below. See
+> [the AtomS3 Joystick hardware contract](board-atom-s3-joystick.md) for its
+> streamed native RGB565 tile path.
+
 Goal
 - Deliver now‑playing artwork from the sidecar to the ESP32‑S3 reliably and cheaply in RAM/CPU, then render it with LVGL on a 360×360 panel.
 
