@@ -4,6 +4,7 @@
 // only Tough-specific detail is the X-Device-Type header value below.
 
 #include "platform/platform_http.h"
+#include "platform/platform_identity.h"
 
 #include <esp_http_client.h>
 #include <esp_heap_caps.h>
@@ -68,7 +69,7 @@ static int http_perform(const char *url, const char *body,
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", "tough");
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
 
     esp_err_t err = esp_http_client_open(client, body ? strlen(body) : 0);
     if (err != ESP_OK) {

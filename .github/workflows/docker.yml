@@ -586,6 +586,52 @@ jobs:
             hiphi_rlcd_merged.bin
           retention-days: 30
 
+  build-atom:
+    name: build-atom-s3-joystick
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Get firmware version
+        id: atom-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' atom_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Inject version into Atom CMakeLists.txt
+        run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.atom-version.outputs.version }}")/' atom_app/CMakeLists.txt
+      - name: Restore Atom managed components
+        uses: actions/cache@v5
+        with:
+          path: atom_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-atom-components-${{ hashFiles('atom_app/dependencies.lock') }}
+      - name: Build AtomS3 Joystick with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: atom_app
+          command: >-
+            set -e;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y" sdkconfig;
+            grep -F "/components/m5_platform/" build/compile_commands.json;
+            grep -F "m5stack__m5unified" build/compile_commands.json;
+            esptool.py --chip esp32s3 merge_bin -o ../hiphi_atom_s3_joystick_merged.bin --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_atom_s3_joystick.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_atom_s3_joystick_merged.bin
+      - name: Upload AtomS3 Joystick artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-atom-s3-joystick-firmware
+          path: |
+            atom_app/build/hiphi_atom_s3_joystick.bin
+            atom_app/build/bootloader/bootloader.bin
+            atom_app/build/partition_table/partition-table.bin
+            atom_app/build/ota_data_initial.bin
+            hiphi_atom_s3_joystick_merged.bin
+          retention-days: 30
+
   build-ble-off:
     name: build-ble-off
     runs-on: ubuntu-latest
@@ -614,7 +660,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-ble-off]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -785,7 +831,7 @@ jobs:
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-ble-off]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write

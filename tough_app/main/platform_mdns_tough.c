@@ -3,6 +3,7 @@
 // target-generic mDNS wiring, not Frame-specific.
 
 #include "platform/platform_mdns.h"
+#include "platform/platform_identity.h"
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -30,16 +31,15 @@ void platform_mdns_init(const char *hostname) {
         ESP_LOGE(TAG, "mdns init failed: %s", esp_err_to_name(err));
         return;
     }
-    const char *host = (hostname && hostname[0]) ? hostname : "hiphi-tough";
+    const char *host = (hostname && hostname[0]) ? hostname : platform_device_slug();
     ESP_LOGI(TAG, "mDNS hostname: %s", host);
     mdns_hostname_set(host);
     mdns_instance_name_set(host);
 
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 
-    mdns_txt_item_t txt[] = {
-        {"product", "hiphi-tough"},
-    };
+    mdns_txt_item_t txt[] = {{"product", NULL}};
+    txt[0].value = platform_device_slug();
     mdns_service_add(NULL, "_device-info", "_udp", 9, txt, sizeof(txt) / sizeof(txt[0]));
     s_mdns_ready = true;
     ESP_LOGI(TAG, "mDNS ready");

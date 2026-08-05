@@ -89,3 +89,4 @@ Competitor and alternative project analysis.
 Tutorials for porting and reusing patterns.
 
 - [PORTING.md](howto/PORTING.md) - Porting to other ESP32 boards or building different apps
+- [AtomS3 Joystick hardware](esp/hw-reference/board-atom-s3-joystick.md)

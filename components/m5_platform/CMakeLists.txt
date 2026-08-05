@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "m5_platform.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES m5stack__m5unified
+    REQUIRES m5stack__m5unified driver
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)

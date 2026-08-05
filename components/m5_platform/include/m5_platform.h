@@ -10,6 +10,7 @@ extern "C" {
 typedef enum {
     M5_PLATFORM_BOARD_UNKNOWN = 0,
     M5_PLATFORM_BOARD_TOUGH = 1,
+    M5_PLATFORM_BOARD_ATOMS3_JOYSTICK = 2,
 } m5_platform_board_t;
 
 typedef enum {
@@ -35,6 +36,16 @@ const char *m5_platform_board_name(void);
 uint16_t m5_platform_display_width(void);
 uint16_t m5_platform_display_height(void);
 bool m5_platform_touch_event(m5_platform_touch_event_t *out);
+
+typedef struct {
+    uint16_t left_x;
+    uint16_t left_y;
+    uint16_t right_x;
+    uint16_t right_y;
+    uint8_t buttons;
+} m5_platform_joystick_state_t;
+
+bool m5_platform_joystick_state(m5_platform_joystick_state_t *out);
 
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */
