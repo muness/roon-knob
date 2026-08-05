@@ -250,7 +250,18 @@ extern "C" void touch_ui_set_zone_name(const char *v) { copy_text(s.zone, sizeof
 extern "C" void touch_ui_set_network_status(const char *v) { copy_text(s.network, sizeof(s.network), v); s.dirty = true; }
 extern "C" void touch_ui_post_zone_name(const char *v) { char *c = strdup(v ? v : ""); platform_task_post_to_ui([](void *p){ touch_ui_set_zone_name(static_cast<char *>(p)); free(p); }, c); }
 extern "C" void touch_ui_post_network_status(const char *v) { char *c = strdup(v ? v : ""); platform_task_post_to_ui([](void *p){ touch_ui_set_network_status(static_cast<char *>(p)); free(p); }, c); }
-extern "C" void touch_ui_set_artwork(const char *v) { if (strcmp(s.artwork_key, v ? v : "") != 0) { copy_text(s.artwork_key, sizeof(s.artwork_key), v); fetch_artwork(); } }
+extern "C" void touch_ui_set_artwork(const char *v) {
+    const char *key = v ? v : "";
+    if (strcmp(s.artwork_key, key) == 0) return;
+    copy_text(s.artwork_key, sizeof(s.artwork_key), key);
+    if (!s.artwork_key[0]) {
+        free(s.artwork);
+        s.artwork = nullptr;
+        s.dirty = true;
+        return;
+    }
+    fetch_artwork();
+}
 extern "C" void touch_ui_post_artwork(const char *v) { char *c = strdup(v ? v : ""); platform_task_post_to_ui([](void *p){ touch_ui_set_artwork(static_cast<char *>(p)); free(p); }, c); }
 extern "C" void touch_ui_show_volume_change(float v, float step) { s.volume = v; s.volume_step = step; s.dirty = true; }
 extern "C" void touch_ui_update(const char *a, const char *b, const char *c, bool p, float v, float, float, float step, int, int) { copy_text(s.track, sizeof(s.track), a); copy_text(s.artist, sizeof(s.artist), b); copy_text(s.album, sizeof(s.album), c); s.playing = p; s.volume = v; s.volume_step = step; s.dirty = true; }
