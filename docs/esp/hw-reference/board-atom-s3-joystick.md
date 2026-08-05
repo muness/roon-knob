@@ -1,6 +1,6 @@
-# M5Stack AtomS3 Joystick
+# HiPhi Joy (M5Stack AtomS3 Joystick)
 
-The AtomS3 Joystick target is a distinct M5 surface, not a small Tough. It
+HiPhi Joy (the AtomS3 Joystick target) is a distinct M5 surface, not a small Tough. It
 uses the AtomS3's 128×128 display through M5Unified/M5GFX and reads the
 joystick base's STM32 coprocessor through the documented I²C interface.
 

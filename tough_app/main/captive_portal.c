@@ -11,6 +11,7 @@
 #include "wifi_manager.h"
 #include "bridge_client.h"
 #include "platform/platform_display.h"
+#include "platform/platform_identity.h"
 #include "os_mutex.h"
 
 #include <esp_err.h>
@@ -22,6 +23,12 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
+
+#ifndef HIPHI_PRODUCT_NAME
+#define HIPHI_PRODUCT_NAME "hiphi"
+#endif
+#define HIPHI_BRAND HIPHI_PRODUCT_NAME
+
 
 static const char *TAG = "captive_portal";
 
@@ -142,7 +149,7 @@ static const char *HTML_SUCCESS_HEAD =
     "<meta name='viewport' content='width=device-width,initial-scale=1'>";
 
 static const char *HTML_SUCCESS_BODY =
-    "<title>hiphi tough - Saved</title>"
+    "<title>" HIPHI_BRAND " - Saved</title>"
     "<style>"
     "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
     "text-align:center;}"
@@ -154,7 +161,7 @@ static const char *HTML_SUCCESS_BODY =
     "left;}"
     ".next li{margin:8px 0;}"
     "</style></head><body>"
-    "<h1>hiphi tough</h1>"
+    "<h1>" HIPHI_BRAND "</h1>"
     "<div class='status'>"
     "<p><strong>WiFi credentials saved!</strong></p>"
     "</div>"
@@ -163,7 +170,7 @@ static const char *HTML_SUCCESS_BODY =
     "<ol>"
     "<li>This setup network will disappear in a few seconds</li>"
     "<li>Reconnect your phone to your home WiFi</li>"
-    "<li>The hiphi tough will connect and start displaying</li>"
+    "<li>The " HIPHI_BRAND " will connect and start displaying</li>"
     "</ol>"
     "</div></body></html>";
 
@@ -362,10 +369,16 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
 
   size_t html_size = 8192;
-  char *html = heap_caps_malloc(html_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  // MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT requires PSRAM.  AtomS3 has no
+  // PSRAM, so use any 8-bit heap and let ESP-IDF choose internal RAM (or
+  // PSRAM on targets that actually provide it).
+  char *html = heap_caps_malloc(html_size, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, "<h1>hiphi tough</h1><p>Out of memory</p>", HTTPD_RESP_USE_STRLEN);
+    char message[96];
+    snprintf(message, sizeof(message), "<h1>%s</h1><p>Out of memory</p>",
+             platform_device_slug());
+    httpd_resp_send(req, message, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
   }
 
@@ -373,7 +386,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>hiphi tough Setup</title>"
+    "<title>" HIPHI_BRAND " Setup</title>"
     "<style>"
     "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
     "h1{color:#4fc3f7;margin-bottom:5px;}"
@@ -398,7 +411,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "background:#0f0f1a;color:#fff;box-sizing:border-box;}"
     "</style>"
     "</head><body>"
-    "<h1>hiphi tough</h1>"
+    "<h1>" HIPHI_BRAND "</h1>"
     "<p>WiFi Setup</p>"
     "%s%s%s"
     "<form method='POST' action='/configure'>"
@@ -489,7 +502,7 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
       "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
       "text-align:center;}h1{color:#4fc3f7;}.error{padding:20px;margin:20px "
       "auto;border-radius:10px;max-width:300px;background:#c62828;}</style></head><body>"
-      "<h1>hiphi tough</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
+      "<h1>" HIPHI_BRAND "</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
       "<p>Please try again.</p></div></body></html>",
       HTTPD_RESP_USE_STRLEN);
     touch_ui_post_network_status("SAVE FAILED!");
@@ -661,7 +674,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
   size_t html_size = 12288;  // Extra room for zone list
-  char *html = heap_caps_malloc(html_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  char *html = heap_caps_malloc(html_size, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
@@ -675,9 +688,9 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
   int pos = snprintf(html, html_size,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>hiphi tough - Zones</title>"
+    "<title>" HIPHI_BRAND " - Zones</title>"
     "<style>%s</style></head><body>"
-    "<h1>hiphi tough</h1>"
+    "<h1>" HIPHI_BRAND "</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a>"
     "%s%s%s"
     "</nav>"
@@ -765,19 +778,18 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   const rk_cfg_t *cfg = &snapshot.value;
-  char *html = heap_caps_calloc(1, 12288,
-                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  char *html = heap_caps_calloc(1, 12288, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
   int pos = snprintf(html, 12288,
     "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>hiphi tough - Display</title><style>%s"
+    "<title>" HIPHI_BRAND " - Display</title><style>%s"
     "label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0;}"
     "input[type=number]{width:88px;padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
     "input[type=checkbox]{width:22px;height:22px;}small{color:#aaa;}"
-    "</style></head><body><h1>hiphi tough</h1>"
+    "</style></head><body><h1>" HIPHI_BRAND "</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
     "<p class='status'>Artwork mode keeps the album visible; dim and sleep are the subsequent power-saving stages.</p>"

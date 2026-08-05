@@ -21,6 +21,8 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
                                                      int width, int height,
                                                      int clip_radius,
                                                      const char *format);
+int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
+                                char **out, size_t *out_len);
 bool bridge_client_is_ready_for_art_mode(void);
 
 // Bridge connection status (mirrors WiFi retry pattern for consistent UX)

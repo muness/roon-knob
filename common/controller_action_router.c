@@ -166,7 +166,7 @@ bool controller_action_router_handle(const controller_action_t *action) {
     case CONTROLLER_ACTION_COMMAND:
         if (action->value.command.kind <= CONTROLLER_COMMAND_NONE ||
             action->value.command.kind >
-                CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS ||
+                CONTROLLER_COMMAND_NEXT_ZONE ||
             (action->value.command.kind ==
                  CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS &&
              action->value.command.volume_steps == 0) ||

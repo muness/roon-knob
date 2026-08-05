@@ -1193,8 +1193,7 @@ void ui_test_pattern(void) {
     size_t sz = w * h * 2;
 
     if (!test_buf) {
-        test_buf = heap_caps_aligned_calloc(16, 1, sz,
-                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        test_buf = heap_caps_aligned_calloc(16, 1, sz, MALLOC_CAP_8BIT);
     }
     if (!test_buf) {
         ESP_LOGE(UI_TAG, "Failed to allocate test pattern buffer");

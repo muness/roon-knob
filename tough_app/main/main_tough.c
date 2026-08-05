@@ -25,7 +25,10 @@
 
 static const char *TAG = "main";
 
-#define UI_LOOP_STACK_SIZE 16384
+/* M5 targets run rendering, config persistence, and synchronous control
+ * dispatch on this task.  The previous 16 KiB budget overflowed during a
+ * volume/zone command and rebooted the device, leaving artwork state stale. */
+#define UI_LOOP_STACK_SIZE 32768
 
 static volatile bool s_mdns_init_pending = false;
 /* The event loop produces this request; the UI task is the sole consumer

@@ -43,10 +43,25 @@ typedef struct {
     uint16_t left_y;
     uint16_t right_x;
     uint16_t right_y;
-    uint8_t buttons;
+    /* Atom JoyStick's 0x70 register is active-low and ordered by the
+     * coprocessor firmware: top-left, top-right, left-stick press,
+     * right-stick press. Keep those physical controls named at the platform
+     * boundary so UIs cannot accidentally treat them as one opaque bitmask. */
+    bool top_left_pressed;
+    bool top_right_pressed;
+    bool left_stick_pressed;
+    bool right_stick_pressed;
 } m5_platform_joystick_state_t;
 
 bool m5_platform_joystick_state(m5_platform_joystick_state_t *out);
+
+typedef struct {
+    bool pressed;
+    bool clicked;
+    bool held;
+} m5_platform_surface_button_event_t;
+
+bool m5_platform_surface_button_event(m5_platform_surface_button_event_t *out);
 
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */

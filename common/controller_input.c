@@ -23,7 +23,7 @@ static bool context_is_valid(controller_interaction_context_t context) {
 
 static bool command_is_valid(const controller_command_t *command) {
     if (!command || command->kind <= CONTROLLER_COMMAND_NONE ||
-        command->kind > CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS) {
+        command->kind > CONTROLLER_COMMAND_NEXT_ZONE) {
         return false;
     }
     if (command->kind == CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS) {

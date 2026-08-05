@@ -2,7 +2,6 @@
 
 #include <M5Unified.h>
 
-#include <driver/i2c.h>
 #include <esp_log.h>
 
 static const char *TAG = "m5_platform";
@@ -11,15 +10,12 @@ static bool s_started = false;
 static bool s_joystick = false;
 
 namespace {
-constexpr i2c_port_t kJoystickI2cPort = I2C_NUM_0;
 constexpr uint8_t kJoystickAddress = 0x59;
 constexpr gpio_num_t kJoystickSda = GPIO_NUM_38;
 constexpr gpio_num_t kJoystickScl = GPIO_NUM_39;
 
 bool joystick_read(uint8_t reg, uint8_t *data, size_t len) {
-    return i2c_master_write_read_device(kJoystickI2cPort, kJoystickAddress,
-                                        &reg, 1, data, len,
-                                        pdMS_TO_TICKS(20)) == ESP_OK;
+    return M5.In_I2C.readRegister(kJoystickAddress, reg, data, len, 400000);
 }
 }
 
@@ -58,19 +54,9 @@ extern "C" bool m5_platform_begin(void) {
                          : M5_PLATFORM_BOARD_TOUGH;
     s_started = true;
     if (s_joystick) {
-        i2c_config_t i2c_cfg = {};
-        i2c_cfg.mode = I2C_MODE_MASTER;
-        i2c_cfg.sda_io_num = kJoystickSda;
-        i2c_cfg.scl_io_num = kJoystickScl;
-        i2c_cfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
-        i2c_cfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
-        i2c_cfg.master.clk_speed = 400000;
-        const esp_err_t i2c_config_err = i2c_param_config(kJoystickI2cPort, &i2c_cfg);
-        const esp_err_t i2c_install_err = i2c_config_err == ESP_OK
-            ? i2c_driver_install(kJoystickI2cPort, I2C_MODE_MASTER, 0, 0, 0)
-            : i2c_config_err;
-        if (i2c_install_err != ESP_OK && i2c_install_err != ESP_ERR_INVALID_STATE) {
-            ESP_LOGE(TAG, "Atom JoyStick I2C initialization failed");
+        if (!M5.In_I2C.isEnabled() || M5.In_I2C.getSDA() != kJoystickSda ||
+            M5.In_I2C.getSCL() != kJoystickScl) {
+            ESP_LOGE(TAG, "Atom JoyStick I2C pins are not configured by M5Unified");
             return false;
         }
         uint8_t probe = 0;
@@ -142,17 +128,42 @@ extern "C" bool m5_platform_touch_event(m5_platform_touch_event_t *out) {
 
 extern "C" bool m5_platform_joystick_state(m5_platform_joystick_state_t *out) {
     if (!out || !s_started || !s_joystick) return false;
-    uint8_t joy[4] = {};
+    uint8_t left_x = 0;
+    uint8_t left_y = 0;
+    uint8_t right_x = 0;
+    uint8_t right_y = 0;
     uint8_t buttons[4] = {};
-    if (!joystick_read(0x30, joy, sizeof(joy)) ||
+    /* The coprocessor exposes each stick as its own 8-bit X/Y register
+     * block.  0x30 is the right stick only; reading four bytes from there
+     * made the Joy appear to have no left-stick input at all. */
+    /* Read each 8-bit register separately. The Atom-JoyStick protocol
+     * defines X/Y as adjacent registers, but its coprocessor firmware is
+     * more reliable with a fresh register transaction for each byte than
+     * with a multi-byte read (especially while a stick is moving). */
+    if (!joystick_read(0x10, &left_x, 1) ||
+        !joystick_read(0x11, &left_y, 1) ||
+        !joystick_read(0x30, &right_x, 1) ||
+        !joystick_read(0x31, &right_y, 1) ||
         !joystick_read(0x70, buttons, sizeof(buttons))) return false;
-    out->left_x = joy[0];
-    out->left_y = joy[1];
-    out->right_x = joy[2];
-    out->right_y = joy[3];
-    out->buttons = (buttons[0] ? 1 : 0) | (buttons[1] ? 2 : 0) |
-                   (buttons[2] ? 4 : 0) | (buttons[3] ? 8 : 0);
+    out->left_x = left_x;
+    out->left_y = left_y;
+    out->right_x = right_x;
+    out->right_y = right_y;
+    /* The Atom JoyStick button register is active-low: 0 means pressed. */
+    out->top_left_pressed = buttons[0] == 0;
+    out->top_right_pressed = buttons[1] == 0;
+    out->left_stick_pressed = buttons[2] == 0;
+    out->right_stick_pressed = buttons[3] == 0;
     return true;
+}
+
+extern "C" bool m5_platform_surface_button_event(
+    m5_platform_surface_button_event_t *out) {
+    if (!out || !s_started || !s_joystick) return false;
+    out->pressed = M5.BtnA.isPressed();
+    out->clicked = M5.BtnA.wasClicked();
+    out->held = M5.BtnA.wasHold();
+    return out->pressed || out->clicked || out->held;
 }
 
 extern "C" void m5_platform_set_brightness(uint8_t brightness) {

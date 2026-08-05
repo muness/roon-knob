@@ -111,10 +111,9 @@ static int http_perform(const char *url, const char *body,
     if (buf_size > max_response_bytes + 1) {
         buf_size = max_response_bytes + 1;
     }
-    char *buffer = heap_caps_calloc(1, buf_size,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *buffer = heap_caps_calloc(1, buf_size, MALLOC_CAP_8BIT);
     if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate %zu-byte PSRAM response buffer",
+        ESP_LOGE(TAG, "Failed to allocate %zu-byte response buffer",
                  buf_size);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -144,10 +143,9 @@ static int http_perform(const char *url, const char *body,
             if (new_size > max_response_bytes + 1) {
                 new_size = max_response_bytes + 1;
             }
-            char *new_buf = heap_caps_realloc(
-                buffer, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            char *new_buf = heap_caps_realloc(buffer, new_size, MALLOC_CAP_8BIT);
             if (!new_buf) {
-                ESP_LOGE(TAG, "Failed to grow PSRAM response buffer to %zu",
+                ESP_LOGE(TAG, "Failed to grow response buffer to %zu",
                          new_size);
                 free(buffer);
                 esp_http_client_close(client);
@@ -288,7 +286,7 @@ static size_t decompress_gzip(char **data, size_t compressed_size) {
 int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     esp_http_client_config_t config = {.url = url, .method = HTTP_METHOD_GET, .timeout_ms = 5000};
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return -1;
+    if (!client) { ESP_LOGE(TAG, "image client init failed"); return -1; }
 
     /* Keep artwork responses uncompressed. The RGB565 payload is already
      * bounded and avoids doing gzip allocation/decompression on the Tough's
@@ -297,9 +295,13 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", "tough");
+    /* Keep image requests aligned with JSON requests. Atom Joy and Tough
+     * share this transport backend but UHC uses the device header for target
+     * capabilities and logging. */
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
 
     if (esp_http_client_open(client, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "image open failed url=%s", url);
         esp_http_client_cleanup(client);
         return -1;
     }
@@ -321,6 +323,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     size_t buffer_size = (content_length > 0) ? content_length : 65536;
     char *buffer = malloc(buffer_size);
     if (!buffer) {
+        ESP_LOGE(TAG, "image buffer alloc failed bytes=%u", (unsigned)buffer_size);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return -1;
@@ -351,7 +354,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
         int read_len = esp_http_client_read(client, buffer + total_read, 4096);
         read_attempts++;
         if (read_len < 0) {
-            ESP_LOGE(TAG, "Image read failed");
+            ESP_LOGE(TAG, "Image read failed after=%d", total_read);
             free(buffer);
             esp_http_client_close(client);
             esp_http_client_cleanup(client);
@@ -365,6 +368,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     esp_http_client_cleanup(client);
 
     if (total_read <= 0) {
+        ESP_LOGE(TAG, "Image empty body content_length=%d", content_length);
         free(buffer);
         return -1;
     }

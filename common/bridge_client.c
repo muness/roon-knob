@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdint.h>
 #include <stdatomic.h>
 #include <cJSON.h>
@@ -48,7 +49,9 @@ static void check_charging_state_change(void);
  * radio controller and display DMA. free() is valid for ESP heap-cap blocks. */
 static void *bridge_external_alloc(size_t size) {
 #ifdef ESP_PLATFORM
-    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // PSRAM is optional across targets (the original AtomS3 has none).
+    // MALLOC_CAP_8BIT permits internal RAM and PSRAM-backed heaps alike.
+    return heap_caps_malloc(size, MALLOC_CAP_8BIT);
 #else
     return malloc(size);
 #endif
@@ -276,7 +279,10 @@ static bool bridge_endpoint_snapshot(char *bridge_base, size_t bridge_len,
     rk_strlcpy(bridge_base, cfg.bridge_base, bridge_len);
     rk_strlcpy(zone_id, cfg.zone_id, zone_len);
     lock_state();
-    if (s_state.runtime_zone_pinned) {
+    /* Once zones have been resolved, runtime selection is authoritative for
+     * every endpoint. Using persisted cfg.zone_id here lets artwork and
+     * now-playing race a zone change and refer to different zones. */
+    if (s_state.zone_resolved && s_state.runtime_zone_id[0]) {
         rk_strlcpy(zone_id, s_state.runtime_zone_id, zone_len);
     }
     unlock_state();
@@ -476,6 +482,18 @@ static void default_now_playing(struct now_playing_state *state) {
     state->image_key[0] = '\0';
     state->config_sha[0] = '\0';
     state->zones_sha[0] = '\0';
+}
+
+static bool json_bool_field(const char *json, const char *field,
+                            bool fallback) {
+    const char *p = json ? strstr(json, field) : NULL;
+    if (!p) return fallback;
+    p = strchr(p, ':');
+    if (!p) return fallback;
+    do { ++p; } while (*p && isspace((unsigned char)*p));
+    if (strncmp(p, "true", 4) == 0) return true;
+    if (strncmp(p, "false", 5) == 0) return false;
+    return fallback;
 }
 
 static void post_ui_update(const struct now_playing_state *state) {
@@ -706,9 +724,11 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_charging=%d&knob_id=%s",
                  bridge_base, zone_id, battery_charging ? 1 : 0, knob_id);
     }
+    LOGI("now_playing request zone=%s url=%s", zone_id, url);
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_get(url, &resp, &resp_len);
+    LOGI("now_playing response ret=%d bytes=%u", ret, (unsigned)resp_len);
     if (ret != 0 || !resp) {
         platform_http_free(resp);
         return false;
@@ -731,7 +751,9 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (line3) {
         extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
     }
-    state->is_playing = strstr(resp, "\"is_playing\":true") != NULL;
+    /* Preserve the last good value if a transient/partial response omits the
+     * field. Treating an incomplete payload as stopped makes the UI lie. */
+    state->is_playing = json_bool_field(resp, "\"is_playing\"", state->is_playing);
 
     const char *vol_key = strstr(resp, "\"volume\"");
     if (vol_key) {
@@ -788,9 +810,11 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     const char *image_key = strstr(resp, "\"image_key\"");
     if (image_key) {
         extract_json_string(image_key, "\"image_key\"", state->image_key, sizeof(state->image_key));
-    } else {
-        state->image_key[0] = '\0';  // No artwork available
     }
+    LOGI("now_playing parsed playing=%s image_key=%s zone=%s",
+         state->is_playing ? "true" : "false", state->image_key, zone_id);
+    /* A partial response may omit artwork metadata. Keep the last good key;
+     * the bridge normally supplies a string (or an empty string) here. */
 
     // Parse config_sha for config change detection (silent - checked in poll loop)
     const char *config_sha_key = strstr(resp, "\"config_sha\"");
@@ -1220,6 +1244,22 @@ bool bridge_client_execute_command(const controller_command_t *command) {
         return false;
     }
 
+    if (command->kind == CONTROLLER_COMMAND_PREVIOUS_ZONE ||
+        command->kind == CONTROLLER_COMMAND_NEXT_ZONE) {
+        bridge_zone_t zones[BRIDGE_CLIENT_MAX_ZONES];
+        const int count = bridge_client_get_zones(zones, BRIDGE_CLIENT_MAX_ZONES);
+        if (count < 2) return false;
+        char current[sizeof(zones[0].id)] = {};
+        (void)bridge_client_get_current_zone_id(current, sizeof(current));
+        int index = 0;
+        for (int i = 0; i < count; ++i) {
+            if (strcmp(zones[i].id, current) == 0) { index = i; break; }
+        }
+        const int delta = command->kind == CONTROLLER_COMMAND_NEXT_ZONE ? 1 : -1;
+        const int next = (index + delta + count) % count;
+        return bridge_client_set_zone(zones[next].id);
+    }
+
     bridge_command_context_t context;
     bridge_command_plan_t plan;
     rk_cfg_t cfg;
@@ -1357,6 +1397,29 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
                  bridge_base, zone_id, width, height, format);
     }
     return url_buf;
+}
+
+int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
+                                char **out, size_t *out_len) {
+    if (!out || width <= 0 || height <= 0) return -1;
+    *out = NULL;
+    if (out_len) *out_len = 0;
+    char url[512];
+    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
+                                                   height, 0, format)) {
+        return -1;
+    }
+    uint32_t cache_key = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
+        cache_key ^= *p;
+        cache_key *= 16777619u;
+    }
+    size_t len = strlen(url);
+    if (len + 20 < sizeof(url)) {
+        snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
+                 (unsigned)cache_key);
+    }
+    return platform_http_get_image(url, out, out_len);
 }
 
 bool bridge_client_is_ready_for_art_mode(void) {

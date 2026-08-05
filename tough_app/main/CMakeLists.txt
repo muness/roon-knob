@@ -57,7 +57,7 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-tough\")
 # Match the shipping Dial/Frame targets until ESP-IDF 6.0/Picolibc removes the
 # aggressive GCC false positives in legacy bounded string copies.
 # TODO(#183): Remove after ESP-IDF 6.0 migration.
