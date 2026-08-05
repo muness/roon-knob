@@ -72,6 +72,13 @@ struct State {
     bool picker = false;
     bool settings = false;
     bool art_mode = false;
+    /* Retained scene contract: keep only the resource identity, requested
+     * layout, and validity epochs. Artwork pixels remain panel-owned and are
+     * always re-streamed after the display loses validity. */
+    uint32_t display_epoch = 1;
+    int artwork_requested_size = THUMB;
+    bool display_content_valid = false;
+    bool media_snapshot_fresh = false;
     bool art_surface_needs_clear = false;
     bool dirty = true;
     bool charging = false;
@@ -154,6 +161,14 @@ void acknowledge(const char *text) {
     s.dirty = true;
 }
 
+void acknowledge_playback_toggle(void) {
+    /* Before the first post-resume now-playing update, the cached state is
+     * explicitly untrusted. A neutral action acknowledgement is safer than
+     * repeatedly claiming PAUSE from a stale pre-sleep snapshot. */
+    acknowledge(s.media_snapshot_fresh ? (s.playing ? "PAUSE" : "PLAY")
+                                       : "TOGGLE");
+}
+
 void fetch_artwork(void);
 
 struct ArtworkResult {
@@ -161,6 +176,7 @@ struct ArtworkResult {
     int width;
     int height;
     uint32_t generation;
+    uint32_t display_epoch;
     bool available;
 };
 
@@ -168,6 +184,7 @@ struct ArtworkRequest {
     char key[MAX_TEXT];
     uint32_t generation;
     bool art_mode;
+    uint32_t display_epoch;
 };
 
 void artwork_applied(void *arg) {
@@ -175,15 +192,17 @@ void artwork_applied(void *arg) {
     if (!r) return;
     const bool current = r->generation == s_artwork_generation.load() &&
                          strcmp(r->key, s.artwork_key) == 0;
-    const int desired_size = s.art_mode ? FULL_ART : THUMB;
+    const bool current_epoch = r->display_epoch == s.display_epoch;
+    const int desired_size = s.artwork_requested_size;
     const bool desired = current && r->width == desired_size &&
-                         r->height == desired_size;
+                         r->height == desired_size && current_epoch;
     if (desired && r->available) {
         s.artwork_available = true;
         /* The worker already painted the tiles into the display. A separate
          * visibility flag lets full-screen settings screens invalidate those
          * pixels without retaining a second copy of the artwork. */
         s.artwork_visible = true;
+        s.display_content_valid = true;
         s.dirty = true;
     }
     const uint32_t owner = s_artwork_generation.load();
@@ -219,12 +238,14 @@ struct ArtworkStream {
     size_t total_bytes = 0;
     int tile_y = 0;
     uint32_t generation = 0;
+    uint32_t display_epoch = 0;
 };
 
 int artwork_stream_chunk(const void *data, size_t len, void *ctx) {
     ArtworkStream *stream = static_cast<ArtworkStream *>(ctx);
     if (!stream || !data || len == 0) return -1;
-    if (s_artwork_generation.load() != stream->generation) return -1;
+    if (s_artwork_generation.load() != stream->generation ||
+        s.display_epoch != stream->display_epoch) return -1;
     const uint8_t *bytes = static_cast<const uint8_t *>(data);
     if (stream->total_bytes == 0 && len >= 2 && bytes[0] == 0x1f &&
         bytes[1] == 0x8b) {
@@ -239,6 +260,8 @@ int artwork_stream_chunk(const void *data, size_t len, void *ctx) {
         len -= copy_len;
         if (stream->tile_bytes == stream->tile_capacity) {
             if (stream->tile_y >= stream->height) return -1;
+            if (s_artwork_generation.load() != stream->generation ||
+                s.display_epoch != stream->display_epoch) return -1;
             M5.Display.pushImage(stream->dest_x, stream->dest_y + stream->tile_y,
                                  stream->width, ART_TILE_ROWS,
                                  reinterpret_cast<const uint16_t *>(stream->tile));
@@ -256,6 +279,7 @@ void artwork_task(void *arg) {
     const char *key = request.key;
     const uint32_t generation = request.generation;
     const bool requested_art_mode = request.art_mode;
+    const uint32_t display_epoch = request.display_epoch;
     const int width = requested_art_mode ? FULL_ART : THUMB;
     const int height = width;
     const int dest_x = requested_art_mode ? 0 : 4;
@@ -269,6 +293,7 @@ void artwork_task(void *arg) {
         stream.dest_x = dest_x;
         stream.dest_y = dest_y;
         stream.generation = generation;
+        stream.display_epoch = display_epoch;
         stream.tile_capacity = static_cast<size_t>(width) * ART_TILE_ROWS *
                                 sizeof(uint16_t);
         size_t raw_len = 0;
@@ -285,6 +310,7 @@ void artwork_task(void *arg) {
                              stream.tile_y == height && stream.tile_bytes == 0;
         fetched = success;
         if (success && generation == s_artwork_generation.load() &&
+            display_epoch == s.display_epoch &&
             requested_art_mode == s.art_mode &&
             strcmp(key, s.artwork_key) == 0) {
             /* Publish visibility before releasing the display mutex. The UI
@@ -309,6 +335,7 @@ void artwork_task(void *arg) {
         r->width = width;
         r->height = height;
         r->generation = generation;
+        r->display_epoch = display_epoch;
         r->available = fetched;
         if (platform_task_post_to_ui(artwork_applied, r)) r = nullptr;
         free(r);
@@ -324,12 +351,15 @@ void fetch_artwork(void) {
         char key[MAX_TEXT];
         uint32_t generation;
         bool art_mode;
+        uint32_t display_epoch;
     };
     ArtworkRequest *request = static_cast<ArtworkRequest *>(calloc(1, sizeof(*request)));
     if (request) {
         copy_text(request->key, sizeof(request->key), s.artwork_key);
         request->generation = s_artwork_generation.load();
         request->art_mode = s.art_mode;
+        request->display_epoch = s.display_epoch;
+        s.artwork_requested_size = s.art_mode ? FULL_ART : THUMB;
     }
     if (!request || platform_task_start_internal_stack("atom_art", 8192,
                                                        artwork_task, request) != 0) {
@@ -676,6 +706,19 @@ void wake(void) {
     if (s.sleeping) {
         s.sleeping = false;
         m5_platform_display_wake();
+        ++s.display_epoch;
+        s.display_content_valid = false;
+        s.artwork_available = false;
+        s.artwork_visible = false;
+        s.media_snapshot_fresh = false;
+        s.art_surface_needs_clear = true;
+        s.last_artwork_retry_us = 0;
+        s_artwork_generation.fetch_add(1);
+        /* Resume is a resource revalidation boundary, not a timed retry.
+         * Re-fetch the retained scene resource in its active layout and wake
+         * the bridge worker so playback state becomes authoritative again. */
+        bridge_client_request_poll();
+        fetch_artwork();
     }
     s.power_started_us = esp_timer_get_time();
     s.dirty = true;
@@ -686,6 +729,7 @@ void leave_art_mode(void) {
     s.art_mode = false;
     s.artwork_available = false;
     s.artwork_visible = false;
+    s.display_content_valid = false;
     s_artwork_generation.fetch_add(1);
     s.art_surface_needs_clear = true;
     s.dirty = true;
@@ -698,6 +742,7 @@ void toggle_art_mode(void) {
         s.art_mode = true;
         s.artwork_available = false;
         s.artwork_visible = false;
+        s.display_content_valid = false;
         s_artwork_generation.fetch_add(1);
     }
     s.action_ack_until_us = 0;
@@ -709,7 +754,6 @@ void toggle_art_mode(void) {
     s.last_artwork_retry_us = 0;
     s.last_draw_us = 0;
     s.dirty = true;
-    if (!s.art_mode) acknowledge("CONTROL");
     fetch_artwork();
 }
 
@@ -725,7 +769,7 @@ void process_input(void) {
         } else if (surface.clicked) {
             if (!s.picker && !s.settings) {
                 if (command(controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK))) {
-                    acknowledge(s.playing ? "PAUSE" : "PLAY");
+                    acknowledge_playback_toggle();
                 }
             }
         }
@@ -789,7 +833,7 @@ void process_input(void) {
             }
             if (pressed & 4 &&
                 command(controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK))) {
-                acknowledge(s.playing ? "PAUSE" : "PLAY");
+                acknowledge_playback_toggle();
             }
         }
         if (released & 2) {
@@ -899,6 +943,12 @@ void update_power(void) {
     }
     if (s.sleep_timeout && elapsed >= static_cast<int64_t>(s.sleep_timeout) * 1000000) {
         s.sleeping = true;
+        ++s.display_epoch;
+        s.display_content_valid = false;
+        s.artwork_available = false;
+        s.artwork_visible = false;
+        s.media_snapshot_fresh = false;
+        s_artwork_generation.fetch_add(1);
         m5_platform_display_sleep();
         s.dirty = true;
     }
@@ -977,6 +1027,7 @@ extern "C" void touch_ui_set_artwork(const char *v) {
      * state, not stale artwork that looks like a playback update failure. */
     s.artwork_available = false;
     s.artwork_visible = false;
+    s.display_content_valid = false;
     s.dirty = true;
     if (!s.artwork_key[0]) {
         return;
@@ -997,6 +1048,9 @@ extern "C" void touch_ui_show_volume_change(float v, float step) {
     s.dirty = true;
 }
 extern "C" void touch_ui_update(const char *a, const char *b, const char *c, bool p, float v, float volume_min, float volume_max, float step, int pos, int length) {
+    /* Every accepted bridge snapshot revalidates the retained media state,
+     * even when its values are identical and no redraw is needed. */
+    s.media_snapshot_fresh = true;
     const bool changed = strcmp(s.track, a ? a : "") != 0 ||
         strcmp(s.artist, b ? b : "") != 0 || strcmp(s.album, c ? c : "") != 0 ||
         s.playing != p || s.volume != v || s.volume_min != volume_min ||
