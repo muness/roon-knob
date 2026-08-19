@@ -11,6 +11,10 @@ typedef enum {
     M5_PLATFORM_BOARD_UNKNOWN = 0,
     M5_PLATFORM_BOARD_TOUGH = 1,
     M5_PLATFORM_BOARD_ATOMS3_JOYSTICK = 2,
+    M5_PLATFORM_BOARD_DIAL = 3,
+    M5_PLATFORM_BOARD_STICKS3 = 4,
+    M5_PLATFORM_BOARD_STOPWATCH = 5,
+    M5_PLATFORM_BOARD_STACKCHAN = 6,
 } m5_platform_board_t;
 
 typedef enum {
@@ -59,9 +63,21 @@ typedef struct {
     bool pressed;
     bool clicked;
     bool held;
+    bool secondary_pressed;
+    bool secondary_clicked;
+    bool secondary_held;
 } m5_platform_surface_button_event_t;
 
 bool m5_platform_surface_button_event(m5_platform_surface_button_event_t *out);
+
+/* Form-native capabilities. Unsupported capabilities return false and leave
+ * the caller's output untouched. Encoder delta is signed and consumed. */
+bool m5_platform_encoder_delta(int32_t *out_delta);
+bool m5_platform_gyro(float *out_x, float *out_y, float *out_z);
+bool m5_platform_accel(float *out_x, float *out_y, float *out_z);
+bool m5_platform_haptic(uint8_t strength);
+bool m5_platform_battery_is_charging(void);
+int m5_platform_battery_level(void);
 
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */
