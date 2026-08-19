@@ -681,7 +681,7 @@ jobs:
             ! grep -F "espressif__arduino-esp32" build/compile_commands.json;
             ! grep -F "/official_components/m5_official/" build/compile_commands.json;
             esptool.py --chip esp32 merge_bin -o ../hiphi_tough_merged.bin --flash_mode dio --flash_freq 40m --flash_size 16MB 0x1000 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_tough.bin;
-            test "$(od -An -tu1 -j4096 -N1 ../hiphi_tough_merged.bin | tr -d ' ')" = "233";
+            od -An -tu1 -j4096 -N1 ../hiphi_tough_merged.bin | grep -Eq "^[[:space:]]*233[[:space:]]*$";
             esptool.py --chip esp32 image_info build/bootloader/bootloader.bin;
             esptool.py --chip esp32 image_info build/hiphi_tough.bin
       - name: Upload M5Stack Tough artifact
