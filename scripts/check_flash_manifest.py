@@ -7,7 +7,15 @@ from pathlib import Path
 import sys
 
 
-REQUIRED_OFFSETS = (0x0, 0x8000, 0xD000, 0x10000)
+BOOTLOADER_OFFSETS = {
+    "ESP32": 0x1000,
+    "ESP32-S2": 0x0,
+    "ESP32-S3": 0x0,
+    "ESP32-C3": 0x0,
+    "ESP32-C6": 0x0,
+    "ESP32-H2": 0x0,
+}
+COMMON_OFFSETS = (0x8000, 0xD000, 0x10000)
 
 
 def fail(message: str) -> None:
@@ -25,12 +33,19 @@ def main() -> None:
 
     try:
         manifest = json.loads(args.manifest.read_text())
-        parts = manifest["builds"][0]["parts"]
+        build = manifest["builds"][0]
+        chip_family = build["chipFamily"]
+        parts = build["parts"]
     except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
         fail(f"cannot read {args.manifest}: {error}")
 
-    if len(parts) != len(REQUIRED_OFFSETS):
-        fail(f"expected {len(REQUIRED_OFFSETS)} parts, found {len(parts)}")
+    bootloader_offset = BOOTLOADER_OFFSETS.get(chip_family)
+    if bootloader_offset is None:
+        fail(f"unsupported chip family: {chip_family}")
+    required_offsets = (bootloader_offset, *COMMON_OFFSETS)
+
+    if len(parts) != len(required_offsets):
+        fail(f"expected {len(required_offsets)} parts, found {len(parts)}")
 
     offsets = []
     nvs_end = args.nvs_offset + args.nvs_size
@@ -50,8 +65,9 @@ def main() -> None:
             fail(f"{path} range 0x{offset:x}-0x{end - 1:x} overlaps NVS")
         offsets.append(offset)
 
-    if tuple(sorted(offsets)) != REQUIRED_OFFSETS:
-        fail("parts must be exactly at 0x0, 0x8000, 0xd000, and 0x10000")
+    if tuple(sorted(offsets)) != tuple(sorted(required_offsets)):
+        expected = ", ".join(f"0x{offset:x}" for offset in required_offsets)
+        fail(f"{chip_family} parts must be exactly at {expected}")
 
     print(f"flash manifest check passed: {args.manifest} preserves NVS")
 

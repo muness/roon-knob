@@ -234,6 +234,26 @@
       </div>
     </div>
 
+    <div class="card" id="joy-card">
+      <h2>AtomS3 JoyStick Deck <span class="chip-badge">Hardware-unverified beta</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">Two sticks turn listening into muscle memory: left stick rides volume, right stick skips tracks, its press opens rooms, and the face button toggles playback. The tiny screen still delivers album art, track context, and explicit action feedback.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-joy.json"><button slot="activate">Flash AtomS3 JoyStick Beta</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack AtomS3 mounted in the Atom JoyStick base. This is not an AtomS3-only touchscreen build.</p>
+    </div>
+
+    <div class="card" id="tough-card">
+      <h2>M5Stack Tough Console <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32</span></h2>
+      <p class="description">A rugged, glanceable whole-room controller: large touch targets for play, previous/next, and volume; album art and three lines of now-playing context; swipeable room selection; and display controls behind a deliberate long press.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-tough.json"><button slot="activate">Flash M5Stack Tough Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack Tough K034 (original ESP32). Touch layout and hit-target sizing still need sustained validation on physical hardware.</p>
+    </div>
+
     <div class="card" id="m5dial-card">
       <h2>M5 Dial Lab <span class="chip-badge">Hardware-unverified beta</span></h2>
       <p class="description">The screen becomes the knob: a full-face volume arc, direct rotary control, press-to-play, and touch-to-choose-room.</p>
@@ -266,12 +286,12 @@
 
     <div class="card" id="stackchan-card">
       <h2>StackChan Playback Companion <span class="chip-badge">Hardware-unverified beta</span></h2>
-      <p class="description">Your music has a face—and, if you hold to enable its body, a new track gets a tiny celebration while a lost connection gets one sad droop. Tap for play/pause; swipe up for rooms.</p>
+      <p class="description">Your music has a face and a body: each new track gets one of several unhurried celebrations, while a lost connection becomes a visible sad face and droop. Tap for play/pause; swipe up for rooms; long-hold to quiet or restore body language.</p>
       <div class="flash-section">
         <esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash StackChan Beta</button></esp-web-install-button>
         <span class="version-info">PR #{{PR_NUMBER}}</span>
       </div>
-      <p class="warning"><strong>Opt-in hardware-unverified motion:</strong> servos stay off at boot, every gesture qualifies the current pose, returns there, and powers down. A bad servo response disables body language.</p>
+      <p class="warning"><strong>Motion is on by default:</strong> the official M5Stack StackChan board library owns servo setup and movement. Give the body room to move before powering on; long-hold the face to disable body language.</p>
     </div>
 
     <div class="warning">
@@ -298,6 +318,7 @@
     previewSubject.textContent = atob(previewSubject.dataset.subjectB64);
     const targetNames = {
       dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi RLCD',
+      joy: 'AtomS3 JoyStick', tough: 'M5Stack Tough',
       m5dial: 'M5 Dial Lab', sticks3: 'M5StickS3 Twist Remote',
       stopwatch: 'M5Stack StopWatch', stackchan: 'StackChan'
     };

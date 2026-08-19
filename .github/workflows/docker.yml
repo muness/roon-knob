@@ -651,6 +651,49 @@ jobs:
             hiphi_joy_merged.bin
           retention-days: 30
 
+  build-tough:
+    name: build-m5-tough
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Restore Tough managed components
+        uses: actions/cache@v5
+        with:
+          path: tough_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-tough-components-${{ hashFiles('tough_app/dependencies.lock') }}
+      - name: Build M5Stack Tough with pure ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32
+          path: tough_app
+          command: >-
+            set -e;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y" sdkconfig;
+            grep -Fx "CONFIG_M5_PLATFORM_EXPECT_TOUGH=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" sdkconfig;
+            grep -F "/components/m5_platform/" build/compile_commands.json;
+            grep -F "m5stack__m5unified" build/compile_commands.json;
+            ! grep -F "espressif__arduino-esp32" build/compile_commands.json;
+            ! grep -F "/official_components/m5_official/" build/compile_commands.json;
+            esptool.py --chip esp32 merge_bin -o ../hiphi_tough_merged.bin --flash_mode dio --flash_freq 40m --flash_size 16MB 0x1000 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_tough.bin;
+            esptool.py --chip esp32 image_info ../hiphi_tough_merged.bin
+      - name: Upload M5Stack Tough artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-tough-firmware
+          path: |
+            tough_app/build/hiphi_tough.bin
+            tough_app/build/bootloader/bootloader.bin
+            tough_app/build/partition_table/partition-table.bin
+            tough_app/build/ota_data_initial.bin
+            hiphi_tough_merged.bin
+          retention-days: 30
+
   build-m5-betas:
     name: build-m5-beta-${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -925,7 +968,7 @@ jobs:
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-m5-betas, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-ble-off]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
@@ -952,6 +995,18 @@ jobs:
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
+
+      - name: Download AtomS3 JoyStick firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-joy-firmware
+          path: joy-artifacts
+
+      - name: Download M5Stack Tough firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-tough-firmware
+          path: tough-artifacts
 
       - name: Download form-native M5 beta firmware
         uses: actions/download-artifact@v7
@@ -1013,6 +1068,22 @@ jobs:
           RLCD_FIRMWARE_FILE="hiphi_rlcd_merged-${PREVIEW_ID}.bin"
           RLCD_FLASH_PAGE="flash-rlcd-${PREVIEW_ID}.html"
 
+          JOY_MANIFEST_FILE="manifest-joy-${PREVIEW_ID}.json"
+          JOY_APPLICATION_FILE="hiphi_joy-${PREVIEW_ID}.bin"
+          JOY_BOOTLOADER_FILE="hiphi_joy_bootloader-${PREVIEW_ID}.bin"
+          JOY_PARTITION_FILE="hiphi_joy_partition-table-${PREVIEW_ID}.bin"
+          JOY_OTA_DATA_FILE="hiphi_joy_ota_data_initial-${PREVIEW_ID}.bin"
+          JOY_FIRMWARE_FILE="hiphi_joy_merged-${PREVIEW_ID}.bin"
+          JOY_FLASH_PAGE="flash-joy-${PREVIEW_ID}.html"
+
+          TOUGH_MANIFEST_FILE="manifest-tough-${PREVIEW_ID}.json"
+          TOUGH_APPLICATION_FILE="hiphi_tough-${PREVIEW_ID}.bin"
+          TOUGH_BOOTLOADER_FILE="hiphi_tough_bootloader-${PREVIEW_ID}.bin"
+          TOUGH_PARTITION_FILE="hiphi_tough_partition-table-${PREVIEW_ID}.bin"
+          TOUGH_OTA_DATA_FILE="hiphi_tough_ota_data_initial-${PREVIEW_ID}.bin"
+          TOUGH_FIRMWARE_FILE="hiphi_tough_merged-${PREVIEW_ID}.bin"
+          TOUGH_FLASH_PAGE="flash-tough-${PREVIEW_ID}.html"
+
           # Use immutable names so an older preview can never flash a newer build.
           cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_APPLICATION_FILE}"
           cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin "pr-preview/${DIAL_BOOTLOADER_FILE}"
@@ -1035,6 +1106,18 @@ jobs:
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin "pr-preview/${RLCD_PARTITION_FILE}"
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin "pr-preview/${RLCD_OTA_DATA_FILE}"
           cp rlcd-artifacts/hiphi_rlcd_merged.bin "pr-preview/${RLCD_FIRMWARE_FILE}"
+
+          cp joy-artifacts/atom_app/build/hiphi_joy.bin "pr-preview/${JOY_APPLICATION_FILE}"
+          cp joy-artifacts/atom_app/build/bootloader/bootloader.bin "pr-preview/${JOY_BOOTLOADER_FILE}"
+          cp joy-artifacts/atom_app/build/partition_table/partition-table.bin "pr-preview/${JOY_PARTITION_FILE}"
+          cp joy-artifacts/atom_app/build/ota_data_initial.bin "pr-preview/${JOY_OTA_DATA_FILE}"
+          cp joy-artifacts/hiphi_joy_merged.bin "pr-preview/${JOY_FIRMWARE_FILE}"
+
+          cp tough-artifacts/tough_app/build/hiphi_tough.bin "pr-preview/${TOUGH_APPLICATION_FILE}"
+          cp tough-artifacts/tough_app/build/bootloader/bootloader.bin "pr-preview/${TOUGH_BOOTLOADER_FILE}"
+          cp tough-artifacts/tough_app/build/partition_table/partition-table.bin "pr-preview/${TOUGH_PARTITION_FILE}"
+          cp tough-artifacts/tough_app/build/ota_data_initial.bin "pr-preview/${TOUGH_OTA_DATA_FILE}"
+          cp tough-artifacts/hiphi_tough_merged.bin "pr-preview/${TOUGH_FIRMWARE_FILE}"
 
           prepare_m5_beta() {
             local build_target="$1"
@@ -1113,11 +1196,41 @@ jobs:
           }
           EOF
 
-          for target in dial frame rlcd m5dial sticks3 stopwatch stackchan; do
+          cat > "pr-preview/${JOY_MANIFEST_FILE}" << EOF
+          {
+            "name": "AtomS3 JoyStick Beta (PR #${PR_NUM} Preview)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+              {"path": "${JOY_BOOTLOADER_FILE}", "offset": 0},
+              {"path": "${JOY_PARTITION_FILE}", "offset": 32768},
+              {"path": "${JOY_OTA_DATA_FILE}", "offset": 53248},
+              {"path": "${JOY_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+
+          cat > "pr-preview/${TOUGH_MANIFEST_FILE}" << EOF
+          {
+            "name": "M5Stack Tough Beta (PR #${PR_NUM} Preview)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32", "parts": [
+              {"path": "${TOUGH_BOOTLOADER_FILE}", "offset": 4096},
+              {"path": "${TOUGH_PARTITION_FILE}", "offset": 32768},
+              {"path": "${TOUGH_OTA_DATA_FILE}", "offset": 53248},
+              {"path": "${TOUGH_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+
+          for target in dial frame rlcd joy tough m5dial sticks3 stopwatch stackchan; do
             case "$target" in
               dial) page="$DIAL_FLASH_PAGE"; manifest="$DIAL_MANIFEST_FILE" ;;
               frame) page="$FRAME_FLASH_PAGE"; manifest="$FRAME_MANIFEST_FILE" ;;
               rlcd) page="$RLCD_FLASH_PAGE"; manifest="$RLCD_MANIFEST_FILE" ;;
+              joy) page="$JOY_FLASH_PAGE"; manifest="$JOY_MANIFEST_FILE" ;;
+              tough) page="$TOUGH_FLASH_PAGE"; manifest="$TOUGH_MANIFEST_FILE" ;;
               *) page="flash-${target}-${PREVIEW_ID}.html"; manifest="manifest-${target}-${PREVIEW_ID}.json" ;;
             esac
             sed \
@@ -1134,6 +1247,8 @@ jobs:
               -e "s|manifest-s3.json|${DIAL_MANIFEST_FILE}|g" \
               -e "s|manifest-frame.json|${FRAME_MANIFEST_FILE}|g" \
               -e "s|manifest-rlcd.json|${RLCD_MANIFEST_FILE}|g" \
+              -e "s|manifest-joy.json|${JOY_MANIFEST_FILE}|g" \
+              -e "s|manifest-tough.json|${TOUGH_MANIFEST_FILE}|g" \
               -e "s|manifest-m5dial.json|manifest-m5dial-${PREVIEW_ID}.json|g" \
               -e "s|manifest-sticks3.json|manifest-sticks3-${PREVIEW_ID}.json|g" \
               -e "s|manifest-stopwatch.json|manifest-stopwatch-${PREVIEW_ID}.json|g" \
@@ -1186,10 +1301,12 @@ jobs:
           grep -F 'data-target-filter="dial"' "deployed-preview/flash-dial-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="frame"' "deployed-preview/flash-frame-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="rlcd"' "deployed-preview/flash-rlcd-${PREVIEW_ID}.html"
+          grep -F 'data-target-filter="joy"' "deployed-preview/flash-joy-${PREVIEW_ID}.html"
+          grep -F 'data-target-filter="tough"' "deployed-preview/flash-tough-${PREVIEW_ID}.html"
           for target in m5dial sticks3 stopwatch stackchan; do
             grep -F "data-target-filter=\"${target}\"" "deployed-preview/flash-${target}-${PREVIEW_ID}.html"
           done
-          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
+          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-joy-${PREVIEW_ID}.json manifest-tough-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
             python3 scripts/check_flash_manifest.py "deployed-preview/${manifest}" --assets-dir deployed-preview
           done
 
@@ -1197,6 +1314,8 @@ jobs:
             echo "dial_page_url=${PREVIEW_BASE}/flash-dial-${PREVIEW_ID}.html"
             echo "frame_page_url=${PREVIEW_BASE}/flash-frame-${PREVIEW_ID}.html"
             echo "rlcd_page_url=${PREVIEW_BASE}/flash-rlcd-${PREVIEW_ID}.html"
+            echo "joy_page_url=${PREVIEW_BASE}/flash-joy-${PREVIEW_ID}.html"
+            echo "tough_page_url=${PREVIEW_BASE}/flash-tough-${PREVIEW_ID}.html"
             echo "m5dial_page_url=${PREVIEW_BASE}/flash-m5dial-${PREVIEW_ID}.html"
             echo "sticks3_page_url=${PREVIEW_BASE}/flash-sticks3-${PREVIEW_ID}.html"
             echo "stopwatch_page_url=${PREVIEW_BASE}/flash-stopwatch-${PREVIEW_ID}.html"
@@ -1204,6 +1323,8 @@ jobs:
             echo "dial_firmware_sha256=$(sha256sum "deployed-preview/hiphi_dial_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "frame_firmware_sha256=$(sha256sum "deployed-preview/hiphi_frame_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "rlcd_firmware_sha256=$(sha256sum "deployed-preview/hiphi_rlcd_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "joy_firmware_sha256=$(sha256sum "deployed-preview/hiphi_joy_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "tough_firmware_sha256=$(sha256sum "deployed-preview/hiphi_tough_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             for target in m5dial sticks3 stopwatch stackchan; do
               echo "${target}_firmware_sha256=$(sha256sum "deployed-preview/hiphi_${target}_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             done
@@ -1216,6 +1337,8 @@ jobs:
           DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.dial_page_url }}
           FRAME_PAGE_URL: ${{ steps.verify-preview.outputs.frame_page_url }}
           RLCD_PAGE_URL: ${{ steps.verify-preview.outputs.rlcd_page_url }}
+          JOY_PAGE_URL: ${{ steps.verify-preview.outputs.joy_page_url }}
+          TOUGH_PAGE_URL: ${{ steps.verify-preview.outputs.tough_page_url }}
           M5DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.m5dial_page_url }}
           STICKS3_PAGE_URL: ${{ steps.verify-preview.outputs.sticks3_page_url }}
           STOPWATCH_PAGE_URL: ${{ steps.verify-preview.outputs.stopwatch_page_url }}
@@ -1223,6 +1346,8 @@ jobs:
           DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.dial_firmware_sha256 }}
           FRAME_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.frame_firmware_sha256 }}
           RLCD_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.rlcd_firmware_sha256 }}
+          JOY_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.joy_firmware_sha256 }}
+          TOUGH_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.tough_firmware_sha256 }}
           M5DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.m5dial_firmware_sha256 }}
           STICKS3_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.sticks3_firmware_sha256 }}
           STOPWATCH_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.stopwatch_firmware_sha256 }}
@@ -1256,6 +1381,8 @@ jobs:
             - [Flash HiPhi Dial](${process.env.DIAL_PAGE_URL}) — \`${process.env.DIAL_FIRMWARE_SHA256}\`
             - [Flash HiPhi Frame](${process.env.FRAME_PAGE_URL}) — \`${process.env.FRAME_FIRMWARE_SHA256}\`
             - [Flash HiPhi RLCD](${process.env.RLCD_PAGE_URL}) — \`${process.env.RLCD_FIRMWARE_SHA256}\`
+            - [Flash AtomS3 JoyStick](${process.env.JOY_PAGE_URL}) — \`${process.env.JOY_FIRMWARE_SHA256}\`
+            - [Flash M5Stack Tough](${process.env.TOUGH_PAGE_URL}) — \`${process.env.TOUGH_FIRMWARE_SHA256}\`
             - [Flash M5 Dial Lab Beta](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
             - [Flash M5StickS3 Twist Beta](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
             - [Flash M5Stack StopWatch Beta](${process.env.STOPWATCH_PAGE_URL}) — \`${process.env.STOPWATCH_FIRMWARE_SHA256}\`
