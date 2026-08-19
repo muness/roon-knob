@@ -79,6 +79,20 @@ bool m5_platform_haptic(uint8_t strength);
 bool m5_platform_battery_is_charging(void);
 int m5_platform_battery_level(void);
 
+typedef enum {
+    M5_PLATFORM_STACKCHAN_CELEBRATE = 1,
+    M5_PLATFORM_STACKCHAN_SAD = 2,
+} m5_platform_stackchan_expression_t;
+
+/* StackChan body language is deliberately opt-in. The implementation powers
+ * the servo rail only for a bounded gesture, qualifies both servo positions
+ * before moving, returns to the observed neutral pose, then powers down. */
+bool m5_platform_stackchan_expression_enable(bool enabled);
+bool m5_platform_stackchan_expression_trigger(
+    m5_platform_stackchan_expression_t expression);
+void m5_platform_stackchan_expression_process(void);
+bool m5_platform_stackchan_expression_faulted(void);
+
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */
 void m5_platform_set_brightness(uint8_t brightness);

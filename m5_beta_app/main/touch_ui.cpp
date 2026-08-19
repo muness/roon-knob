@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <esp_timer.h>
+#include <nvs.h>
 
 namespace {
 constexpr int TARGET_DIAL = 1;
@@ -34,12 +35,15 @@ struct State {
     char network[96] = "Starting...";
     bool playing = false;
     bool online = false;
+    bool ever_online = false;
     bool dirty = true;
     bool sleeping = false;
     bool picker = false;
     bool settings = false;
     bool twist_armed = false;
     bool action_flash = false;
+    bool body_enabled = false;
+    bool track_seen = false;
     float volume = -40;
     float volume_min = -80;
     float volume_max = 0;
@@ -54,10 +58,49 @@ struct State {
     int64_t haptic_off = 0;
     int64_t awake_until = 0;
     float last_accel_mag = 1.0f;
+    char body_notice[32] = {};
+    int64_t body_notice_until = 0;
 } s;
+
+constexpr char kStackChanNvsNamespace[] = "stackchan";
+constexpr char kStackChanBodyKey[] = "body_on";
 
 void copy_text(char *out, size_t len, const char *value) {
     if (out && len) std::snprintf(out, len, "%s", value ? value : "");
+}
+
+bool load_body_enabled() {
+    nvs_handle_t handle = 0;
+    uint8_t value = 0;
+    if (nvs_open(kStackChanNvsNamespace, NVS_READONLY, &handle) != ESP_OK)
+        return false;
+    const bool enabled = nvs_get_u8(handle, kStackChanBodyKey, &value) == ESP_OK &&
+                         value == 1;
+    nvs_close(handle);
+    return enabled;
+}
+
+void save_body_enabled(bool enabled) {
+    nvs_handle_t handle = 0;
+    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
+        return;
+    nvs_set_u8(handle, kStackChanBodyKey, enabled ? 1 : 0);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
+void body_notice(const char *message) {
+    copy_text(s.body_notice, sizeof(s.body_notice), message);
+    s.body_notice_until = esp_timer_get_time() + 1800000;
+    s.dirty = true;
+}
+
+void toggle_body_language() {
+    const bool wanted = !s.body_enabled;
+    s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
+    save_body_enabled(s.body_enabled);
+    body_notice(s.body_enabled ? "BODY LANGUAGE ON" :
+                (wanted ? "SERVOS NOT READY" : "BODY LANGUAGE OFF"));
 }
 
 bool dispatch(controller_command_t command) {
@@ -194,10 +237,17 @@ void render_picker() {
     const int w = M5.Display.width();
     const int h = M5.Display.height();
     const int bob = s.action_flash ? -7 : 0;
-    M5.Display.fillScreen(s.playing ? 0x10201b : BG);
+    const bool connection_lost = !s.online && s.ever_online;
+    M5.Display.fillScreen(connection_lost ? 0x17111b :
+                          (s.playing ? 0x10201b : BG));
     draw_battery();
     const uint32_t eye = s.online ? INK : MUTED;
-    if (s.playing) {
+    if (connection_lost) {
+        M5.Display.fillEllipse(w / 2 - 72, 103, 28, 11, eye);
+        M5.Display.fillEllipse(w / 2 + 72, 103, 28, 11, eye);
+        M5.Display.drawArc(w / 2, 171, 38, 28, 210, 330, MUTED);
+        draw_centered("I LOST THE MUSIC...", 18, 1, HOT);
+    } else if (s.playing) {
         M5.Display.fillEllipse(w / 2 - 72, 93 + bob, 25, 40, eye);
         M5.Display.fillEllipse(w / 2 + 72, 93 + bob, 25, 40, eye);
         M5.Display.fillCircle(w / 2 - 65, 84 + bob, 8, ACCENT);
@@ -208,11 +258,16 @@ void render_picker() {
         M5.Display.fillRoundRect(w / 2 + 40, 92 + bob, 64, 8, 4, eye);
         M5.Display.fillRoundRect(w / 2 - 25, 151 + bob, 50, 7, 3, MUTED);
     }
-    draw_centered(s.playing ? "I'M INTO THIS" : "SERVOS PARKED - FACE LIVE", 18, 1,
-                  s.playing ? ACCENT : MUTED);
+    if (!connection_lost) {
+        draw_centered(s.body_notice[0] ? s.body_notice :
+                      (s.playing ? "I'M INTO THIS" :
+                       (s.body_enabled ? "READY TO DANCE" : "FACE LIVE - BODY OFF")),
+                      18, 1, s.body_enabled ? ACCENT : MUTED);
+    }
     draw_centered(s.title, h - 55, 2, INK);
     draw_centered(s.artist, h - 34, 1, MUTED);
-    draw_centered("TAP MY FACE", h - 13, 1, s.action_flash ? HOT : MUTED);
+    draw_centered("TAP PLAY  HOLD BODY  SWIPE UP ROOMS", h - 13, 1,
+                  s.action_flash ? HOT : MUTED);
 }
 
 void render() {
@@ -316,8 +371,11 @@ void process_input() {
             picker_input(touch.delta_y > 0 ? -1 : 1, false);
         if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED)
             picker_input(0, true);
-    } else if (touched && touch.state == M5_PLATFORM_TOUCH_HELD) {
+    } else if (touched && touch.state == M5_PLATFORM_TOUCH_DRAGGING &&
+               touch.delta_y < -18) {
         simple(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
+    } else if (touched && touch.state == M5_PLATFORM_TOUCH_HELD) {
+        toggle_body_language();
     } else if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED) {
         toggle_playback();
     }
@@ -325,13 +383,37 @@ void process_input() {
 }
 }
 
-extern "C" void touch_ui_init(void) { s.awake_until = esp_timer_get_time() + 8000000; render(); }
+extern "C" void touch_ui_init(void) {
+    s.awake_until = esp_timer_get_time() + 8000000;
+#if HIPHI_M5_TARGET_ID == 4
+    if (load_body_enabled()) {
+        s.body_enabled = m5_platform_stackchan_expression_enable(true);
+        if (!s.body_enabled) save_body_enabled(false);
+    }
+#endif
+    render();
+}
 extern "C" void touch_ui_process(void) {
     process_input();
+    m5_platform_stackchan_expression_process();
     if (s.action_flash && esp_timer_get_time() >= s.action_until) { s.action_flash=false; s.dirty=true; }
+    if (s.body_notice[0] && esp_timer_get_time() >= s.body_notice_until) {
+        s.body_notice[0] = 0; s.dirty = true;
+    }
+    if (s.body_enabled && m5_platform_stackchan_expression_faulted()) {
+        s.body_enabled = false; save_body_enabled(false);
+        body_notice("BODY SAFELY DISABLED");
+    }
     if (s.dirty && !s.sleeping) { s.dirty=false; render(); }
 }
-extern "C" void touch_ui_set_status(bool v){if(s.online!=v){s.online=v;s.dirty=true;}}
+extern "C" void touch_ui_set_status(bool v){
+    if(s.online!=v){
+        const bool lost = s.online && !v;
+        s.online=v;if(v)s.ever_online=true;s.dirty=true;
+        if (lost && s.body_enabled)
+            m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_SAD);
+    }
+}
 extern "C" void touch_ui_set_message(const char *v){touch_ui_set_network_status(v);}
 extern "C" void touch_ui_set_zone_name(const char *v){if(std::strcmp(s.zone,v?v:"")!=0){copy_text(s.zone,sizeof(s.zone),v);s.dirty=true;}}
 extern "C" void touch_ui_set_network_status(const char *v){if(std::strcmp(s.network,v?v:"")!=0){copy_text(s.network,sizeof(s.network),v);s.dirty=true;}}
@@ -340,7 +422,19 @@ extern "C" void touch_ui_post_network_status(const char *v){char *c=strdup(v?v:"
 extern "C" void touch_ui_set_artwork(const char *v){(void)v;}
 extern "C" void touch_ui_post_artwork(const char *v){(void)v;}
 extern "C" void touch_ui_show_volume_change(float v,float step){(void)step;s.volume=v;s.dirty=true;flash_action();}
-extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p,float v,float min,float max,float step,int pos,int length){(void)step;(void)pos;(void)length;copy_text(s.title,sizeof(s.title),a);copy_text(s.artist,sizeof(s.artist),b);copy_text(s.album,sizeof(s.album),c);s.playing=p;s.volume=v;s.volume_min=min;s.volume_max=max;s.dirty=true;}
+extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p,float v,float min,float max,float step,int pos,int length){
+    (void)step;(void)pos;(void)length;
+    const char *title=a?a:""; const char *artist=b?b:""; const char *album=c?c:"";
+    const bool changed=s.track_seen && title[0] &&
+        (std::strcmp(s.title,title)!=0 || std::strcmp(s.artist,artist)!=0 ||
+         std::strcmp(s.album,album)!=0);
+    copy_text(s.title,sizeof(s.title),title);copy_text(s.artist,sizeof(s.artist),artist);
+    copy_text(s.album,sizeof(s.album),album);s.playing=p;s.volume=v;
+    s.volume_min=min;s.volume_max=max;s.dirty=true;
+    if (title[0]) s.track_seen=true;
+    if (changed && p && s.online && s.body_enabled)
+        m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_CELEBRATE);
+}
 extern "C" void touch_ui_show_zone_picker(const char **n,const char **i,int count,int selected){s.zone_count=std::min(count,18);s.zone_selected=std::max(0,std::min(selected,s.zone_count-1));s.zone_current=s.zone_selected;for(int x=0;x<s.zone_count;x++){copy_text(s.zone_names[x],64,n[x]);copy_text(s.zone_ids[x],64,i[x]);}s.picker=true;s.settings=false;s.dirty=true;}
 extern "C" void touch_ui_hide_zone_picker(void){s.picker=false;s.dirty=true;}
 extern "C" bool touch_ui_is_zone_picker_visible(void){return s.picker;}

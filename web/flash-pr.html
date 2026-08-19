@@ -266,12 +266,12 @@
 
     <div class="card" id="stackchan-card">
       <h2>StackChan Playback Companion <span class="chip-badge">Hardware-unverified beta</span></h2>
-      <p class="description">Your music has a face: it wakes up when playback starts, changes expression when paused, and visibly nods when you tap it.</p>
+      <p class="description">Your music has a face—and, if you hold to enable its body, a new track gets a tiny celebration while a lost connection gets one sad droop. Tap for play/pause; swipe up for rooms.</p>
       <div class="flash-section">
         <esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash StackChan Beta</button></esp-web-install-button>
         <span class="version-info">PR #{{PR_NUMBER}}</span>
       </div>
-      <p class="warning"><strong>Safe first beta:</strong> the on-screen character is live; physical servos remain parked until limits are validated on the exact K151 unit.</p>
+      <p class="warning"><strong>Opt-in hardware-unverified motion:</strong> servos stay off at boot, every gesture qualifies the current pose, returns there, and powers down. A bad servo response disables body language.</p>
     </div>
 
     <div class="warning">

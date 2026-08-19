@@ -3,8 +3,13 @@
 #include <M5Unified.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <driver/gpio.h>
+#include <driver/uart.h>
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
 
 static const char *TAG = "m5_platform";
 static m5_platform_board_t s_board = M5_PLATFORM_BOARD_UNKNOWN;
@@ -20,6 +25,182 @@ constexpr gpio_num_t kJoystickSda = GPIO_NUM_38;
 constexpr gpio_num_t kJoystickScl = GPIO_NUM_39;
 constexpr uint8_t kRightStickX12Register = 0x20;
 constexpr uint8_t kRightStickY12Register = 0x22;
+constexpr uint8_t kStackChanIoAddress = 0x6f;
+constexpr uint8_t kStackChanIoVersion = 0x02;
+constexpr uint8_t kStackChanIoDirection = 0x03;
+constexpr uint8_t kStackChanIoOutput = 0x05;
+constexpr uint8_t kStackChanIoPullUp = 0x09;
+constexpr uint8_t kStackChanServoPowerBit = 0x01;
+constexpr uart_port_t kStackChanServoUart = UART_NUM_1;
+constexpr int kStackChanServoTx = 6;
+constexpr int kStackChanServoRx = 7;
+constexpr uint8_t kServoGoalPosition = 42;
+constexpr uint8_t kServoPresentPosition = 56;
+
+enum class StackChanMotionPhase {
+    idle,
+    power_wait,
+    first_pose,
+    second_pose,
+    returning,
+};
+
+struct StackChanMotionState {
+    bool enabled = false;
+    bool initialized = false;
+    bool faulted = false;
+    bool power_ready = false;
+    bool has_queued = false;
+    m5_platform_stackchan_expression_t pending = M5_PLATFORM_STACKCHAN_CELEBRATE;
+    m5_platform_stackchan_expression_t queued = M5_PLATFORM_STACKCHAN_CELEBRATE;
+    StackChanMotionPhase phase = StackChanMotionPhase::idle;
+    int yaw_center = 0;
+    int pitch_center = 0;
+    uint8_t return_attempts = 0;
+    int64_t deadline = 0;
+} s_stackchan_motion;
+
+bool stackchan_io_read(uint8_t reg, uint8_t *value) {
+    return value && M5.In_I2C.readRegister(
+        kStackChanIoAddress, reg, value, 1, 400000);
+}
+
+bool stackchan_io_write(uint8_t reg, uint8_t value) {
+    return M5.In_I2C.writeRegister8(
+        kStackChanIoAddress, reg, value, 400000);
+}
+
+bool stackchan_io_set_bit(uint8_t reg, uint8_t bit, bool enabled) {
+    uint8_t value = 0;
+    if (!stackchan_io_read(reg, &value)) return false;
+    value = enabled ? static_cast<uint8_t>(value | bit)
+                    : static_cast<uint8_t>(value & ~bit);
+    return stackchan_io_write(reg, value);
+}
+
+bool stackchan_power(bool enabled) {
+    if (!s_stackchan_motion.power_ready) return false;
+    return stackchan_io_set_bit(kStackChanIoOutput,
+                                kStackChanServoPowerBit, enabled);
+}
+
+constexpr uint8_t servo_checksum(const uint8_t *bytes, size_t begin, size_t end) {
+    uint8_t sum = 0;
+    for (size_t i = begin; i < end; ++i) sum += bytes[i];
+    return static_cast<uint8_t>(~sum);
+}
+
+constexpr uint8_t kReadPositionPacketWithoutChecksum[] = {
+    0xff, 0xff, 1, 4, 0x02, kServoPresentPosition, 2,
+};
+static_assert(servo_checksum(kReadPositionPacketWithoutChecksum, 2, 7) == 0xbe,
+              "SCSCL position-read packet checksum drifted");
+
+bool servo_read_reply(uint8_t id, uint8_t *data, size_t data_len) {
+    uint8_t reply[16] = {};
+    const size_t need = data_len + 6;
+    if (need > sizeof(reply)) return false;
+    const int got = uart_read_bytes(kStackChanServoUart, reply, need,
+                                    pdMS_TO_TICKS(35));
+    if (got != static_cast<int>(need) || reply[0] != 0xff ||
+        reply[1] != 0xff || reply[2] != id ||
+        reply[3] != data_len + 2 || reply[4] != 0 ||
+        reply[need - 1] != servo_checksum(reply, 2, need - 1)) return false;
+    if (data_len) std::memcpy(data, reply + 5, data_len);
+    return true;
+}
+
+bool servo_request(uint8_t id, uint8_t instruction, uint8_t reg,
+                   const uint8_t *data, size_t data_len, size_t reply_len) {
+    uint8_t packet[16] = {0xff, 0xff, id,
+                          static_cast<uint8_t>(data_len + 3), instruction, reg};
+    if (data_len) std::memcpy(packet + 6, data, data_len);
+    const size_t length = data_len + 7;
+    packet[length - 1] = servo_checksum(packet, 2, length - 1);
+    uart_flush_input(kStackChanServoUart);
+    if (uart_write_bytes(kStackChanServoUart, packet, length) !=
+            static_cast<int>(length) ||
+        uart_wait_tx_done(kStackChanServoUart, pdMS_TO_TICKS(20)) != ESP_OK)
+        return false;
+    uint8_t reply[8] = {};
+    return servo_read_reply(id, reply, reply_len);
+}
+
+int servo_read_position(uint8_t id) {
+    const uint8_t count = 2;
+    uint8_t packet[8] = {0xff, 0xff, id, 4, 0x02,
+                         kServoPresentPosition, count, 0};
+    packet[7] = servo_checksum(packet, 2, 7);
+    uart_flush_input(kStackChanServoUart);
+    if (uart_write_bytes(kStackChanServoUart, packet, sizeof(packet)) !=
+            sizeof(packet) ||
+        uart_wait_tx_done(kStackChanServoUart, pdMS_TO_TICKS(20)) != ESP_OK)
+        return -1;
+    uint8_t data[2] = {};
+    if (!servo_read_reply(id, data, sizeof(data))) return -1;
+    return (static_cast<int>(data[0]) << 8) | data[1];
+}
+
+bool servo_write_position(uint8_t id, int position) {
+    position = std::clamp(position, 0, 1000);
+    const uint8_t data[6] = {
+        static_cast<uint8_t>(position >> 8), static_cast<uint8_t>(position),
+        0, 20, 0, 0,
+    };
+    return servo_request(id, 0x03, kServoGoalPosition, data, sizeof(data), 0);
+}
+
+bool stackchan_motion_init() {
+    if (s_stackchan_motion.initialized) return true;
+    uint8_t version = 0;
+    if (!M5.In_I2C.isEnabled() ||
+        !stackchan_io_read(kStackChanIoVersion, &version) ||
+        version == 0 || version == 0xff ||
+        !stackchan_io_set_bit(kStackChanIoDirection,
+                              kStackChanServoPowerBit, true) ||
+        !stackchan_io_set_bit(kStackChanIoPullUp,
+                              kStackChanServoPowerBit, true)) {
+        ESP_LOGE(TAG, "StackChan servo power expander qualification failed");
+        return false;
+    }
+    s_stackchan_motion.power_ready = true;
+    stackchan_power(false);
+
+    const uart_config_t uart_cfg = {
+        .baud_rate = 1000000,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 0,
+        .source_clk = UART_SCLK_DEFAULT,
+        .flags = {},
+    };
+    if (uart_param_config(kStackChanServoUart, &uart_cfg) != ESP_OK ||
+        uart_set_pin(kStackChanServoUart, kStackChanServoTx,
+                     kStackChanServoRx, UART_PIN_NO_CHANGE,
+                     UART_PIN_NO_CHANGE) != ESP_OK ||
+        (!uart_is_driver_installed(kStackChanServoUart) &&
+         uart_driver_install(kStackChanServoUart, 256, 0, 0, nullptr, 0) != ESP_OK)) {
+        ESP_LOGE(TAG, "StackChan servo UART qualification failed");
+        return false;
+    }
+    s_stackchan_motion.initialized = true;
+    ESP_LOGI(TAG, "StackChan body language armed; servo rail remains off");
+    return true;
+}
+
+void stackchan_motion_fail(const char *reason) {
+    ESP_LOGE(TAG, "StackChan body language disabled: %s", reason);
+    stackchan_power(false);
+    s_stackchan_motion.faulted = true;
+    s_stackchan_motion.enabled = false;
+    s_stackchan_motion.phase = StackChanMotionPhase::idle;
+}
+
+bool stackchan_pose(int yaw, int pitch) {
+    return servo_write_position(1, yaw) && servo_write_position(2, pitch);
+}
 
 bool expected_board(m5::board_t board) {
 #if CONFIG_M5_PLATFORM_EXPECT_DIAL
@@ -286,6 +467,142 @@ extern "C" bool m5_platform_battery_is_charging(void) {
 
 extern "C" int m5_platform_battery_level(void) {
     return s_started ? static_cast<int>(M5.Power.getBatteryLevel()) : -1;
+}
+
+extern "C" bool m5_platform_stackchan_expression_enable(bool enabled) {
+    if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return false;
+    if (!enabled) {
+        stackchan_power(false);
+        s_stackchan_motion.enabled = false;
+        s_stackchan_motion.has_queued = false;
+        s_stackchan_motion.phase = StackChanMotionPhase::idle;
+        return true;
+    }
+    s_stackchan_motion.faulted = false;
+    if (!stackchan_motion_init()) {
+        stackchan_motion_fail("hardware init failed");
+        return false;
+    }
+    s_stackchan_motion.enabled = true;
+    return true;
+}
+
+extern "C" bool m5_platform_stackchan_expression_trigger(
+    m5_platform_stackchan_expression_t expression) {
+    if (!s_stackchan_motion.enabled || s_stackchan_motion.faulted) return false;
+    if (expression != M5_PLATFORM_STACKCHAN_CELEBRATE &&
+        expression != M5_PLATFORM_STACKCHAN_SAD) return false;
+    if (s_stackchan_motion.phase != StackChanMotionPhase::idle) {
+        /* Connection loss is higher-value body language than another track
+         * celebration. Queue exactly one sadness event behind an active move. */
+        if (expression == M5_PLATFORM_STACKCHAN_SAD) {
+            s_stackchan_motion.queued = expression;
+            s_stackchan_motion.has_queued = true;
+            return true;
+        }
+        return false;
+    }
+    s_stackchan_motion.pending = expression;
+    if (!stackchan_power(true)) {
+        stackchan_motion_fail("servo rail did not enable");
+        return false;
+    }
+    s_stackchan_motion.phase = StackChanMotionPhase::power_wait;
+    s_stackchan_motion.deadline = esp_timer_get_time() + 250000;
+    return true;
+}
+
+extern "C" void m5_platform_stackchan_expression_process(void) {
+    if (!s_stackchan_motion.enabled || s_stackchan_motion.faulted ||
+        s_stackchan_motion.phase == StackChanMotionPhase::idle ||
+        esp_timer_get_time() < s_stackchan_motion.deadline) return;
+
+    if (s_stackchan_motion.phase == StackChanMotionPhase::power_wait) {
+        const int yaw = servo_read_position(1);
+        const int pitch = servo_read_position(2);
+        /* The official BSP permits raw positions 0..1000. Keep a further
+         * 64-step guard band so every gesture can return without clipping. */
+        if (yaw < 64 || yaw > 936 || pitch < 64 || pitch > 936) {
+            stackchan_motion_fail("servo position qualification failed");
+            return;
+        }
+        s_stackchan_motion.yaw_center = yaw;
+        s_stackchan_motion.pitch_center = pitch;
+        s_stackchan_motion.return_attempts = 0;
+        const int first_yaw = s_stackchan_motion.pending ==
+                M5_PLATFORM_STACKCHAN_CELEBRATE ? yaw - 40 : yaw;
+        const int first_pitch = pitch +
+            (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_CELEBRATE
+                 ? 20 : 40);
+        if (!stackchan_pose(first_yaw, first_pitch)) {
+            stackchan_motion_fail("first pose was not acknowledged");
+            return;
+        }
+        s_stackchan_motion.phase = StackChanMotionPhase::first_pose;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 320000;
+        return;
+    }
+
+    if (s_stackchan_motion.phase == StackChanMotionPhase::first_pose) {
+        if (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_CELEBRATE) {
+            if (!stackchan_pose(s_stackchan_motion.yaw_center + 40,
+                                s_stackchan_motion.pitch_center)) {
+                stackchan_motion_fail("second pose was not acknowledged");
+                return;
+            }
+            s_stackchan_motion.phase = StackChanMotionPhase::second_pose;
+            s_stackchan_motion.deadline = esp_timer_get_time() + 320000;
+            return;
+        }
+        s_stackchan_motion.phase = StackChanMotionPhase::second_pose;
+    }
+
+    if (s_stackchan_motion.phase == StackChanMotionPhase::second_pose) {
+        if (!stackchan_pose(s_stackchan_motion.yaw_center,
+                            s_stackchan_motion.pitch_center)) {
+            stackchan_motion_fail("neutral return was not acknowledged");
+            return;
+        }
+        s_stackchan_motion.phase = StackChanMotionPhase::returning;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 380000;
+        return;
+    }
+
+    if (s_stackchan_motion.phase == StackChanMotionPhase::returning) {
+        const int yaw = servo_read_position(1);
+        const int pitch = servo_read_position(2);
+        if (yaw < 0 || pitch < 0) {
+            stackchan_motion_fail("neutral return could not be verified");
+            return;
+        }
+        if ((std::abs(yaw - s_stackchan_motion.yaw_center) > 12 ||
+             std::abs(pitch - s_stackchan_motion.pitch_center) > 12) &&
+            s_stackchan_motion.return_attempts++ < 2) {
+            if (!stackchan_pose(s_stackchan_motion.yaw_center,
+                                s_stackchan_motion.pitch_center)) {
+                stackchan_motion_fail("neutral return retry failed");
+                return;
+            }
+            s_stackchan_motion.deadline = esp_timer_get_time() + 300000;
+            return;
+        }
+        if (std::abs(yaw - s_stackchan_motion.yaw_center) > 12 ||
+            std::abs(pitch - s_stackchan_motion.pitch_center) > 12) {
+            stackchan_motion_fail("neutral return exceeded its time bound");
+            return;
+        }
+        stackchan_power(false);
+        s_stackchan_motion.phase = StackChanMotionPhase::idle;
+        if (s_stackchan_motion.has_queued) {
+            const auto queued = s_stackchan_motion.queued;
+            s_stackchan_motion.has_queued = false;
+            m5_platform_stackchan_expression_trigger(queued);
+        }
+    }
+}
+
+extern "C" bool m5_platform_stackchan_expression_faulted(void) {
+    return s_stackchan_motion.faulted;
 }
 
 extern "C" void m5_platform_set_brightness(uint8_t brightness) {
