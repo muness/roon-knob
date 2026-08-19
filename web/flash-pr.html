@@ -234,10 +234,51 @@
       </div>
     </div>
 
+    <div class="card" id="m5dial-card">
+      <h2>M5 Dial Lab <span class="chip-badge">Hardware-unverified beta</span></h2>
+      <p class="description">The screen becomes the knob: a full-face volume arc, direct rotary control, press-to-play, and touch-to-choose-room.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-m5dial.json"><button slot="activate">Flash M5 Dial Lab Beta</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5 Dial K130. The firmware refuses to run on a different detected board.</p>
+    </div>
+
+    <div class="card" id="sticks3-card">
+      <h2>M5StickS3 Twist Remote <span class="chip-badge">Hardware-unverified beta</span></h2>
+      <p class="description">Hold to arm it, then rotate the device in your hand to change volume. The portrait display makes the live/dead state impossible to miss; the second button toggles playback.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-sticks3.json"><button slot="activate">Flash StickS3 Twist Beta</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Intent guard:</strong> twisting does nothing unless the primary button is held. This beta targets M5StickS3 K150 only.</p>
+    </div>
+
+    <div class="card" id="stopwatch-card">
+      <h2>M5Stack StopWatch Wrist Remote <span class="chip-badge">Hardware-unverified beta</span></h2>
+      <p class="description">Raise your wrist to wake the AMOLED, use the two edge buttons for volume, and feel a short haptic confirmation. Tap the face for play/pause.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-stopwatch.json"><button slot="activate">Flash StopWatch Beta</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack StopWatch C152 with OPI PSRAM enabled.</p>
+    </div>
+
+    <div class="card" id="stackchan-card">
+      <h2>StackChan Playback Companion <span class="chip-badge">Hardware-unverified beta</span></h2>
+      <p class="description">Your music has a face: it wakes up when playback starts, changes expression when paused, and visibly nods when you tap it.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash StackChan Beta</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Safe first beta:</strong> the on-screen character is live; physical servos remain parked until limits are validated on the exact K151 unit.</p>
+    </div>
+
     <div class="warning">
       <strong>First time?</strong><br>
       HiPhi Dial creates <code>hiphi-dial-setup</code>; HiPhi Frame creates
-      <code>hiphi-frame-setup</code>; HiPhi RLCD creates <code>hiphi-rlcd-setup</code>.
+      <code>hiphi-frame-setup</code>; the new M5 betas create a network ending
+      in <code>-beta-setup</code> with the device name.
       Connect to the matching network to configure WiFi.
     </div>
 
@@ -255,18 +296,16 @@
     const targetFilter = document.body.dataset.targetFilter;
     const previewSubject = document.getElementById('preview-subject');
     previewSubject.textContent = atob(previewSubject.dataset.subjectB64);
-    if (targetFilter === 'dial') {
-      document.getElementById('frame-card').remove();
-      document.getElementById('rlcd-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi Dial Firmware';
-    } else if (targetFilter === 'frame') {
-      document.getElementById('dial-card').remove();
-      document.getElementById('rlcd-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi Frame Firmware';
-    } else if (targetFilter === 'rlcd') {
-      document.getElementById('dial-card').remove();
-      document.getElementById('frame-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi RLCD Firmware';
+    const targetNames = {
+      dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi RLCD',
+      m5dial: 'M5 Dial Lab', sticks3: 'M5StickS3 Twist Remote',
+      stopwatch: 'M5Stack StopWatch', stackchan: 'StackChan'
+    };
+    if (targetNames[targetFilter]) {
+      document.querySelectorAll('.card').forEach(card => {
+        if (card.id !== `${targetFilter}-card`) card.remove();
+      });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]} Firmware`;
     }
 
     if (!('serial' in navigator)) {

@@ -25,6 +25,12 @@ jobs:
 
       - name: Test shared configuration contracts
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icomponents/m5_platform/include \
+            tests/test_m5_interaction_policy.c \
+            components/m5_platform/m5_interaction_policy.c \
+            -lm -o /tmp/test-m5-interaction-policy
+          /tmp/test-m5-interaction-policy
           python3 scripts/check_dial_identity.py
           python3 scripts/check_controller_dependencies.py
           python3 scripts/check_controller_dependencies.py --self-test
@@ -632,6 +638,73 @@ jobs:
             hiphi_joy_merged.bin
           retention-days: 30
 
+  build-m5-betas:
+    name: build-m5-beta-${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: dial
+            flash_size: 8MB
+            psram: false
+            expected: DIAL
+          - target: sticks3
+            flash_size: 8MB
+            psram: true
+            expected: STICKS3
+          - target: stopwatch
+            flash_size: 16MB
+            psram: true
+            expected: STOPWATCH
+          - target: stackchan
+            flash_size: 16MB
+            psram: true
+            expected: STACKCHAN
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Restore M5 beta managed components
+        uses: actions/cache@v5
+        with:
+          path: m5_beta_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-components-${{ hashFiles('m5_beta_app/dependencies.lock') }}
+      - name: Build exact M5 beta profile
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: m5_beta_app
+          command: >-
+            set -e;
+            idf.py -B build-${{ matrix.target }}
+            -D HIPHI_M5_TARGET=${{ matrix.target }}
+            -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_${{ matrix.flash_size }}=y" build-${{ matrix.target }}/sdkconfig;
+            if [ "${{ matrix.psram }}" = "true" ]; then grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; else ! grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; fi;
+            grep -Fx "CONFIG_M5_PLATFORM_EXPECT_${{ matrix.expected }}=y" build-${{ matrix.target }}/sdkconfig;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_${{ matrix.target }}_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size ${{ matrix.flash_size }}
+            0x0 build-${{ matrix.target }}/bootloader/bootloader.bin
+            0x8000 build-${{ matrix.target }}/partition_table/partition-table.bin
+            0xd000 build-${{ matrix.target }}/ota_data_initial.bin
+            0x10000 build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_${{ matrix.target }}_merged.bin
+      - name: Upload M5 beta artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-m5-beta-${{ matrix.target }}
+          path: |
+            m5_beta_app/build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin
+            m5_beta_app/build-${{ matrix.target }}/bootloader/bootloader.bin
+            m5_beta_app/build-${{ matrix.target }}/partition_table/partition-table.bin
+            m5_beta_app/build-${{ matrix.target }}/ota_data_initial.bin
+            hiphi_${{ matrix.target }}_merged.bin
+          retention-days: 30
+
   build-ble-off:
     name: build-ble-off
     runs-on: ubuntu-latest
@@ -831,7 +904,7 @@ jobs:
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-m5-betas, build-ble-off]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
@@ -858,6 +931,13 @@ jobs:
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
+
+      - name: Download form-native M5 beta firmware
+        uses: actions/download-artifact@v7
+        with:
+          pattern: hiphi-m5-beta-*
+          path: m5-beta-artifacts
+          merge-multiple: true
 
       - name: Read preview commit metadata
         id: preview-commit
@@ -935,6 +1015,43 @@ jobs:
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin "pr-preview/${RLCD_OTA_DATA_FILE}"
           cp rlcd-artifacts/hiphi_rlcd_merged.bin "pr-preview/${RLCD_FIRMWARE_FILE}"
 
+          prepare_m5_beta() {
+            local build_target="$1"
+            local page_target="$2"
+            local display_name="$3"
+            local manifest="manifest-${page_target}-${PREVIEW_ID}.json"
+            local app="hiphi_${page_target}-${PREVIEW_ID}.bin"
+            local boot="hiphi_${page_target}_bootloader-${PREVIEW_ID}.bin"
+            local partition="hiphi_${page_target}_partition-table-${PREVIEW_ID}.bin"
+            local ota="hiphi_${page_target}_ota_data_initial-${PREVIEW_ID}.bin"
+            local merged="hiphi_${page_target}_merged-${PREVIEW_ID}.bin"
+
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" "pr-preview/${app}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" "pr-preview/${boot}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/partition_table/partition-table.bin" "pr-preview/${partition}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/ota_data_initial.bin" "pr-preview/${ota}"
+            cp "m5-beta-artifacts/hiphi_${build_target}_merged.bin" "pr-preview/${merged}"
+
+            cat > "pr-preview/${manifest}" << EOF
+          {
+            "name": "${display_name} (PR #${PR_NUM} Hardware-Unverified Beta)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+              {"path": "${boot}", "offset": 0},
+              {"path": "${partition}", "offset": 32768},
+              {"path": "${ota}", "offset": 53248},
+              {"path": "${app}", "offset": 65536}
+            ]}]
+          }
+          EOF
+          }
+
+          prepare_m5_beta dial m5dial "M5 Dial Form-Native"
+          prepare_m5_beta sticks3 sticks3 "M5StickS3 Twist Remote"
+          prepare_m5_beta stopwatch stopwatch "M5Stack StopWatch Wrist Remote"
+          prepare_m5_beta stackchan stackchan "StackChan Playback Companion"
+
           cat > "pr-preview/${DIAL_MANIFEST_FILE}" << EOF
           {
             "name": "HiPhi Dial Beta (PR #${PR_NUM} Preview)",
@@ -975,11 +1092,12 @@ jobs:
           }
           EOF
 
-          for target in dial frame rlcd; do
+          for target in dial frame rlcd m5dial sticks3 stopwatch stackchan; do
             case "$target" in
               dial) page="$DIAL_FLASH_PAGE"; manifest="$DIAL_MANIFEST_FILE" ;;
               frame) page="$FRAME_FLASH_PAGE"; manifest="$FRAME_MANIFEST_FILE" ;;
               rlcd) page="$RLCD_FLASH_PAGE"; manifest="$RLCD_MANIFEST_FILE" ;;
+              *) page="flash-${target}-${PREVIEW_ID}.html"; manifest="manifest-${target}-${PREVIEW_ID}.json" ;;
             esac
             sed \
               -e "s/{{PR_NUMBER}}/${PR_NUM}/g" \
@@ -995,6 +1113,10 @@ jobs:
               -e "s|manifest-s3.json|${DIAL_MANIFEST_FILE}|g" \
               -e "s|manifest-frame.json|${FRAME_MANIFEST_FILE}|g" \
               -e "s|manifest-rlcd.json|${RLCD_MANIFEST_FILE}|g" \
+              -e "s|manifest-m5dial.json|manifest-m5dial-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-sticks3.json|manifest-sticks3-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-stopwatch.json|manifest-stopwatch-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-stackchan.json|manifest-stackchan-${PREVIEW_ID}.json|g" \
               web/flash-pr.html > "pr-preview/${page}"
             python3 scripts/check_flash_manifest.py "pr-preview/${manifest}" --assets-dir pr-preview
           done
@@ -1043,7 +1165,10 @@ jobs:
           grep -F 'data-target-filter="dial"' "deployed-preview/flash-dial-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="frame"' "deployed-preview/flash-frame-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="rlcd"' "deployed-preview/flash-rlcd-${PREVIEW_ID}.html"
-          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json; do
+          for target in m5dial sticks3 stopwatch stackchan; do
+            grep -F "data-target-filter=\"${target}\"" "deployed-preview/flash-${target}-${PREVIEW_ID}.html"
+          done
+          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
             python3 scripts/check_flash_manifest.py "deployed-preview/${manifest}" --assets-dir deployed-preview
           done
 
@@ -1051,9 +1176,16 @@ jobs:
             echo "dial_page_url=${PREVIEW_BASE}/flash-dial-${PREVIEW_ID}.html"
             echo "frame_page_url=${PREVIEW_BASE}/flash-frame-${PREVIEW_ID}.html"
             echo "rlcd_page_url=${PREVIEW_BASE}/flash-rlcd-${PREVIEW_ID}.html"
+            echo "m5dial_page_url=${PREVIEW_BASE}/flash-m5dial-${PREVIEW_ID}.html"
+            echo "sticks3_page_url=${PREVIEW_BASE}/flash-sticks3-${PREVIEW_ID}.html"
+            echo "stopwatch_page_url=${PREVIEW_BASE}/flash-stopwatch-${PREVIEW_ID}.html"
+            echo "stackchan_page_url=${PREVIEW_BASE}/flash-stackchan-${PREVIEW_ID}.html"
             echo "dial_firmware_sha256=$(sha256sum "deployed-preview/hiphi_dial_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "frame_firmware_sha256=$(sha256sum "deployed-preview/hiphi_frame_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "rlcd_firmware_sha256=$(sha256sum "deployed-preview/hiphi_rlcd_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            for target in m5dial sticks3 stopwatch stackchan; do
+              echo "${target}_firmware_sha256=$(sha256sum "deployed-preview/hiphi_${target}_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            done
           } >> "$GITHUB_OUTPUT"
 
       - name: Post all preview URLs to PR
@@ -1063,9 +1195,17 @@ jobs:
           DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.dial_page_url }}
           FRAME_PAGE_URL: ${{ steps.verify-preview.outputs.frame_page_url }}
           RLCD_PAGE_URL: ${{ steps.verify-preview.outputs.rlcd_page_url }}
+          M5DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.m5dial_page_url }}
+          STICKS3_PAGE_URL: ${{ steps.verify-preview.outputs.sticks3_page_url }}
+          STOPWATCH_PAGE_URL: ${{ steps.verify-preview.outputs.stopwatch_page_url }}
+          STACKCHAN_PAGE_URL: ${{ steps.verify-preview.outputs.stackchan_page_url }}
           DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.dial_firmware_sha256 }}
           FRAME_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.frame_firmware_sha256 }}
           RLCD_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.rlcd_firmware_sha256 }}
+          M5DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.m5dial_firmware_sha256 }}
+          STICKS3_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.sticks3_firmware_sha256 }}
+          STOPWATCH_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.stopwatch_firmware_sha256 }}
+          STACKCHAN_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.stackchan_firmware_sha256 }}
           PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PREVIEW_COMMIT_SUBJECT: ${{ steps.preview-commit.outputs.subject }}
           PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1095,6 +1235,10 @@ jobs:
             - [Flash HiPhi Dial](${process.env.DIAL_PAGE_URL}) — \`${process.env.DIAL_FIRMWARE_SHA256}\`
             - [Flash HiPhi Frame](${process.env.FRAME_PAGE_URL}) — \`${process.env.FRAME_FIRMWARE_SHA256}\`
             - [Flash HiPhi RLCD](${process.env.RLCD_PAGE_URL}) — \`${process.env.RLCD_FIRMWARE_SHA256}\`
+            - [Flash M5 Dial Lab Beta](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
+            - [Flash M5StickS3 Twist Beta](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
+            - [Flash M5Stack StopWatch Beta](${process.env.STOPWATCH_PAGE_URL}) — \`${process.env.STOPWATCH_FIRMWARE_SHA256}\`
+            - [Flash StackChan Companion Beta](${process.env.STACKCHAN_PAGE_URL}) — \`${process.env.STACKCHAN_FIRMWARE_SHA256}\`
 
             Each page, manifest, bootloader, partition table, OTA data image, and application binary was fetched from GitHub Pages and compared byte-for-byte with the job workspace. Manifest checks preserve NVS; browser updates must decline the erase prompt to retain settings. Hardware testing remains the active merge gate.
 
