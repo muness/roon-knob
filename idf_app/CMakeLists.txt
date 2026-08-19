@@ -19,6 +19,10 @@ endif()
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
 
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
+# The legacy Dial target does not use the shared M5Unified platform. ESP-IDF's
+# non-minimal build otherwise tries to resolve every discovered component,
+# including m5_platform and its target-specific managed dependency.
+set(EXCLUDE_COMPONENTS m5_platform)
 
 # Detect when an existing sdkconfig was generated from different defaults. Without
 # this, ESP-IDF silently retains old values (including debug optimization).
