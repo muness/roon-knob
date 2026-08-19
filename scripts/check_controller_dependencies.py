@@ -206,11 +206,16 @@ def parse_cmake_include_dirs(cmake_path: Path) -> list[Path]:
 
 def project_file_index(root: Path = ROOT) -> dict[str, list[Path]]:
     index: dict[str, list[Path]] = {}
-    ignored_parts = {".git", "build", "managed_components"}
     for candidate in root.rglob("*"):
         if not candidate.is_file():
             continue
-        if ignored_parts.intersection(candidate.relative_to(root).parts):
+        parts = candidate.relative_to(root).parts
+        if any(
+            part in {".git", "managed_components"}
+            or part == "build"
+            or part.startswith("build-")
+            for part in parts
+        ):
             continue
         index.setdefault(candidate.name, []).append(candidate.resolve())
     return index

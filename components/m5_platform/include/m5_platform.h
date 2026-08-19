@@ -47,10 +47,8 @@ typedef struct {
     uint16_t left_y;
     uint16_t right_x;
     uint16_t right_y;
-    /* Atom JoyStick's 0x70 register is active-low and ordered by the
-     * coprocessor firmware: top-left, top-right, left-stick press,
-     * right-stick press. Keep those physical controls named at the platform
-     * boundary so UIs cannot accidentally treat them as one opaque bitmask. */
+    /* Keep the official library's physical controls named at the platform
+     * boundary so UIs cannot accidentally treat them as an opaque bitmask. */
     bool top_left_pressed;
     bool top_right_pressed;
     bool left_stick_pressed;
@@ -85,15 +83,28 @@ typedef enum {
     M5_PLATFORM_STACKCHAN_DANCE = 3,
 } m5_platform_stackchan_expression_t;
 
+/* Face cues are the visual half of one coordinated performance. They expose
+ * no servo state or timing detail; the UI maps them to expressive features. */
+typedef enum {
+    M5_PLATFORM_STACKCHAN_FACE_NEUTRAL = 0,
+    M5_PLATFORM_STACKCHAN_FACE_ANTICIPATE = 1,
+    M5_PLATFORM_STACKCHAN_FACE_BEAM_LEFT = 2,
+    M5_PLATFORM_STACKCHAN_FACE_BEAM_RIGHT = 3,
+    M5_PLATFORM_STACKCHAN_FACE_POP = 4,
+    M5_PLATFORM_STACKCHAN_FACE_WINK = 5,
+    M5_PLATFORM_STACKCHAN_FACE_SAD = 6,
+    M5_PLATFORM_STACKCHAN_FACE_SETTLE = 7,
+} m5_platform_stackchan_face_cue_t;
+
 /* StackChan body language is enabled by default (and can be turned off with a
- * long hold). The implementation powers the servo rail only for a bounded
- * gesture, qualifies both servo positions before moving, returns to the
- * observed neutral pose, then powers down. */
+ * long hold). Choreography is ours; calibration, limits, power, motion, and
+ * torque are owned by M5Stack's official StackChan BSP. */
 bool m5_platform_stackchan_expression_enable(bool enabled);
 bool m5_platform_stackchan_expression_trigger(
     m5_platform_stackchan_expression_t expression);
 void m5_platform_stackchan_expression_process(void);
 bool m5_platform_stackchan_expression_faulted(void);
+m5_platform_stackchan_face_cue_t m5_platform_stackchan_face_cue(void);
 
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */

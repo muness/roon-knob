@@ -31,9 +31,16 @@ jobs:
             components/m5_platform/m5_interaction_policy.c \
             -lm -o /tmp/test-m5-interaction-policy
           /tmp/test-m5-interaction-policy
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -Icomponents/m5_platform/include \
+            -Icomponents/m5_platform \
+            tests/test_m5_stackchan_choreography.cpp \
+            -o /tmp/test-m5-stackchan-choreography
+          /tmp/test-m5-stackchan-choreography
           python3 scripts/check_dial_identity.py
           python3 scripts/check_controller_dependencies.py
           python3 scripts/check_controller_dependencies.py --self-test
+          python3 scripts/check_m5_hardware_boundary.py
           cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
             -DCONTROLLER_CONFIG_TEST \
             -Icommon -Iinclude \
@@ -599,6 +606,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          submodules: recursive
       - name: Get firmware version
         id: atom-version
         run: |
@@ -622,8 +630,13 @@ jobs:
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y" sdkconfig;
+            grep -Fx "CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK=y" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_HZ=1000" sdkconfig;
+            grep -Fx "CONFIG_ARDUINO_SELECTIVE_COMPILATION=y" sdkconfig;
             grep -F "/components/m5_platform/" build/compile_commands.json;
             grep -F "m5stack__m5unified" build/compile_commands.json;
+            grep -F "/components/m5_official/vendor/Atom-JoyStick/" build/compile_commands.json;
+            python3 ../scripts/check_m5_arduino_abi.py build/compile_commands.json;
             esptool.py --chip esp32s3 merge_bin -o ../hiphi_joy_merged.bin --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_joy.bin;
             esptool.py --chip esp32s3 image_info ../hiphi_joy_merged.bin
       - name: Upload AtomS3 Joystick artifact
@@ -665,6 +678,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          submodules: recursive
       - name: Restore M5 beta managed components
         uses: actions/cache@v5
         with:
@@ -688,9 +702,9 @@ jobs:
             grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" build-${{ matrix.target }}/sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" build-${{ matrix.target }}/sdkconfig;
             case "${{ matrix.target }}" in
-              dial) ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig ;;
-              sticks3|stopwatch) grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig ;;
-              stackchan) grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig ;;
+              dial) ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_FREERTOS_HZ=1000" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_ARDUINO_SELECTIVE_COMPILATION=y" build-${{ matrix.target }}/sdkconfig; grep -F "/components/m5_official/vendor/M5Dial/" build-${{ matrix.target }}/compile_commands.json; python3 ../scripts/check_m5_arduino_abi.py build-${{ matrix.target }}/compile_commands.json ;;
+              sticks3|stopwatch) grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig; ! grep -F "espressif__arduino-esp32" build-${{ matrix.target }}/compile_commands.json; ! grep -F "/components/m5_official/" build-${{ matrix.target }}/compile_commands.json ;;
+              stackchan) grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_FREERTOS_HZ=1000" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_ARDUINO_SELECTIVE_COMPILATION=y" build-${{ matrix.target }}/sdkconfig; grep -F "/components/m5_official/vendor/StackChan-BSP/" build-${{ matrix.target }}/compile_commands.json; python3 ../scripts/check_m5_arduino_abi.py build-${{ matrix.target }}/compile_commands.json ;;
             esac;
             esptool.py --chip esp32s3 merge_bin
             -o ../hiphi_${{ matrix.target }}_merged.bin

@@ -162,6 +162,98 @@ void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int
     target->drawString(text ? text : "", x, y);
 }
 
+void stackchan_draw_thick_line(lgfx::LovyanGFX *target, int x0, int y0, int x1,
+                               int y1, uint32_t color, int thickness = 3) {
+    const int half = thickness / 2;
+    for (int offset = -half; offset <= half; ++offset) {
+        target->drawLine(x0, y0 + offset, x1, y1 + offset, color);
+    }
+}
+
+/* Face and body are one performance. These are intentionally bold graphic
+ * cues rather than tiny emoji changes: StackChan is normally read from across
+ * a room, and the face must remain legible while the head is moving. */
+void stackchan_draw_performance_face(
+    lgfx::LovyanGFX *target, m5_platform_stackchan_face_cue_t cue, int w) {
+    const int cx = w / 2;
+    const int left = cx - 64;
+    const int right = cx + 64;
+    const int eye_y = 78;
+
+    const auto open_eye = [&](int x, int pupil_dx, int pupil_dy,
+                              int radius_x = 28, int radius_y = 40) {
+        target->fillEllipse(x, eye_y, radius_x, radius_y, STACK_INK);
+        target->fillCircle(x + pupil_dx, eye_y - 8 + pupil_dy, 8,
+                           STACK_ACCENT);
+        target->fillCircle(x + pupil_dx - 2, eye_y - 10 + pupil_dy, 2,
+                           STACK_INK);
+    };
+    const auto happy_eye = [&](int x, int gaze) {
+        stackchan_draw_thick_line(target, x - 23, eye_y + 7, x, eye_y - 7,
+                                  STACK_INK, 5);
+        stackchan_draw_thick_line(target, x, eye_y - 7, x + 23, eye_y + 7,
+                                  STACK_INK, 5);
+        target->fillCircle(x + gaze, eye_y + 1, 3, STACK_ACCENT);
+    };
+    const auto broad_smile = [&](int offset) {
+        target->drawArc(cx + offset, 122, 43, 30, 32, 148, STACK_HOT);
+        target->drawArc(cx + offset, 123, 43, 30, 32, 148, STACK_HOT);
+    };
+
+    switch (cue) {
+        case M5_PLATFORM_STACKCHAN_FACE_ANTICIPATE:
+            open_eye(left, 4, 4, 25, 37);
+            open_eye(right, -4, 4, 25, 37);
+            target->fillCircle(cx, 126, 12, STACK_HOT);
+            target->fillCircle(cx, 126, 6, STACK_BG);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_BEAM_LEFT:
+            happy_eye(left, -5);
+            happy_eye(right, -5);
+            broad_smile(-5);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_BEAM_RIGHT:
+            happy_eye(left, 5);
+            happy_eye(right, 5);
+            broad_smile(5);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_POP:
+            open_eye(left, 0, 3, 30, 43);
+            open_eye(right, 0, 3, 30, 43);
+            target->fillEllipse(cx, 128, 17, 21, STACK_HOT);
+            target->fillEllipse(cx, 128, 9, 12, STACK_BG);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_WINK:
+            stackchan_draw_thick_line(target, left - 23, eye_y + 4, left,
+                                      eye_y - 5, STACK_INK, 5);
+            stackchan_draw_thick_line(target, left, eye_y - 5, left + 23,
+                                      eye_y + 4, STACK_INK, 5);
+            open_eye(right, 6, 1, 27, 39);
+            broad_smile(7);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_SAD:
+            open_eye(left, -5, 8, 27, 38);
+            open_eye(right, 5, 8, 27, 38);
+            stackchan_draw_thick_line(target, left - 22, eye_y - 30,
+                                      left + 18, eye_y - 23, STACK_HOT, 3);
+            stackchan_draw_thick_line(target, right - 18, eye_y - 23,
+                                      right + 22, eye_y - 30, STACK_HOT, 3);
+            target->drawArc(cx, 143, 35, 25, 210, 330, STACK_HOT);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_SETTLE:
+            happy_eye(left, 0);
+            happy_eye(right, 0);
+            target->drawArc(cx, 121, 35, 25, 35, 145, STACK_HOT);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_NEUTRAL:
+        default:
+            open_eye(left, 0, 1, 27, 39);
+            open_eye(right, 0, 1, 27, 39);
+            target->drawArc(cx, 122, 34, 25, 35, 145, STACK_HOT);
+            break;
+    }
+}
+
 void stackchan_draw_marquee(lgfx::LovyanGFX *target, const char *text, int x,
                             int y, int width, int size, uint32_t color,
                             MarqueeState *marquee) {
@@ -701,24 +793,10 @@ void render_stackchan_delight() {
     }
 
     if (reveal) {
-        const int64_t elapsed = now - s.track_reveal_started;
-        int glance = 0;
-        int bob = 0;
-        if (elapsed < 550000) {
-            glance = -5;
-        } else if (elapsed < 1100000) {
-            glance = 5;
-            bob = -2;
-        } else if (elapsed < 1750000) {
-            glance = -3;
-        }
         stackchan_draw_center(target, "NOW PLAYING", w / 2, 20, 1,
                               STACK_ACCENT);
-        target->fillEllipse(w / 2 - 64, 80 + bob, 29, 43, STACK_INK);
-        target->fillEllipse(w / 2 + 64, 80 + bob, 29, 43, STACK_INK);
-        target->fillCircle(w / 2 - 57 + glance, 68 + bob, 8, STACK_ACCENT);
-        target->fillCircle(w / 2 + 71 + glance, 68 + bob, 8, STACK_ACCENT);
-        target->drawArc(w / 2, 132 + bob, 41, 31, 30, 150, STACK_HOT);
+        stackchan_draw_performance_face(
+            target, m5_platform_stackchan_face_cue(), w);
 
         target->fillRect(0, 153, w, h - 153, STACK_BG);
         target->fillRect(0, 153, w, 2, STACK_CONTROL);
@@ -830,9 +908,8 @@ void render_stackchan_delight() {
                                  : (s.body_notice[0] ? s.body_notice
                                     : (connection_lost ? "I LOST THE MUSIC"
                                        : (!s.online ? "CONNECTING..."
-                                          : (s.playing ? "I'M FEELING THIS"
-                                             : (s.body_enabled ? "READY"
-                                                : "BODY OFF")))));
+                                          : (s.body_enabled ? "READY"
+                                             : "BODY OFF"))));
     stackchan_draw_center(target, expression, w / 2, 40, 1,
                           connection_lost ? STACK_HOT :
                           (s.action_flash ? STACK_HOT : STACK_INK));

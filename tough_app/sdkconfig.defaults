@@ -7,6 +7,7 @@
 # before the first `idf.py build`. The line below documents the expected
 # value and lets ESP-IDF flag a mismatch if someone reconfigures in place.
 CONFIG_IDF_TARGET="esp32"
+CONFIG_M5_PLATFORM_EXPECT_TOUGH=y
 
 # Partition table: factory-only, no OTA app slots. This mirrors frame_app's
 # precedent (see frame_app/partitions.csv) -- the `otadata` partition below

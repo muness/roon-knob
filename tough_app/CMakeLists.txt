@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 set(PROJECT_VER "0.1.0")
+set(HIPHI_M5_TARGET "tough" CACHE STRING "Exact M5 target")
 
 # Auto-append -dev if not building from a release tag
 execute_process(
@@ -18,6 +19,7 @@ set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+idf_build_set_property(HIPHI_M5_TARGET ${HIPHI_M5_TARGET})
 # Without this, ESP-IDF builds every component discovered under
 # EXTRA_COMPONENT_DIRS regardless of whether anything requires it -- which
 # would silently pull in components/rk_ble_hid_host (and its "bt"/NimBLE

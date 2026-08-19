@@ -1,13 +1,17 @@
 #include "m5_platform.h"
-#include "SCSCL.h"
-
+#include "m5_stackchan_choreography.h"
 #include <M5Unified.h>
+#if CONFIG_M5_PLATFORM_EXPECT_DIAL
+#include <M5Dial.h>
+#elif CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#include <M5StackChan.h>
+#elif CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+#include <AtomJoyStick.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <driver/gpio.h>
-#include <driver/uart.h>
 #include <esp_log.h>
 #include <esp_random.h>
 #include <esp_timer.h>
@@ -17,31 +21,17 @@ static const char *TAG = "m5_platform";
 static m5_platform_board_t s_board = M5_PLATFORM_BOARD_UNKNOWN;
 static bool s_started = false;
 static bool s_joystick = false;
+static bool s_joystick_ready = false;
 static bool s_has_imu = false;
-static int8_t s_encoder_state = 0;
-static int32_t s_encoder_delta = 0;
+static int32_t s_encoder_remainder = 0;
+
+#if CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+static AtomJoyStick s_atom_joystick;
+#endif
 
 namespace {
-constexpr uint8_t kJoystickAddress = 0x59;
-constexpr gpio_num_t kJoystickSda = GPIO_NUM_38;
-constexpr gpio_num_t kJoystickScl = GPIO_NUM_39;
-constexpr uint8_t kRightStickX12Register = 0x20;
-constexpr uint8_t kRightStickY12Register = 0x22;
-constexpr uint8_t kStackChanIoAddress = 0x6f;
-constexpr uint8_t kStackChanIoVersion = 0x02;
-constexpr uint8_t kStackChanIoDirection = 0x03;
-constexpr uint8_t kStackChanIoOutput = 0x05;
-constexpr uint8_t kStackChanIoPullUp = 0x09;
-constexpr uint8_t kStackChanServoPowerBit = 0x01;
-constexpr uint32_t kStackChanIoFrequency = 100000;
-constexpr uart_port_t kStackChanServoUart = UART_NUM_1;
-constexpr int kStackChanServoTx = 6;
-constexpr int kStackChanServoRx = 7;
-SCSCL s_stackchan_servo_bus;
-
 enum class StackChanMotionPhase {
     idle,
-    power_wait,
     first_pose,
     second_pose,
     third_pose,
@@ -53,171 +43,60 @@ struct StackChanMotionState {
     bool enabled = false;
     bool initialized = false;
     bool faulted = false;
-    bool power_ready = false;
     bool has_queued = false;
     m5_platform_stackchan_expression_t pending = M5_PLATFORM_STACKCHAN_CELEBRATE;
     m5_platform_stackchan_expression_t queued = M5_PLATFORM_STACKCHAN_CELEBRATE;
     StackChanMotionPhase phase = StackChanMotionPhase::idle;
-    bool neutral_valid = false;
-    int yaw_neutral = 0;
-    int pitch_neutral = 0;
-    int yaw_center = 0;
-    int pitch_center = 0;
     uint8_t dance_variant = 0;
-    uint8_t return_attempts = 0;
+    m5_platform_stackchan_face_cue_t face_cue =
+        M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
     int64_t deadline = 0;
 } s_stackchan_motion;
 
-struct StackChanDancePose {
-    int8_t yaw_offset;
-    int8_t pitch_offset;
-    uint8_t move_time;
-    uint16_t settle_ms;
-};
-
-/* Four gentle dances, all deliberately bounded to about ten degrees from the
- * resting pose. The factory servo protocol's movement time is used to turn
- * the old sequence of snaps into a relaxed sway. */
-constexpr StackChanDancePose kStackChanDances[4][4] = {
-    {{-28, 8, 44, 560}, {30, 10, 48, 600}, {16, -12, 42, 520}, {-12, 6, 40, 480}},
-    {{-16, -14, 42, 520}, {20, 16, 46, 570}, {-24, 8, 44, 550}, {16, -8, 42, 500}},
-    {{-32, 12, 48, 610}, {0, -16, 44, 540}, {30, 10, 48, 600}, {0, 5, 40, 470}},
-    {{-22, 8, 44, 550}, {24, -10, 46, 570}, {-14, -14, 44, 540}, {14, 10, 44, 530}},
-};
-
-bool stackchan_io_read(uint8_t reg, uint8_t *value) {
-    return value && M5.In_I2C.readRegister(
-        kStackChanIoAddress, reg, value, 1, kStackChanIoFrequency);
-}
-
-bool stackchan_io_write(uint8_t reg, uint8_t value) {
-    return M5.In_I2C.writeRegister8(
-        kStackChanIoAddress, reg, value, kStackChanIoFrequency);
-}
-
-bool stackchan_io_set_bit(uint8_t reg, uint8_t bit, bool enabled) {
-    uint8_t value = 0;
-    if (!stackchan_io_read(reg, &value)) return false;
-    value = enabled ? static_cast<uint8_t>(value | bit)
-                    : static_cast<uint8_t>(value & ~bit);
-    return stackchan_io_write(reg, value);
-}
-
-bool stackchan_power(bool enabled) {
-    if (!s_stackchan_motion.power_ready) return false;
-    return stackchan_io_set_bit(kStackChanIoOutput,
-                                kStackChanServoPowerBit, enabled);
-}
-
-int servo_read_position(uint8_t id) {
-    return s_stackchan_servo_bus.ReadPos(id);
-}
-
-bool servo_write_position(uint8_t id, int position, uint16_t move_time) {
-    position = std::clamp(position, 0, 1000);
-    return s_stackchan_servo_bus.WritePos(id, position, move_time, 0) == 1;
-}
-
-bool stackchan_motion_init() {
-    if (s_stackchan_motion.initialized) return true;
-    uint8_t version = 0;
-    ESP_LOGI(TAG, "Qualifying StackChan servo rail: i2c=%d",
-             M5.In_I2C.isEnabled());
-    bool expander_ready = false;
-    if (M5.In_I2C.isEnabled()) {
-        ESP_LOGI(TAG, "StackChan expander scan: 0x6f=%d 0x71=%d",
-                 M5.In_I2C.scanID(kStackChanIoAddress, 100000),
-                 M5.In_I2C.scanID(0x71, 100000));
-        // The PY32L020 on the body board boots asynchronously. The official
-        // BSP waits up to 1.2s before declaring the expander absent.
-        for (int attempt = 0; attempt < 6; ++attempt) {
-            if (stackchan_io_read(kStackChanIoVersion, &version) &&
-                version != 0 && version != 0xff) {
-                expander_ready = true;
-                break;
-            }
-            vTaskDelay(pdMS_TO_TICKS(200));
-        }
-    }
-    if (!expander_ready ||
-        !stackchan_io_set_bit(kStackChanIoDirection,
-                              kStackChanServoPowerBit, true) ||
-        !stackchan_io_set_bit(kStackChanIoPullUp,
-                              kStackChanServoPowerBit, true)) {
-        ESP_LOGE(TAG, "StackChan servo power expander qualification failed");
-        return false;
-    }
-    ESP_LOGI(TAG, "StackChan servo power expander version=0x%02x", version);
-    s_stackchan_motion.power_ready = true;
-    /* Exact M5Stack BSP order: power the servo rail, allow it to boot, then
-     * initialize the vendored SCSCL driver on UART1 TX=6/RX=7. The reference
-     * firmware leaves the rail up and releases torque while idle. */
-    if (!stackchan_power(true)) {
-        ESP_LOGE(TAG, "StackChan servo rail did not enable during init");
-        return false;
-    }
-    vTaskDelay(pdMS_TO_TICKS(200));
-    if (!s_stackchan_servo_bus.begin(kStackChanServoUart, 1000000,
-                                     kStackChanServoTx,
-                                     kStackChanServoRx)) {
-        ESP_LOGE(TAG, "StackChan reference SCSCL driver init failed");
-        stackchan_power(false);
-        return false;
-    }
-    const int yaw = s_stackchan_servo_bus.ReadPos(1);
-    const int pitch = s_stackchan_servo_bus.ReadPos(2);
-    if (yaw >= 64 && yaw <= 936 && pitch >= 64 && pitch <= 936) {
-        s_stackchan_motion.yaw_neutral = yaw;
-        s_stackchan_motion.pitch_neutral = pitch;
-        s_stackchan_motion.neutral_valid = true;
-    }
-    s_stackchan_servo_bus.EnableTorque(1, 0);
-    s_stackchan_servo_bus.EnableTorque(2, 0);
-    s_stackchan_motion.initialized = true;
-    ESP_LOGI(TAG,
-             "StackChan reference servo driver ready: yaw=%d pitch=%d "
-             "errors=%u/%u",
-             yaw, pitch, s_stackchan_servo_bus.getLastError(),
-             s_stackchan_servo_bus.getState());
-    ESP_LOGI(TAG, "StackChan body language armed; torque released while idle");
-    return true;
-}
-
 void stackchan_motion_fail(const char *reason) {
     ESP_LOGE(TAG, "StackChan body language disabled: %s", reason);
-    stackchan_power(false);
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    M5StackChan.Motion.setTorqueEnabled(false);
+    M5StackChan.setServoPowerEnabled(false);
+#endif
     s_stackchan_motion.faulted = true;
     s_stackchan_motion.enabled = false;
     s_stackchan_motion.phase = StackChanMotionPhase::idle;
+    s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
 }
 
-bool stackchan_pose(int yaw, int pitch, uint16_t move_time = 20) {
-    return servo_write_position(1, yaw, move_time) &&
-           servo_write_position(2, pitch, move_time);
+void stackchan_pose(int yaw, int pitch, int speed) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    M5StackChan.Motion.setTorqueEnabled(true);
+    M5StackChan.Motion.move(yaw, pitch, speed);
+#else
+    (void)yaw;
+    (void)pitch;
+    (void)speed;
+#endif
 }
 
-bool stackchan_dance_pose(size_t index) {
-    const auto &pose = kStackChanDances[s_stackchan_motion.dance_variant][index];
-    return stackchan_pose(s_stackchan_motion.yaw_center + pose.yaw_offset,
-                          s_stackchan_motion.pitch_center + pose.pitch_offset,
-                          pose.move_time);
+void stackchan_dance_pose(size_t index) {
+    const auto &pose =
+        M5_STACKCHAN_DANCES[s_stackchan_motion.dance_variant][index];
+    s_stackchan_motion.face_cue = pose.face;
+    stackchan_pose(pose.yaw_angle, pose.pitch_angle, pose.speed);
 }
 
 int64_t stackchan_dance_deadline(size_t index) {
     return esp_timer_get_time() +
            static_cast<int64_t>(
-               kStackChanDances[s_stackchan_motion.dance_variant][index]
-                   .settle_ms) *
+               M5_STACKCHAN_DANCES[s_stackchan_motion.dance_variant][index]
+                   .hold_ms) *
                1000;
 }
 
-bool stackchan_torque(bool enabled) {
-    return s_stackchan_servo_bus.EnableTorque(1, enabled ? 1 : 0) == 1 &&
-           s_stackchan_servo_bus.EnableTorque(2, enabled ? 1 : 0) == 1;
-}
-
 bool expected_board(m5::board_t board) {
-#if CONFIG_M5_PLATFORM_EXPECT_DIAL
+#if CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+    return board == m5::board_t::board_M5AtomS3;
+#elif CONFIG_M5_PLATFORM_EXPECT_TOUGH
+    return board == m5::board_t::board_M5Tough;
+#elif CONFIG_M5_PLATFORM_EXPECT_DIAL
     return board == m5::board_t::board_M5Dial;
 #elif CONFIG_M5_PLATFORM_EXPECT_STICKS3
     return board == m5::board_t::board_M5StickS3;
@@ -230,27 +109,10 @@ bool expected_board(m5::board_t board) {
 #endif
 }
 
-bool joystick_read(uint8_t reg, uint8_t *data, size_t len) {
-    return M5.In_I2C.readRegister(kJoystickAddress, reg, data, len, 400000);
-}
-
-uint8_t joystick_adc12_to_u8(const uint8_t *data) {
-    uint16_t value = static_cast<uint16_t>(data[0]) |
-                     (static_cast<uint16_t>(data[1]) << 8);
+uint8_t joystick_adc12_to_u8(uint16_t value) {
     value = std::min<uint16_t>(value, 4095);
     return static_cast<uint8_t>((static_cast<uint32_t>(value) * 255 + 2047) /
                                 4095);
-}
-
-void update_dial_encoder() {
-    if (s_board != M5_PLATFORM_BOARD_DIAL) return;
-    const int8_t state = static_cast<int8_t>((gpio_get_level(GPIO_NUM_40) << 1) |
-                                             gpio_get_level(GPIO_NUM_41));
-    static constexpr int8_t kTransitions[16] = {
-        0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0,
-    };
-    s_encoder_delta += kTransitions[(s_encoder_state << 2) | state];
-    s_encoder_state = state;
 }
 }
 
@@ -265,7 +127,18 @@ extern "C" bool m5_platform_begin(void) {
     cfg.internal_mic = false;
     cfg.led_brightness = 0;
 
+#if CONFIG_M5_PLATFORM_EXPECT_DIAL || \
+    CONFIG_M5_PLATFORM_EXPECT_STACKCHAN || \
+    CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+    initArduino();
+#endif
+#if CONFIG_M5_PLATFORM_EXPECT_DIAL
+    M5Dial.begin(cfg, true, false);
+#elif CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    M5StackChan.begin();
+#else
     M5.begin(cfg);
+#endif
     const auto board = M5.getBoard();
     if (board != m5::board_t::board_M5Tough &&
         board != m5::board_t::board_M5AtomS3 &&
@@ -308,33 +181,36 @@ extern "C" bool m5_platform_begin(void) {
               M5_PLATFORM_BOARD_STACKCHAN;
     s_has_imu = M5.Imu.isEnabled();
     s_started = true;
-    if (s_board == M5_PLATFORM_BOARD_DIAL) {
-        gpio_config_t encoder = {};
-        encoder.pin_bit_mask = (1ULL << GPIO_NUM_40) | (1ULL << GPIO_NUM_41);
-        encoder.mode = GPIO_MODE_INPUT;
-        encoder.pull_up_en = GPIO_PULLUP_ENABLE;
-        encoder.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        encoder.intr_type = GPIO_INTR_DISABLE;
-        if (gpio_config(&encoder) != ESP_OK) {
-            ESP_LOGE(TAG, "M5Dial encoder GPIO qualification failed");
-            return false;
-        }
-        s_encoder_state = static_cast<int8_t>((gpio_get_level(GPIO_NUM_40) << 1) |
-                                              gpio_get_level(GPIO_NUM_41));
-    }
     if (s_joystick) {
-        if (!M5.In_I2C.isEnabled() || M5.In_I2C.getSDA() != kJoystickSda ||
-            M5.In_I2C.getSCL() != kJoystickScl) {
-            ESP_LOGE(TAG, "Atom JoyStick I2C pins are not configured by M5Unified");
-            return false;
-        }
-        uint8_t probe = 0;
-        if (!joystick_read(0xFE, &probe, 1)) {
-            ESP_LOGW(TAG, "Atom JoyStick coprocessor not responding at 0x59");
+#if CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+        s_joystick_ready = s_atom_joystick.begin();
+        if (!s_joystick_ready) {
+            ESP_LOGW(TAG, "Official Atom JoyStick library did not find the base");
         } else {
-            ESP_LOGI(TAG, "Qualified AtomS3 Joystick: %ux%u firmware=%u",
-                     M5.Display.width(), M5.Display.height(), probe);
+            ESP_LOGI(TAG, "Qualified AtomS3 Joystick via M5Stack library: "
+                          "%ux%u firmware=%u",
+                     M5.Display.width(), M5.Display.height(),
+                     s_atom_joystick.getFirmwareVersion());
         }
+#else
+        ESP_LOGE(TAG, "AtomS3 Joystick firmware lacks its official board library");
+        return false;
+#endif
+    } else if (s_board == M5_PLATFORM_BOARD_STACKCHAN) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        const auto angles = M5StackChan.Motion.getCurrentAngles();
+        if (angles.x < -1280 || angles.x > 1280 ||
+            angles.y < 0 || angles.y > 900) {
+            stackchan_motion_fail("official BSP returned invalid angles");
+        } else {
+            M5StackChan.Motion.setAutoAngleSyncEnabled(false);
+            M5StackChan.Motion.setAutoTorqueReleaseEnabled(true);
+            M5StackChan.Motion.setTorqueEnabled(false);
+            s_stackchan_motion.initialized = true;
+            ESP_LOGI(TAG, "Qualified StackChan via M5Stack BSP: yaw=%d pitch=%d",
+                     angles.x, angles.y);
+        }
+#endif
     } else {
         ESP_LOGI(TAG, "Qualified %s: %ux%u touch=%s imu=%s",
                  m5_platform_board_name(), M5.Display.width(),
@@ -346,8 +222,18 @@ extern "C" bool m5_platform_begin(void) {
 
 extern "C" void m5_platform_update(void) {
     if (s_started) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        if (s_board == M5_PLATFORM_BOARD_STACKCHAN) {
+            M5StackChan.update();
+            return;
+        }
+#elif CONFIG_M5_PLATFORM_EXPECT_DIAL
+        if (s_board == M5_PLATFORM_BOARD_DIAL) {
+            M5Dial.update();
+            return;
+        }
+#endif
         M5.update();
-        update_dial_encoder();
     }
 }
 
@@ -403,35 +289,24 @@ extern "C" bool m5_platform_touch_event(m5_platform_touch_event_t *out) {
 }
 
 extern "C" bool m5_platform_joystick_state(m5_platform_joystick_state_t *out) {
-    if (!out || !s_started || !s_joystick) return false;
-    uint8_t left_x = 0;
-    uint8_t left_y = 0;
-    uint8_t right_x = 0;
-    uint8_t right_y = 0;
-    uint8_t right_x_12[2] = {};
-    uint8_t right_y_12[2] = {};
-    uint8_t buttons[4] = {};
-    /* The official Atom-JoyStick protocol exposes the right stick's 12-bit
-     * X/Y values at 0x20 and 0x22. Read those values at the platform boundary
-     * and normalize them to the existing 8-bit UI contract. This avoids
-     * depending on the coprocessor's separate 8-bit summary registers, which
-     * are not updating reliably on the firmware revision in this device. */
-    if (!joystick_read(0x10, &left_x, 1) ||
-        !joystick_read(0x11, &left_y, 1) ||
-        !joystick_read(kRightStickX12Register, right_x_12, sizeof(right_x_12)) ||
-        !joystick_read(kRightStickY12Register, right_y_12, sizeof(right_y_12)) ||
-        !joystick_read(0x70, buttons, sizeof(buttons))) return false;
-    right_x = joystick_adc12_to_u8(right_x_12);
-    right_y = joystick_adc12_to_u8(right_y_12);
-    out->left_x = left_x;
-    out->left_y = left_y;
-    out->right_x = right_x;
-    out->right_y = right_y;
-    /* The Atom JoyStick button register is active-low: 0 means pressed. */
-    out->top_left_pressed = buttons[0] == 0;
-    out->top_right_pressed = buttons[1] == 0;
-    out->left_stick_pressed = buttons[2] == 0;
-    out->right_stick_pressed = buttons[3] == 0;
+    if (!out || !s_started || !s_joystick || !s_joystick_ready) return false;
+#if CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+    out->left_x = joystick_adc12_to_u8(
+        s_atom_joystick.getJoy1ADCValueX(_12bit));
+    out->left_y = joystick_adc12_to_u8(
+        s_atom_joystick.getJoy1ADCValueY(_12bit));
+    out->right_x = joystick_adc12_to_u8(
+        s_atom_joystick.getJoy2ADCValueX(_12bit));
+    out->right_y = joystick_adc12_to_u8(
+        s_atom_joystick.getJoy2ADCValueY(_12bit));
+    /* M5Stack's public button values are active-low. */
+    out->top_left_pressed = s_atom_joystick.getButtonValue(BUTTON_1) == 0;
+    out->top_right_pressed = s_atom_joystick.getButtonValue(BUTTON_2) == 0;
+    out->left_stick_pressed = s_atom_joystick.getButtonValue(BUTTON_A) == 0;
+    out->right_stick_pressed = s_atom_joystick.getButtonValue(BUTTON_B) == 0;
+#else
+    return false;
+#endif
     return true;
 }
 
@@ -451,11 +326,17 @@ extern "C" bool m5_platform_surface_button_event(
 
 extern "C" bool m5_platform_encoder_delta(int32_t *out_delta) {
     if (!out_delta || !s_started || s_board != M5_PLATFORM_BOARD_DIAL) return false;
-    /* A complete detent is four quadrature edges. Retain incomplete edges. */
-    const int32_t detents = s_encoder_delta / 4;
-    s_encoder_delta -= detents * 4;
+#if CONFIG_M5_PLATFORM_EXPECT_DIAL
+    /* M5Dial's official encoder reports quadrature edges. The controller's
+     * human-facing unit is one physical detent, so retain partial edges. */
+    s_encoder_remainder += M5Dial.Encoder.readAndReset();
+    const int32_t detents = s_encoder_remainder / 4;
+    s_encoder_remainder -= detents * 4;
     *out_delta = detents;
     return true;
+#else
+    return false;
+#endif
 }
 
 extern "C" bool m5_platform_gyro(float *out_x, float *out_y, float *out_z) {
@@ -488,17 +369,23 @@ extern "C" bool m5_platform_stackchan_expression_enable(bool enabled) {
              enabled, s_started, static_cast<int>(s_board));
     if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return false;
     if (!enabled) {
-        stackchan_power(false);
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        M5StackChan.Motion.setTorqueEnabled(false);
+        M5StackChan.setServoPowerEnabled(false);
+#endif
         s_stackchan_motion.enabled = false;
         s_stackchan_motion.has_queued = false;
         s_stackchan_motion.phase = StackChanMotionPhase::idle;
+        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
         return true;
     }
-    s_stackchan_motion.faulted = false;
-    if (!stackchan_motion_init()) {
-        stackchan_motion_fail("hardware init failed");
+    if (!s_stackchan_motion.initialized || s_stackchan_motion.faulted) {
+        ESP_LOGE(TAG, "StackChan official BSP was not qualified");
         return false;
     }
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    M5StackChan.setServoPowerEnabled(true);
+#endif
     s_stackchan_motion.enabled = true;
     return true;
 }
@@ -530,12 +417,21 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
         ESP_LOGI(TAG, "StackChan dance variation=%u",
                  s_stackchan_motion.dance_variant + 1);
     }
-    if (!stackchan_power(true)) {
-        stackchan_motion_fail("servo rail did not enable");
-        return false;
+    if (expression == M5_PLATFORM_STACKCHAN_DANCE) {
+        stackchan_dance_pose(0);
+        s_stackchan_motion.deadline = stackchan_dance_deadline(0);
+    } else if (expression == M5_PLATFORM_STACKCHAN_SAD) {
+        /* A slow look away with the head lowered: readable body language
+         * without turning a connection problem into a theatrical routine. */
+        stackchan_pose(-90, 0, 240);
+        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_SAD;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 650000;
+    } else {
+        stackchan_pose(-120, 100, 340);
+        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_BEAM_LEFT;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 560000;
     }
-    s_stackchan_motion.phase = StackChanMotionPhase::power_wait;
-    s_stackchan_motion.deadline = esp_timer_get_time() + 250000;
+    s_stackchan_motion.phase = StackChanMotionPhase::first_pose;
     return true;
 }
 
@@ -544,136 +440,60 @@ extern "C" void m5_platform_stackchan_expression_process(void) {
         s_stackchan_motion.phase == StackChanMotionPhase::idle ||
         esp_timer_get_time() < s_stackchan_motion.deadline) return;
 
-    if (s_stackchan_motion.phase == StackChanMotionPhase::power_wait) {
-        const int yaw = servo_read_position(1);
-        const int pitch = servo_read_position(2);
-        ESP_LOGI(TAG, "StackChan qualified servo positions: yaw=%d pitch=%d",
-                 yaw, pitch);
-        /* The official BSP permits raw positions 0..1000. Keep a further
-         * 64-step guard band so every gesture can return without clipping. */
-        if (yaw < 64 || yaw > 936 || pitch < 64 || pitch > 936) {
-            stackchan_motion_fail("servo position qualification failed");
-            return;
-        }
-        /* Reuse the qualified neutral instead of adopting each return's small
-         * servo tolerance as the next center and slowly drifting across a
-         * listening session. A head moved deliberately while torque is off
-         * can still establish a new neutral. */
-        if (!s_stackchan_motion.neutral_valid ||
-            std::abs(yaw - s_stackchan_motion.yaw_neutral) > 48 ||
-            std::abs(pitch - s_stackchan_motion.pitch_neutral) > 48) {
-            s_stackchan_motion.yaw_neutral = yaw;
-            s_stackchan_motion.pitch_neutral = pitch;
-            s_stackchan_motion.neutral_valid = true;
-            ESP_LOGI(TAG, "StackChan adopted repositioned neutral: yaw=%d pitch=%d",
-                     yaw, pitch);
-        }
-        s_stackchan_motion.yaw_center = s_stackchan_motion.yaw_neutral;
-        s_stackchan_motion.pitch_center = s_stackchan_motion.pitch_neutral;
-        s_stackchan_motion.return_attempts = 0;
-        const bool dance = s_stackchan_motion.pending ==
-                           M5_PLATFORM_STACKCHAN_DANCE;
-        const bool celebrate = s_stackchan_motion.pending ==
-                               M5_PLATFORM_STACKCHAN_CELEBRATE;
-        const int first_yaw = celebrate ? yaw - 40 : yaw;
-        const int first_pitch = pitch + (celebrate ? 20 : 40);
-        if (!stackchan_torque(true) ||
-            !(dance ? stackchan_dance_pose(0)
-                    : stackchan_pose(first_yaw, first_pitch))) {
-            stackchan_motion_fail("first pose was not acknowledged");
-            return;
-        }
-        s_stackchan_motion.phase = StackChanMotionPhase::first_pose;
-        s_stackchan_motion.deadline = dance ? stackchan_dance_deadline(0)
-                                            : esp_timer_get_time() + 320000;
-        return;
-    }
-
     if (s_stackchan_motion.phase == StackChanMotionPhase::first_pose) {
-        if (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_CELEBRATE ||
-            s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE) {
-            const bool dance = s_stackchan_motion.pending ==
-                               M5_PLATFORM_STACKCHAN_DANCE;
-            if (!(dance ? stackchan_dance_pose(1)
-                        : stackchan_pose(s_stackchan_motion.yaw_center + 40,
-                                         s_stackchan_motion.pitch_center))) {
-                stackchan_motion_fail("second pose was not acknowledged");
-                return;
-            }
-            s_stackchan_motion.phase = StackChanMotionPhase::second_pose;
-            s_stackchan_motion.deadline = dance ? stackchan_dance_deadline(1)
-                                                : esp_timer_get_time() + 320000;
-            return;
+        if (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE) {
+            stackchan_dance_pose(1);
+            s_stackchan_motion.deadline = stackchan_dance_deadline(1);
+        } else if (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_SAD) {
+            stackchan_pose(40, 0, 220);
+            s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_SAD;
+            s_stackchan_motion.deadline = esp_timer_get_time() + 620000;
+        } else {
+            stackchan_pose(120, 100, 340);
+            s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_BEAM_RIGHT;
+            s_stackchan_motion.deadline = esp_timer_get_time() + 560000;
         }
         s_stackchan_motion.phase = StackChanMotionPhase::second_pose;
+        return;
     }
 
     if (s_stackchan_motion.phase == StackChanMotionPhase::second_pose) {
         if (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE) {
-            if (!stackchan_dance_pose(2)) {
-                stackchan_motion_fail("third dance pose was not acknowledged");
-                return;
-            }
+            stackchan_dance_pose(2);
             s_stackchan_motion.phase = StackChanMotionPhase::third_pose;
             s_stackchan_motion.deadline = stackchan_dance_deadline(2);
             return;
         }
         s_stackchan_motion.phase = StackChanMotionPhase::fourth_pose;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 250000;
+        return;
     }
 
     if (s_stackchan_motion.phase == StackChanMotionPhase::third_pose) {
-        if (!stackchan_dance_pose(3)) {
-            stackchan_motion_fail("fourth dance pose was not acknowledged");
-            return;
-        }
+        stackchan_dance_pose(3);
         s_stackchan_motion.phase = StackChanMotionPhase::fourth_pose;
         s_stackchan_motion.deadline = stackchan_dance_deadline(3);
         return;
     }
 
     if (s_stackchan_motion.phase == StackChanMotionPhase::fourth_pose) {
-        const uint16_t return_time =
-            s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE ? 46 : 20;
-        if (!stackchan_pose(s_stackchan_motion.yaw_center,
-                            s_stackchan_motion.pitch_center, return_time)) {
-            stackchan_motion_fail("neutral return was not acknowledged");
-            return;
-        }
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        M5StackChan.Motion.goHome(
+            s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE ? 260 : 280);
+#endif
+        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_SETTLE;
         s_stackchan_motion.phase = StackChanMotionPhase::returning;
-        s_stackchan_motion.deadline = esp_timer_get_time() +
-            (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE
-                 ? 600000
-                 : 380000);
+        s_stackchan_motion.deadline = esp_timer_get_time() + 900000;
         return;
     }
 
     if (s_stackchan_motion.phase == StackChanMotionPhase::returning) {
-        const int yaw = servo_read_position(1);
-        const int pitch = servo_read_position(2);
-        if (yaw < 0 || pitch < 0) {
-            stackchan_motion_fail("neutral return could not be verified");
-            return;
-        }
-        if ((std::abs(yaw - s_stackchan_motion.yaw_center) > 12 ||
-             std::abs(pitch - s_stackchan_motion.pitch_center) > 12) &&
-            s_stackchan_motion.return_attempts++ < 2) {
-            if (!stackchan_pose(s_stackchan_motion.yaw_center,
-                                s_stackchan_motion.pitch_center)) {
-                stackchan_motion_fail("neutral return retry failed");
-                return;
-            }
-            s_stackchan_motion.deadline = esp_timer_get_time() + 300000;
-            return;
-        }
-        if (std::abs(yaw - s_stackchan_motion.yaw_center) > 12 ||
-            std::abs(pitch - s_stackchan_motion.pitch_center) > 12) {
-            stackchan_motion_fail("neutral return exceeded its time bound");
-            return;
-        }
-        stackchan_torque(false);
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        M5StackChan.Motion.setTorqueEnabled(false);
+#endif
         s_stackchan_motion.phase = StackChanMotionPhase::idle;
-        ESP_LOGI(TAG,
-                 "StackChan gesture complete; neutral verified, torque released");
+        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
+        ESP_LOGI(TAG, "StackChan gesture complete via official BSP");
         if (s_stackchan_motion.has_queued) {
             const auto queued = s_stackchan_motion.queued;
             s_stackchan_motion.has_queued = false;
@@ -684,6 +504,11 @@ extern "C" void m5_platform_stackchan_expression_process(void) {
 
 extern "C" bool m5_platform_stackchan_expression_faulted(void) {
     return s_stackchan_motion.faulted;
+}
+
+extern "C" m5_platform_stackchan_face_cue_t
+m5_platform_stackchan_face_cue(void) {
+    return s_stackchan_motion.face_cue;
 }
 
 extern "C" void m5_platform_set_brightness(uint8_t brightness) {

@@ -8,10 +8,26 @@ if(NOT HIPHI_M5_TARGET IN_LIST _valid_targets)
 endif()
 
 set(PROJECT_VER "0.1.0-beta.1")
-set(SDKCONFIG_DEFAULTS
-    "sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults"
-    CACHE STRING "M5 beta target defaults" FORCE)
+set(_sdkconfig_defaults
+    "sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults")
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
+if(HIPHI_M5_TARGET STREQUAL "dial" OR
+   HIPHI_M5_TARGET STREQUAL "stackchan")
+    list(APPEND EXTRA_COMPONENT_DIRS
+        "${CMAKE_CURRENT_LIST_DIR}/../official_components/m5_official")
+    list(APPEND _sdkconfig_defaults
+        "${CMAKE_CURRENT_LIST_DIR}/../official_components/m5_official/sdkconfig.defaults")
+endif()
+set(SDKCONFIG_DEFAULTS ${_sdkconfig_defaults}
+    CACHE STRING "M5 beta target defaults" FORCE)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+idf_build_set_property(HIPHI_M5_TARGET ${HIPHI_M5_TARGET})
 idf_build_set_property(MINIMAL_BUILD ON)
+if(HIPHI_M5_TARGET STREQUAL "dial" OR
+   HIPHI_M5_TARGET STREQUAL "stackchan")
+    # Arduino's published ESP-IDF 5.5 dependency graph currently includes an
+    # esp-modbus source warning that GCC 14 otherwise promotes to an error.
+    idf_build_set_property(COMPILE_OPTIONS
+        "-Wno-error=stringop-truncation" APPEND)
+endif()
 project(hiphi_${HIPHI_M5_TARGET})

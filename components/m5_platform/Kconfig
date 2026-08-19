@@ -6,6 +6,10 @@ choice M5_PLATFORM_EXPECTED_BOARD
 
 config M5_PLATFORM_EXPECT_ANY
     bool "Any supported board"
+config M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+    bool "AtomS3 + Atom JoyStick"
+config M5_PLATFORM_EXPECT_TOUGH
+    bool "M5Stack Tough"
 config M5_PLATFORM_EXPECT_DIAL
     bool "M5 Dial"
 config M5_PLATFORM_EXPECT_STICKS3
