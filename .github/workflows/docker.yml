@@ -685,7 +685,13 @@ jobs:
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_${{ matrix.flash_size }}=y" build-${{ matrix.target }}/sdkconfig;
             if [ "${{ matrix.psram }}" = "true" ]; then grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; else ! grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; fi;
             grep -Fx "CONFIG_M5_PLATFORM_EXPECT_${{ matrix.expected }}=y" build-${{ matrix.target }}/sdkconfig;
-            if [ "${{ matrix.target }}" = "stackchan" ]; then grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; fi;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" build-${{ matrix.target }}/sdkconfig;
+            case "${{ matrix.target }}" in
+              dial) ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig ;;
+              sticks3|stopwatch) grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig ;;
+              stackchan) grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig ;;
+            esac;
             esptool.py --chip esp32s3 merge_bin
             -o ../hiphi_${{ matrix.target }}_merged.bin
             --flash_mode dio --flash_freq 80m --flash_size ${{ matrix.flash_size }}
