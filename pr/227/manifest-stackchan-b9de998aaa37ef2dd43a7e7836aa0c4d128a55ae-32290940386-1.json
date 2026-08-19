@@ -1,0 +1,11 @@
+{
+  "name": "StackChan Playback Companion (PR #227 Hardware-Unverified Beta)",
+  "version": "pr-227",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_stackchan_bootloader-b9de998aaa37ef2dd43a7e7836aa0c4d128a55ae-32290940386-1.bin", "offset": 0},
+    {"path": "hiphi_stackchan_partition-table-b9de998aaa37ef2dd43a7e7836aa0c4d128a55ae-32290940386-1.bin", "offset": 32768},
+    {"path": "hiphi_stackchan_ota_data_initial-b9de998aaa37ef2dd43a7e7836aa0c4d128a55ae-32290940386-1.bin", "offset": 53248},
+    {"path": "hiphi_stackchan-b9de998aaa37ef2dd43a7e7836aa0c4d128a55ae-32290940386-1.bin", "offset": 65536}
+  ]}]
+}
