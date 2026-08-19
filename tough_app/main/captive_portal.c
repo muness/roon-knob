@@ -327,15 +327,12 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
   const rk_cfg_t *cfg = &snapshot.value;
 
-  char query[32] = {0};
-  char scan_value[8] = {0};
-  const bool scan_requested =
-      httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
-      httpd_query_key_value(query, "scan", scan_value, sizeof(scan_value)) == ESP_OK;
   rk_wifi_network_t scan[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
   rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-  if (scan_requested && (scan_state == RK_WIFI_SCAN_IDLE ||
-                         scan_state == RK_WIFI_SCAN_FAILED)) {
+  /* Every setup page promises a network dropdown. Start the non-blocking scan
+   * on the first visit instead of relying on a board-specific display to do
+   * it as a side effect. */
+  if (scan_state == RK_WIFI_SCAN_IDLE || scan_state == RK_WIFI_SCAN_FAILED) {
     (void)wifi_mgr_scan_start();
     scan_state = wifi_mgr_scan_state();
   }
@@ -351,6 +348,13 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
                          "<option value='%s'>%s (%d dBm)</option>",
                          escaped, escaped, (int)scan[i].rssi);
   }
+  const char *scan_placeholder =
+      scan_state == RK_WIFI_SCAN_RUNNING ? "Scanning for nearby networks..." :
+      scan_state == RK_WIFI_SCAN_FAILED ? "Scan failed - reload to retry" :
+      scan_count == 0 ? "No nearby networks found" :
+      "Choose a nearby network";
+  const char *scan_refresh = scan_state == RK_WIFI_SCAN_RUNNING
+      ? "setTimeout(function(){location.reload();},1200);" : "";
 
   char wifi_html[1024] = "";
   int pos = 0;
@@ -417,7 +421,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
-    "<select id='ssid_scan' name='ssid'><option value=''>Choose a scanned network</option>%s</select>"
+    "<select id='ssid_scan' name='ssid'><option value=''>%s</option>%s</select>"
     "<label>Or enter a hidden network</label>"
     "<input id='ssid_manual' type='text' name='ssid_manual' maxlength='32' placeholder='Hidden WiFi name'>"
     "<label>Password</label>"
@@ -430,11 +434,14 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
     "</div><script>document.getElementById('ssid_scan').addEventListener('change',function(){"
-    "if(this.value)document.getElementById('ssid_manual').value=this.value;});</script></body></html>",
+    "if(this.value)document.getElementById('ssid_manual').value=this.value;});%s"
+    "</script></body></html>",
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
     cfg->wifi_count > 0 ? "</div>" : "",
-    scan_options);
+    scan_placeholder,
+    scan_options,
+    scan_refresh);
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));

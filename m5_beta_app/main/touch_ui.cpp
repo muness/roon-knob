@@ -3,20 +3,29 @@
 #include "controller_action.h"
 #include "controller_command.h"
 #include "controller_input.h"
+#include "bridge_client.h"
 #include "m5_platform.h"
 #include "m5_interaction_policy.h"
+#include "platform/platform_http.h"
+#include "platform/platform_identity.h"
 #include "platform/platform_task.h"
+#include "wifi_manager.h"
 
 #include <M5Unified.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <esp_timer.h>
+#include <esp_log.h>
+#include <freertos/task.h>
+#include <inttypes.h>
 #include <nvs.h>
 
 namespace {
+constexpr char TAG[] = "touch_ui";
 constexpr int TARGET_DIAL = 1;
 constexpr int TARGET_STICKS3 = 2;
 constexpr int TARGET_STOPWATCH = 3;
@@ -26,11 +35,32 @@ constexpr uint32_t INK = 0xf4f1e8;
 constexpr uint32_t MUTED = 0x778397;
 constexpr uint32_t ACCENT = 0x35e0a1;
 constexpr uint32_t HOT = 0xff4f87;
+constexpr uint32_t STACK_BG = 0x07090d;
+constexpr uint32_t STACK_INK = 0xfff8e7;
+constexpr uint32_t STACK_SECONDARY = 0xd4dbe5;
+constexpr uint32_t STACK_TERTIARY = 0xaeb9c8;
+constexpr uint32_t STACK_ACCENT = 0x7aa2ff;
+constexpr uint32_t STACK_HOT = 0xff6b8f;
+constexpr uint32_t STACK_CONTROL = 0x252c38;
+#if HIPHI_M5_TARGET_ID == 1 || HIPHI_M5_TARGET_ID == 2
+constexpr int STACKCHAN_ARTWORK_SIZE = 120;
+#elif HIPHI_M5_TARGET_ID == 3
+constexpr int STACKCHAN_ARTWORK_SIZE = 360;
+#else
+/* StackChan's Art mode is full-bleed on a 320x240 panel. Fetch at panel
+ * width so the hero image is never enlarged from a postage-stamp source. */
+constexpr int STACKCHAN_ARTWORK_SIZE = 320;
+#endif
+constexpr int STACKCHAN_FACE_BOTTOM = 108;
+constexpr int STACKCHAN_VOLUME_TOP = 168;
+constexpr int STACKCHAN_TRANSPORT_TOP = 199;
 
 struct State {
     char title[96] = "HiPhi";
     char artist[96] = "waiting for music";
     char album[96] = "";
+    char track_identity_title[96] = {};
+    char track_identity_artist[96] = {};
     char zone[64] = "NO ZONE";
     char network[96] = "Starting...";
     bool playing = false;
@@ -43,7 +73,12 @@ struct State {
     bool twist_armed = false;
     bool action_flash = false;
     bool body_enabled = false;
+    bool body_hold_consumed = false;
+    bool setup_mode = false;
     bool track_seen = false;
+    bool controls_mode = false;
+    bool art_mode = false;
+    bool gesture_consumed = false;
     float volume = -40;
     float volume_min = -80;
     float volume_max = 0;
@@ -51,33 +86,295 @@ struct State {
     int zone_count = 0;
     int zone_selected = 0;
     int zone_current = 0;
+    int seek_position = 0;
+    int seek_length = 0;
     char zone_names[18][64] = {};
     char zone_ids[18][64] = {};
     int64_t action_until = 0;
+    int64_t controls_until = 0;
+    int64_t track_reveal_started = 0;
+    int64_t track_reveal_until = 0;
+    int64_t last_activity_us = 0;
     int64_t input_next = 0;
+    int64_t touch_quarantine_until = 0;
     int64_t haptic_off = 0;
     int64_t awake_until = 0;
     float last_accel_mag = 1.0f;
     char body_notice[32] = {};
     int64_t body_notice_until = 0;
+    char action_notice[32] = {};
+    char artwork_key[128] = {};
+    uint16_t *artwork_pixels = nullptr;
+    int artwork_width = 0;
+    int artwork_height = 0;
+    uint16_t art_timeout_sec = 0;
 } s;
+
+std::atomic_bool s_artwork_loading{false};
+M5Canvas s_stackchan_canvas(&M5.Display);
+bool s_stackchan_canvas_ready = false;
+
+struct MarqueeState {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int size = 0;
+    char value[128] = {};
+    int64_t started_us = 0;
+};
+
+MarqueeState s_stackchan_marquees[3];
 
 constexpr char kStackChanNvsNamespace[] = "stackchan";
 constexpr char kStackChanBodyKey[] = "body_on";
+/* v3 deliberately retires the debug-era off preference. Those values were
+ * created while the servo driver could not arm and should not suppress the
+ * first real body-language build. Choices made from this build persist. */
+constexpr char kStackChanBodyPreferenceKey[] = "body_pref_v3";
 
 void copy_text(char *out, size_t len, const char *value) {
     if (out && len) std::snprintf(out, len, "%s", value ? value : "");
 }
 
-bool load_body_enabled() {
+void stackchan_apply_font(lgfx::LovyanGFX *target, int size) {
+#if HIPHI_M5_TARGET_ID == 4
+    target->setFont(size >= 2 ? &fonts::Font4 : &fonts::Font2);
+    target->setTextSize(1);
+#else
+    target->setFont(&fonts::Font0);
+    target->setTextSize(size);
+#endif
+}
+
+void stackchan_draw_text(lgfx::LovyanGFX *target, const char *text, int x, int y,
+                         int size, uint32_t color) {
+    target->setTextDatum(lgfx::top_left);
+    stackchan_apply_font(target, size);
+    target->setTextColor(color);
+    target->drawString(text ? text : "", x, y);
+}
+
+void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int y,
+                           int size, uint32_t color) {
+    target->setTextDatum(lgfx::middle_center);
+    stackchan_apply_font(target, size);
+    target->setTextColor(color);
+    target->drawString(text ? text : "", x, y);
+}
+
+void stackchan_draw_marquee(lgfx::LovyanGFX *target, const char *text, int x,
+                            int y, int width, int size, uint32_t color,
+                            MarqueeState *marquee) {
+    const char *value = text ? text : "";
+    stackchan_apply_font(target, size);
+    if (marquee->started_us == 0 || std::strcmp(marquee->value, value) != 0) {
+        copy_text(marquee->value, sizeof(marquee->value), value);
+        marquee->x = x;
+        marquee->y = y;
+        marquee->width = width;
+        marquee->size = size;
+        marquee->started_us = esp_timer_get_time();
+    }
+    const int text_width = target->textWidth(value);
+    if (text_width <= width) {
+        stackchan_draw_text(target, value, x, y, size, color);
+        return;
+    }
+    constexpr int gap = 22;
+    constexpr int speed = 34;
+    constexpr int pause_ms = 700;
+    const int cycle = text_width + gap;
+    const int travel_ms = std::max(1, cycle * 1000 / speed);
+    const int64_t phase_ms = ((esp_timer_get_time() - marquee->started_us) / 1000) %
+                             (2 * pause_ms + travel_ms);
+    int offset = 0;
+    if (phase_ms >= pause_ms && phase_ms < pause_ms + travel_ms) {
+        offset = std::min(cycle, static_cast<int>(
+            (phase_ms - pause_ms) * speed / 1000));
+    } else if (phase_ms >= pause_ms + travel_ms) {
+        offset = cycle;
+    }
+    int32_t old_x = 0;
+    int32_t old_y = 0;
+    int32_t old_w = 0;
+    int32_t old_h = 0;
+    target->getClipRect(&old_x, &old_y, &old_w, &old_h);
+    target->setClipRect(x, y, width, target->fontHeight());
+    stackchan_draw_text(target, value, x - offset, y, size, color);
+    stackchan_draw_text(target, value, x - offset + cycle, y, size, color);
+    target->setClipRect(old_x, old_y, old_w, old_h);
+}
+
+bool stackchan_marquee_needed() {
+    if (s.art_mode || s.picker || s.settings || wifi_mgr_is_ap_mode())
+        return false;
+    stackchan_apply_font(&M5.Display, 2);
+    const bool title_scrolls = M5.Display.textWidth(s.title) > 302;
+    stackchan_apply_font(&M5.Display, 1);
+    return title_scrolls || M5.Display.textWidth(s.artist) > 302 ||
+           M5.Display.textWidth(s.album) > 302;
+}
+
+struct ArtworkJob { char key[128]; };
+struct ArtworkResult {
+    char key[128];
+    uint16_t *pixels = nullptr;
+};
+
+void start_stackchan_artwork_fetch();
+
+void apply_stackchan_artwork(void *arg) {
+    ArtworkResult *result = static_cast<ArtworkResult *>(arg);
+    if (!result) {
+        s_artwork_loading.store(false);
+        return;
+    }
+    const bool current = std::strcmp(result->key, s.artwork_key) == 0;
+    if (current && result->pixels) {
+        free(s.artwork_pixels);
+        s.artwork_pixels = result->pixels;
+        s.artwork_width = STACKCHAN_ARTWORK_SIZE;
+        s.artwork_height = STACKCHAN_ARTWORK_SIZE;
+        result->pixels = nullptr;
+        s.dirty = true;
+        ESP_LOGI(TAG, "StackChan artwork ready for '%s'", result->key);
+    }
+    free(result->pixels);
+    free(result);
+    s_artwork_loading.store(false);
+    if (!current && s.artwork_key[0]) start_stackchan_artwork_fetch();
+}
+
+void stackchan_artwork_task(void *arg) {
+    ArtworkJob *job = static_cast<ArtworkJob *>(arg);
+    if (!job) {
+        s_artwork_loading.store(false);
+        vTaskDelete(nullptr);
+        return;
+    }
+    char url[384] = {};
+    const char *art_url = bridge_client_get_artwork_url_for_format(
+        url, sizeof(url), STACKCHAN_ARTWORK_SIZE, STACKCHAN_ARTWORK_SIZE, 0,
+        "rgb565");
+    if (art_url) {
+        uint32_t hash = 2166136261u;
+        for (const unsigned char *p =
+                 reinterpret_cast<const unsigned char *>(job->key); *p; ++p) {
+            hash ^= *p;
+            hash *= 16777619u;
+        }
+        const size_t used = std::strlen(url);
+        if (used < sizeof(url)) {
+            std::snprintf(url + used, sizeof(url) - used,
+                          "&cache_bust=%08" PRIx32, hash);
+        }
+    }
+    char *raw = nullptr;
+    size_t raw_len = 0;
+    constexpr size_t expected = STACKCHAN_ARTWORK_SIZE * STACKCHAN_ARTWORK_SIZE *
+                                sizeof(uint16_t);
+    bool posted = false;
+    if (art_url && platform_http_get_image(art_url, &raw, &raw_len) == 0 &&
+        raw && raw_len == expected) {
+        ArtworkResult *result = static_cast<ArtworkResult *>(
+            calloc(1, sizeof(*result)));
+        uint16_t *pixels = static_cast<uint16_t *>(malloc(expected));
+        if (result && pixels) {
+            std::memcpy(pixels, raw, expected);
+            /* The worker owns this result until it posts it. Do not use the
+             * UI copy helper here: that helper also mutates render state. */
+            std::snprintf(result->key, sizeof(result->key), "%s", job->key);
+            result->pixels = pixels;
+            if (platform_task_post_to_ui(apply_stackchan_artwork, result)) {
+                posted = true;
+                result = nullptr;
+                pixels = nullptr;
+            }
+        }
+        free(pixels);
+        free(result);
+    } else {
+        ESP_LOGW(TAG, "StackChan artwork fetch returned %zu bytes (expected %zu)",
+                 raw_len, expected);
+    }
+    platform_http_free(raw);
+    free(job);
+    if (!posted) s_artwork_loading.store(false);
+    vTaskDelete(nullptr);
+}
+
+void start_stackchan_artwork_fetch() {
+    if (!s.artwork_key[0] || s_artwork_loading.exchange(true)) return;
+    ArtworkJob *job = static_cast<ArtworkJob *>(calloc(1, sizeof(*job)));
+    if (!job) {
+        s_artwork_loading.store(false);
+        return;
+    }
+    copy_text(job->key, sizeof(job->key), s.artwork_key);
+    if (platform_task_start_internal_stack("stackchan_art", 16384,
+                                           stackchan_artwork_task, job) != 0) {
+        free(job);
+        s_artwork_loading.store(false);
+        ESP_LOGW(TAG, "Could not start StackChan artwork worker");
+    }
+}
+
+void stackchan_draw_artwork(lgfx::LovyanGFX *target, int x, int y, int width,
+                            int height, bool muted = false) {
+    if (!s.artwork_pixels || s.artwork_width <= 0 || s.artwork_height <= 0 ||
+        width <= 0 || height <= 0 || width > 466) return;
+    uint16_t row[466];
+    int crop_width = s.artwork_width;
+    int crop_height = s.artwork_height;
+    if (width * s.artwork_height > height * s.artwork_width) {
+        crop_height = std::max(1, s.artwork_width * height / width);
+    } else {
+        crop_width = std::max(1, s.artwork_height * width / height);
+    }
+    const int src_x0 = (s.artwork_width - crop_width) / 2;
+    const int src_y0 = (s.artwork_height - crop_height) / 2;
+    for (int dy = 0; dy < height; ++dy) {
+        const int sy = src_y0 + dy * crop_height / height;
+        const uint16_t *src = s.artwork_pixels + sy * s.artwork_width;
+        for (int dx = 0; dx < width; ++dx) {
+            uint16_t pixel = src[src_x0 + dx * crop_width / width];
+            if (muted) {
+                const uint16_t r = (pixel >> 11) & 0x1f;
+                const uint16_t g = (pixel >> 5) & 0x3f;
+                const uint16_t b = pixel & 0x1f;
+                pixel = static_cast<uint16_t>(((r * 25 / 100) << 11) |
+                                              ((g * 25 / 100) << 5) |
+                                              (b * 25 / 100));
+            }
+            row[dx] = pixel;
+        }
+        target->pushImage(x, y + dy, width, 1, row);
+    }
+}
+
+bool load_body_enabled(bool *configured) {
+    if (configured) *configured = false;
     nvs_handle_t handle = 0;
     uint8_t value = 0;
+    // Body language is on by default.  A stored value is an explicit user
+    // choice, so preserve a prior long-hold "off" setting across updates.
     if (nvs_open(kStackChanNvsNamespace, NVS_READONLY, &handle) != ESP_OK)
-        return false;
-    const bool enabled = nvs_get_u8(handle, kStackChanBodyKey, &value) == ESP_OK &&
-                         value == 1;
+        return true;
+    uint8_t preference = 0;
+    // Older builds wrote body_on=false when hardware qualification failed.
+    // Only the new preference marker means the user explicitly chose a value.
+    if (nvs_get_u8(handle, kStackChanBodyPreferenceKey, &preference) != ESP_OK) {
+        nvs_close(handle);
+        return true;
+    }
+    const esp_err_t err = nvs_get_u8(handle, kStackChanBodyKey, &value);
+    if (err != ESP_OK) {
+        nvs_close(handle);
+        return true;
+    }
+    if (configured) *configured = true;
     nvs_close(handle);
-    return enabled;
+    return value == 1;
 }
 
 void save_body_enabled(bool enabled) {
@@ -85,6 +382,7 @@ void save_body_enabled(bool enabled) {
     if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
         return;
     nvs_set_u8(handle, kStackChanBodyKey, enabled ? 1 : 0);
+    nvs_set_u8(handle, kStackChanBodyPreferenceKey, 1);
     nvs_commit(handle);
     nvs_close(handle);
 }
@@ -98,7 +396,12 @@ void body_notice(const char *message) {
 void toggle_body_language() {
     const bool wanted = !s.body_enabled;
     s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
-    save_body_enabled(s.body_enabled);
+    ESP_LOGI(TAG, "StackChan body toggle: wanted=%d enabled=%d faulted=%d",
+             wanted, s.body_enabled,
+             m5_platform_stackchan_expression_faulted());
+    /* Persist the user's intent, not the result of this one hardware attempt.
+     * A transient qualification failure should retry after the next boot. */
+    save_body_enabled(wanted);
     body_notice(s.body_enabled ? "BODY LANGUAGE ON" :
                 (wanted ? "SERVOS NOT READY" : "BODY LANGUAGE OFF"));
 }
@@ -113,20 +416,30 @@ bool simple(controller_action_kind_t kind) {
     return controller_input_dispatch_action(&action);
 }
 
-void flash_action() {
+void flash_action(const char *notice = nullptr) {
     s.action_flash = true;
     s.action_until = esp_timer_get_time() + 550000;
+    if (notice) copy_text(s.action_notice, sizeof(s.action_notice), notice);
+#if HIPHI_M5_TARGET_ID == 4
+    if (s.controls_mode) s.controls_until = esp_timer_get_time() + 7000000;
+#endif
     s.dirty = true;
 }
 
 [[maybe_unused]] void volume_steps(int steps) {
-    if (steps && dispatch(controller_command_adjust_volume(steps))) flash_action();
+    if (steps && dispatch(controller_command_adjust_volume(steps))) {
+        flash_action(steps > 0 ? "VOLUME UP" : "VOLUME DOWN");
+    }
 }
 
 void toggle_playback() {
     if (dispatch(controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK))) {
-        flash_action();
+        flash_action(s.playing ? "PAUSE" : "PLAY");
     }
+}
+
+void stackchan_transport(controller_command_kind_t kind, const char *notice) {
+    if (dispatch(controller_command_make(kind))) flash_action(notice);
 }
 
 [[maybe_unused]] void wake_display() {
@@ -162,7 +475,16 @@ void render_picker() {
     M5.Display.fillScreen(BG);
     draw_battery();
     draw_centered("CHOOSE A ROOM", 22, 1, ACCENT);
+    M5.Display.fillRoundRect(w - 42, 4, 36, 30, 7, 0x293446);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.setTextSize(2);
+    M5.Display.setTextColor(INK, 0x293446);
+    M5.Display.drawString("X", w - 24, 19);
     const int visible = std::min(5, s.zone_count);
+    if (visible == 0) {
+        draw_centered("NO ROOMS YET", h / 2 - 8, 2, INK);
+        draw_centered("CHECK YOUR BRIDGE CONNECTION", h / 2 + 22, 1, MUTED);
+    }
     int first = std::max(0, std::min(s.zone_selected - visible / 2,
                                      s.zone_count - visible));
     for (int row = 0; row < visible; ++row) {
@@ -236,46 +558,366 @@ void render_picker() {
 [[maybe_unused]] void render_stackchan() {
     const int w = M5.Display.width();
     const int h = M5.Display.height();
-    const int bob = s.action_flash ? -7 : 0;
+    lgfx::LovyanGFX *target = s_stackchan_canvas_ready
+                                 ? static_cast<lgfx::LovyanGFX *>(&s_stackchan_canvas)
+                                 : static_cast<lgfx::LovyanGFX *>(&M5.Display);
+    const int bob = s.action_flash ? -3 : 0;
     const bool connection_lost = !s.online && s.ever_online;
-    M5.Display.fillScreen(connection_lost ? 0x17111b :
-                          (s.playing ? 0x10201b : BG));
-    draw_battery();
-    const uint32_t eye = s.online ? INK : MUTED;
+    const uint32_t surface = connection_lost ? 0x17111b :
+                             (s.playing ? 0x10201b : BG);
+    target->fillScreen(surface);
+
+    if (s.art_mode && s.artwork_pixels) {
+        stackchan_draw_artwork(target, 0, 0, w, h, true);
+        target->fillRect(0, 0, w, 25, BG);
+        target->fillRect(0, 25, w, 26, 0x101722);
+        target->fillRect(0, STACKCHAN_VOLUME_TOP - 1, w,
+                         h - STACKCHAN_VOLUME_TOP + 1, BG);
+        stackchan_draw_marquee(target, s.title, 8, 33, w - 16, 1, INK,
+                               &s_stackchan_marquees[0]);
+    }
+
+    stackchan_draw_text(target, s.zone[0] ? s.zone : "NO ROOM", 7, 7, 1,
+                        s.online ? ACCENT : HOT);
+    target->fillCircle(w - 49, 11, 3, s.online ? ACCENT : HOT);
+    if (s.battery >= 0) {
+        char battery[12];
+        std::snprintf(battery, sizeof(battery), "%d%%", s.battery);
+        target->setTextDatum(lgfx::top_right);
+        target->setTextSize(1);
+        target->setTextColor(MUTED);
+        target->drawString(battery, w - 7, 7);
+    }
+
+    if (!s.art_mode) {
+        const uint32_t eye = s.online ? INK : MUTED;
+        if (connection_lost) {
+            target->fillEllipse(w / 2 - 54, 59, 22, 8, eye);
+            target->fillEllipse(w / 2 + 54, 59, 22, 8, eye);
+            target->drawArc(w / 2, 99, 28, 20, 210, 330, MUTED);
+        } else if (s.playing) {
+            const bool previous = std::strcmp(s.action_notice, "PREVIOUS") == 0;
+            const bool next = std::strcmp(s.action_notice, "NEXT") == 0;
+            const int glance = s.action_flash ? (next ? 7 : (previous ? -7 : 0)) : 0;
+            target->fillEllipse(w / 2 - 54, 58 + bob, 19, 28, eye);
+            target->fillEllipse(w / 2 + 54, 58 + bob, 19, 28, eye);
+            target->fillCircle(w / 2 - 50 + glance, 51 + bob, 6, ACCENT);
+            target->fillCircle(w / 2 + 58 + glance, 51 + bob, 6, ACCENT);
+            target->drawArc(w / 2, 92 + bob, 29, 22, 30, 150, HOT);
+        } else {
+            target->fillRoundRect(w / 2 - 76, 58 + bob, 48, 7, 4, eye);
+            target->fillRoundRect(w / 2 + 28, 58 + bob, 48, 7, 4, eye);
+            target->fillRoundRect(w / 2 - 20, 92 + bob, 40, 6, 3, MUTED);
+        }
+
+        const char *expression = s.action_flash && s.action_notice[0]
+                                     ? s.action_notice
+                                     : (s.body_notice[0] ? s.body_notice
+                                        : (connection_lost ? "I LOST THE MUSIC"
+                                           : (!s.online ? "CONNECTING..."
+                                           : (s.playing ? "I'M INTO THIS"
+                                              : (s.body_enabled ? "READY"
+                                                 : "BODY OFF")))));
+        stackchan_draw_center(target, expression, w / 2, 27, 1,
+                              connection_lost ? HOT :
+                              (s.action_flash ? HOT :
+                               (s.body_enabled ? ACCENT : MUTED)));
+
+        target->fillRect(0, STACKCHAN_FACE_BOTTOM, w,
+                         STACKCHAN_VOLUME_TOP - STACKCHAN_FACE_BOTTOM, BG);
+        if (s.artwork_pixels) {
+            stackchan_draw_artwork(target, 5, 112, 52, 52);
+        } else {
+            target->fillRoundRect(5, 112, 52, 52, 6, 0x1b2330);
+            stackchan_draw_center(target, "NO", 31, 130, 1, MUTED);
+            stackchan_draw_center(target, "ART", 31, 145, 1, MUTED);
+        }
+        stackchan_draw_marquee(target, s.title, 64, 112, w - 69, 1, INK,
+                               &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 64, 130, w - 69, 1, 0x9aa7ba,
+                               &s_stackchan_marquees[1]);
+        stackchan_draw_marquee(target, s.album, 64, 148, w - 69, 1, MUTED,
+                               &s_stackchan_marquees[2]);
+        if (s.seek_length > 0) {
+            const int progress = std::clamp(
+                static_cast<int>((static_cast<int64_t>(s.seek_position) * (w - 69)) /
+                                 s.seek_length), 0, w - 69);
+            target->fillRect(64, 162, w - 69, 2, 0x293446);
+            if (progress > 0) target->fillRect(64, 162, progress, 2, ACCENT);
+        }
+    }
+
+    target->fillRect(0, STACKCHAN_VOLUME_TOP, w, 30, 0x111722);
+    target->fillRoundRect(4, 171, 43, 24, 7, 0x293446);
+    target->fillRoundRect(w - 47, 171, 43, 24, 7, 0x293446);
+    stackchan_draw_center(target, "-", 25, 183, 2, INK);
+    stackchan_draw_center(target, "+", w - 25, 183, 2, INK);
+    const float range = std::max(1.0f, s.volume_max - s.volume_min);
+    const float ratio = std::clamp((s.volume - s.volume_min) / range, 0.0f, 1.0f);
+    target->fillRoundRect(53, 174, w - 106, 18, 5, 0x202a38);
+    const int volume_fill = static_cast<int>((w - 106) * ratio);
+    if (volume_fill > 0)
+        target->fillRoundRect(53, 174, volume_fill, 18, 5,
+                              s.action_flash ? HOT : ACCENT);
+    char volume[24];
+    std::snprintf(volume, sizeof(volume), "VOL %.1f", s.volume);
+    stackchan_draw_center(target, volume, w / 2, 183, 1, INK);
+
+    target->fillRect(0, STACKCHAN_TRANSPORT_TOP, w,
+                     h - STACKCHAN_TRANSPORT_TOP, surface);
+    constexpr int gap = 4;
+    const int button_w = (w - 4 * gap) / 3;
+    const char *labels[] = {"|<", s.playing ? "II" : ">", ">|"};
+    for (int index = 0; index < 3; ++index) {
+        const int x = gap + index * (button_w + gap);
+        const uint32_t color = index == 1 ? ACCENT : 0x293446;
+        target->fillRoundRect(x, STACKCHAN_TRANSPORT_TOP + 2, button_w,
+                              h - STACKCHAN_TRANSPORT_TOP - 4, 8, color);
+        stackchan_draw_center(target, labels[index], x + button_w / 2,
+                              (STACKCHAN_TRANSPORT_TOP + h) / 2, 2,
+                              index == 1 ? BG : INK);
+    }
+    if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
+}
+
+/* StackChan is a character first.  Information and controls arrive as
+ * deliberate temporal layers instead of permanently shrinking the face into
+ * the top half of a generic dashboard. */
+void render_stackchan_delight() {
+    const int w = M5.Display.width();
+    const int h = M5.Display.height();
+    const int64_t now = esp_timer_get_time();
+    const bool connection_lost = !s.online && s.ever_online;
+    const bool reveal = s.track_reveal_until > now;
+    lgfx::LovyanGFX *target = s_stackchan_canvas_ready
+                                 ? static_cast<lgfx::LovyanGFX *>(&s_stackchan_canvas)
+                                 : static_cast<lgfx::LovyanGFX *>(&M5.Display);
+    const uint32_t mood = connection_lost ? 0x160d12 : STACK_BG;
+    target->fillScreen(mood);
+
+    if (s.artwork_pixels && !connection_lost && !reveal) {
+        stackchan_draw_artwork(target, 0, 0, w, h,
+                               !s.art_mode);
+    }
+
+    if (reveal) {
+        const int64_t elapsed = now - s.track_reveal_started;
+        int glance = 0;
+        int bob = 0;
+        if (elapsed < 550000) {
+            glance = -5;
+        } else if (elapsed < 1100000) {
+            glance = 5;
+            bob = -2;
+        } else if (elapsed < 1750000) {
+            glance = -3;
+        }
+        stackchan_draw_center(target, "NOW PLAYING", w / 2, 20, 1,
+                              STACK_ACCENT);
+        target->fillEllipse(w / 2 - 64, 80 + bob, 29, 43, STACK_INK);
+        target->fillEllipse(w / 2 + 64, 80 + bob, 29, 43, STACK_INK);
+        target->fillCircle(w / 2 - 57 + glance, 68 + bob, 8, STACK_ACCENT);
+        target->fillCircle(w / 2 + 71 + glance, 68 + bob, 8, STACK_ACCENT);
+        target->drawArc(w / 2, 132 + bob, 41, 31, 30, 150, STACK_HOT);
+
+        target->fillRect(0, 153, w, h - 153, STACK_BG);
+        target->fillRect(0, 153, w, 2, STACK_CONTROL);
+        stackchan_draw_marquee(target, s.title, 10, 160, w - 20, 2, STACK_INK,
+                               &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 10, 196, w - 20, 1,
+                               STACK_SECONDARY,
+                               &s_stackchan_marquees[1]);
+        if (s.seek_length > 0) {
+            const int progress = std::clamp(static_cast<int>(
+                static_cast<int64_t>(s.seek_position) * w / s.seek_length), 0, w);
+            target->fillRect(0, h - 4, w, 4, STACK_CONTROL);
+            if (progress > 0)
+                target->fillRect(0, h - 4, progress, 4, STACK_ACCENT);
+        }
+        if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
+        return;
+    }
+
+    /* Dial's Art mode contract: the sleeve owns every pixel. It is a
+     * persistent display state, not a controls timeout or another dashboard. */
+    if (s.art_mode && s.artwork_pixels && !connection_lost) {
+        if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
+        return;
+    }
+
+    target->fillRoundRect(6, 5, 142, 30, 15, STACK_BG);
+    stackchan_draw_center(target, s.zone[0] ? s.zone : "NO ROOM", 77, 20, 1,
+                          s.online ? STACK_INK : STACK_HOT);
+    target->fillRoundRect(w - 70, 5, 64, 30, 15, STACK_BG);
+    if (s.battery >= 0) {
+        char battery[12];
+        std::snprintf(battery, sizeof(battery), "%d%%", s.battery);
+        stackchan_draw_center(target, battery, w - 38, 20, 1, STACK_SECONDARY);
+    }
+
+    if (s.controls_mode) {
+        target->fillRoundRect(10, 40, w - 20, 54, 14, STACK_BG);
+        stackchan_draw_marquee(target, s.title, 22, 45, w - 44, 2, STACK_INK,
+                               &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 22, 73, w - 44, 1,
+                               STACK_SECONDARY,
+                               &s_stackchan_marquees[1]);
+
+        target->fillRoundRect(10, 100, w - 20, 38, 14, STACK_BG);
+        target->fillRoundRect(16, 103, 48, 32, 11, STACK_CONTROL);
+        target->fillRoundRect(w - 64, 103, 48, 32, 11, STACK_CONTROL);
+        stackchan_draw_center(target, "-", 40, 119, 2, STACK_INK);
+        stackchan_draw_center(target, "+", w - 40, 119, 2, STACK_INK);
+        const float range = std::max(1.0f, s.volume_max - s.volume_min);
+        const float ratio = std::clamp((s.volume - s.volume_min) / range,
+                                       0.0f, 1.0f);
+        target->fillRoundRect(72, 107, w - 144, 24, 8, STACK_CONTROL);
+        const int filled = static_cast<int>((w - 144) * ratio);
+        if (filled > 0)
+            target->fillRoundRect(72, 107, std::min(filled, w - 144), 24, 8,
+                                  s.action_flash ? STACK_HOT : STACK_ACCENT);
+        char volume[24];
+        std::snprintf(volume, sizeof(volume), "%.1f dB", s.volume);
+        stackchan_draw_center(target, volume, w / 2, 119, 1, STACK_INK);
+
+        constexpr int gap = 7;
+        const int button_w = (w - 4 * gap) / 3;
+        const char *icons[] = {"|<", s.playing ? "II" : ">", ">|"};
+        const char *names[] = {"PREV", s.playing ? "PAUSE" : "PLAY", "NEXT"};
+        for (int index = 0; index < 3; ++index) {
+            const int x = gap + index * (button_w + gap);
+            target->fillRoundRect(x, 145, button_w, 70, 18,
+                                  index == 1 ? STACK_ACCENT : STACK_CONTROL);
+            stackchan_draw_center(target, icons[index], x + button_w / 2, 169,
+                                  3, index == 1 ? STACK_BG : STACK_INK);
+            stackchan_draw_center(target, names[index], x + button_w / 2, 200,
+                                  1, index == 1 ? STACK_BG : STACK_SECONDARY);
+        }
+        const char *hint = s.action_flash && s.action_notice[0]
+                               ? s.action_notice
+                               : (s.artwork_pixels
+                                      ? "TAP THE SLEEVE FOR ART MODE"
+                                      : "TAP ABOVE TO RETURN TO FACE");
+        stackchan_draw_center(target, hint, w / 2, 229, 1,
+                              s.action_flash ? STACK_HOT : STACK_TERTIARY);
+        if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
+        return;
+    }
+
+    const int bob = s.action_flash ? -3 : 0;
+    const uint32_t eye = s.online ? STACK_INK : STACK_SECONDARY;
     if (connection_lost) {
-        M5.Display.fillEllipse(w / 2 - 72, 103, 28, 11, eye);
-        M5.Display.fillEllipse(w / 2 + 72, 103, 28, 11, eye);
-        M5.Display.drawArc(w / 2, 171, 38, 28, 210, 330, MUTED);
-        draw_centered("I LOST THE MUSIC...", 18, 1, HOT);
+        target->fillEllipse(w / 2 - 64, 80, 27, 10, eye);
+        target->fillEllipse(w / 2 + 64, 80, 27, 10, eye);
+        target->drawArc(w / 2, 137, 38, 27, 210, 330, STACK_SECONDARY);
     } else if (s.playing) {
-        M5.Display.fillEllipse(w / 2 - 72, 93 + bob, 25, 40, eye);
-        M5.Display.fillEllipse(w / 2 + 72, 93 + bob, 25, 40, eye);
-        M5.Display.fillCircle(w / 2 - 65, 84 + bob, 8, ACCENT);
-        M5.Display.fillCircle(w / 2 + 79, 84 + bob, 8, ACCENT);
-        M5.Display.drawArc(w / 2, 147 + bob, 40, 34, 30, 150, HOT);
+        const bool previous = std::strcmp(s.action_notice, "PREVIOUS") == 0;
+        const bool next = std::strcmp(s.action_notice, "NEXT") == 0;
+        const int glance = s.action_flash ? (next ? 9 : (previous ? -9 : 0)) : 0;
+        target->fillEllipse(w / 2 - 64, 82 + bob, 29, 43, eye);
+        target->fillEllipse(w / 2 + 64, 82 + bob, 29, 43, eye);
+        target->fillCircle(w / 2 - 57 + glance, 70 + bob, 8, STACK_ACCENT);
+        target->fillCircle(w / 2 + 71 + glance, 70 + bob, 8, STACK_ACCENT);
+        target->drawArc(w / 2, 133 + bob, 41, 31, 30, 150, STACK_HOT);
     } else {
-        M5.Display.fillRoundRect(w / 2 - 104, 92 + bob, 64, 8, 4, eye);
-        M5.Display.fillRoundRect(w / 2 + 40, 92 + bob, 64, 8, 4, eye);
-        M5.Display.fillRoundRect(w / 2 - 25, 151 + bob, 50, 7, 3, MUTED);
+        target->fillRoundRect(w / 2 - 103, 79 + bob, 67, 9, 5, eye);
+        target->fillRoundRect(w / 2 + 36, 79 + bob, 67, 9, 5, eye);
+        target->fillRoundRect(w / 2 - 25, 131 + bob, 50, 7, 4,
+                              STACK_SECONDARY);
     }
-    if (!connection_lost) {
-        draw_centered(s.body_notice[0] ? s.body_notice :
-                      (s.playing ? "I'M INTO THIS" :
-                       (s.body_enabled ? "READY TO DANCE" : "FACE LIVE - BODY OFF")),
-                      18, 1, s.body_enabled ? ACCENT : MUTED);
+    const char *expression = s.action_flash && s.action_notice[0]
+                                 ? s.action_notice
+                                 : (s.body_notice[0] ? s.body_notice
+                                    : (connection_lost ? "I LOST THE MUSIC"
+                                       : (!s.online ? "CONNECTING..."
+                                          : (s.playing ? "I'M FEELING THIS"
+                                             : (s.body_enabled ? "READY"
+                                                : "BODY OFF")))));
+    stackchan_draw_center(target, expression, w / 2, 40, 1,
+                          connection_lost ? STACK_HOT :
+                          (s.action_flash ? STACK_HOT : STACK_INK));
+
+    target->fillRect(0, 157, w, h - 157, STACK_BG);
+    stackchan_draw_marquee(target, s.title, 9, 162, w - 18, 2, STACK_INK,
+                           &s_stackchan_marquees[0]);
+    stackchan_draw_marquee(target, s.artist, 9, 193, w - 18, 1,
+                           STACK_SECONDARY,
+                           &s_stackchan_marquees[1]);
+    stackchan_draw_center(target, "TOUCH FOR CONTROLS", w / 2, 224, 1,
+                          STACK_TERTIARY);
+    if (s.seek_length > 0) {
+        const int progress = std::clamp(static_cast<int>(
+            static_cast<int64_t>(s.seek_position) * w / s.seek_length), 0, w);
+        target->fillRect(0, 156, w, 2, STACK_CONTROL);
+        if (progress > 0)
+            target->fillRect(0, 156, progress, 2, STACK_ACCENT);
     }
-    draw_centered(s.title, h - 55, 2, INK);
-    draw_centered(s.artist, h - 34, 1, MUTED);
-    draw_centered("TAP PLAY  HOLD BODY  SWIPE UP ROOMS", h - 13, 1,
-                  s.action_flash ? HOT : MUTED);
+    if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
+}
+
+void render_provisioning() {
+    const int w = M5.Display.width();
+    const int h = M5.Display.height();
+#if HIPHI_M5_TARGET_ID == 4
+    M5.Display.fillScreen(STACK_BG);
+    M5.Display.fillEllipse(w / 2 - 62, 68, 26, 9, STACK_SECONDARY);
+    M5.Display.fillEllipse(w / 2 + 62, 68, 26, 9, STACK_SECONDARY);
+    M5.Display.drawArc(w / 2, 116, 34, 24, 210, 330, STACK_SECONDARY);
+    stackchan_draw_center(&M5.Display, "I WANT TO CONNECT", w / 2, 20, 1,
+                          STACK_HOT);
+    stackchan_draw_center(&M5.Display, platform_provisioning_ssid(), w / 2,
+                          145, 1, STACK_INK);
+    stackchan_draw_center(&M5.Display, "OPEN 192.168.4.1", w / 2, 166, 1,
+                          STACK_ACCENT);
+    const rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+    if (scan_state == RK_WIFI_SCAN_IDLE || scan_state == RK_WIFI_SCAN_FAILED)
+        (void)wifi_mgr_scan_start();
+    rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {};
+    const size_t count = scan_state == RK_WIFI_SCAN_READY
+                             ? wifi_mgr_scan_results_copy(
+                                   networks, RK_WIFI_SCAN_MAX_NETWORKS)
+                             : 0;
+    char scan_line[48];
+    if (scan_state == RK_WIFI_SCAN_READY)
+        std::snprintf(scan_line, sizeof(scan_line), "%u NETWORKS FOUND",
+                      static_cast<unsigned>(count));
+    else
+        copy_text(scan_line, sizeof(scan_line), "SCANNING FOR NETWORKS...");
+    stackchan_draw_center(&M5.Display, scan_line, w / 2, 187, 1,
+                          STACK_SECONDARY);
+    M5.Display.fillRoundRect(36, 207, w - 72, 29, 12, STACK_CONTROL);
+    stackchan_draw_center(&M5.Display, "RETRY SAVED WI-FI", w / 2, 221, 1,
+                          STACK_INK);
+#else
+    M5.Display.fillScreen(BG);
+    draw_centered("WI-FI SETUP", 28, 2, ACCENT);
+    draw_centered("JOIN THIS NETWORK", 66, 1, MUTED);
+    draw_centered(platform_provisioning_ssid(), 94, 1, INK);
+    draw_centered("OPEN 192.168.4.1", 136, 2, INK);
+    draw_centered("TO CONFIGURE WI-FI", 168, 1, MUTED);
+    draw_centered("THEN RESTART", h - 24, 1, ACCENT);
+#endif
 }
 
 void render() {
+    if (wifi_mgr_is_ap_mode()) return render_provisioning();
     if (s.picker) return render_picker();
     if (s.settings) {
+#if HIPHI_M5_TARGET_ID == 4
+        M5.Display.fillScreen(STACK_BG);
+        stackchan_draw_center(&M5.Display, "SETUP", M5.Display.width()/2, 45,
+                              2, STACK_INK);
+        stackchan_draw_center(&M5.Display, s.network, M5.Display.width()/2, 100,
+                              1, STACK_SECONDARY);
+        M5.Display.fillRoundRect(42, M5.Display.height()-60,
+                                 M5.Display.width()-84, 44, 14, STACK_CONTROL);
+        stackchan_draw_center(&M5.Display, "CLOSE", M5.Display.width()/2,
+                              M5.Display.height()-38, 1, STACK_INK);
+#else
         M5.Display.fillScreen(BG);
         draw_centered("SETUP", M5.Display.height()/2 - 30, 2, ACCENT);
         draw_centered(s.network, M5.Display.height()/2 + 10, 1, INK);
+#endif
         return;
     }
 #if HIPHI_M5_TARGET_ID == 1
@@ -285,7 +927,7 @@ void render() {
 #elif HIPHI_M5_TARGET_ID == 3
     render_stopwatch();
 #else
-    render_stackchan();
+    render_stackchan_delight();
 #endif
 }
 
@@ -304,6 +946,21 @@ void process_input() {
     m5_platform_surface_button_event(&buttons);
     m5_platform_touch_event_t touch = {};
     [[maybe_unused]] const bool touched = m5_platform_touch_event(&touch);
+
+#if HIPHI_M5_TARGET_ID == 4
+    if (wifi_mgr_is_ap_mode()) {
+        if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED && touch.y >= 198) {
+            wifi_mgr_stop_ap();
+        } else if (touched && touch.state == M5_PLATFORM_TOUCH_HELD &&
+                   !s.body_hold_consumed && touch.y < 145) {
+            s.body_hold_consumed = true;
+            toggle_body_language();
+        } else if (touched && touch.state == M5_PLATFORM_TOUCH_RELEASED) {
+            s.body_hold_consumed = false;
+        }
+        return;
+    }
+#endif
 
 #if HIPHI_M5_TARGET_ID == 1
     int32_t delta = 0;
@@ -365,19 +1022,120 @@ void process_input() {
         m5_platform_set_brightness(20); s.sleeping = true;
     }
 #else
+    if (touched) {
+        s.last_activity_us = now;
+        /* Transport remains direct even in Art mode: artwork is the controller,
+         * not a lock screen. Only a completed tap exits to the control chrome. */
+        if (s.art_mode) {
+            if (touch.state == M5_PLATFORM_TOUCH_DRAGGING &&
+                !s.gesture_consumed && touch.y < 180 &&
+                std::abs(touch.delta_x) > 18) {
+                s.gesture_consumed = true;
+                s.touch_quarantine_until = now + 450000;
+                stackchan_transport(
+                    touch.delta_x < 0 ? CONTROLLER_COMMAND_NEXT_TRACK
+                                      : CONTROLLER_COMMAND_PREVIOUS_TRACK,
+                    touch.delta_x < 0 ? "NEXT" : "PREVIOUS");
+                return;
+            }
+            if (touch.state == M5_PLATFORM_TOUCH_RELEASED) {
+                s.body_hold_consumed = false;
+                s.gesture_consumed = false;
+                return;
+            }
+            if (touch.state == M5_PLATFORM_TOUCH_CLICKED) {
+                s.art_mode = false;
+                s.gesture_consumed = true;
+                s.touch_quarantine_until = now + 500000;
+                s.dirty = true;
+                return;
+            }
+        }
+    }
     if (s.picker) {
         if (touched && touch.state == M5_PLATFORM_TOUCH_DRAGGING &&
             std::abs(touch.delta_y) > 8)
             picker_input(touch.delta_y > 0 ? -1 : 1, false);
-        if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED)
-            picker_input(0, true);
+        if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED) {
+            if (touch.y < 38 && touch.x > M5.Display.width() - 52) {
+                touch_ui_hide_zone_picker();
+            } else if (s.zone_count > 0 && touch.y >= 35) {
+                const int visible = std::min(5, s.zone_count);
+                const int first = std::max(0, std::min(
+                    s.zone_selected - visible / 2, s.zone_count - visible));
+                const int spacing = std::max(
+                    28, static_cast<int>((M5.Display.height() - 58) /
+                                         std::max(1, visible)));
+                const int row = std::clamp((touch.y - 35) / spacing, 0,
+                                           std::max(0, visible - 1));
+                s.zone_selected = first + row;
+                picker_input(0, true);
+            }
+        }
+    } else if (s.settings) {
+        if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED) {
+            s.settings = false;
+            s.dirty = true;
+        }
     } else if (touched && touch.state == M5_PLATFORM_TOUCH_DRAGGING &&
-               touch.delta_y < -18) {
+               !s.gesture_consumed && touch.y < 160 &&
+               std::abs(touch.delta_x) > 18) {
+        s.gesture_consumed = true;
+        s.touch_quarantine_until = now + 450000;
+        stackchan_transport(touch.delta_x < 0 ? CONTROLLER_COMMAND_NEXT_TRACK
+                                              : CONTROLLER_COMMAND_PREVIOUS_TRACK,
+                            touch.delta_x < 0 ? "NEXT" : "PREVIOUS");
+    } else if (touched && touch.state == M5_PLATFORM_TOUCH_DRAGGING &&
+               !s.gesture_consumed && touch.delta_y < -18 &&
+               touch.y < 160) {
+        s.gesture_consumed = true;
+        s.touch_quarantine_until = now + 450000;
         simple(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
-    } else if (touched && touch.state == M5_PLATFORM_TOUCH_HELD) {
+    } else if (touched && touch.state == M5_PLATFORM_TOUCH_HELD &&
+               !s.controls_mode && !s.gesture_consumed && touch.y < 157 &&
+               !s.body_hold_consumed) {
+        s.body_hold_consumed = true;
+        s.gesture_consumed = true;
+        s.touch_quarantine_until = now + 600000;
         toggle_body_language();
-    } else if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED) {
-        toggle_playback();
+    } else if (touched && touch.state == M5_PLATFORM_TOUCH_RELEASED) {
+        s.body_hold_consumed = false;
+        s.gesture_consumed = false;
+    } else if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED &&
+               now >= s.touch_quarantine_until) {
+        const int w = M5.Display.width();
+        if (touch.y < 25) {
+            simple(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
+        } else if (s.controls_mode) {
+            s.controls_until = now + 7000000;
+            if (touch.y >= 25 && touch.y < 96 && s.artwork_pixels) {
+                s.controls_mode = false;
+                s.controls_until = 0;
+                s.art_mode = true;
+                s.dirty = true;
+            } else if (touch.y >= 89 && touch.y < 132) {
+                if (touch.x < 65) volume_steps(-1);
+                else if (touch.x > w - 65) volume_steps(1);
+            } else if (touch.y >= 136 && touch.y < 216) {
+                if (touch.x < w / 3)
+                    stackchan_transport(CONTROLLER_COMMAND_PREVIOUS_TRACK,
+                                        "PREVIOUS");
+                else if (touch.x < 2 * w / 3)
+                    toggle_playback();
+                else
+                    stackchan_transport(CONTROLLER_COMMAND_NEXT_TRACK, "NEXT");
+            } else {
+                s.controls_mode = false;
+                s.dirty = true;
+            }
+        } else if (touch.y >= 157) {
+            s.controls_mode = true;
+            s.controls_until = now + 7000000;
+            s.track_reveal_until = 0;
+            s.dirty = true;
+        } else {
+            toggle_playback();
+        }
     }
 #endif
 }
@@ -385,25 +1143,81 @@ void process_input() {
 
 extern "C" void touch_ui_init(void) {
     s.awake_until = esp_timer_get_time() + 8000000;
+    s.last_activity_us = esp_timer_get_time();
 #if HIPHI_M5_TARGET_ID == 4
-    if (load_body_enabled()) {
-        s.body_enabled = m5_platform_stackchan_expression_enable(true);
-        if (!s.body_enabled) save_body_enabled(false);
-    }
+    s_stackchan_canvas.setColorDepth(16);
+    /* Network RGB565 pixels arrive byte-swapped for the panel.  Match the
+     * proven Tough sprite path so both artwork and primitive colors survive
+     * composition without a second, psychedelic byte swap. */
+    s_stackchan_canvas.setSwapBytes(true);
+    s_stackchan_canvas_ready = s_stackchan_canvas.createSprite(
+        M5.Display.width(), M5.Display.height()) != nullptr;
+    if (!s_stackchan_canvas_ready)
+        ESP_LOGW(TAG, "StackChan double buffer unavailable; drawing directly");
+    bool configured = false;
+    const bool wanted = load_body_enabled(&configured);
+    s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
+    ESP_LOGI(TAG, "StackChan body startup: wanted=%d configured=%d enabled=%d faulted=%d",
+             wanted, configured, s.body_enabled,
+             m5_platform_stackchan_expression_faulted());
+    (void)configured;
 #endif
+    s.setup_mode = wifi_mgr_is_ap_mode();
     render();
 }
 extern "C" void touch_ui_process(void) {
     process_input();
+    const int64_t now = esp_timer_get_time();
+    const bool setup_mode = wifi_mgr_is_ap_mode();
+    if (setup_mode != s.setup_mode) {
+        s.setup_mode = setup_mode;
+        s.dirty = true;
+#if HIPHI_M5_TARGET_ID == 4
+        if (setup_mode && s.body_enabled)
+            m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_SAD);
+#endif
+    }
+    if (setup_mode && wifi_mgr_scan_state() == RK_WIFI_SCAN_RUNNING)
+        s.dirty = true;
     m5_platform_stackchan_expression_process();
-    if (s.action_flash && esp_timer_get_time() >= s.action_until) { s.action_flash=false; s.dirty=true; }
-    if (s.body_notice[0] && esp_timer_get_time() >= s.body_notice_until) {
+    if (s.action_flash && now >= s.action_until) {
+        s.action_flash=false;
+        s.action_notice[0]=0;
+        s.dirty=true;
+    }
+    if (s.body_notice[0] && now >= s.body_notice_until) {
         s.body_notice[0] = 0; s.dirty = true;
     }
     if (s.body_enabled && m5_platform_stackchan_expression_faulted()) {
-        s.body_enabled = false; save_body_enabled(false);
+        /* The rail is already off and motion is faulted for this boot. Keep
+         * the user's preference so a transient fault is retried next boot. */
+        s.body_enabled = false;
         body_notice("BODY SAFELY DISABLED");
     }
+#if HIPHI_M5_TARGET_ID == 4
+    if (s.controls_mode && s.controls_until && now >= s.controls_until) {
+        s.controls_mode = false;
+        s.controls_until = 0;
+        s.dirty = true;
+    }
+    if (s.track_reveal_until && now >= s.track_reveal_until) {
+        s.track_reveal_started = 0;
+        s.track_reveal_until = 0;
+        s.dirty = true;
+    }
+    const bool art_eligible = !s.setup_mode && !s.picker && !s.settings &&
+        !s.controls_mode && !s.art_mode && s.artwork_pixels && s.online &&
+        bridge_client_is_ready_for_art_mode() && s.art_timeout_sec > 0;
+    if (art_eligible &&
+        now - s.last_activity_us >=
+            static_cast<int64_t>(s.art_timeout_sec) * 1000000) {
+        s.art_mode = true;
+        s.dirty = true;
+        ESP_LOGI(TAG, "StackChan entered Art mode after %us",
+                 static_cast<unsigned>(s.art_timeout_sec));
+    }
+    if (s.track_reveal_until || stackchan_marquee_needed()) s.dirty = true;
+#endif
     if (s.dirty && !s.sleeping) { s.dirty=false; render(); }
 }
 extern "C" void touch_ui_set_status(bool v){
@@ -419,21 +1233,62 @@ extern "C" void touch_ui_set_zone_name(const char *v){if(std::strcmp(s.zone,v?v:
 extern "C" void touch_ui_set_network_status(const char *v){if(std::strcmp(s.network,v?v:"")!=0){copy_text(s.network,sizeof(s.network),v);s.dirty=true;}}
 extern "C" void touch_ui_post_zone_name(const char *v){char *c=strdup(v?v:"");platform_task_post_to_ui([](void*p){touch_ui_set_zone_name(static_cast<char*>(p));free(p);},c);}
 extern "C" void touch_ui_post_network_status(const char *v){char *c=strdup(v?v:"");platform_task_post_to_ui([](void*p){touch_ui_set_network_status(static_cast<char*>(p));free(p);},c);}
-extern "C" void touch_ui_set_artwork(const char *v){(void)v;}
-extern "C" void touch_ui_post_artwork(const char *v){(void)v;}
-extern "C" void touch_ui_show_volume_change(float v,float step){(void)step;s.volume=v;s.dirty=true;flash_action();}
+extern "C" void touch_ui_set_artwork(const char *v){
+    const char *key=v?v:"";
+    if(std::strcmp(s.artwork_key,key)==0){
+        if(key[0]&&!s.artwork_pixels)start_stackchan_artwork_fetch();
+        return;
+    }
+    copy_text(s.artwork_key,sizeof(s.artwork_key),key);
+    free(s.artwork_pixels);s.artwork_pixels=nullptr;
+    s.artwork_width=0;s.artwork_height=0;s.dirty=true;
+    if(key[0])start_stackchan_artwork_fetch();
+}
+extern "C" void touch_ui_post_artwork(const char *v){
+    char *c=strdup(v?v:"");
+    if(!c||!platform_task_post_to_ui([](void*p){
+        touch_ui_set_artwork(static_cast<char*>(p));free(p);},c))free(c);
+}
+extern "C" void touch_ui_show_volume_change(float v,float step){
+    (void)step;s.volume=v;s.dirty=true;
+#if HIPHI_M5_TARGET_ID == 4
+    char notice[32];std::snprintf(notice,sizeof(notice),"VOL %.1f",v);
+    flash_action(notice);
+#else
+    flash_action();
+#endif
+}
 extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p,float v,float min,float max,float step,int pos,int length){
-    (void)step;(void)pos;(void)length;
+    (void)step;
     const char *title=a?a:""; const char *artist=b?b:""; const char *album=c?c:"";
+    /* Recovery can briefly publish empty presentation fields between two
+     * otherwise identical polls. Preserve the last non-empty identity so
+     * blank -> restored metadata cannot impersonate a new song. Album display
+     * refinements also do not define a new track. */
     const bool changed=s.track_seen && title[0] &&
-        (std::strcmp(s.title,title)!=0 || std::strcmp(s.artist,artist)!=0 ||
-         std::strcmp(s.album,album)!=0);
+        (std::strcmp(s.track_identity_title,title)!=0 ||
+         std::strcmp(s.track_identity_artist,artist)!=0);
     copy_text(s.title,sizeof(s.title),title);copy_text(s.artist,sizeof(s.artist),artist);
     copy_text(s.album,sizeof(s.album),album);s.playing=p;s.volume=v;
-    s.volume_min=min;s.volume_max=max;s.dirty=true;
-    if (title[0]) s.track_seen=true;
-    if (changed && p && s.online && s.body_enabled)
-        m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_CELEBRATE);
+    s.volume_min=min;s.volume_max=max;s.seek_position=std::max(0,pos);
+    s.seek_length=std::max(0,length);s.dirty=true;
+    if (title[0]) {
+        copy_text(s.track_identity_title,sizeof(s.track_identity_title),title);
+        copy_text(s.track_identity_artist,sizeof(s.track_identity_artist),artist);
+        s.track_seen=true;
+    }
+    if (changed && p && s.online) {
+#if HIPHI_M5_TARGET_ID == 4
+        s.controls_mode=false;s.controls_until=0;
+        s.track_reveal_started=esp_timer_get_time();
+        s.track_reveal_until=s.track_reveal_started+7000000;
+#endif
+        const bool dance_started = s.body_enabled &&
+            m5_platform_stackchan_expression_trigger(
+                M5_PLATFORM_STACKCHAN_DANCE);
+        ESP_LOGI(TAG, "StackChan new-track dance: enabled=%d accepted=%d",
+                 s.body_enabled, dance_started);
+    }
 }
 extern "C" void touch_ui_show_zone_picker(const char **n,const char **i,int count,int selected){s.zone_count=std::min(count,18);s.zone_selected=std::max(0,std::min(selected,s.zone_count-1));s.zone_current=s.zone_selected;for(int x=0;x<s.zone_count;x++){copy_text(s.zone_names[x],64,n[x]);copy_text(s.zone_ids[x],64,i[x]);}s.picker=true;s.settings=false;s.dirty=true;}
 extern "C" void touch_ui_hide_zone_picker(void){s.picker=false;s.dirty=true;}
@@ -442,6 +1297,17 @@ extern "C" void touch_ui_zone_picker_scroll(int d){s.zone_selected=std::max(0,st
 extern "C" void touch_ui_zone_picker_get_selected_id(char *o,size_t l){if(o&&l&&s.zone_selected>=0&&s.zone_selected<s.zone_count)copy_text(o,l,s.zone_ids[s.zone_selected]);}
 extern "C" bool touch_ui_zone_picker_is_current_selection(void){return s.zone_selected==s.zone_current;}
 extern "C" void touch_ui_update_battery(void){int level=m5_platform_battery_level();if(level!=s.battery){s.battery=level;s.dirty=true;}}
-extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging){(void)cfg;(void)charging;}
+extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging){
+    if (!cfg) return;
+#if HIPHI_M5_TARGET_ID == 4
+    s.art_timeout_sec = rk_cfg_get_art_mode_timeout(cfg, charging);
+    s.last_activity_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "StackChan Art mode policy: timeout=%us charging=%s",
+             static_cast<unsigned>(s.art_timeout_sec),
+             charging ? "yes" : "no");
+#else
+    (void)charging;
+#endif
+}
 extern "C" bool touch_ui_is_display_sleeping(void){return s.sleeping;}
 extern "C" void touch_ui_show_settings(void){s.settings=true;s.picker=false;s.dirty=true;}

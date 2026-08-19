@@ -82,11 +82,13 @@ int m5_platform_battery_level(void);
 typedef enum {
     M5_PLATFORM_STACKCHAN_CELEBRATE = 1,
     M5_PLATFORM_STACKCHAN_SAD = 2,
+    M5_PLATFORM_STACKCHAN_DANCE = 3,
 } m5_platform_stackchan_expression_t;
 
-/* StackChan body language is deliberately opt-in. The implementation powers
- * the servo rail only for a bounded gesture, qualifies both servo positions
- * before moving, returns to the observed neutral pose, then powers down. */
+/* StackChan body language is enabled by default (and can be turned off with a
+ * long hold). The implementation powers the servo rail only for a bounded
+ * gesture, qualifies both servo positions before moving, returns to the
+ * observed neutral pose, then powers down. */
 bool m5_platform_stackchan_expression_enable(bool enabled);
 bool m5_platform_stackchan_expression_trigger(
     m5_platform_stackchan_expression_t expression);
