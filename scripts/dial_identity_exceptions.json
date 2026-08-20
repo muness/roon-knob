@@ -167,6 +167,16 @@
       "contains": "return \"hiphi-dial-setup\";"
     },
     {
+      "path": "idf_app/main/platform_http_idf.c",
+      "contains": "esp_http_client_set_header(client, \"X-Device-Type\", platform_device_slug());",
+      "min_count": 3
+    },
+    {
+      "path": "frame_app/main/platform_http_frame.c",
+      "contains": "esp_http_client_set_header(client, \"X-Device-Type\", platform_device_slug());",
+      "min_count": 3
+    },
+    {
       "path": "idf_app/main/platform_mdns_idf.c",
       "contains": "{\"product\", \"hiphi-dial\"}"
     },
