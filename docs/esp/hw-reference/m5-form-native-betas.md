@@ -9,7 +9,7 @@ profile does not match that board.
 | M5 Dial Lab | M5 Dial K130 | 8 MB / none | The round face is a live volume arc driven by the encoder | Press: play/pause; touch: room picker; turn/press: navigate/select |
 | StickS3 Twist Remote | M5StickS3 K150 | 8 MB / 8 MB OPI | Hold the device button and twist the handheld itself for volume | Secondary click: play/pause; secondary hold: rooms; primary/secondary: navigate/select |
 | StopWatch Wrist Remote | M5Stack StopWatch C152 | 16 MB / 8 MB OPI | Raise-to-wake AMOLED plus haptic acknowledgement | Edge buttons: volume; tap: play/pause; hold: rooms |
-| Kizz Companion | M5StackChan K151 | 16 MB / 8 MB Quad | An expressive face can celebrate new tracks and droop once when the connection is lost | Tap: play/pause; hold: body language on/off; swipe up: rooms; swipe/tap: navigate/select |
+| Kizz Companion | M5StackChan K151 | 16 MB / 8 MB Quad | A Kismet-inspired expressive face can celebrate new tracks and droop once when the connection is lost | Tap: play/pause; hold: body language on/off; swipe up: rooms; swipe/tap: navigate/select |
 
 ## Evidence level
 

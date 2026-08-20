@@ -16,12 +16,14 @@ REQUIRED = {
     ],
     "web/flash.html": [
         "Kizz Playback Companion",
+        "Named for Kismet",
         "Flash Kizz Alpha",
         "stackchan: 'Kizz'",
         'manifest="manifest-stackchan.json"',
     ],
     "web/flash-pr.html": [
         "Kizz Playback Companion",
+        "Named for Kismet",
         "Flash Kizz Alpha",
         "stackchan: 'Kizz'",
     ],
@@ -41,6 +43,9 @@ REQUIRED = {
     "components/m5_platform/m5_platform.cpp": [
         's_board == M5_PLATFORM_BOARD_STACKCHAN ? "Kizz"',
         "board_M5StackChan",
+    ],
+    "components/m5_platform/STACKCHAN_PERSONALITY.md": [
+        "Kizz is named in honor of Kismet",
     ],
 }
 

@@ -2,6 +2,8 @@
 
 This directory treats Kizz's personality as reusable product data, not as
 an effect baked into the current playback screen.
+Kizz is named in honor of Kismet, whose affective vocabulary inspired this
+firmware's expressive face families.
 
 ## Catalogs
 
