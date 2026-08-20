@@ -1,9 +1,12 @@
 # HiPhi v{{VERSION}}
 
-This alpha brings HiPhi firmware to nine devices. The biggest change is how the
-Waveshare HiPhi Dial, our most popular controller, sleeps while idle. It also
-adds nearby Wi-Fi lists everywhere, expands BLE media-remote support, and gives
-every controller the same power-debug page.
+This alpha consolidates every firmware change since the stable v2.5.2 release,
+including the v2.6 work that was offered only as a prerelease and was never
+promoted to stable or automatic OTA. HiPhi now supports nine physical
+controllers. The biggest change is how the Waveshare HiPhi Dial, our most
+popular controller, sleeps while idle. It also restores and expands the shared
+controller platform, adds BLE media remotes and nearby Wi-Fi lists, and gives
+every controller the same power-debug contract.
 
 > **This is test firmware.** Install it yourself from the
 > [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html). Alpha builds
@@ -40,10 +43,11 @@ processors. This alpha changes the power behavior of both:
   parse messages and periodic memory reports now require debug logging. Power
   policy, shutdown, sleep, and wake events remain visible at normal log levels.
 
-The default battery timeline is 30 seconds to Art mode, another 30 seconds to
-dim, another 60 seconds to turn the panel off, then one minute to Deep-sleep.
-The server can override those values. While USB power is detected, panel sleep
-and Deep-sleep remain disabled by default.
+For fresh/default configurations, the battery timeline is 30 seconds to Art
+mode, another 30 seconds to dim, another 60 seconds to turn the panel off, then
+one minute to Deep-sleep. Existing saved timeout choices are preserved rather
+than silently migrated. The server can override those values. While USB power
+is detected, panel sleep and Deep-sleep remain disabled by default.
 
 The Dial still chooses between its battery and plugged-in policies using a
 voltage heuristic. A nearly full battery can temporarily receive the plugged-in
@@ -63,7 +67,46 @@ also park the board's otherwise-unused auxiliary ESP32 once:
 2. Once, flip the USB-C cable to the other orientation and install the
    [auxiliary ESP32 parking image](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_knob_aux_park_merged.bin).
 
-## What changed since v2.6.0-beta.1
+## Everything added since stable v2.5.2
+
+### Shared controller foundation and nine exact hardware profiles
+
+The work begun for v2.6 moved playback state, commands, configuration,
+connectivity, recovery, input routing, and presentation values behind shared
+controller interfaces rather than cloning the application for each board. It
+also restored HiPhi Frame on the current shared stack and added HiPhi RLCD,
+M5Stack Tough, AtomS3 JoyStick, original M5 Dial, M5StickS3, StopWatch, and
+Kizz. Together with the Waveshare Dial, this alpha packages nine physical
+controller profiles.
+
+The Waveshare product is now named **HiPhi Dial** throughout the user-facing
+firmware while retaining compatibility with earlier controller identities and
+download names. The M5StackChan companion is now **Kizz**, in honor of Kismet;
+its `stackchan` build and asset stem remain for compatibility.
+
+### Safer configuration and browser updates
+
+Configuration ownership and provisioning are shared across targets, including
+Wi-Fi credentials, bridge endpoint, selected zone, controller name, and display
+and power policy. The shared BLE host separately owns its enabled preference,
+remembered remote, and bond state. Browser manifests no longer intentionally
+erase NVS during normal updates. Decline any browser erase prompt to preserve
+the device's saved configuration; merged factory images written at address
+`0x0` still erase it.
+
+### BLE media remotes on compatible targets
+
+BLE HOGP media-remote support is new compared with stable v2.5.2. It first
+appeared for HiPhi Dial and HiPhi Frame in the v2.6 prerelease work. This alpha
+also links the shared host into HiPhi RLCD and makes all three compatible
+targets sleep without intentionally forgetting the enabled setting, remembered
+remote, or Bluetooth bond.
+
+A paired Bluetooth Low Energy HOGP remote can control play/pause, previous,
+next, volume up, and volume down for the selected zone. Frame and RLCD enable
+the feature by default. Dial includes it but leaves it off until you enable
+**BLE Media Remote** in settings. This is support for a separate physical
+remote; it does not make the HiPhi controller a Bluetooth keyboard or speaker.
 
 ### Nearby Wi-Fi scanning on every controller
 
@@ -71,19 +114,6 @@ All nine physical controllers now scan for nearby 2.4 GHz networks during
 setup. The scan does not stop the setup access point. You can select a visible
 SSID, retry an empty or failed scan, or type a hidden network manually. The
 Waveshare Dial shows the list in both captive setup and connected settings.
-
-### BLE media remotes expanded to HiPhi RLCD
-
-BLE media-remote support is not new in this alpha: v2.6.0-beta.1 already
-included it for HiPhi Dial and HiPhi Frame. This release adds the same host to
-HiPhi RLCD and makes Dial and Frame sleep without forgetting the enabled
-setting, remembered remote, or Bluetooth bond.
-
-A paired Bluetooth Low Energy HOGP remote can control play/pause, previous,
-next, volume up, and volume down for the selected zone. Frame and RLCD enable
-the feature by default. Dial includes it but leaves it off until you enable
-**BLE Media Remote** in settings. This is support for a separate physical
-remote; it does not make the HiPhi controller a Bluetooth keyboard or speaker.
 
 ### One power-debug page across all hardware
 
