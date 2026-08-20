@@ -124,10 +124,10 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         '"../../common/power_debug_web.c"',
     ),
     ".github/RELEASE_TEMPLATE.md": (
-        "Scanning is exposed in this alpha on all nine physical targets",
-        "A platform power snapshot now supplies battery level",
-        "Every physical target now exposes the same `/power-debug` page",
-        "HiPhi Dial and HiPhi Frame additionally expose a one-time 15-second powered",
+        "All nine physical controllers now scan for nearby 2.4 GHz",
+        "one shared power snapshot now supplies",
+        "Every physical controller exposes `/power-debug`",
+        "Dial and Frame also provide the one-time 15-second powered Deep-sleep test",
     ),
 }
 

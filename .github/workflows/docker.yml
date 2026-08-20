@@ -1065,11 +1065,12 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # Start with auto-generated "What's Changed"
-          cat release_notes.md > final_body.md
-
-          # Append template with version substituted
-          sed "s/{{VERSION}}/$VERSION/g" .github/RELEASE_TEMPLATE.md >> final_body.md
+          # Lead with the useful, curated notes. Keep the generated PR list as
+          # reference material at the end instead of making readers dig through
+          # it before learning what the release does.
+          sed "s/{{VERSION}}/$VERSION/g" .github/RELEASE_TEMPLATE.md > final_body.md
+          printf '\n---\n\n## Complete changelog\n\n' >> final_body.md
+          cat release_notes.md >> final_body.md
 
       - name: Check if release exists
         id: check_release

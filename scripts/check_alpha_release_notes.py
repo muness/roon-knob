@@ -11,23 +11,20 @@ ROOT = Path(__file__).resolve().parents[1]
 NOTES = ROOT / ".github" / "RELEASE_TEMPLATE.md"
 
 REQUIRED = (
-    "## Highlights since v2.6.0-beta.1",
-    "BLE media-remote support is **not new in this alpha**",
-    "adds it to HiPhi RLCD",
-    "without deleting its enabled preference, remembered peer, or\n  bond",
-    "### Nearby Wi-Fi scanning during setup",
-    "non-blocking scans for visible 2.4 GHz",
-    "Scanning is exposed in this alpha on all nine physical targets",
-    "The classic Waveshare HiPhi Dial now starts a scan from\n"
-    "both its captive setup and connected settings pages",
-    "## HiPhi Dial power-saving changes",
-    "A platform power snapshot now supplies battery level and external-\n  power state together across every target",
+    "# HiPhi v{{VERSION}}",
+    "## The Waveshare Dial now sleeps between jobs",
+    "## What changed since v2.6.0-beta.1",
+    "BLE media-remote support is not new in this alpha",
+    "adds the same host to\nHiPhi RLCD",
+    "### Nearby Wi-Fi scanning on every controller",
+    "All nine physical controllers now scan for nearby 2.4 GHz",
+    "Waveshare Dial shows the list in both captive setup and connected settings",
+    "one shared power snapshot now supplies",
     "16-sample ADC reading is cached for 15 seconds",
-    "Routine\n  two-second request/response/parse messages and memory watermarks move to\n  debug level",
-    "Every physical target now exposes the same `/power-debug` page",
-    "HiPhi Dial and HiPhi Frame additionally expose a one-time 15-second powered",
-    "RTC-retained counters distinguish a policy block",
-    "## Supported hardware and where to buy it",
+    "routine two-second now-playing request, response, and\n  parse messages",
+    "Every physical controller exposes `/power-debug`",
+    "Dial and Frame also provide the one-time 15-second powered Deep-sleep test",
+    "## Choose your hardware and firmware",
     "ESP32-S3-Knob-Touch-LCD-1.8",
     "ESP32-S3-PhotoPainter",
     "ESP32-S3-RLCD-4.2",
@@ -37,8 +34,22 @@ REQUIRED = (
     "SKU K150",
     "SKU C152",
     "SKU K151",
-    "K130-V11 is a\ndifferent revision and has not been qualified",
-    "not a tenth supported device",
+    "K130-V11 replacement is a\ndifferent revision and is not supported",
+    "not a tenth controller",
+    "Alpha builds\n> are never sent through automatic OTA",
+)
+
+FIRMWARE_ASSETS = (
+    "hiphi_dial_merged.bin",
+    "hiphi_knob_aux_park_merged.bin",
+    "hiphi_frame_merged.bin",
+    "hiphi_rlcd_merged.bin",
+    "hiphi_joy_merged.bin",
+    "hiphi_tough_merged.bin",
+    "hiphi_m5dial_merged.bin",
+    "hiphi_sticks3_merged.bin",
+    "hiphi_stopwatch_merged.bin",
+    "hiphi_stackchan_merged.bin",
 )
 
 OFFICIAL_URLS = (
@@ -63,6 +74,9 @@ def main() -> int:
     for url in OFFICIAL_URLS:
         if url not in text:
             failures.append(f"missing official hardware URL {url}")
+    for asset in FIRMWARE_ASSETS:
+        if asset not in text:
+            failures.append(f"missing firmware asset link {asset}")
 
     if failures:
         print("Alpha release-note check FAILED", file=sys.stderr)
@@ -72,8 +86,8 @@ def main() -> int:
 
     print("Alpha release-note check passed")
     print("- BLE chronology and target expansion are explicit")
-    print("- Wi-Fi scanning is scoped to the surfaces that expose it")
-    print("- all nine physical targets link to exact official hardware")
+    print("- Dial power work and its measurement limits are explicit")
+    print("- all nine physical targets link to hardware and firmware")
     return 0
 
 
