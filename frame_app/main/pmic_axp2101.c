@@ -154,3 +154,19 @@ int pmic_get_battery_voltage(void) {
     int raw = ((h & 0x3F) << 8) | l;
     return raw;  // mV
 }
+
+bool pmic_prepare_for_deep_sleep(void) {
+    if (!s_initialized) return false;
+    uint8_t ldo_ctrl = 0;
+    if (pmic_read_reg(AXP2101_LDO_ONOFF0, &ldo_ctrl) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not read e-paper rail state");
+        return false;
+    }
+    ldo_ctrl &= (uint8_t)~0x0F;
+    if (pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not disable ALDO1-4 e-paper rails");
+        return false;
+    }
+    ESP_LOGI(TAG, "Deep-sleep rails prepared: ALDO1-4 off");
+    return true;
+}

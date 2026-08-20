@@ -53,6 +53,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     "rlcd_app/main/platform_display_rlcd.c": (
         "void platform_power_snapshot",
+        "rlcd_battery_percent()",
         "platform_power_diagnostics_enrich",
         "rlcd_power_manager_debug_enrich",
         "platform_power_debug_arm_sleep",
@@ -67,9 +68,25 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     "m5_beta_app/main/platform_display_beta.c": (
         "void platform_power_snapshot",
-        "m5_platform_battery_level()",
-        "m5_platform_battery_is_charging()",
+        "m5_platform_power_snapshot(&snapshot)",
         "platform_power_diagnostics_enrich",
+    ),
+    "common/m5_terminal_power.c": (
+        "platform_power_prepare_for_deep_sleep()",
+        "platform_input_shutdown()",
+        "wifi_mgr_stop()",
+        "m5_platform_power_off()",
+        "nvs_commit(handle)",
+    ),
+    "components/m5_platform/m5_platform.cpp": (
+        "POWER_SNAPSHOT_CACHE_US",
+        "getBattery1Voltage()",
+        "getBattery2Voltage()",
+        "M5_PLATFORM_BOARD_DIAL",
+    ),
+    "rlcd_app/main/rlcd_battery.c": (
+        "RLCD_BATTERY_CHANNEL ADC_CHANNEL_3",
+        "RLCD_BATTERY_CACHE_US",
     ),
     "idf_app/main/battery.c": (
         "BATTERY_SAMPLE_CACHE_MS 15000",
@@ -111,6 +128,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "s_power_debug_rtc.entries++",
         "platform_power_prepare_for_deep_sleep()",
         ".provisioning = wifi_mgr_is_ap_mode()",
+        "pmic_prepare_for_deep_sleep()",
     ),
     "rlcd_app/main/rlcd_power_manager.c": (
         "RTC_DATA_ATTR static rlcd_power_debug_rtc_t",
@@ -148,7 +166,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "All nine physical controllers now scan for nearby 2.4 GHz",
         "one shared power snapshot now supplies",
         "Every physical controller exposes `/power-debug`",
-        "Dial, Frame, and RLCD also provide the one-time 15-second powered Deep-sleep test",
+        "All nine controllers provide the one-time 15-second powered terminal-power",
         "could therefore\nkeep the processor awake indefinitely",
         "HiPhi RLCD now sleeps the panel and processor",
     ),
@@ -170,6 +188,11 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
     ),
     "frame_app/main/frame_power_manager.c": (
         "wifi_mgr_is_ap_mode() || captive_portal_is_running()",
+        "esp_sleep_enable_timer_wakeup",
+    ),
+    "tough_app/main/platform_display_m5.c": (
+        "out->external_power = true",
+        "USB-powered appliance",
     ),
     "rlcd_app/main/rlcd_power_manager.c": (
         "!captive_portal_is_running()",

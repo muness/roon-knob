@@ -25,8 +25,6 @@
 static const char *TAG = "frame_power";
 
 #define FRAME_WAKE_GPIO GPIO_NUM_4
-#define FRAME_TIMER_WAKE_US (30ULL * 60ULL * 1000000ULL)
-#define FRAME_TIMER_WAKE_GRACE_MS (60ULL * 1000ULL)
 #define FRAME_RETRY_COOLDOWN_MS (60ULL * 1000ULL)
 #define FRAME_SOURCE_CACHE_MS 1000ULL
 #define FRAME_POWER_DEBUG_RTC_MAGIC 0x46505752u  // "FPWR"
@@ -53,10 +51,7 @@ typedef enum {
 } frame_sleep_state_t;
 
 static frame_sleep_state_t s_state;
-static uint64_t s_boot_ms;
-static uint64_t s_initial_input_ms;
 static uint64_t s_retry_not_before_ms;
-static bool s_timer_wake;
 static bool s_have_cached_source;
 static uint64_t s_source_checked_ms;
 static frame_power_source_t s_cached_source;
@@ -132,8 +127,7 @@ static bool configure_wake_sources(void) {
         esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,
                             ESP_PD_OPTION_ON) != ESP_OK ||
         esp_sleep_enable_ext1_wakeup_io(1ULL << FRAME_WAKE_GPIO,
-                                        ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK ||
-        esp_sleep_enable_timer_wakeup(FRAME_TIMER_WAKE_US) != ESP_OK) {
+                                        ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK) {
         (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
         s_power_debug_rtc.last_preflight_error =
             PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
@@ -163,9 +157,6 @@ static frame_power_decision_t build_snapshot(
         sleep_not_before_ms =
             last_input_ms +
             (uint64_t)config.value.deep_sleep_battery_timeout_sec * 1000ULL;
-        if (s_timer_wake && last_input_ms == s_initial_input_ms) {
-            sleep_not_before_ms = s_boot_ms + FRAME_TIMER_WAKE_GRACE_MS;
-        }
     }
 #endif
 
@@ -227,10 +218,7 @@ static bool cancel_sleep_attempt(void) {
 
 void frame_power_manager_init(void) {
     s_state = FRAME_SLEEP_IDLE;
-    s_boot_ms = now_ms();
-    s_initial_input_ms = frame_input_last_activity_ms();
     s_retry_not_before_ms = 0;
-    s_timer_wake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
     s_have_cached_source = false;
     s_source_checked_ms = 0;
     s_cached_source = FRAME_POWER_SOURCE_UNKNOWN;
@@ -245,8 +233,7 @@ void frame_power_manager_init(void) {
         s_power_debug_rtc.hardware_wakes++;
     }
 #if CONFIG_RK_FRAME_DEEP_SLEEP
-    ESP_LOGI(TAG, "Frame Deep-sleep enabled; wake=%s, timeout=configured",
-             s_timer_wake ? "timer" : "cold-or-key");
+    ESP_LOGI(TAG, "Frame Deep-sleep enabled; KEY wake only, timeout=configured");
 #else
     ESP_LOGI(TAG, "Frame Deep-sleep disabled by build profile");
 #endif
@@ -324,10 +311,17 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
         return;
     }
 
-    ESP_LOGI(TAG, "Entering ESP32-S3 Deep-sleep; KEY or 30-minute timer wakes");
+    ESP_LOGI(TAG, "Entering ESP32-S3 Deep-sleep; KEY wake only");
     s_power_debug_rtc.last_preflight_flags |=
         PLATFORM_POWER_PREFLIGHT_DISPLAY_SAFE;
     captive_portal_stop();
+    if (!pmic_prepare_for_deep_sleep()) {
+        s_power_debug_rtc.last_preflight_error =
+            PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS;
+        ESP_LOGE(TAG, "E-paper rails did not turn off; staying awake");
+        (void)cancel_sleep_attempt();
+        return;
+    }
     platform_input_shutdown();
     s_power_debug_rtc.last_preflight_flags |=
         PLATFORM_POWER_PREFLIGHT_OUTPUTS_SAFE;

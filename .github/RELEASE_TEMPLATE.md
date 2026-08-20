@@ -41,7 +41,7 @@ processors. This alpha changes the power behavior of both:
   policy, shutdown, sleep, and wake events remain visible at normal log levels.
 
 The default battery timeline is 30 seconds to Art mode, another 30 seconds to
-dim, another 60 seconds to turn the panel off, then 20 minutes to Deep-sleep.
+dim, another 60 seconds to turn the panel off, then one minute to Deep-sleep.
 The server can override those values. While USB power is detected, panel sleep
 and Deep-sleep remain disabled by default.
 
@@ -92,16 +92,28 @@ Every physical controller exposes `/power-debug` and
 shows the power source, active timeouts, display state, reset and wake cause,
 and the sleep or power-off capabilities that the exact target implements.
 
-Dial, Frame, and RLCD also provide the one-time 15-second powered Deep-sleep test and
-RTC-retained evidence. Other targets report that the forced test is unsupported
-until their own power-off and wake paths can retain trustworthy evidence. The
-endpoint is passive: it does no background polling when nobody opens it.
+All nine controllers provide the one-time 15-second powered terminal-power
+test. Dial, Frame, and RLCD retain evidence in RTC memory across processor
+Deep-sleep. Tough, AtomS3 JoyStick, original M5 Dial, StickS3, StopWatch, and
+Kizz persist the completed shutdown marker in NVS so it survives full PMIC
+rail-off. The endpoint is passive: it does no background polling when nobody
+opens it.
+
+The M5-family targets now share one terminal preflight instead of jumping
+straight from a UI timeout into a board-specific power call. It removes the
+automatic Light-sleep timer wake, stops input and Wi-Fi, records durable
+evidence, and only then invokes the exact board's M5Unified power-off path.
+Tough now uses its actual AXP192 battery/VBUS state rather than being wrongly
+classified as an always-plugged appliance. AtomS3 JoyStick now reports its two
+base battery inputs through the STM32 and uses the physical power switch/reset
+as its recovery path.
 
 ### HiPhi Frame now enters processor Deep-sleep
 
 On battery, a stopped and idle Frame now shuts down BLE and Wi-Fi, sleeps its
-e-paper controller, and puts the ESP32-S3 into Deep-sleep. The KEY input and a
-timer can wake it. This alpha also fixes a blocker that mistook the normal
+e-paper controller, disables the four AXP2101 e-paper LDO rails, and puts the
+ESP32-S3 into Deep-sleep. Only the KEY input wakes it; the old periodic
+30-minute timer wake is removed. This alpha also fixes a blocker that mistook the normal
 connected settings server for active Wi-Fi provisioning and could therefore
 keep the processor awake indefinitely. The code path and retained wake evidence
 are implemented; actual PMIC rail current still needs measurement on the
@@ -115,8 +127,9 @@ the ESP32-S3 into Deep-sleep. Press KEY to wake it. The `/power-debug` page has
 the same retained entry and wake evidence as Dial and Frame.
 
 The board's PWR button controls a separate hardware power latch that firmware
-cannot switch off. Its battery ADC also cannot distinguish USB from battery
-power, so RLCD currently applies the battery idle policy even while USB is
+cannot switch off. The alpha now reads and caches the documented GPIO4
+three-to-one battery divider, but that ADC still cannot distinguish USB from
+battery power, so RLCD applies the battery idle policy even while USB is
 attached. Board-level sleep current and runtime remain unmeasured until the
 release image is tested with an external meter.
 

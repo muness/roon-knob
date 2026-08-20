@@ -96,8 +96,8 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
     }
 
     const char *device = platform_device_slug();
-    const bool rtc_supported =
-        (power.capabilities & PLATFORM_POWER_CAP_RTC_EVIDENCE) != 0;
+    const bool evidence_supported =
+        (power.capabilities & PLATFORM_POWER_CAP_DURABLE_EVIDENCE) != 0;
     const bool test_supported =
         (power.capabilities & PLATFORM_POWER_CAP_FORCED_TEST) != 0;
 
@@ -108,7 +108,9 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "{\"schema_version\":1,\"device\":\"%s\","
             "\"measurement_scope\":\"firmware evidence; not an ammeter\","
             "\"uptime_ms\":%llu,\"state\":\"%s\",\"strategy\":\"%s\","
-            "\"capabilities\":%lu,\"battery_level\":%d,\"external_power\":%s,"
+            "\"capabilities\":%lu,\"battery_level\":%d,"
+            "\"observed_source\":\"%s\",\"external_power\":%s,"
+            "\"external_power_policy\":%s,"
             "\"policy\":{\"known\":%s,\"art_sec\":%lu,\"dim_sec\":%lu,"
             "\"display_sleep_sec\":%lu,\"power_off_sec\":%lu},"
             "\"runtime\":{\"wifi_modem_sleep_baseline\":%s,"
@@ -124,6 +126,8 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             device, (unsigned long long)power.uptime_ms,
             state_name(power.state), strategy_name(power.capabilities),
             (unsigned long)power.capabilities, power.power.battery_level,
+            platform_power_source_name(power.power.source),
+            power.power.external_power ? "true" : "false",
             power.power.external_power ? "true" : "false",
             power.policy_known ? "true" : "false",
             (unsigned long)power.art_timeout_sec,
@@ -139,7 +143,7 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (unsigned long)power.display_sleep_transitions,
             (unsigned long)power.runtime_wakes,
             (unsigned long)power.debug_sleep_arms,
-            rtc_supported ? "true" : "false",
+            evidence_supported ? "true" : "false",
             (unsigned long)power.power_off_attempts,
             (unsigned long)power.preflight_completions,
             (unsigned long)power.power_off_entries,
@@ -164,7 +168,9 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "<p><a href='/'>Device UI</a> · <a href='/power-debug?format=json'>JSON</a></p>"
             "<h2>Current policy</h2><table><tr><th>State</th><td>%s</td></tr>"
             "<tr><th>Power strategy</th><td>%s</td></tr>"
-            "<tr><th>Source</th><td>%s</td></tr><tr><th>Battery</th><td>%d</td></tr>"
+            "<tr><th>Observed source</th><td>%s</td></tr>"
+            "<tr><th>Effective policy</th><td>%s</td></tr>"
+            "<tr><th>Battery</th><td>%d</td></tr>"
             "<tr><th>Timeouts</th><td>art %lus · dim %lus · display %lus · power-off %lus</td></tr>"
             "<tr><th>Wi-Fi modem-sleep baseline</th><td>%s</td></tr>"
             "<tr><th>Automatic Light-sleep configured</th><td>%s</td></tr>"
@@ -183,6 +189,7 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (power.capabilities & PLATFORM_POWER_CAP_AUXILIARY_SOC)
                 ? " or prove the auxiliary processor's draw" : "",
             state_name(power.state), strategy_name(power.capabilities),
+            platform_power_source_name(power.power.source),
             power.power.external_power ? "external/charging" : "battery",
             power.power.battery_level,
             (unsigned long)power.art_timeout_sec,
@@ -198,9 +205,9 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (unsigned long)power.display_sleep_transitions,
             (unsigned long)power.runtime_wakes,
             (unsigned long)power.debug_sleep_arms,
-            rtc_supported
-                ? "Counters survive supported ESP32 Deep-sleep cycles."
-                : "This target does not currently expose retained Deep-sleep evidence.",
+            evidence_supported
+                ? "Counters survive this target's implemented terminal power cycle."
+                : "This target does not currently expose retained terminal-power evidence.",
             (unsigned long)power.power_off_attempts,
             (unsigned long)power.preflight_completions,
             (unsigned long)power.power_off_entries,

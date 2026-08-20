@@ -26,6 +26,10 @@ static bool s_joystick = false;
 static bool s_joystick_ready = false;
 static bool s_has_imu = false;
 static int32_t s_encoder_remainder = 0;
+static m5_platform_power_snapshot_t s_power_snapshot = {
+    -1, M5_PLATFORM_POWER_SOURCE_UNKNOWN, false};
+static int64_t s_power_snapshot_us = 0;
+static constexpr int64_t POWER_SNAPSHOT_CACHE_US = 15000000;
 
 #if CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
 static AtomJoyStick s_atom_joystick;
@@ -436,22 +440,57 @@ extern "C" bool m5_platform_haptic(uint8_t strength) {
 }
 
 extern "C" bool m5_platform_battery_is_charging(void) {
-    if (!s_started) return false;
-
-    /* The shared platform contract is external power, not merely charge-in-
-     * progress. StickS3/StopWatch (M5PM1) and Kizz/M5StackChan (AXP2101) can report
-     * VBUS even after a full battery stops charging. Without this check a
-     * full USB-powered device incorrectly selects the battery sleep profile.
-     * The exact original M5Dial exposes neither VBUS nor its TP4057 status pins
-     * to M5Unified, so that target remains source-ambiguous and falls back to
-     * the battery profile. */
-    const int16_t vbus_mv = M5.Power.getVBUSVoltage();
-    return vbus_mv >= 4000 ||
-           M5.Power.isCharging() == m5::Power_Class::is_charging;
+    m5_platform_power_snapshot_t snapshot = {};
+    return m5_platform_power_snapshot(&snapshot) &&
+           snapshot.external_power_policy;
 }
 
 extern "C" int m5_platform_battery_level(void) {
-    return s_started ? static_cast<int>(M5.Power.getBatteryLevel()) : -1;
+    m5_platform_power_snapshot_t snapshot = {};
+    return m5_platform_power_snapshot(&snapshot) ? snapshot.battery_level : -1;
+}
+
+extern "C" bool m5_platform_power_snapshot(
+    m5_platform_power_snapshot_t *out) {
+    if (!out || !s_started) return false;
+    const int64_t now = esp_timer_get_time();
+    if (s_power_snapshot_us == 0 ||
+        now - s_power_snapshot_us >= POWER_SNAPSHOT_CACHE_US) {
+        m5_platform_power_snapshot_t next = {
+            -1, M5_PLATFORM_POWER_SOURCE_UNKNOWN, false};
+#if CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK
+        /* The base's STM32 owns both battery ADC channels. There is no VBUS
+         * status register, so report that uncertainty while choosing the
+         * portable/battery policy. Use the higher valid pack reading because
+         * either JST battery socket may be populated. */
+        const float battery1 = s_atom_joystick.getBattery1Voltage();
+        const float battery2 = s_atom_joystick.getBattery2Voltage();
+        const float volts = std::max(battery1, battery2);
+        if (volts >= 2.5f && volts <= 4.5f) {
+            next.battery_level = std::clamp(
+                static_cast<int>((volts - 3.20f) * 100.0f / 1.00f), 0, 100);
+        }
+#else
+        next.battery_level = static_cast<int>(M5.Power.getBatteryLevel());
+        const int16_t vbus_mv = M5.Power.getVBUSVoltage();
+        const bool external = vbus_mv >= 4000 ||
+            M5.Power.isCharging() == m5::Power_Class::is_charging;
+        /* Original M5Dial's TP4057/VBUS status is not exposed through its
+         * qualified BSP. The other supported PMIC boards do expose VBUS. */
+        if (s_board == M5_PLATFORM_BOARD_DIAL) {
+            next.source = M5_PLATFORM_POWER_SOURCE_UNKNOWN;
+            next.external_power_policy = false;
+        } else {
+            next.source = external ? M5_PLATFORM_POWER_SOURCE_EXTERNAL
+                                   : M5_PLATFORM_POWER_SOURCE_BATTERY;
+            next.external_power_policy = external;
+        }
+#endif
+        s_power_snapshot = next;
+        s_power_snapshot_us = now;
+    }
+    *out = s_power_snapshot;
+    return true;
 }
 
 extern "C" bool m5_platform_stackchan_expression_enable(bool enabled) {

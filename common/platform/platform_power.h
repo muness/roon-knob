@@ -7,10 +7,18 @@
 extern "C" {
 #endif
 
+/** What the hardware can actually establish about its present supply. */
+typedef enum {
+    PLATFORM_POWER_SOURCE_UNKNOWN = 0,
+    PLATFORM_POWER_SOURCE_BATTERY,
+    PLATFORM_POWER_SOURCE_EXTERNAL,
+} platform_power_source_t;
+
 /** One coherent target power reading for controller policy and telemetry. */
 typedef struct {
     int battery_level;       /**< 0-100, or -1 when the target has no gauge. */
-    bool external_power;     /**< USB/VBUS/external supply is present. */
+    platform_power_source_t source; /**< Observed source, never a policy guess. */
+    bool external_power;     /**< Effective policy: use external-power settings. */
 } platform_power_snapshot_t;
 
 typedef enum {
@@ -25,7 +33,9 @@ enum {
     PLATFORM_POWER_CAP_DISPLAY_SLEEP = 1u << 0,
     PLATFORM_POWER_CAP_SOC_DEEP_SLEEP = 1u << 1,
     PLATFORM_POWER_CAP_BOARD_POWER_OFF = 1u << 2,
-    PLATFORM_POWER_CAP_RTC_EVIDENCE = 1u << 3,
+    PLATFORM_POWER_CAP_DURABLE_EVIDENCE = 1u << 3,
+    /* Compatibility name for the Frame/RLCD/Dial RTC implementation. */
+    PLATFORM_POWER_CAP_RTC_EVIDENCE = PLATFORM_POWER_CAP_DURABLE_EVIDENCE,
     PLATFORM_POWER_CAP_FORCED_TEST = 1u << 4,
     PLATFORM_POWER_CAP_AUXILIARY_SOC = 1u << 5,
 };
@@ -100,6 +110,8 @@ bool platform_power_debug_arm_sleep(uint32_t delay_sec);
  * target installs the exact wake sources it wants for Deep-sleep.
  */
 bool platform_power_prepare_for_deep_sleep(void);
+
+const char *platform_power_source_name(platform_power_source_t source);
 
 #ifdef __cplusplus
 }

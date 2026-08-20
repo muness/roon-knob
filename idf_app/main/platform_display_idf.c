@@ -689,6 +689,10 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     /* battery.c caches one voltage sample, so these derived fields are from
      * the same ADC reading rather than two independent 16-sample bursts. */
     out->battery_level = battery_get_percentage();
+    /* This board exposes battery voltage but no true VBUS signal. Keep the
+     * observed source honest while retaining the calibrated threshold as the
+     * effective policy projection. */
+    out->source = PLATFORM_POWER_SOURCE_UNKNOWN;
     out->external_power = battery_is_charging();
 }
 

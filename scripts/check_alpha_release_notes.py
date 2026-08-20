@@ -23,7 +23,7 @@ REQUIRED = (
     "16-sample ADC reading is cached for 15 seconds",
     "routine two-second now-playing request, response, and\n  parse messages",
     "Every physical controller exposes `/power-debug`",
-    "Dial, Frame, and RLCD also provide the one-time 15-second powered Deep-sleep test",
+    "All nine controllers provide the one-time 15-second powered terminal-power",
     "could therefore\nkeep the processor awake indefinitely",
     "HiPhi RLCD now sleeps the panel and processor",
     "## Choose your hardware and firmware",

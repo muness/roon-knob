@@ -80,6 +80,23 @@ bool m5_platform_battery_is_charging(void);
 int m5_platform_battery_level(void);
 
 typedef enum {
+    M5_PLATFORM_POWER_SOURCE_UNKNOWN = 0,
+    M5_PLATFORM_POWER_SOURCE_BATTERY,
+    M5_PLATFORM_POWER_SOURCE_EXTERNAL,
+} m5_platform_power_source_t;
+
+typedef struct {
+    int battery_level;
+    m5_platform_power_source_t source;
+    /* Policy is explicit because some portable boards can measure battery
+     * but cannot observe USB/VBUS. */
+    bool external_power_policy;
+} m5_platform_power_snapshot_t;
+
+/* One cached, coherent PMIC/ADC read for a whole controller poll cycle. */
+bool m5_platform_power_snapshot(m5_platform_power_snapshot_t *out);
+
+typedef enum {
     M5_PLATFORM_STACKCHAN_CELEBRATE = 1,
     M5_PLATFORM_STACKCHAN_SAD = 2,
     M5_PLATFORM_STACKCHAN_DANCE = 3,

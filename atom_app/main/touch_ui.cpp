@@ -5,6 +5,7 @@
 #include "controller_config.h"
 #include "controller_input.h"
 #include "m5_platform.h"
+#include "m5_terminal_power.h"
 #include "platform/platform_http.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_task.h"
@@ -94,6 +95,9 @@ struct State {
     int64_t power_started_us = 0;
     uint32_t dim_timeout = 0;
     uint32_t sleep_timeout = 0;
+    uint32_t power_off_timeout = 0;
+    int64_t sleep_started_us = 0;
+    int64_t last_sleep_input_poll_us = 0;
     bool sleeping = false;
     bool wifi_scan_started = false;
     bool wifi_scan_frame_drawn = false;
@@ -704,7 +708,9 @@ void redraw(void) {
 
 void wake(void) {
     if (s.sleeping) {
+        m5_terminal_power_note_runtime_wake();
         s.sleeping = false;
+        s.sleep_started_us = 0;
         m5_platform_display_wake();
         ++s.display_epoch;
         s.display_content_valid = false;
@@ -935,14 +941,27 @@ void process_input(void) {
 }
 
 void update_power(void) {
-    if (s.sleeping || !s.dim_timeout) return;
+    if (m5_terminal_power_debug_due()) {
+        (void)m5_terminal_power_off();
+        return;
+    }
+    if (s.sleeping) {
+        if (s.power_off_timeout && s.sleep_started_us > 0 &&
+            esp_timer_get_time() - s.sleep_started_us >=
+                static_cast<int64_t>(s.power_off_timeout) * 1000000) {
+            (void)m5_terminal_power_off();
+        }
+        return;
+    }
     const int64_t elapsed = esp_timer_get_time() - s.power_started_us;
-    if (elapsed >= static_cast<int64_t>(s.dim_timeout) * 1000000 &&
+    if (s.dim_timeout &&
+        elapsed >= static_cast<int64_t>(s.dim_timeout) * 1000000 &&
         !s.artwork_available) {
         m5_platform_set_brightness(28);
     }
     if (s.sleep_timeout && elapsed >= static_cast<int64_t>(s.sleep_timeout) * 1000000) {
         s.sleeping = true;
+        s.sleep_started_us = esp_timer_get_time();
         ++s.display_epoch;
         s.display_content_valid = false;
         s.artwork_available = false;
@@ -950,6 +969,7 @@ void update_power(void) {
         s.media_snapshot_fresh = false;
         s_artwork_generation.fetch_add(1);
         m5_platform_display_sleep();
+        m5_terminal_power_note_display_sleep();
         s.dirty = true;
     }
 }
@@ -972,7 +992,15 @@ extern "C" void touch_ui_init(void) {
 extern "C" void touch_ui_process(void) {
     m5_platform_update();
     platform_task_run_pending();
-    process_input();
+    const int64_t process_now_us = esp_timer_get_time();
+    /* The base has no interrupt line to the AtomS3. Keep button wake usable
+     * during the short connected-display-sleep stage, but reduce the STM32
+     * multi-register I2C poll from 20 Hz to 4 Hz until terminal power-off. */
+    if (!s.sleeping ||
+        process_now_us - s.last_sleep_input_poll_us >= 250000) {
+        process_input();
+        s.last_sleep_input_poll_us = process_now_us;
+    }
     /* The shared media view intentionally deduplicates image keys. If the
      * first fetch races bridge readiness, retry the same key here rather
      * than waiting for another metadata change. */
@@ -1073,7 +1101,7 @@ extern "C" void touch_ui_zone_picker_scroll(int d) { s.zone_offset=std::max(0,st
 extern "C" void touch_ui_zone_picker_get_selected_id(char *o,size_t l){if(o&&l&&s.zone_selected>=0&&s.zone_selected<s.zone_count)copy_text(o,l,s.zone_ids[s.zone_selected]);}
 extern "C" bool touch_ui_zone_picker_is_current_selection(void){return s.zone_selected==s.zone_current;}
 extern "C" void touch_ui_update_battery(void) { }
-extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging){if(!cfg)return;s.charging=charging;s.dim_timeout=rk_cfg_get_dim_timeout(cfg,charging);s.sleep_timeout=rk_cfg_get_sleep_timeout(cfg,charging);s.power_started_us=esp_timer_get_time();}
+extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging){if(!cfg)return;s.charging=charging;s.dim_timeout=rk_cfg_get_dim_timeout(cfg,charging);s.sleep_timeout=rk_cfg_get_sleep_timeout(cfg,charging);s.power_off_timeout=rk_cfg_get_deep_sleep_timeout(cfg,charging);s.power_started_us=esp_timer_get_time();}
 extern "C" bool touch_ui_is_display_sleeping(void){return s.sleeping;}
 extern "C" void touch_ui_show_settings(void){
     s.settings = true;

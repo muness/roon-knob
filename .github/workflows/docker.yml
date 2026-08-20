@@ -497,7 +497,7 @@ jobs:
             ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map;
             grep -Fx "CONFIG_RK_FRAME_DEEP_SLEEP=y" sdkconfig;
             grep -F "esp_sleep_enable_ext1_wakeup_io" main/frame_power_manager.c;
-            grep -F "esp_sleep_enable_timer_wakeup" main/frame_power_manager.c;
+            ! grep -F "esp_sleep_enable_timer_wakeup" main/frame_power_manager.c;
             grep -F "pmic_power_source()" main/frame_power_manager.c;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig;

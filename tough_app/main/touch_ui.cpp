@@ -5,6 +5,7 @@
 #include "controller_input.h"
 #include "bridge_client.h"
 #include "m5_platform.h"
+#include "m5_terminal_power.h"
 #include "platform/platform_http.h"
 #include "platform/platform_task.h"
 #include "platform/platform_identity.h"
@@ -77,6 +78,7 @@ struct UiState {
     uint32_t art_timeout_sec = 0;
     uint32_t dim_timeout_sec = 0;
     uint32_t sleep_timeout_sec = 0;
+    uint32_t power_off_timeout_sec = 0;
     int64_t power_state_started_us = 0;
     int64_t last_activity_us = 0;
     int64_t message_until_us = 0;
@@ -375,6 +377,7 @@ void set_power_state(PowerState state) {
     s_state.power_state_started_us = esp_timer_get_time();
     switch (state) {
     case PowerState::Normal:
+        if (previous == PowerState::Sleep) m5_terminal_power_note_runtime_wake();
         m5_platform_display_wake();
         m5_platform_set_brightness(kNormalBrightness);
         break;
@@ -388,6 +391,7 @@ void set_power_state(PowerState state) {
         break;
     case PowerState::Sleep:
         m5_platform_display_sleep();
+        m5_terminal_power_note_display_sleep();
         break;
     }
     if (state == PowerState::Normal && previous != PowerState::Normal) {
@@ -408,15 +412,29 @@ void reset_activity(void) {
 
 void update_power_state(void) {
     const int64_t now = esp_timer_get_time();
+    if (m5_terminal_power_debug_due()) {
+        (void)m5_terminal_power_off();
+        return;
+    }
     if (s_state.power_state == PowerState::Sleep) {
+        if (s_state.power_off_timeout_sec > 0 &&
+            now - s_state.power_state_started_us >=
+                static_cast<int64_t>(s_state.power_off_timeout_sec) * 1000000) {
+            (void)m5_terminal_power_off();
+        }
         return;
     }
     const bool art_eligible = s_state.artwork_key[0] &&
         bridge_client_is_ready_for_art_mode() && s_state.art_timeout_sec > 0;
     const uint32_t timeout = s_state.power_state == PowerState::Normal
-        ? (art_eligible ? s_state.art_timeout_sec : s_state.dim_timeout_sec)
+        ? (art_eligible ? s_state.art_timeout_sec
+                        : (s_state.dim_timeout_sec > 0
+                               ? s_state.dim_timeout_sec
+                               : s_state.sleep_timeout_sec))
         : (s_state.power_state == PowerState::Art
-               ? s_state.dim_timeout_sec
+               ? (s_state.dim_timeout_sec > 0
+                      ? s_state.dim_timeout_sec
+                      : s_state.sleep_timeout_sec)
                : s_state.sleep_timeout_sec);
     if (timeout == 0 || now - s_state.power_state_started_us <
             static_cast<int64_t>(timeout) * 1000000) {
@@ -895,11 +913,14 @@ extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,
     s_state.art_timeout_sec = rk_cfg_get_art_mode_timeout(cfg, is_charging);
     s_state.dim_timeout_sec = rk_cfg_get_dim_timeout(cfg, is_charging);
     s_state.sleep_timeout_sec = rk_cfg_get_sleep_timeout(cfg, is_charging);
+    s_state.power_off_timeout_sec =
+        rk_cfg_get_deep_sleep_timeout(cfg, is_charging);
     reset_activity();
-    ESP_LOGI(TAG, "Power policy: art=%us dim=%us sleep=%us charging=%s",
+    ESP_LOGI(TAG, "Power policy: art=%us dim=%us sleep=%us power-off=%us charging=%s",
              (unsigned)s_state.art_timeout_sec,
              (unsigned)s_state.dim_timeout_sec,
              (unsigned)s_state.sleep_timeout_sec,
+             (unsigned)s_state.power_off_timeout_sec,
              is_charging ? "yes" : "no");
 }
 

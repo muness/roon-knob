@@ -5,6 +5,7 @@
 #include "controller_input.h"
 #include "bridge_client.h"
 #include "m5_platform.h"
+#include "m5_terminal_power.h"
 #include "m5_interaction_policy.h"
 #include "m5_stackchan_faces.h"
 #include "platform/platform_http.h"
@@ -822,6 +823,7 @@ void stackchan_transport(controller_command_kind_t kind, const char *notice) {
 void wake_display() {
     const int64_t now = esp_timer_get_time();
     if (s.sleeping) {
+        m5_terminal_power_note_runtime_wake();
         m5_platform_display_wake();
         s.sleeping = false;
     }
@@ -838,11 +840,16 @@ void enter_connected_sleep(int64_t now) {
     s.dimmed = true;
     s.sleeping = true;
     s.sleep_started_us = now;
+    m5_terminal_power_note_display_sleep();
     ESP_LOGI(TAG, "%s entered connected display sleep",
              m5_platform_board_name());
 }
 
 void apply_power_policy(int64_t now, bool artwork_transition_pending) {
+    if (m5_terminal_power_debug_due()) {
+        (void)m5_terminal_power_off();
+        return;
+    }
     const m5_power_action_t action = m5_interaction_power_action(
         now, s.last_activity_us, s.sleep_started_us, s.dim_timeout_sec,
         s.sleep_timeout_sec, s.power_off_timeout_sec, s.dimmed, s.sleeping,
@@ -859,7 +866,7 @@ void apply_power_policy(int64_t now, bool artwork_transition_pending) {
     case M5_POWER_ACTION_POWER_OFF:
         ESP_LOGI(TAG, "%s connected-sleep timeout reached",
                  m5_platform_board_name());
-        m5_platform_power_off();
+        (void)m5_terminal_power_off();
         break;
     case M5_POWER_ACTION_NONE:
     default:

@@ -24,3 +24,6 @@ int pmic_get_battery_percent(void);
 
 // Get battery voltage in mV
 int pmic_get_battery_voltage(void);
+
+// Remove power from the e-paper peripheral rails immediately before S3 sleep.
+bool pmic_prepare_for_deep_sleep(void);

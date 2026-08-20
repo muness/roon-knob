@@ -30,6 +30,18 @@ PLATFORM_WEAK bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
     return false;
 }
 
+const char *platform_power_source_name(platform_power_source_t source) {
+    switch (source) {
+    case PLATFORM_POWER_SOURCE_BATTERY:
+        return "battery";
+    case PLATFORM_POWER_SOURCE_EXTERNAL:
+        return "external";
+    case PLATFORM_POWER_SOURCE_UNKNOWN:
+    default:
+        return "unknown";
+    }
+}
+
 bool platform_power_prepare_for_deep_sleep(void) {
 #ifdef ESP_PLATFORM
 #if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
@@ -60,6 +72,7 @@ void platform_power_diagnostics_snapshot(platform_power_diagnostics_t *out) {
     }
     memset(out, 0, sizeof(*out));
     out->power.battery_level = -1;
+    out->power.source = PLATFORM_POWER_SOURCE_UNKNOWN;
     platform_power_snapshot(&out->power);
     out->state = platform_display_is_sleeping()
         ? PLATFORM_POWER_STATE_DISPLAY_SLEEP

@@ -5,6 +5,15 @@
 #include "platform/platform_power.h"
 #include "frame_power_manager.h"
 #include "pmic_axp2101.h"
+#include <esp_timer.h>
+
+#define FRAME_POWER_SNAPSHOT_CACHE_US 15000000LL
+static platform_power_snapshot_t s_cached_power = {
+    .battery_level = -1,
+    .source = PLATFORM_POWER_SOURCE_UNKNOWN,
+    .external_power = true,
+};
+static int64_t s_cached_power_us;
 
 bool platform_display_is_sleeping(void) {
     return false;  // E-ink always "displays" — no sleep concept
@@ -25,9 +34,22 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     if (!out) {
         return;
     }
-    out->battery_level = pmic_get_battery_percent();
-    out->external_power =
-        pmic_power_source() == PMIC_POWER_SOURCE_EXTERNAL;
+    const int64_t now = esp_timer_get_time();
+    if (s_cached_power_us != 0 &&
+        now - s_cached_power_us < FRAME_POWER_SNAPSHOT_CACHE_US) {
+        *out = s_cached_power;
+        return;
+    }
+    s_cached_power.battery_level = pmic_get_battery_percent();
+    const pmic_power_source_t source = pmic_power_source();
+    s_cached_power.source = source == PMIC_POWER_SOURCE_EXTERNAL
+        ? PLATFORM_POWER_SOURCE_EXTERNAL
+        : source == PMIC_POWER_SOURCE_BATTERY
+            ? PLATFORM_POWER_SOURCE_BATTERY
+            : PLATFORM_POWER_SOURCE_UNKNOWN;
+    s_cached_power.external_power = source != PMIC_POWER_SOURCE_BATTERY;
+    s_cached_power_us = now;
+    *out = s_cached_power;
 }
 
 void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {

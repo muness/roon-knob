@@ -1,6 +1,7 @@
 #include "platform/platform_display.h"
 #include "platform/platform_power.h"
 #include "m5_platform.h"
+#include "m5_terminal_power.h"
 #include "touch_ui.h"
 
 bool platform_display_is_sleeping(void) {
@@ -17,11 +18,18 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     if (!out) {
         return;
     }
-    out->battery_level = m5_platform_battery_level();
-    out->external_power = m5_platform_battery_is_charging();
+    m5_platform_power_snapshot_t snapshot = {0};
+    if (!m5_platform_power_snapshot(&snapshot)) return;
+    out->battery_level = snapshot.battery_level;
+    out->external_power = snapshot.external_power_policy;
+    out->source = snapshot.source == M5_PLATFORM_POWER_SOURCE_EXTERNAL
+        ? PLATFORM_POWER_SOURCE_EXTERNAL
+        : snapshot.source == M5_PLATFORM_POWER_SOURCE_BATTERY
+            ? PLATFORM_POWER_SOURCE_BATTERY : PLATFORM_POWER_SOURCE_UNKNOWN;
 }
 void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
-    if (!out) return;
-    out->capabilities = PLATFORM_POWER_CAP_DISPLAY_SLEEP |
-        PLATFORM_POWER_CAP_BOARD_POWER_OFF;
+    m5_terminal_power_diagnostics(out);
+}
+bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
+    return m5_terminal_power_debug_arm(delay_sec);
 }
