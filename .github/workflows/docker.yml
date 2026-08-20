@@ -357,6 +357,7 @@ jobs:
             ccache --zero-stats;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
             grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
             grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
@@ -466,6 +467,7 @@ jobs:
             ccache --zero-stats;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
             grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
             grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
@@ -566,6 +568,7 @@ jobs:
             ccache --zero-stats;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_SPIRAM=y" sdkconfig;
             grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
             grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
@@ -629,6 +632,7 @@ jobs:
             set -e;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y" sdkconfig;
             grep -Fx "CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK=y" sdkconfig;
             grep -Fx "CONFIG_FREERTOS_HZ=1000" sdkconfig;
@@ -673,6 +677,7 @@ jobs:
             set -e;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y" sdkconfig;
             grep -Fx "CONFIG_M5_PLATFORM_EXPECT_TOUGH=y" sdkconfig;
             grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" sdkconfig;
@@ -741,6 +746,7 @@ jobs:
             -D HIPHI_M5_TARGET=${{ matrix.target }}
             -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" build-${{ matrix.target }}/sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_${{ matrix.flash_size }}=y" build-${{ matrix.target }}/sdkconfig;
             if [ "${{ matrix.psram }}" = "true" ]; then grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; else ! grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; fi;
             grep -Fx "CONFIG_M5_PLATFORM_EXPECT_${{ matrix.expected }}=y" build-${{ matrix.target }}/sdkconfig;

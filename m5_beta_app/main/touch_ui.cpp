@@ -69,6 +69,7 @@ struct State {
     bool online = false;
     bool ever_online = false;
     bool dirty = true;
+    bool dimmed = false;
     bool sleeping = false;
     bool picker = false;
     bool settings = false;
@@ -102,10 +103,10 @@ struct State {
     int64_t track_reveal_started = 0;
     int64_t track_reveal_until = 0;
     int64_t last_activity_us = 0;
+    int64_t sleep_started_us = 0;
     int64_t input_next = 0;
     int64_t touch_quarantine_until = 0;
     int64_t haptic_off = 0;
-    int64_t awake_until = 0;
     float last_accel_mag = 1.0f;
     char body_notice[32] = {};
     int64_t body_notice_until = 0;
@@ -115,6 +116,9 @@ struct State {
     int artwork_width = 0;
     int artwork_height = 0;
     uint16_t art_timeout_sec = 0;
+    uint16_t dim_timeout_sec = 0;
+    uint16_t sleep_timeout_sec = 0;
+    uint16_t power_off_timeout_sec = 0;
     uint8_t action_face_variant = 0;
     uint8_t ambient_face_variant = 0;
 } s;
@@ -815,14 +819,52 @@ void stackchan_transport(controller_command_kind_t kind, const char *notice) {
     if (dispatch(controller_command_make(kind))) flash_action(notice);
 }
 
-[[maybe_unused]] void wake_display() {
-    s.awake_until = esp_timer_get_time() + 8000000;
+void wake_display() {
+    const int64_t now = esp_timer_get_time();
     if (s.sleeping) {
         m5_platform_display_wake();
         s.sleeping = false;
     }
+    s.dimmed = false;
+    s.sleep_started_us = 0;
+    s.last_activity_us = now;
     m5_platform_set_brightness(210);
     s.dirty = true;
+}
+
+void enter_connected_sleep(int64_t now) {
+    m5_platform_set_brightness(0);
+    m5_platform_display_sleep();
+    s.dimmed = true;
+    s.sleeping = true;
+    s.sleep_started_us = now;
+    ESP_LOGI(TAG, "%s entered connected display sleep",
+             m5_platform_board_name());
+}
+
+void apply_power_policy(int64_t now, bool artwork_transition_pending) {
+    const m5_power_action_t action = m5_interaction_power_action(
+        now, s.last_activity_us, s.sleep_started_us, s.dim_timeout_sec,
+        s.sleep_timeout_sec, s.power_off_timeout_sec, s.dimmed, s.sleeping,
+        s.setup_mode, artwork_transition_pending);
+    switch (action) {
+    case M5_POWER_ACTION_DIM:
+        m5_platform_set_brightness(20);
+        s.dimmed = true;
+        ESP_LOGI(TAG, "%s display dimmed", m5_platform_board_name());
+        break;
+    case M5_POWER_ACTION_CONNECTED_SLEEP:
+        enter_connected_sleep(now);
+        break;
+    case M5_POWER_ACTION_POWER_OFF:
+        ESP_LOGI(TAG, "%s connected-sleep timeout reached",
+                 m5_platform_board_name());
+        m5_platform_power_off();
+        break;
+    case M5_POWER_ACTION_NONE:
+    default:
+        break;
+    }
 }
 
 void draw_centered(const char *text, int y, int size, uint32_t color) {
@@ -1312,9 +1354,10 @@ void process_input() {
     m5_platform_update();
     [[maybe_unused]] const int64_t now = esp_timer_get_time();
     m5_platform_surface_button_event_t buttons = {};
-    m5_platform_surface_button_event(&buttons);
+    const bool button_activity = m5_platform_surface_button_event(&buttons);
     m5_platform_touch_event_t touch = {};
     [[maybe_unused]] const bool touched = m5_platform_touch_event(&touch);
+    if (button_activity || touched) wake_display();
 
 #if HIPHI_M5_TARGET_ID == 4
     if (wifi_mgr_is_ap_mode()) {
@@ -1334,6 +1377,7 @@ void process_input() {
 #if HIPHI_M5_TARGET_ID == 1
     int32_t delta = 0;
     m5_platform_encoder_delta(&delta);
+    if (delta) wake_display();
     if (s.picker) {
         picker_input(delta, buttons.clicked);
     } else {
@@ -1387,9 +1431,6 @@ void process_input() {
         wake_display(); toggle_playback(); m5_platform_haptic(70); s.haptic_off = now + 50000;
     }
     if (s.haptic_off && now >= s.haptic_off) { m5_platform_haptic(0); s.haptic_off = 0; }
-    if (s.awake_until && now >= s.awake_until && !s.sleeping) {
-        m5_platform_set_brightness(20); s.sleeping = true;
-    }
 #else
     if (buttons.double_clicked) {
         toggle_sounds();
@@ -1534,7 +1575,6 @@ void process_input() {
 }
 
 extern "C" void touch_ui_init(void) {
-    s.awake_until = esp_timer_get_time() + 8000000;
     s.last_activity_us = esp_timer_get_time();
 #if HIPHI_M5_TARGET_ID == 4
     s_stackchan_canvas.setColorDepth(16);
@@ -1578,6 +1618,7 @@ extern "C" void touch_ui_process(void) {
     if (setup_mode != s.setup_mode) {
         s.setup_mode = setup_mode;
         s.dirty = true;
+        if (setup_mode && (s.sleeping || s.dimmed)) wake_display();
 #if HIPHI_M5_TARGET_ID == 4
         if (setup_mode && s.body_enabled)
             m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_SAD);
@@ -1618,12 +1659,18 @@ extern "C" void touch_ui_process(void) {
         now - s.last_activity_us >=
             static_cast<int64_t>(s.art_timeout_sec) * 1000000) {
         s.art_mode = true;
+        wake_display();
         s.dirty = true;
         ESP_LOGI(TAG, "StackChan entered Art mode after %us",
                  static_cast<unsigned>(s.art_timeout_sec));
     }
     if (s.track_reveal_until || stackchan_marquee_needed()) s.dirty = true;
+    const bool artwork_transition_pending = art_eligible && !s.art_mode;
+#else
+    const bool artwork_transition_pending = false;
 #endif
+    if (s.sleeping && s.sleep_timeout_sec == 0) wake_display();
+    apply_power_policy(now, artwork_transition_pending);
     if (s.dirty && !s.sleeping) { s.dirty=false; render(); }
 }
 extern "C" void touch_ui_set_status(bool v){
@@ -1734,15 +1781,28 @@ extern "C" bool touch_ui_zone_picker_is_current_selection(void){return s.zone_se
 extern "C" void touch_ui_update_battery(void){int level=m5_platform_battery_level();if(level!=s.battery){s.battery=level;s.dirty=true;}}
 extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging){
     if (!cfg) return;
+    s.dim_timeout_sec = rk_cfg_get_dim_timeout(cfg, charging);
+    s.sleep_timeout_sec = rk_cfg_get_sleep_timeout(cfg, charging);
+    s.power_off_timeout_sec = rk_cfg_get_deep_sleep_timeout(cfg, charging);
+    if ((s.sleeping && s.sleep_timeout_sec == 0) ||
+        (s.dimmed && !s.sleeping && s.dim_timeout_sec == 0)) {
+        wake_display();
+    } else {
+        s.last_activity_us = esp_timer_get_time();
+    }
 #if HIPHI_M5_TARGET_ID == 4
     s.art_timeout_sec = rk_cfg_get_art_mode_timeout(cfg, charging);
-    s.last_activity_us = esp_timer_get_time();
     ESP_LOGI(TAG, "StackChan Art mode policy: timeout=%us charging=%s",
              static_cast<unsigned>(s.art_timeout_sec),
              charging ? "yes" : "no");
-#else
-    (void)charging;
 #endif
+    ESP_LOGI(TAG,
+             "%s power policy: dim=%us sleep=%us power-off=%us charging=%s",
+             m5_platform_board_name(),
+             static_cast<unsigned>(s.dim_timeout_sec),
+             static_cast<unsigned>(s.sleep_timeout_sec),
+             static_cast<unsigned>(s.power_off_timeout_sec),
+             charging ? "yes" : "no");
 }
 extern "C" bool touch_ui_is_display_sleeping(void){return s.sleeping;}
 extern "C" void touch_ui_show_settings(void){s.settings=true;s.picker=false;s.art_mode=false;s.dirty=true;}

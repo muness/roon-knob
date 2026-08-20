@@ -15,6 +15,7 @@
 #include <cstring>
 #include <esp_log.h>
 #include <esp_random.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 
@@ -90,6 +91,34 @@ void stackchan_motion_fail(const char *reason) {
     s_stackchan_motion.enabled = false;
     s_stackchan_motion.phase = StackChanMotionPhase::idle;
     s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
+}
+
+void stackchan_quiesce_for_sleep() {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
+    s_stackchan_voice.phrase = nullptr;
+    M5.Speaker.stop();
+    M5.Speaker.end();
+    M5StackChan.Motion.setTorqueEnabled(false);
+    M5StackChan.setServoPowerEnabled(false);
+    s_stackchan_motion.has_queued = false;
+    s_stackchan_motion.phase = StackChanMotionPhase::idle;
+    s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_RESTING;
+#endif
+}
+
+void stackchan_resume_from_sleep() {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
+    if (s_stackchan_motion.enabled && !s_stackchan_motion.faulted) {
+        M5StackChan.setServoPowerEnabled(true);
+    }
+    if (s_stackchan_voice.enabled && M5.Speaker.isEnabled() &&
+        !M5.Speaker.isRunning() && !M5.Speaker.begin()) {
+        ESP_LOGW(TAG, "StackChan speaker did not resume after display sleep");
+    }
+    s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
+#endif
 }
 
 void stackchan_pose(int yaw, int pitch, int speed) {
@@ -407,7 +436,17 @@ extern "C" bool m5_platform_haptic(uint8_t strength) {
 }
 
 extern "C" bool m5_platform_battery_is_charging(void) {
-    return s_started &&
+    if (!s_started) return false;
+
+    /* The shared platform contract is external power, not merely charge-in-
+     * progress. StickS3/StopWatch (M5PM1) and StackChan (AXP2101) can report
+     * VBUS even after a full battery stops charging. Without this check a
+     * full USB-powered device incorrectly selects the battery sleep profile.
+     * The exact original M5Dial exposes neither VBUS nor its TP4057 status pins
+     * to M5Unified, so that target remains source-ambiguous and falls back to
+     * the battery profile. */
+    const int16_t vbus_mv = M5.Power.getVBUSVoltage();
+    return vbus_mv >= 4000 ||
            M5.Power.isCharging() == m5::Power_Class::is_charging;
 }
 
@@ -665,6 +704,8 @@ extern "C" void m5_platform_set_brightness(uint8_t brightness) {
 
 extern "C" void m5_platform_display_sleep(void) {
     if (s_started) {
+        m5_platform_haptic(0);
+        stackchan_quiesce_for_sleep();
         M5.Display.sleep();
     }
 }
@@ -672,5 +713,25 @@ extern "C" void m5_platform_display_sleep(void) {
 extern "C" void m5_platform_display_wake(void) {
     if (s_started) {
         M5.Display.wakeup();
+        stackchan_resume_from_sleep();
     }
+}
+
+extern "C" void m5_platform_power_off(void) {
+    if (!s_started) return;
+
+    ESP_LOGI(TAG, "Entering %s board power-off path",
+             m5_platform_board_name());
+    m5_platform_haptic(0);
+    stackchan_quiesce_for_sleep();
+    M5.Display.setBrightness(0);
+    M5.Display.sleep();
+    M5.Display.waitDisplay();
+    M5.Power.powerOff();
+
+    /* The supported exact targets should never return from Power_Class. If a
+     * future board profile does, fail awake through a clean boot instead of
+     * continuing with stopped peripherals and a dark display. */
+    ESP_LOGE(TAG, "Board power-off returned unexpectedly; rebooting");
+    esp_restart();
 }

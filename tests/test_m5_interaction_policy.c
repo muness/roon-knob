@@ -20,5 +20,38 @@ int main(void) {
     assert(!m5_interaction_raise_wake(1.0f, 1.17f));
     assert(m5_interaction_raise_wake(1.0f, 1.19f));
     assert(m5_interaction_raise_wake(1.0f, 0.80f));
+
+    const int64_t start = 1000000;
+    assert(m5_interaction_power_action(
+               start + 29 * 1000000LL, start, 0, 30, 60, 1200,
+               false, false, false, false) == M5_POWER_ACTION_NONE);
+    assert(m5_interaction_power_action(
+               start + 30 * 1000000LL, start, 0, 30, 60, 1200,
+               false, false, false, false) == M5_POWER_ACTION_DIM);
+    /* Sleep outranks dim once both thresholds have elapsed. This catches the
+     * tempting panel-dim-only implementation that caused the original drain. */
+    assert(m5_interaction_power_action(
+               start + 60 * 1000000LL, start, 0, 30, 60, 1200,
+               false, false, false, false) ==
+           M5_POWER_ACTION_CONNECTED_SLEEP);
+    /* A pending retained-artwork transition may defer sleep, but not dimming. */
+    assert(m5_interaction_power_action(
+               start + 60 * 1000000LL, start, 0, 30, 60, 1200,
+               false, false, false, true) == M5_POWER_ACTION_DIM);
+    assert(m5_interaction_power_action(
+               start + 60 * 1000000LL, start, 0, 30, 60, 1200,
+               true, false, false, true) == M5_POWER_ACTION_NONE);
+    /* Board power-off is staged from actual connected-sleep entry rather than
+     * from last activity, so a late panel transition gets its full timeout. */
+    const int64_t slept = start + 60 * 1000000LL;
+    assert(m5_interaction_power_action(
+               slept + 1199 * 1000000LL, start, slept, 30, 60, 1200,
+               true, true, false, false) == M5_POWER_ACTION_NONE);
+    assert(m5_interaction_power_action(
+               slept + 1200 * 1000000LL, start, slept, 30, 60, 1200,
+               true, true, false, false) == M5_POWER_ACTION_POWER_OFF);
+    assert(m5_interaction_power_action(
+               slept + 1200 * 1000000LL, start, slept, 30, 60, 1200,
+               true, true, true, false) == M5_POWER_ACTION_NONE);
     return 0;
 }

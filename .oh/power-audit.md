@@ -2,12 +2,15 @@
 
 ## Session
 
-- Phase: execute, with hardware validation still open
+- Phase: ship-to-draft, with exact-artifact hardware validation still open
 - Updated: 2026-08-20
-- Working branch: `codex/issue-191-atom-s3-joystick`
-- Starting commit: `97b700f4f69ad0c55297c3e79e09ddcff85a7332`
-- M5 beta reference: `codex/issue-226-m5-betas` at
-  `3296917` (read-only during this slice)
+- Authoritative branch: `codex/issue-226-m5-betas`
+- Starting commit: `32969178d73b2ec661ad51f264bc9bbb018dd733`
+- Cross-target source baseline integrated from:
+  `codex/issue-191-atom-s3-joystick` at
+  `97b700f4f69ad0c55297c3e79e09ddcff85a7332`
+- Firmware source: the commit containing this report; its exact SHA and build
+  artifact hashes are recorded in issue #228 after the clean build completes
 - Issue: <https://github.com/muness/roon-knob/issues/228>
 - User observation: all tested low-power modes have unacceptable battery life;
   no exact-artifact current or energy traces were available for this audit
@@ -58,10 +61,10 @@ Success has two levels:
 | Waveshare RLCD 4.2 | Connected, static reflective display | Shared Wi-Fi explicitly fully awake; no target power state machine | Shared modem sleep and opportunistic Light-sleep | Exact usage model, input wake, and whether connectionless operation is desirable |
 | M5Stack Tough | Backlight/panel sleep via M5Unified; application continues at 100 Hz | No SoC/PMIC sleep; frequent input/UI wakeups | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | Qualify touch/button/RTC wake before using official `Power_Class` deep/timer sleep |
 | AtomS3 + Atom JoyStick | Panel sleep; connected controller loop remains active | No SoC sleep; base has its own battery and controller behavior | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | Decide whether battery runtime or always-connected responsiveness owns the profile |
-| M5Dial beta at `3296917` | No configured dim/sleep policy | Official board has a power-hold shutdown path, but beta does not invoke it | Audited only | Add exact M5Dial policy using official wake/power-off semantics |
-| M5StickS3 beta at `3296917` | No configured dim/sleep policy | Panel/SoC remain active | Audited only | Qualify exact revision, button/IMU/RTC wake, then add target policy |
-| M5StopWatch beta at `3296917` | After 8 s sets brightness to 20 and marks the UI sleeping | Screen remains lit; SoC remains active | Audited only | Turn the panel off and qualify official target wake/power behavior |
-| M5Stack Chan beta at `3296917` | No idle sleep policy | Connected loop stays active; servo/motion power is a target-owned load | Audited only | Explicit idle pose, torque/rail shutdown, wake policy, and recovery test |
+| M5Dial beta | No configured dim/sleep policy | Panel, SoC, and radio remain active; exact board has a GPIO46 power-hold path | Shared dim → connected panel sleep → M5Unified power-off ladder; button/touch/encoder wake while connected; setup inhibitor | Original Dial cannot report USB/external power, so source classification and power-button recovery require hardware qualification |
+| M5StickS3 beta | No configured dim/sleep policy | Panel/SoC remain active | Shared power ladder; button/IMU wake while connected; M5PM1 power-off; VBUS-aware external-power policy | Verify exact unit/revision, button wake after power-off, and raise-to-wake thresholds |
+| M5StopWatch beta | After 8 s sets brightness to 20 and marks the UI sleeping | Screen remains lit; SoC remains active | Removed fake sleep; shared power ladder; haptic off before sleep; M5PM1 power-off; VBUS-aware external-power policy | Verify touch/button/raise wake, vibration shutdown, and PMIC power-button recovery |
+| M5Stack Chan beta | No idle sleep policy | Connected loop stays active; servo rail and speaker remain enabled | Shared power ladder; speaker task/amp stopped; servo torque and VM rail disabled in connected sleep; AXP2101 power-off; peripherals restored on wake; VBUS-aware external-power policy | Qualify physical balance/load behavior, servo/speaker restoration, AXP wake, and the BSP motion task's residual 20 ms wake cadence |
 
 ### Dial board-level evidence
 
@@ -102,20 +105,35 @@ rail and restore sequence. This audit preserves that safety boundary.
 
 ### M5 boundary
 
-The local M5Unified implementation used by these builds defines
+The pinned M5Unified 0.2.19 implementation used by these builds defines
 `M5.Display.sleep()` as brightness zero plus panel sleep. It does not enter SoC
-Deep-sleep or power the device off. M5Unified also provides `Power_Class`
-`lightSleep`, `deepSleep`, `timerSleep`, and `powerOff`, but the correct behavior
-is target-specific:
+Deep-sleep or power the device off. The implemented beta ladder therefore keeps
+that state explicitly named **connected display sleep**, then calls
+`M5.Power.powerOff()` only after the separately configured deep-sleep timeout.
+The pinned source resolves that API through exact board hardware:
 
 - Tough has an AXP192 and BM8563 RTC; M5Stack documents Light-sleep,
   Deep-sleep, and timer-sleep examples.
-- M5Dial has a power-hold/wake circuit. M5Stack reports about 1.9 µA for the
-  original Dial on battery in its qualified power-off state (and different
-  figures for Dial V1.1). That number is not evidence about the Waveshare HiPhi
-  Dial and must never be transferred between products or revisions.
-- M5Stack Chan additionally owns motors/servos. CPU sleep without torque/rail
-  policy can leave a large board-level load untouched.
+- Original M5Dial has a GPIO46 power-hold/wake circuit. M5Stack reports 1.9 µA
+  for its battery-only sleep condition. The same documentation says GPIO46
+  power-off applies only without external USB. Its TP4057 status pins are not
+  routed to the ESP32-S3, and M5Unified reports neither VBUS nor charge state,
+  so firmware cannot reliably distinguish battery from external power on this
+  exact revision. That limitation is recorded rather than guessed around.
+- StickS3 and StopWatch use M5PM1. Pinned M5Unified dispatches `powerOff()` to
+  M5PM1, and provides a VBUS voltage reading independent of active charging.
+- StackChan's CoreS3 uses AXP2101. Pinned M5Unified dispatches `powerOff()` to
+  AXP2101. The official StackChan BSP exposes servo VM rail control; M5Unified's
+  speaker `end()` path also disables the amplifier callback.
+- StackChan's official BSP starts a 50 Hz motion task even when idle. This can
+  shorten automatic Light-sleep residency. Safely suspending it requires a BSP
+  lifecycle API; force-suspending it by task name can freeze its private mutex,
+  so that tempting patch is rejected pending measurement or upstream support.
+
+For boards with a readable PMIC, external-power classification now treats VBUS
+at or above 4 V as external power even when a full battery is no longer
+actively charging. This fixes the platform contract's prior active-charge-only
+interpretation. It cannot fix the original Dial's missing source signal.
 
 ## Solution Space
 
@@ -169,6 +187,11 @@ revision-sensitive rail writes.
 - Parking the unused classic ESP32 removes a meaningful load; magnitude remains
   unmeasured.
 - A 20 Hz asleep input loop still detects real Tough/Atom interactions.
+- M5 connected-sleep input polling still sees brief real button/touch/encoder
+  events, and the exact PMIC/power-hold path returns through the documented
+  physical control.
+- Cutting StackChan's servo VM rail while idle is mechanically safe for the
+  user's installation and restores cleanly before the next gesture.
 - USB-input measurements predict battery runtime only after charger/PMIC and
   test-topology effects are separated.
 
@@ -201,8 +224,8 @@ revision-sensitive rail writes.
 - Benefit: makes “true sleep” a testable board contract rather than a UI label.
 - Failure mode: an incorrect inhibitor or wake source can make a controller
   unavailable; default-off rollout and fail-awake checks are required.
-- Decision: selected as the durable direction. Dial hardening is included now;
-  Frame follows issue #160; M5 profiles follow the exact beta targets.
+- Decision: selected as the durable direction. Waveshare Dial hardening and the
+  four exact M5 beta profiles are included now; Frame still follows issue #160.
 
 ### Candidate D — redesign: discontinuous controller
 
@@ -241,7 +264,11 @@ revision-sensitive rail writes.
 | BLE teardown corrupts preference/bond state | Connected, disconnected, scanning, disabled, and teardown-timeout sleep cycles | Before public beta |
 | Auxiliary image is flashed to the wrong SoC | Boot-log chip identity plus physical USB orientation checklist | Every auxiliary flash |
 | Auxiliary ESP32 is not a dominant load | A/B board-energy trace with identical main firmware | Before further auxiliary work |
-| 20 Hz M5 asleep input misses taps | Short/long/edge touch and button qualification | Before accepting cadence change |
+| 20 Hz M5 asleep input misses taps | Short/long/edge touch, encoder, and button qualification on every affected profile | Before accepting cadence change |
+| M5 board power-off cannot recover | Repeated battery-only power-off and documented button/RTC wake on the exact revision | Before distributing M5 beta images |
+| Original M5Dial misclassifies external power | USB, rear-terminal, and battery-only traces plus observed policy log; no numeric or safety claim from the Boolean alone | Before enabling unattended deployment |
+| StackChan strands or jolts its body | Sleep during motion, torque release, VM rail measurement, manual displacement, wake, neutral gesture, speaker replay | Before distributing StackChan beta |
+| StackChan BSP motion task dominates idle | Compare PM residency/current with body enabled/disabled; request a coordinated BSP suspend API if material | After first FNB-C2 ranking trace |
 | Frame PMIC write strands hardware | Register readback, rail voltages, completed e-ink refresh, repeated KEY/timer wake | Before any rail-gating code |
 | Deep sleep costs more than it saves | Integrate sleep plus wake/reconnect energy across real idle durations | Before choosing timeout |
 
@@ -253,11 +280,12 @@ runtime aim. Never borrow a current number or wake recipe across product names.
 
 ### Execution handoff
 
-This slice implements:
+The authoritative branch implements:
 
 1. Shared `WIFI_PS_MIN_MODEM` at STA startup.
-2. Shared automatic Light-sleep that reads and preserves any existing target
-   min/max CPU range.
+2. Startup dynamic frequency scaling from crystal frequency to the configured
+   maximum on all six app families, plus shared automatic Light-sleep that
+   reads and preserves any target-owned min/max range.
 3. A 20 Hz asleep UI/input cadence for the current Tough/Atom path.
 4. Dial ext1 wake preflight using the board's external pull-ups, with no forced
    RTC peripheral domain.
@@ -266,33 +294,48 @@ This slice implements:
 7. A separately flashed classic-ESP32 parking image that holds DAC XSMT low and
    enters Deep-sleep with no wake source.
 8. CI packaging for the auxiliary image, deliberately excluded from releases.
+9. One tested M5 beta transition policy across Dial, StickS3, StopWatch, and
+   StackChan: dim → connected display sleep → exact-board power-off.
+10. Physical M5 input wakes connected sleep; setup mode inhibits it; a late
+    retained-artwork transition receives a fresh sleep window rather than
+    permanently suppressing sleep.
+11. M5 PMIC boards use VBUS presence rather than active charging alone when
+    selecting external-power policy.
+12. StackChan connected sleep stops speaker playback/I2S/amplifier, releases
+    torque, cuts the servo VM rail, clears queued choreography, and restores
+    enabled peripherals on wake.
 
 It does not implement or claim:
 
 - Frame S3 Deep-sleep or AXP2101 rail gating.
-- M5 beta sleep/power-off behavior on the `3296917` branch.
 - A measured current, percentage reduction, or battery-life number.
-- A public beta or hardware-qualified artifact.
+- A safe original-M5Dial external-power detector; the hardware exposes none to
+  the controller in the checked schematic/API.
+- A public release or hardware-qualified artifact.
 
 ## Build and artifact evidence
 
-All six local candidates build with ESP-IDF 5.5.5. The merged images below are
-bench-test inputs, not hardware-qualified releases. The Atom image also contains
-the user's pre-existing uncommitted `atom_app/main/touch_ui.cpp` change, so its
-hash identifies this exact working tree rather than commit `97b700f` alone.
+The clean ESP-IDF 5.5.5 matrix for the report's containing commit covers nine
+primary images plus the separately flashed Waveshare auxiliary image:
 
-| Target | Merged image | Bytes | SHA-256 |
-| --- | --- | ---: | --- |
-| Waveshare Dial main ESP32-S3 | `idf_app/build/hiphi_dial_power_audit_merged.bin` | 2,157,264 | `bb225d6a812b77bd5c298ad262c1280a4953b70fe8c87626aa16901868266494` |
-| Frame | `frame_app/build/hiphi_frame_power_audit_merged.bin` | 1,424,048 | `35f5c523af4a533397989f3e6289437dd47e837b940493f7e3f7006c63ee93bf` |
-| RLCD 4.2 | `rlcd_app/build/hiphi_rlcd_42_power_audit_merged.bin` | 1,755,392 | `d19261a40c44f64576620fff0f0604aeb3a81ce4a4de05d63a73ea9973ff6862` |
-| AtomS3 + JoyStick | `atom_app/build/hiphi_joy_power_audit_merged.bin` | 1,295,520 | `cda24dca4f3bc44fd477ecf8c800e85395060bbdf999ab7967672635996d0df4` |
-| M5Stack Tough | `tough_app/build/hiphi_tough_power_audit_merged.bin` | 1,314,224 | `748b3d2270b7788673ee9f5dc97fde7e7a2095c484d3a9a043882d80773620ea` |
-| Waveshare Dial auxiliary ESP32 | `knob_aux_app/build/hiphi_knob_aux_park_merged.bin` | 207,936 | `e15e4ade4320c1965fa3e43eeab8aafd6ae175a0602321fbd064110049caca29` |
+- Waveshare Dial main, Frame, RLCD 4.2, AtomS3 + JoyStick, and M5Stack Tough;
+- M5Dial, M5StickS3, M5StopWatch, and StackChan betas;
+- classic-ESP32 auxiliary parking firmware.
 
-Automated checks passed: Wi-Fi provisioning lifecycle, BLE-disabled stub,
-controller dependency policy and negative fixture, Dial identity, workflow YAML
-parse, and `git diff --check`.
+For each build, CI and local verification require PERF optimization, the exact
+target flash size/profile, and `CONFIG_PM_DFS_INIT_AUTO=y`. M5 beta profiles use
+independent build directories and target-specific generated sdkconfig files.
+Merged-image byte sizes and SHA-256 values are intentionally recorded with the
+exact containing commit in issue #228 after the final clean build, avoiding a
+self-referential report commit or hashes from the superseded joystick worktree.
+
+The complete host contract suite passes, including the pure M5 power ladder,
+StackChan choreography, configuration ownership, input/action/presentation,
+Wi-Fi provisioning lifecycle, BLE-disabled stub, controller dependency policy
+and negative fixture, Dial identity, M5 hardware boundary, workflow YAML parse,
+and `git diff --check`. macOS cannot run LeakSanitizer's leak detector; those
+sub-runs self-skip as designed while their non-sanitized twins pass. GitHub CI
+remains the Linux sanitizer authority.
 
 ## Fact-checker accuracy report
 
@@ -308,8 +351,12 @@ parse, and `git diff --check`.
 | Parking the auxiliary ESP32 will materially improve runtime | Unverified | Strong mechanism, no A/B energy trace | Present as the highest-value board hypothesis and measure it first |
 | GPIO7/GPIO8 wake no longer requires RTC peripheral forced on | Verified for this schematic/API pairing | External 10 kΩ pull-ups in schematic; ESP-IDF ext1 hold behavior | Hardware-test both encoder directions and held-low recovery |
 | GPIO47 can be held low across ESP32-S3 Deep-sleep | Verified | ESP-IDF GPIO hold documentation plus board backlight gate schematic | Release the hold before LEDC reclaims the pad on boot |
-| `M5.Display.sleep()` is full device sleep | Contradicted | Local pinned M5Unified implementation sets brightness zero and panel sleep only | Call it “panel sleep” |
-| M5Stack devices can reach microamp-class sleep | Partially verified, revision-specific | M5Stack reports 1.9 µA for original M5Dial battery power-off and 6 µA for Dial V1.1 battery-only sleep | Use only as target/revision potential, never as HiPhi Dial evidence |
+| `M5.Display.sleep()` is full device sleep | Contradicted | Pinned M5Unified 0.2.19 sets brightness zero and panel sleep only | Call it “connected display sleep” in the implemented ladder |
+| Pinned M5Unified `powerOff()` selects exact M5 hardware paths | Verified for source/API mapping | M5Unified 0.2.19 dispatches original Dial through `power_hold`, StickS3/StopWatch through M5PM1, and StackChan/CoreS3 through AXP2101 before ESP Deep-sleep fallback | Source qualification is not physical wake qualification; repeat on every exact unit |
+| A full USB-powered M5 PMIC board is always “charging” | Contradicted | M5Unified separates `isCharging()` from `getVBUSVoltage()`; charge status can go false when full while VBUS remains readable | Treat valid VBUS as external power for M5PM1/AXP2101 targets |
+| Original M5Dial firmware can reliably detect external USB/DC power | Contradicted | Exact schematic leaves TP4057 `CHRG`/`STDBY` unconnected to the S3 and M5Unified exposes no Dial VBUS channel | Record source as ambiguous; validate unattended behavior before deployment |
+| StackChan panel sleep also turns off its servo/speaker domains | Contradicted before this slice | Official BSP exposes a separate servo VM switch; M5Unified speaker has a separate runtime/amplifier lifecycle | Explicitly end speaker and cut servo VM in the target platform path |
+| M5Stack devices can reach microamp-class sleep | Partially verified, revision-specific | M5Stack reports 1.9 µA for original M5Dial battery sleep and 6 µA for Dial V1.1 battery-only sleep | Use only as target/revision potential, never as Waveshare HiPhi Dial evidence or a firmware result |
 | The FNB-C2 has a 20-bit ADC, 1 µA displayed current resolution, 0–6.5 A range, ±(0.5‰ + 2 digits) current accuracy, 2 sps–1 ksps low-speed waveform, and 9-hour logging | Verified | FNIRSI official FNB-C2 product/specification page | Resolution is not the same as guaranteed accuracy or low-current burden performance |
 | An FNB-C2 alone measures internal battery-rail current while the device is self-powered | Contradicted by topology | Instrument is an inline USB-C VBUS tester; self-powered battery current does not pass through it | Use USB-path A/B tests; add a safe series battery fixture/bench instrument for true battery rail |
 
@@ -323,7 +370,13 @@ parse, and `git diff --check`.
 - Auto Light-sleep residency and the identity of remaining PM locks are unknown.
 - Frame's charging state is still Boolean; issue #160 requires a tri-state
   `{charging, not_charging, unknown}` before true sleep.
-- M5 target wake behavior has not been physically qualified for these artifacts.
+- M5 target connected-sleep and power-off wake behavior has not been physically
+  qualified for these artifacts.
+- Original M5Dial external-power status is unobservable through the checked
+  controller pins/API; its default battery policy under external supply remains
+  an explicit deployment risk, not a solved fact.
+- StackChan's BSP motion task still wakes every 20 ms even with its servo rail
+  off; whether that materially dominates connected sleep is unmeasured.
 
 ### Expert review and source gaps
 
@@ -333,6 +386,10 @@ parse, and `git diff --check`.
 - Exact AP beacon/DTIM settings, RSSI, battery voltage, temperature, and charger
   state must accompany any comparative measurement.
 - A board photo/revision record should accompany the first Dial auxiliary flash.
+- M5 qualification must record the exact runtime board ID, power input path,
+  battery state, and physical wake control; product-family names are not enough.
+- StackChan qualification must include mechanical safety with torque and VM off,
+  not just an electrical current trace.
 
 ### Corrections made during this audit
 
@@ -345,6 +402,14 @@ parse, and `git diff --check`.
   remains associated and outgoing traffic wakes the station.
 - Corrected the shared PM implementation so enabling Light-sleep preserves a
   target's existing DFS range instead of overwriting it.
+- Corrected the configuration-only PM gap by enabling ESP-IDF startup DFS on
+  every current application profile.
+- Corrected M5StopWatch's “sleeping” Boolean: its old path only set brightness
+  to 20 and never slept the panel or SoC.
+- Corrected M5 charging semantics on PMIC boards: external VBUS persists after
+  active charging ends.
+- Corrected StackChan's display-only model to include its speaker amplifier,
+  servo torque, servo VM rail, and residual BSP task cadence.
 - Kept M5Dial current figures separate from the unrelated Waveshare Dial.
 
 ## FNB-C2 measurement protocol
@@ -419,77 +484,143 @@ The break-even time determines whether true sleep helps a real listening gap.
 A very low minimum current can still lose if the controller repeatedly wakes,
 reconnects, refreshes, or charges.
 
-## Review report
+## Review
 
-### Scope inspected
+**Aim:** remove all source-provable low-hanging power waste across the current
+firmware families, with `codex/issue-226-m5-betas` as the authoritative branch,
+while preserving exact-hardware recovery gates.
 
-- Full working-tree diff excluding the user's pre-existing
-  `atom_app/main/touch_ui.cpp`, `.impeccable/`, and Python cache changes.
-- Shared Wi-Fi/PM lifecycle, Dial sleep entry, BLE host lifecycle, M5 slept-loop
-  cadence, auxiliary ESP32 image, target build isolation, tests, and CI.
-- Read-only target audit of `3296917` for M5Dial, StickS3, StopWatch, and
-  StackChan power behavior.
+**Status:** CONTINUE to draft artifact; PAUSE before public beta/release.
 
-### Findings
+### Alignment check
 
-1. **Resolved during review:** the first shared PM draft set equal min/max
-   frequencies and would have overwritten Dial's earlier 80–240 MHz DFS policy
-   because Wi-Fi starts later. It now reads the current PM configuration and
-   changes only `light_sleep_enable`.
-2. **Hardware gate:** compile success cannot validate Dial wake, BLE teardown,
-   auxiliary flashing orientation, M5 touch cadence, or current draw.
-3. **Accepted policy change:** the old `wifi_power_save_enabled` setting no
-   longer disables modem sleep during normal display wake. Treat MIN_MODEM as
-   the supported STA baseline; retain `WIFI_PS_NONE` only as an explicit
-   diagnostic override if one is later required.
-4. **Usability risk:** 20 Hz asleep input sampling is expected to be adequate,
-   but short touch/button behavior needs exact Tough/Atom tests.
-5. **Delivery boundary:** auxiliary firmware is built and uploaded separately
-   and is not included in a release, preventing accidental main-SoC flashing.
+- **Necessary:** yes. Forced awake Wi-Fi, inactive startup DFS, display-only M5
+  sleep, an unparked Dial auxiliary ESP32, and energized StackChan peripherals
+  directly explain plausible whole-board waste.
+- **Aligned:** yes. Each change either lowers connected-idle work, stages true
+  board shutdown, or makes a hidden always-on load explicit.
+- **Sufficient:** sufficient for the pre-instrument source pass, not sufficient
+  for a battery-life claim. Frame PMIC work and StackChan BSP-task work remain
+  gated because source evidence cannot prove their safe physical behavior.
+- **Mechanism clear:** yes. Radio modem sleep + startup DFS + automatic
+  Light-sleep address shared SoC/radio idle; target ladders separately address
+  panels, PMIC/power-hold, BLE, a second MCU, haptic, speaker, and servo rail.
+- **Changes complete:** yes for source, host contracts, CI gates, and build
+  matrix; no for exact-artifact flash/wake/current verification.
+- **Risks retired:** source and build risks are retired. Physical wake,
+  interaction capture, AP reliability, mechanical behavior, and energy impact
+  are explicitly accepted only as hardware gates.
+
+### Frame check
+
+The frame still holds: the failure was never one bad timeout; “sleep” had been
+used for unrelated panel, SoC, radio, and board states. Evidence strengthened
+the per-target state-machine frame. It did not justify a universal PMIC recipe.
+
+### Drift detected
+
+- **Branch drift.** Started as implementation on the joystick branch with M5
+  read-only; user clarified `3296917` is the latest branch and must contain all
+  fixes. Route: adjusted by replaying the cross-target slice onto that lineage
+  and implementing the four M5 profiles there.
+- **Scope expansion, authorized.** M5 inspection exposed StopWatch fake sleep,
+  full-battery USB misclassification, and StackChan energized peripherals.
+  These are low-hanging power defects inside the requested “ALL fixes” scope.
+
+### Findings resolved during review
+
+1. Shared PM originally risked overwriting target frequency ranges; it now
+   preserves the effective range and only enables automatic Light-sleep.
+2. Merely compiling PM support left non-Dial targets at a fixed startup
+   frequency; every application profile now enables startup DFS and CI asserts
+   it.
+3. M5 active-charge status could go false on full USB power; PMIC targets now
+   classify readable VBUS as external power.
+4. Reapplying a config that disables the current dim/sleep state could leave a
+   dark UI; policy application now wakes and reconciles that state.
+5. Force-suspending StackChan's private motion task was rejected because it can
+   freeze the BSP mutex; its residual cadence is a measurement-ranked follow-up.
+
+### Needs human verification
+
+- Exact revision/board ID and input capture at the 20 Hz connected-sleep loop.
+- Every power-off and recovery path, including held controls and external power.
+- Dial auxiliary USB orientation and recovery with the vendor image.
+- BLE state/bond survival across repeated Waveshare Dial sleep cycles.
+- StackChan torque/VM-off mechanical safety plus servo/speaker restoration.
+- Sustained Wi-Fi control/reconnect behavior on representative AP/RSSI/DTIM.
+- FNB-C2 energy traces; no model review can establish current or battery life.
 
 ### Decision
 
-**CONTINUE to draft hardware validation.** No source-level blocker remains for
-the low-hanging slice. Do not call it fixed, publish current/battery claims, or
-promote the firmware to beta until the hardware gates above pass.
+Continue through a local branch commit and bench-test artifacts. The completion
+gate is intentionally open: do not mark issue #228 fixed or promote a public
+beta until the exact-artifact hardware checklist is recorded.
 
-## Dissent report
+## Dissent
 
-### Verdict
+**Decision under review:** ship one broad low-hanging power slice across shared,
+Waveshare, and M5 firmware before instrumented measurements.
 
-**ADJUST, then proceed.** The direction is sound, but “we enabled sleep” is not
-yet equivalent to “battery life is solved.”
+**Stakes:** a wrong sleep transition can make a physical controller unavailable;
+a weak transition can create false confidence while board-level loads dominate.
 
-### Strongest contrary case
+**Confidence before dissent:** medium-high for source waste, low for magnitude.
 
-- Modem sleep may contribute less than expected if 10/50 ms tasks, BLE, HTTP,
-  or a low-DTIM AP keep waking the system.
-- The Dial's auxiliary ESP32, regulators, DAC path, and fixed peripherals can
-  dominate after the S3 is asleep.
-- The Frame may require a discontinuous product mode or PMIC work to improve by
-  an order of magnitude; connected idle alone may not satisfy the aim.
-- Deep sleep is not automatically better: reconnection and e-paper refresh
-  energy can exceed the saved idle energy for short gaps.
-- Changing Wi-Fi power policy everywhere creates a reliability regression
-  surface that unit tests and builds cannot exercise.
+### Steel-man position
 
-### Adjustments accepted
+The selected changes remove known waste with high mechanism confidence, use
+official exact-board APIs, remain recoverable, and expose a clean state ladder
+for the coming instrument to rank what remains. Waiting for the meter would
+waste its first sessions rediscovering defects already proven in source.
 
-- Make no numeric savings claim before paired traces.
-- Preserve target CPU-frequency policy in shared PM setup.
-- Treat the auxiliary ESP32 as a separate, recoverable, orientation-sensitive
-  artifact with vendor recovery documented.
-- Keep Frame PMIC work out of this slice and uphold issue #160's default-off,
-  fail-awake contract.
-- Measure transition energy and break-even time, not just steady minimum draw.
-- Audit PR #227 targets now, but implement their exact power profiles only on
-  the branch that contains them.
+### Contrary evidence
 
-### Remaining blockers
+1. Automatic Light-sleep can be enabled yet achieve little residency when UI,
+   bridge, BLE, HTTP, or the StackChan 50 Hz motion task keeps waking the SoC.
+2. Original M5Dial cannot report external power, so a Boolean configuration
+   model necessarily chooses the battery profile in an ambiguous state.
+3. Waveshare Dial regulators/fixed peripherals or Frame PMIC rails may dominate
+   after the implemented SoC/radio fixes.
+4. Power-off/reconnect energy may exceed saved idle energy for short gaps.
+5. M5Unified source dispatch proves API selection, not the owned unit's wake,
+   balance, peripheral restore, or charger behavior.
 
-- Exact-artifact physical power and recovery evidence.
-- Frame tri-state charging/inhibitor model and qualified wake path.
-- Exact M5 beta profile integration on `codex/issue-226-m5-betas`.
+### Pre-mortem scenarios
+
+1. **Functional failure:** one target powers off and its expected input cannot
+   recover it, or StackChan wakes with dead audio/body control.
+2. **Adoption failure:** users disable the new ladder because reconnect or
+   interaction latency makes the dedicated controller feel unreliable.
+3. **Opportunity cost:** shared tuning produces a modest win while the Frame
+   PMIC, Dial auxiliary/fixed rails, or StackChan BSP cadence dominates; effort
+   should have shifted to discontinuous operation or board power domains.
+
+### Hidden assumptions
+
+| Assumption | Evidence | Risk if wrong | Test |
+| --- | --- | --- | --- |
+| MIN_MODEM preserves control reliability | ESP-IDF contract; outgoing traffic wakes STA | misses/reconnect storms | long run at weak RSSI and real AP DTIM |
+| Tasks leave useful Light-sleep windows | tickless idle and longer sleeping cadence | negligible savings | trace plus PM-lock/residency diagnostic build |
+| M5 power buttons recover exact artifacts | M5 docs and pinned `Power_Class` mapping | unavailable device | repeated battery/USB power-off/wake matrix |
+| StackChan can safely depower servos at rest | official VM/torque APIs | mechanical drop/jolt or bad restore | loaded sleep-during-motion test and rail trace |
+| Original M5Dial battery policy is acceptable when source is unknown | battery use case and recoverable button wake | external unit disconnects unexpectedly | USB/rear-terminal/battery policy observation |
+| Auxiliary ESP32 is material | always-enabled SoC with active factory image | flashing risk for little gain | factorial main/aux A/B energy trace |
+
+### Reconstructed story and decision
+
+- **Still true:** several large mistakes were source-provable and should be
+  removed before measurement.
+- **Weakest assumption:** that automatic connected-idle mechanisms gain enough
+  residency on the real task/AP workload to matter.
+- **Changed situation model:** M5 is not one easy family; PMIC-equipped targets
+  have good source observability, while original Dial power source and
+  StackChan's BSP task remain explicit exceptions.
+- **Recommendation:** ADJUST, then proceed to draft artifacts. Keep every
+  numeric/hardware claim open, preserve the original-Dial ambiguity in logs and
+  documentation, and let the first meter run rank residual tasks/rails.
+- **Confidence after dissent:** high that the branch removes genuine waste;
+  medium-low that it reaches the desired runtime without the next measured pass.
 
 ## Primary sources
 
@@ -519,5 +650,17 @@ yet equivalent to “battery life is solved.”
   <https://docs.m5stack.com/en/core/M5Dial>
 - M5Stack Dial wake examples:
   <https://docs.m5stack.com/en/arduino/m5dial/wakeup>
+- M5Stack original Dial schematic:
+  <https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/499/Sch_M5Dial.pdf>
+- M5Stack StickS3 wake examples:
+  <https://docs.m5stack.com/en/arduino/m5sticks3/wakeup>
+- M5Stack StopWatch exact product documentation:
+  <https://docs.m5stack.com/en/core/StopWatch>
+- M5Stack Chan exact product documentation:
+  <https://docs.m5stack.com/en/StackChan>
+- M5Stack Chan servo documentation:
+  <https://docs.m5stack.com/en/arduino/stackchan/servo>
+- Pinned M5Unified power API implementation (local build uses 0.2.19):
+  <https://github.com/m5stack/M5Unified/blob/master/src/utility/Power_Class.cpp>
 - FNIRSI FNB-C2 official specifications:
   <https://www.fnirsi.com/products/fnb-c2>

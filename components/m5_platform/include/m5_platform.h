@@ -163,6 +163,11 @@ void m5_platform_set_brightness(uint8_t brightness);
 void m5_platform_display_sleep(void);
 void m5_platform_display_wake(void);
 
+/* Enter the exact board's M5Unified-qualified PMIC/power-hold shutdown path.
+ * This is a reboot boundary and normally does not return; the physical power
+ * button is the recovery path for the supported M5 beta boards. */
+void m5_platform_power_off(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -30,9 +30,10 @@ static const char *s_last_error = NULL;  // Last disconnect reason for UI displa
 /*
  * All supported ESP targets already enable tickless idle in sdkconfig. Keep
  * any target-owned DFS range intact, but let ESP-IDF enter automatic
- * Light-sleep whenever every task and radio driver is idle. Targets without a
- * DFS policy retain ESP-IDF's current equal min/max frequencies, so this shared
- * baseline cannot silently slow active rendering.
+ * Light-sleep whenever every task and radio driver is idle. Target defaults
+ * enable ESP-IDF's startup DFS range (XTAL to the configured maximum); a
+ * target such as the Waveshare Dial may deliberately narrow that range before
+ * Wi-Fi starts, and this function preserves the effective values.
  */
 static void configure_connected_idle_power(void) {
 #if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
