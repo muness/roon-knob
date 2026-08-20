@@ -69,7 +69,7 @@ void stackchan_voice_note(uint8_t index) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     const auto &note = s_stackchan_voice.phrase->notes[index];
     if (!M5.Speaker.tone(note.frequency_hz, note.duration_ms, 0, true)) {
-        ESP_LOGE(TAG, "StackChan speaker rejected note %u for %s",
+        ESP_LOGE(TAG, "Kizz speaker rejected note %u for %s",
                  static_cast<unsigned>(index), s_stackchan_voice.phrase->name);
         s_stackchan_voice.phrase = nullptr;
         return;
@@ -82,7 +82,7 @@ void stackchan_voice_note(uint8_t index) {
 }
 
 void stackchan_motion_fail(const char *reason) {
-    ESP_LOGE(TAG, "StackChan body language disabled: %s", reason);
+    ESP_LOGE(TAG, "Kizz body language disabled: %s", reason);
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     M5StackChan.Motion.setTorqueEnabled(false);
     M5StackChan.setServoPowerEnabled(false);
@@ -115,7 +115,7 @@ void stackchan_resume_from_sleep() {
     }
     if (s_stackchan_voice.enabled && M5.Speaker.isEnabled() &&
         !M5.Speaker.isRunning() && !M5.Speaker.begin()) {
-        ESP_LOGW(TAG, "StackChan speaker did not resume after display sleep");
+        ESP_LOGW(TAG, "Kizz speaker did not resume after display sleep");
     }
     s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
 #endif
@@ -273,17 +273,17 @@ extern "C" bool m5_platform_begin(void) {
                 M5.Speaker.setAllChannelVolume(255);
                 if (M5.Speaker.begin()) {
                     ESP_LOGI(TAG,
-                             "StackChan proto-voice ready via M5Unified: "
+                             "Kizz proto-voice ready via M5Unified: "
                              "running=%d master=%u channel=%u",
                              M5.Speaker.isRunning(), M5.Speaker.getVolume(),
                              M5.Speaker.getChannelVolume(0));
                 } else {
-                    ESP_LOGW(TAG, "StackChan M5Unified speaker did not start");
+                    ESP_LOGW(TAG, "Kizz M5Unified speaker did not start");
                 }
             } else {
-                ESP_LOGW(TAG, "StackChan speaker unavailable to M5Unified");
+                ESP_LOGW(TAG, "Kizz speaker unavailable to M5Unified");
             }
-            ESP_LOGI(TAG, "Qualified StackChan via M5Stack BSP: yaw=%d pitch=%d",
+            ESP_LOGI(TAG, "Qualified Kizz on M5StackChan via M5Stack BSP: yaw=%d pitch=%d",
                      angles.x, angles.y);
         }
 #endif
@@ -324,7 +324,7 @@ extern "C" const char *m5_platform_board_name(void) {
            s_board == M5_PLATFORM_BOARD_DIAL ? "M5 Dial" :
            s_board == M5_PLATFORM_BOARD_STICKS3 ? "M5StickS3" :
            s_board == M5_PLATFORM_BOARD_STOPWATCH ? "M5Stack StopWatch" :
-           s_board == M5_PLATFORM_BOARD_STACKCHAN ? "StackChan" :
+           s_board == M5_PLATFORM_BOARD_STACKCHAN ? "Kizz" :
            "unknown";
 }
 
@@ -439,7 +439,7 @@ extern "C" bool m5_platform_battery_is_charging(void) {
     if (!s_started) return false;
 
     /* The shared platform contract is external power, not merely charge-in-
-     * progress. StickS3/StopWatch (M5PM1) and StackChan (AXP2101) can report
+     * progress. StickS3/StopWatch (M5PM1) and Kizz/M5StackChan (AXP2101) can report
      * VBUS even after a full battery stops charging. Without this check a
      * full USB-powered device incorrectly selects the battery sleep profile.
      * The exact original M5Dial exposes neither VBUS nor its TP4057 status pins
@@ -455,7 +455,7 @@ extern "C" int m5_platform_battery_level(void) {
 }
 
 extern "C" bool m5_platform_stackchan_expression_enable(bool enabled) {
-    ESP_LOGI(TAG, "StackChan expression enable=%d started=%d board=%d",
+    ESP_LOGI(TAG, "Kizz expression enable=%d started=%d board=%d",
              enabled, s_started, static_cast<int>(s_board));
     if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return false;
     if (!enabled) {
@@ -470,7 +470,7 @@ extern "C" bool m5_platform_stackchan_expression_enable(bool enabled) {
         return true;
     }
     if (!s_stackchan_motion.initialized || s_stackchan_motion.faulted) {
-        ESP_LOGE(TAG, "StackChan official BSP was not qualified");
+        ESP_LOGE(TAG, "Kizz's official M5StackChan BSP was not qualified");
         return false;
     }
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
@@ -500,11 +500,11 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
     if (expression == M5_PLATFORM_STACKCHAN_DANCE) {
         s_stackchan_motion.dance_variant = esp_random() % 8;
     }
-    ESP_LOGI(TAG, "StackChan gesture starting: %s",
+    ESP_LOGI(TAG, "Kizz gesture starting: %s",
              expression == M5_PLATFORM_STACKCHAN_DANCE ? "dance" :
              expression == M5_PLATFORM_STACKCHAN_SAD ? "sad" : "celebrate");
     if (expression == M5_PLATFORM_STACKCHAN_DANCE) {
-        ESP_LOGI(TAG, "StackChan dance variation=%u",
+        ESP_LOGI(TAG, "Kizz dance variation=%u",
                  s_stackchan_motion.dance_variant + 1);
     }
     if (expression == M5_PLATFORM_STACKCHAN_DANCE) {
@@ -583,7 +583,7 @@ extern "C" void m5_platform_stackchan_expression_process(void) {
 #endif
         s_stackchan_motion.phase = StackChanMotionPhase::idle;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
-        ESP_LOGI(TAG, "StackChan gesture complete via official BSP");
+        ESP_LOGI(TAG, "Kizz gesture complete via official M5StackChan BSP");
         if (s_stackchan_motion.has_queued) {
             const auto queued = s_stackchan_motion.queued;
             s_stackchan_motion.has_queued = false;
@@ -634,7 +634,7 @@ extern "C" bool m5_platform_stackchan_sound_trigger(
     s_stackchan_voice.phrase = selected;
     s_stackchan_voice.note = 0;
     s_stackchan_voice.last_started[sound_index] = now;
-    ESP_LOGI(TAG, "StackChan voice: %s", selected->name);
+    ESP_LOGI(TAG, "Kizz voice: %s", selected->name);
     stackchan_voice_note(0);
     return true;
 #else
@@ -661,7 +661,7 @@ extern "C" bool m5_platform_stackchan_sound_enable(bool enabled) {
     if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN ||
         !M5.Speaker.isEnabled()) return false;
     if (enabled && !M5.Speaker.isRunning() && !M5.Speaker.begin()) {
-        ESP_LOGE(TAG, "StackChan sounds could not start via M5Unified");
+        ESP_LOGE(TAG, "Kizz sounds could not start via M5Unified");
         s_stackchan_voice.enabled = false;
         return false;
     }
@@ -670,7 +670,7 @@ extern "C" bool m5_platform_stackchan_sound_enable(bool enabled) {
         s_stackchan_voice.phrase = nullptr;
         M5.Speaker.stop();
     }
-    ESP_LOGI(TAG, "StackChan sounds %s", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Kizz sounds %s", enabled ? "enabled" : "disabled");
     return true;
 #else
     (void)enabled;
@@ -687,7 +687,7 @@ extern "C" bool m5_platform_stackchan_sound_volume(
         volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return false;
     const uint8_t gain = STACKCHAN_VOICE_GAINS[static_cast<size_t>(volume)];
     M5.Speaker.setVolume(gain);
-    ESP_LOGI(TAG, "StackChan voice level=%u gain=%u",
+    ESP_LOGI(TAG, "Kizz voice level=%u gain=%u",
              static_cast<unsigned>(volume), static_cast<unsigned>(gain));
     return M5.Speaker.getVolume() == gain;
 #else

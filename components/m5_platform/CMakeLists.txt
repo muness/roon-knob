@@ -8,7 +8,7 @@ endif()
 
 idf_component_register(
     SRCS "m5_platform.cpp" "m5_interaction_policy.c"
-    # The StackChan personality catalogs are deliberately public data headers:
+    # The Kizz personality catalogs are deliberately public data headers:
     # current and future adaptive-UI renderers consume the same vocabulary.
     INCLUDE_DIRS "include" "."
     REQUIRES ${m5_platform_requires}

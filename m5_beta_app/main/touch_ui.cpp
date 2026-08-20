@@ -49,7 +49,7 @@ constexpr int STACKCHAN_ARTWORK_SIZE = 120;
 #elif HIPHI_M5_TARGET_ID == 3
 constexpr int STACKCHAN_ARTWORK_SIZE = 360;
 #else
-/* StackChan's Art mode is full-bleed on a 320x240 panel. Fetch at panel
+/* Kizz's Art mode is full-bleed on a 320x240 panel. Fetch at panel
  * width so the hero image is never enlarged from a postage-stamp source. */
 constexpr int STACKCHAN_ARTWORK_SIZE = 320;
 #endif
@@ -188,7 +188,7 @@ void stackchan_draw_thick_line(lgfx::LovyanGFX *target, int x0, int y0, int x1,
 }
 
 /* Face and body are one performance. These are intentionally bold graphic
- * cues rather than tiny emoji changes: StackChan is normally read from across
+ * cues rather than tiny emoji changes: Kizz is normally read from across
  * a room, and the face must remain legible while the head is moving. */
 void stackchan_draw_performance_face(
     lgfx::LovyanGFX *target, m5_platform_stackchan_face_cue_t cue, int w,
@@ -508,7 +508,7 @@ void apply_stackchan_artwork(void *arg) {
         s.artwork_height = STACKCHAN_ARTWORK_SIZE;
         result->pixels = nullptr;
         s.dirty = true;
-        ESP_LOGI(TAG, "StackChan artwork ready for '%s'", result->key);
+        ESP_LOGI(TAG, "Kizz artwork ready for '%s'", result->key);
     }
     free(result->pixels);
     free(result);
@@ -565,7 +565,7 @@ void stackchan_artwork_task(void *arg) {
         free(pixels);
         free(result);
     } else {
-        ESP_LOGW(TAG, "StackChan artwork fetch returned %zu bytes (expected %zu)",
+        ESP_LOGW(TAG, "Kizz artwork fetch returned %zu bytes (expected %zu)",
                  raw_len, expected);
     }
     platform_http_free(raw);
@@ -586,7 +586,7 @@ void start_stackchan_artwork_fetch() {
                                            stackchan_artwork_task, job) != 0) {
         free(job);
         s_artwork_loading.store(false);
-        ESP_LOGW(TAG, "Could not start StackChan artwork worker");
+        ESP_LOGW(TAG, "Could not start Kizz artwork worker");
     }
 }
 
@@ -720,7 +720,7 @@ void body_notice(const char *message) {
 
 void set_body_language(bool wanted, bool persist = true) {
     s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
-    ESP_LOGI(TAG, "StackChan body toggle: wanted=%d enabled=%d faulted=%d",
+    ESP_LOGI(TAG, "Kizz body toggle: wanted=%d enabled=%d faulted=%d",
              wanted, s.body_enabled,
              m5_platform_stackchan_expression_faulted());
     /* Persist the user's intent, not the result of this one hardware attempt.
@@ -735,7 +735,7 @@ void toggle_body_language() { set_body_language(!s.body_enabled); }
 void set_sounds(bool enabled, bool confirm = true, bool persist = true) {
     s.sound_enabled = m5_platform_stackchan_sound_enable(enabled) && enabled;
     if (persist) save_sound_enabled(enabled);
-    ESP_LOGI(TAG, "StackChan sound toggle: wanted=%d enabled=%d", enabled,
+    ESP_LOGI(TAG, "Kizz sound toggle: wanted=%d enabled=%d", enabled,
              s.sound_enabled);
     if (confirm) body_notice(s.sound_enabled ? "SOUNDS ON" : "SOUNDS OFF");
     /* Enabling should prove itself immediately; disabling has already stopped
@@ -1095,7 +1095,7 @@ void render_picker() {
     if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
 }
 
-/* StackChan is a character first.  Information and controls arrive as
+/* Kizz is a character first. Information and controls arrive as
  * deliberate temporal layers instead of permanently shrinking the face into
  * the top half of a generic dashboard. */
 void render_stackchan_delight() {
@@ -1585,11 +1585,11 @@ extern "C" void touch_ui_init(void) {
     s_stackchan_canvas_ready = s_stackchan_canvas.createSprite(
         M5.Display.width(), M5.Display.height()) != nullptr;
     if (!s_stackchan_canvas_ready)
-        ESP_LOGW(TAG, "StackChan double buffer unavailable; drawing directly");
+        ESP_LOGW(TAG, "Kizz double buffer unavailable; drawing directly");
     bool configured = false;
     const bool wanted = load_body_enabled(&configured);
     s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
-    ESP_LOGI(TAG, "StackChan body startup: wanted=%d configured=%d enabled=%d faulted=%d",
+    ESP_LOGI(TAG, "Kizz body startup: wanted=%d configured=%d enabled=%d faulted=%d",
              wanted, configured, s.body_enabled,
              m5_platform_stackchan_expression_faulted());
     (void)configured;
@@ -1602,7 +1602,7 @@ extern "C" void touch_ui_init(void) {
     s.sound_enabled =
         m5_platform_stackchan_sound_enable(sound_wanted) && sound_wanted;
     ESP_LOGI(TAG,
-             "StackChan sound startup: wanted=%d configured=%d enabled=%d "
+             "Kizz sound startup: wanted=%d configured=%d enabled=%d "
              "level=%u level_configured=%d level_ready=%d",
              sound_wanted, sound_configured, s.sound_enabled,
              static_cast<unsigned>(s.voice_volume), volume_configured,
@@ -1661,7 +1661,7 @@ extern "C" void touch_ui_process(void) {
         s.art_mode = true;
         wake_display();
         s.dirty = true;
-        ESP_LOGI(TAG, "StackChan entered Art mode after %us",
+        ESP_LOGI(TAG, "Kizz entered Art mode after %us",
                  static_cast<unsigned>(s.art_timeout_sec));
     }
     if (s.track_reveal_until || stackchan_marquee_needed()) s.dirty = true;
@@ -1768,7 +1768,7 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
         const bool dance_started = s.body_enabled &&
             m5_platform_stackchan_expression_trigger(
                 M5_PLATFORM_STACKCHAN_DANCE);
-        ESP_LOGI(TAG, "StackChan new-track dance: enabled=%d accepted=%d",
+        ESP_LOGI(TAG, "Kizz new-track dance: enabled=%d accepted=%d",
                  s.body_enabled, dance_started);
     }
 }
@@ -1792,7 +1792,7 @@ extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging)
     }
 #if HIPHI_M5_TARGET_ID == 4
     s.art_timeout_sec = rk_cfg_get_art_mode_timeout(cfg, charging);
-    ESP_LOGI(TAG, "StackChan Art mode policy: timeout=%us charging=%s",
+    ESP_LOGI(TAG, "Kizz Art mode policy: timeout=%us charging=%s",
              static_cast<unsigned>(s.art_timeout_sec),
              charging ? "yes" : "no");
 #endif

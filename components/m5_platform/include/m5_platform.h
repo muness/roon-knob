@@ -119,9 +119,9 @@ typedef enum {
     M5_PLATFORM_STACKCHAN_FACE_BORED = 25,
 } m5_platform_stackchan_face_cue_t;
 
-/* StackChan body language is enabled by default (and can be turned off with a
+/* Kizz body language is enabled by default (and can be turned off with a
  * long hold). Choreography is ours; calibration, limits, power, motion, and
- * torque are owned by M5Stack's official StackChan BSP. */
+ * torque are owned by M5Stack's official M5StackChan BSP. */
 bool m5_platform_stackchan_expression_enable(bool enabled);
 bool m5_platform_stackchan_expression_trigger(
     m5_platform_stackchan_expression_t expression);

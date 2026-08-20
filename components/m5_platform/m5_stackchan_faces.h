@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 /* Kismet generated expression from a three-dimensional affect space:
- * arousal, valence and stance. StackChan cannot reproduce Kismet's ears,
+ * arousal, valence and stance. Kizz cannot reproduce Kismet's ears,
  * eyelids, brows, lips and jaw independently, but keeping the same dimensions
  * gives our reduced graphic face a coherent family resemblance instead of a
  * bag of unrelated emoji. Values are normalized to -100..100. */

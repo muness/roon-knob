@@ -44,6 +44,7 @@ jobs:
             -o /tmp/test-m5-stackchan-choreography
           /tmp/test-m5-stackchan-choreography
           python3 scripts/check_dial_identity.py
+          python3 scripts/check_kizz_identity.py
           python3 scripts/check_controller_dependencies.py
           python3 scripts/check_controller_dependencies.py --self-test
           python3 scripts/check_m5_hardware_boundary.py
@@ -1304,7 +1305,7 @@ jobs:
           prepare_m5_beta dial m5dial "M5 Dial Form-Native"
           prepare_m5_beta sticks3 sticks3 "M5StickS3 Twist Remote"
           prepare_m5_beta stopwatch stopwatch "M5Stack StopWatch Wrist Remote"
-          prepare_m5_beta stackchan stackchan "StackChan Playback Companion"
+          prepare_m5_beta stackchan stackchan "Kizz Playback Companion"
 
           cat > "pr-preview/${DIAL_MANIFEST_FILE}" << EOF
           {
@@ -1536,7 +1537,7 @@ jobs:
             - [Flash M5 Dial Lab Alpha](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
             - [Flash M5StickS3 Twist Alpha](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
             - [Flash M5Stack StopWatch Alpha](${process.env.STOPWATCH_PAGE_URL}) — \`${process.env.STOPWATCH_FIRMWARE_SHA256}\`
-            - [Flash StackChan Companion Alpha](${process.env.STACKCHAN_PAGE_URL}) — \`${process.env.STACKCHAN_FIRMWARE_SHA256}\`
+            - [Flash Kizz Companion Alpha](${process.env.STACKCHAN_PAGE_URL}) — \`${process.env.STACKCHAN_FIRMWARE_SHA256}\`
 
             Each page, manifest, bootloader, partition table, OTA data image, and application binary was fetched from GitHub Pages and compared byte-for-byte with the job workspace. Manifest checks preserve NVS; browser updates must decline the erase prompt to retain settings. Hardware testing remains the active merge gate.
 

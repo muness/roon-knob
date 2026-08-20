@@ -39,7 +39,7 @@ elseif(HIPHI_M5_TARGET STREQUAL "stopwatch")
     set(_slug "hiphi-stopwatch-beta")
 elseif(HIPHI_M5_TARGET STREQUAL "stackchan")
     set(_target_id 4)
-    set(_slug "hiphi-stackchan-beta")
+    set(_slug "hiphi-kizz-beta")
 endif()
 
 idf_component_register(SRCS ${SRC_FILES}

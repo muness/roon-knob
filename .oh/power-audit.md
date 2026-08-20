@@ -64,7 +64,7 @@ Success has two levels:
 | M5Dial alpha | No configured dim/sleep policy | Panel, SoC, and radio remain active; exact board has a GPIO46 power-hold path | Shared dim → connected panel sleep → M5Unified power-off ladder; button/touch/encoder wake while connected; setup inhibitor | Original Dial cannot report USB/external power, so source classification and power-button recovery require hardware qualification |
 | M5StickS3 alpha | No configured dim/sleep policy | Panel/SoC remain active | Shared power ladder; button/IMU wake while connected; M5PM1 power-off; VBUS-aware external-power policy | Verify exact unit/revision, button wake after power-off, and raise-to-wake thresholds |
 | M5StopWatch alpha | After 8 s sets brightness to 20 and marks the UI sleeping | Screen remains lit; SoC remains active | Removed fake sleep; shared power ladder; haptic off before sleep; M5PM1 power-off; VBUS-aware external-power policy | Verify touch/button/raise wake, vibration shutdown, and PMIC power-button recovery |
-| M5Stack Chan alpha | No idle sleep policy | Connected loop stays active; servo rail and speaker remain enabled | Shared power ladder; speaker task/amp stopped; servo torque and VM rail disabled in connected sleep; AXP2101 power-off; peripherals restored on wake; VBUS-aware external-power policy | Qualify physical balance/load behavior, servo/speaker restoration, AXP wake, and the BSP motion task's residual 20 ms wake cadence |
+| Kizz alpha on M5StackChan K151 | No idle sleep policy | Connected loop stays active; servo rail and speaker remain enabled | Shared power ladder; speaker task/amp stopped; servo torque and VM rail disabled in connected sleep; AXP2101 power-off; peripherals restored on wake; VBUS-aware external-power policy | Qualify physical balance/load behavior, servo/speaker restoration, AXP wake, and the BSP motion task's residual 20 ms wake cadence |
 
 ### Dial board-level evidence
 
@@ -115,7 +115,7 @@ programmable general-purpose processors:
    command. This is a real residual load and a separate firmware/hardware gate,
    not a reason to pretend the board is single-SoC.
 
-StackChan's smart servos also contain control electronics, but connected sleep
+Kizz's smart servos also contain control electronics, but connected sleep
 already releases torque and removes their VM rail. The remaining targets use
 dedicated display/touch/PMIC/peripheral controllers, not an unused application
 processor that can safely receive an always-off image.
@@ -160,10 +160,10 @@ The pinned source resolves that API through exact board hardware:
   exact revision. That limitation is recorded rather than guessed around.
 - StickS3 and StopWatch use M5PM1. Pinned M5Unified dispatches `powerOff()` to
   M5PM1, and provides a VBUS voltage reading independent of active charging.
-- StackChan's CoreS3 uses AXP2101. Pinned M5Unified dispatches `powerOff()` to
-  AXP2101. The official StackChan BSP exposes servo VM rail control; M5Unified's
+- Kizz's CoreS3 uses AXP2101. Pinned M5Unified dispatches `powerOff()` to
+  AXP2101. The official M5StackChan BSP exposes servo VM rail control; M5Unified's
   speaker `end()` path also disables the amplifier callback.
-- StackChan's official BSP starts a 50 Hz motion task even when idle. This can
+- Kizz's official M5StackChan BSP starts a 50 Hz motion task even when idle. This can
   shorten automatic Light-sleep residency. Safely suspending it requires a BSP
   lifecycle API; force-suspending it by task name can freeze its private mutex,
   so that tempting patch is rejected pending measurement or upstream support.
@@ -229,7 +229,7 @@ revision-sensitive rail writes.
 - M5 connected-sleep input polling still sees brief real button/touch/encoder
   events, and the exact PMIC/power-hold path returns through the documented
   physical control.
-- Cutting StackChan's servo VM rail while idle is mechanically safe for the
+- Cutting Kizz's servo VM rail while idle is mechanically safe for the
   user's installation and restores cleanly before the next gesture.
 - USB-input measurements predict battery runtime only after charger/PMIC and
   test-topology effects are separated.
@@ -307,8 +307,8 @@ revision-sensitive rail writes.
 | 20 Hz M5 asleep input misses taps | Short/long/edge touch, encoder, and button qualification on every affected profile | Before accepting cadence change |
 | M5 board power-off cannot recover | Repeated battery-only power-off and documented button/RTC wake on the exact revision | Before distributing M5 alpha images |
 | Original M5Dial misclassifies external power | USB, rear-terminal, and battery-only traces plus observed policy log; no numeric or safety claim from the Boolean alone | Before enabling unattended deployment |
-| StackChan strands or jolts its body | Sleep during motion, torque release, VM rail measurement, manual displacement, wake, neutral gesture, speaker replay | Before distributing StackChan alpha |
-| StackChan BSP motion task dominates idle | Compare PM residency/current with body enabled/disabled; request a coordinated BSP suspend API if material | After first FNB-C2 ranking trace |
+| Kizz strands or jolts its body | Sleep during motion, torque release, VM rail measurement, manual displacement, wake, neutral gesture, speaker replay | Before distributing Kizz alpha |
+| M5StackChan BSP motion task dominates Kizz idle | Compare PM residency/current with body enabled/disabled; request a coordinated BSP suspend API if material | After first FNB-C2 ranking trace |
 | Frame PMIC write strands hardware | Register readback, rail voltages, completed e-ink refresh, repeated KEY/timer wake | Before any rail-gating code |
 | Deep sleep costs more than it saves | Integrate sleep plus wake/reconnect energy across real idle durations | Before choosing timeout |
 
@@ -337,13 +337,13 @@ The authoritative branch implements:
 8. CI and prerelease packaging for the auxiliary image, with a separate
    browser-flasher card for the auxiliary USB orientation.
 9. One tested M5 alpha transition policy across Dial, StickS3, StopWatch, and
-   StackChan: dim → connected display sleep → exact-board power-off.
+   Kizz: dim → connected display sleep → exact-board power-off.
 10. Physical M5 input wakes connected sleep; setup mode inhibits it; a late
     retained-artwork transition receives a fresh sleep window rather than
     permanently suppressing sleep.
 11. M5 PMIC boards use VBUS presence rather than active charging alone when
     selecting external-power policy.
-12. StackChan connected sleep stops speaker playback/I2S/amplifier, releases
+12. Kizz connected sleep stops speaker playback/I2S/amplifier, releases
     torque, cuts the servo VM rail, clears queued choreography, and restores
     enabled peripherals on wake.
 13. Frame battery-idle ESP32-S3 Deep-sleep with a pure inhibitor policy, PMIC
@@ -369,7 +369,7 @@ The clean ESP-IDF 5.5.5 matrix for the report's containing commit covers nine
 primary images plus the separately flashed Waveshare auxiliary image:
 
 - Waveshare Dial main, Frame, RLCD 4.2, AtomS3 + JoyStick, and M5Stack Tough;
-- M5Dial, M5StickS3, M5StopWatch, and StackChan alphas;
+- M5Dial, M5StickS3, M5StopWatch, and Kizz alphas;
 - classic-ESP32 auxiliary parking firmware.
 
 For each build, CI and local verification require PERF optimization, the exact
@@ -380,7 +380,7 @@ exact containing commit in issue #228 after the final clean build, avoiding a
 self-referential report commit or hashes from the superseded joystick worktree.
 
 The complete host contract suite passes, including the pure M5 power ladder,
-StackChan choreography, configuration ownership, input/action/presentation,
+Kizz choreography, configuration ownership, input/action/presentation,
 Wi-Fi provisioning lifecycle, BLE-disabled stub, controller dependency policy
 and negative fixture, Dial identity, M5 hardware boundary, workflow YAML parse,
 and `git diff --check`. macOS cannot run LeakSanitizer's leak detector; those
@@ -408,10 +408,10 @@ remains the Linux sanitizer authority.
 | GPIO7/GPIO8 wake no longer requires RTC peripheral forced on | Verified for this schematic/API pairing | External 10 kΩ pull-ups in schematic; ESP-IDF ext1 hold behavior | Hardware-test both encoder directions and held-low recovery |
 | GPIO47 can be held low across ESP32-S3 Deep-sleep | Verified | ESP-IDF GPIO hold documentation plus board backlight gate schematic | Release the hold before LEDC reclaims the pad on boot |
 | `M5.Display.sleep()` is full device sleep | Contradicted | Pinned M5Unified 0.2.19 sets brightness zero and panel sleep only | Call it “connected display sleep” in the implemented ladder |
-| Pinned M5Unified `powerOff()` selects exact M5 hardware paths | Verified for source/API mapping | M5Unified 0.2.19 dispatches original Dial through `power_hold`, StickS3/StopWatch through M5PM1, and StackChan/CoreS3 through AXP2101 before ESP Deep-sleep fallback | Source qualification is not physical wake qualification; repeat on every exact unit |
+| Pinned M5Unified `powerOff()` selects exact M5 hardware paths | Verified for source/API mapping | M5Unified 0.2.19 dispatches original Dial through `power_hold`, StickS3/StopWatch through M5PM1, and Kizz/CoreS3 through AXP2101 before ESP Deep-sleep fallback | Source qualification is not physical wake qualification; repeat on every exact unit |
 | A full USB-powered M5 PMIC board is always “charging” | Contradicted | M5Unified separates `isCharging()` from `getVBUSVoltage()`; charge status can go false when full while VBUS remains readable | Treat valid VBUS as external power for M5PM1/AXP2101 targets |
 | Original M5Dial firmware can reliably detect external USB/DC power | Contradicted | Exact schematic leaves TP4057 `CHRG`/`STDBY` unconnected to the S3 and M5Unified exposes no Dial VBUS channel | Record source as ambiguous; validate unattended behavior before deployment |
-| StackChan panel sleep also turns off its servo/speaker domains | Contradicted before this slice | Official BSP exposes a separate servo VM switch; M5Unified speaker has a separate runtime/amplifier lifecycle | Explicitly end speaker and cut servo VM in the target platform path |
+| Kizz panel sleep also turns off its servo/speaker domains | Contradicted before this slice | Official M5StackChan BSP exposes a separate servo VM switch; M5Unified speaker has a separate runtime/amplifier lifecycle | Explicitly end speaker and cut servo VM in the target platform path |
 | M5Stack devices can reach microamp-class sleep | Partially verified, revision-specific | M5Stack reports 1.9 µA for original M5Dial battery sleep and 6 µA for Dial V1.1 battery-only sleep | Use only as target/revision potential, never as Waveshare HiPhi Dial evidence or a firmware result |
 | The FNB-C2 has a 20-bit ADC, 1 µA displayed current resolution, 0–6.5 A range, ±(0.5‰ + 2 digits) current accuracy, 2 sps–1 ksps low-speed waveform, and 9-hour logging | Verified | FNIRSI official FNB-C2 product/specification page | Resolution is not the same as guaranteed accuracy or low-current burden performance |
 | An FNB-C2 alone measures internal battery-rail current while the device is self-powered | Contradicted by topology | Instrument is an inline USB-C VBUS tester; self-powered battery current does not pass through it | Use USB-path A/B tests; add a safe series battery fixture/bench instrument for true battery rail |
@@ -433,7 +433,7 @@ remains the Linux sanitizer authority.
 - Original M5Dial external-power status is unobservable through the checked
   controller pins/API; its default battery policy under external supply remains
   an explicit deployment risk, not a solved fact.
-- StackChan's BSP motion task still wakes every 20 ms even with its servo rail
+- Kizz's M5StackChan BSP motion task still wakes every 20 ms even with its servo rail
   off; whether that materially dominates connected sleep is unmeasured.
 
 ### Expert review and source gaps
@@ -446,7 +446,7 @@ remains the Linux sanitizer authority.
 - A board photo/revision record should accompany the first Dial auxiliary flash.
 - M5 qualification must record the exact runtime board ID, power input path,
   battery state, and physical wake control; product-family names are not enough.
-- StackChan qualification must include mechanical safety with torque and VM off,
+- Kizz qualification must include mechanical safety with torque and VM off,
   not just an electrical current trace.
 
 ### Corrections made during this audit
@@ -472,7 +472,7 @@ remains the Linux sanitizer authority.
   to 20 and never slept the panel or SoC.
 - Corrected M5 charging semantics on PMIC boards: external VBUS persists after
   active charging ends.
-- Corrected StackChan's display-only model to include its speaker amplifier,
+- Corrected Kizz's display-only model to include its speaker amplifier,
   servo torque, servo VM rail, and residual BSP task cadence.
 - Kept M5Dial current figures separate from the unrelated Waveshare Dial.
 
@@ -560,13 +560,13 @@ before stable/OTA promotion.
 ### Alignment check
 
 - **Necessary:** yes. Forced awake Wi-Fi, inactive startup DFS, display-only M5
-  sleep, an unparked Dial auxiliary ESP32, and energized StackChan peripherals
+  sleep, an unparked Dial auxiliary ESP32, and energized Kizz peripherals
   directly explain plausible whole-board waste.
 - **Aligned:** yes. Each change either lowers connected-idle work, stages true
   board shutdown, or makes a hidden always-on load explicit.
 - **Sufficient:** sufficient for the pre-instrument source pass and an opt-in
   alpha, not sufficient for a battery-life claim or stable promotion. Frame PMIC
-  work and StackChan BSP-task work remain measurement-gated.
+  work and Kizz's M5StackChan BSP-task work remain measurement-gated.
 - **Mechanism clear:** yes. Radio modem sleep + startup DFS + automatic
   Light-sleep address shared SoC/radio idle; target ladders separately address
   panels, PMIC/power-hold, BLE, a second MCU, haptic, speaker, and servo rail.
@@ -589,7 +589,7 @@ the per-target state-machine frame. It did not justify a universal PMIC recipe.
   fixes. Route: adjusted by replaying the cross-target slice onto that lineage
   and implementing the four M5 profiles there.
 - **Scope expansion, authorized.** M5 inspection exposed StopWatch fake sleep,
-  full-battery USB misclassification, and StackChan energized peripherals.
+  full-battery USB misclassification, and energized Kizz peripherals.
   These are low-hanging power defects inside the requested “ALL fixes” scope.
 
 ### Findings resolved during review
@@ -603,7 +603,7 @@ the per-target state-machine frame. It did not justify a universal PMIC recipe.
    classify readable VBUS as external power.
 4. Reapplying a config that disables the current dim/sleep state could leave a
    dark UI; policy application now wakes and reconciles that state.
-5. Force-suspending StackChan's private motion task was rejected because it can
+5. Force-suspending Kizz's private M5StackChan motion task was rejected because it can
    freeze the BSP mutex; its residual cadence is a measurement-ranked follow-up.
 6. Frame could cancel a sleep attempt while BLE teardown was in flight and
    strand the BLE host quiesced. The shared owner now accepts a transient cancel
@@ -619,7 +619,7 @@ the per-target state-machine frame. It did not justify a universal PMIC recipe.
 - Every power-off and recovery path, including held controls and external power.
 - Dial auxiliary USB orientation and recovery with the vendor image.
 - BLE state/bond survival across repeated Waveshare Dial sleep cycles.
-- StackChan torque/VM-off mechanical safety plus servo/speaker restoration.
+- Kizz torque/VM-off mechanical safety plus servo/speaker restoration.
 - Sustained Wi-Fi control/reconnect behavior on representative AP/RSSI/DTIM.
 - FNB-C2 energy traces; no model review can establish current or battery life.
 
@@ -649,7 +649,7 @@ waste its first sessions rediscovering defects already proven in source.
 ### Contrary evidence
 
 1. Automatic Light-sleep can be enabled yet achieve little residency when UI,
-   bridge, BLE, HTTP, or the StackChan 50 Hz motion task keeps waking the SoC.
+   bridge, BLE, HTTP, or Kizz's 50 Hz M5StackChan motion task keeps waking the SoC.
 2. Original M5Dial cannot report external power, so a Boolean configuration
    model necessarily chooses the battery profile in an ambiguous state.
 3. Waveshare Dial regulators/fixed peripherals or Frame PMIC rails may dominate
@@ -661,11 +661,11 @@ waste its first sessions rediscovering defects already proven in source.
 ### Pre-mortem scenarios
 
 1. **Functional failure:** one target powers off and its expected input cannot
-   recover it, or StackChan wakes with dead audio/body control.
+   recover it, or Kizz wakes with dead audio/body control.
 2. **Adoption failure:** users disable the new ladder because reconnect or
    interaction latency makes the dedicated controller feel unreliable.
 3. **Opportunity cost:** shared tuning produces a modest win while the Frame
-   PMIC, Dial auxiliary/fixed rails, or StackChan BSP cadence dominates; effort
+   PMIC, Dial auxiliary/fixed rails, or Kizz's M5StackChan BSP cadence dominates; effort
    should have shifted to discontinuous operation or board power domains.
 
 ### Hidden assumptions
@@ -675,7 +675,7 @@ waste its first sessions rediscovering defects already proven in source.
 | MIN_MODEM preserves control reliability | ESP-IDF contract; outgoing traffic wakes STA | misses/reconnect storms | long run at weak RSSI and real AP DTIM |
 | Tasks leave useful Light-sleep windows | tickless idle and longer sleeping cadence | negligible savings | trace plus PM-lock/residency diagnostic build |
 | M5 power buttons recover exact artifacts | M5 docs and pinned `Power_Class` mapping | unavailable device | repeated battery/USB power-off/wake matrix |
-| StackChan can safely depower servos at rest | official VM/torque APIs | mechanical drop/jolt or bad restore | loaded sleep-during-motion test and rail trace |
+| Kizz can safely depower servos at rest | official VM/torque APIs | mechanical drop/jolt or bad restore | loaded sleep-during-motion test and rail trace |
 | Original M5Dial battery policy is acceptable when source is unknown | battery use case and recoverable button wake | external unit disconnects unexpectedly | USB/rear-terminal/battery policy observation |
 | Auxiliary ESP32 is material | always-enabled SoC with active factory image | flashing risk for little gain | factorial main/aux A/B energy trace |
 
@@ -687,7 +687,7 @@ waste its first sessions rediscovering defects already proven in source.
   residency on the real task/AP workload to matter.
 - **Changed situation model:** M5 is not one easy family; PMIC-equipped targets
   have good source observability, while original Dial power source and
-  StackChan's BSP task remain explicit exceptions.
+  Kizz's M5StackChan BSP task remain explicit exceptions.
 - **Recommendation:** ADJUST, then proceed to draft artifacts. Keep every
   numeric/hardware claim open, preserve the original-Dial ambiguity in logs and
   documentation, and let the first meter run rank residual tasks/rails.
@@ -734,9 +734,9 @@ waste its first sessions rediscovering defects already proven in source.
   <https://docs.m5stack.com/en/arduino/m5sticks3/wakeup>
 - M5Stack StopWatch exact product documentation:
   <https://docs.m5stack.com/en/core/StopWatch>
-- M5Stack Chan exact product documentation:
+- M5StackChan K151 exact product documentation:
   <https://docs.m5stack.com/en/StackChan>
-- M5Stack Chan servo documentation:
+- M5StackChan servo documentation:
   <https://docs.m5stack.com/en/arduino/stackchan/servo>
 - Pinned M5Unified power API implementation (local build uses 0.2.19):
   <https://github.com/m5stack/M5Unified/blob/master/src/utility/Power_Class.cpp>

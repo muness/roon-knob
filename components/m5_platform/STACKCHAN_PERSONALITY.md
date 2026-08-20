@@ -1,6 +1,6 @@
-# StackChan personality library
+# Kizz personality library
 
-This directory treats StackChan's personality as reusable product data, not as
+This directory treats Kizz's personality as reusable product data, not as
 an effect baked into the current playback screen.
 
 ## Catalogs
@@ -19,7 +19,7 @@ an effect baked into the current playback screen.
 
 ## Adaptive-UI contract
 
-The controller or adaptive UI decides *why* StackChan should respond: volume
+The controller or adaptive UI decides *why* Kizz should respond: volume
 changed, transport moved, playback started, a track arrived, the room changed,
 or connectivity changed. It then chooses one or more library cues using the
 interaction's importance and frequency.
@@ -30,7 +30,7 @@ or decline body motion entirely. It must not duplicate servo transport, speaker
 drivers, calibration, or board pin knowledge; those remain official M5Stack
 abstractions.
 
-On the current StackChan adapter, both body and sounds default on and persist
+On the current Kizz adapter, both body and sounds default on and persist
 independently. Long-hold the face for body language; double-click the physical
 front button for sounds. A single front-button click opens the on-device
 Personality page, and the web Settings page exposes the same two switches.

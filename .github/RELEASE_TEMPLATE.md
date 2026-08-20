@@ -11,7 +11,7 @@
   Frame now enters ESP32-S3 Deep-sleep on battery when stopped and idle, with
   KEY and timer wake; PMIC rail-current qualification remains open.
 - **AtomS3 JoyStick, M5Stack Tough, M5 Dial, M5StickS3, StopWatch, and
-  StackChan:** compile- and policy-validated;
+  Kizz:** compile- and policy-validated;
   exact-artifact physical testing is still required.
 
 ## Every firmware image
@@ -28,7 +28,7 @@ every target. Merged images for command-line flashing are linked directly:
 - [M5 Dial Lab](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_m5dial_merged.bin)
 - [M5StickS3 Twist Remote](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_sticks3_merged.bin)
 - [M5Stack StopWatch](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stopwatch_merged.bin)
-- [StackChan Playback Companion](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stackchan_merged.bin)
+- [Kizz Playback Companion](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stackchan_merged.bin)
 - [SHA-256 checksums](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/SHA256SUMS.txt)
 
 ## Updating
