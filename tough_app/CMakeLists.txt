@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "0.1.0")
+set(PROJECT_VER "2.7.0-beta.1")
 set(HIPHI_M5_TARGET "tough" CACHE STRING "Exact M5 target")
 
 # Auto-append -dev if not building from a release tag

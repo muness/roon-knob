@@ -16,6 +16,7 @@ int main(void) {
     assert(rk_ble_hid_host_set_enabled(true) ==
            RK_BLE_HID_HOST_ERR_NOT_SUPPORTED);
     assert(rk_ble_hid_host_prepare_for_sleep() == RK_BLE_HID_HOST_OK);
+    assert(rk_ble_hid_host_cancel_sleep() == RK_BLE_HID_HOST_OK);
     assert(rk_ble_hid_host_scan_start() ==
            RK_BLE_HID_HOST_ERR_NOT_SUPPORTED);
     assert(rk_ble_hid_host_scan_results_copy(&device, 1, &generation) == 0);

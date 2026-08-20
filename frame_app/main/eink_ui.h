@@ -54,3 +54,8 @@ void eink_ui_show_settings(void);
 
 // Process pending UI updates (call from main loop)
 void eink_ui_process(void);
+
+// Frame Deep-sleep inhibitors, read only from the UI actor.
+bool eink_ui_power_state_known(void);
+bool eink_ui_is_playing(void);
+bool eink_ui_has_pending_refresh(void);

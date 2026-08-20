@@ -21,6 +21,10 @@ rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void) {
     return RK_BLE_HID_HOST_OK;
 }
 
+rk_ble_hid_host_result_t rk_ble_hid_host_cancel_sleep(void) {
+    return RK_BLE_HID_HOST_OK;
+}
+
 rk_ble_hid_host_result_t rk_ble_hid_host_scan_start(void) {
     return RK_BLE_HID_HOST_ERR_NOT_SUPPORTED;
 }

@@ -57,7 +57,7 @@ Success has two levels:
 | Target | Before this slice | Dominant source-proven gap | This slice | Still open |
 | --- | --- | --- | --- | --- |
 | Waveshare HiPhi Dial / ESP32-S3 Knob 1.8 | LCD/backlight soft sleep; S3 Deep-sleep after the configured timeout | Shared Wi-Fi forced fully awake; RTC peripheral forced on; BLE not quiesced; backlight output not held; second ESP32 cannot be shut down by S3 | Modem sleep baseline, automatic Light-sleep, qualified ext1 wake, BLE quiesce, digital backlight hold, permanent no-wake auxiliary-ESP32 Deep-sleep image | Board current, wake/reconnect, fixed rails, PMIC/charger losses |
-| HiPhi Frame / Waveshare PhotoPainter | E-paper controller sleeps after refresh; S3 and services stay connected | “Panel deep sleep” was being treated as if it were device sleep | Shared modem sleep and opportunistic S3 Light-sleep | Issue #160 default-off S3 sleep manager; PMIC rail work remains bench-gated |
+| HiPhi Frame / Waveshare PhotoPainter | E-paper controller slept after refresh; S3 and services stayed connected | “Panel deep sleep” was being treated as if it were device sleep; the PMIC helper mislabeled VBUS-good as active charging | Shared modem/Light-sleep plus a beta-enabled, fail-awake ESP32-S3 Deep-sleep manager after 20 minutes stopped and idle on battery; KEY and 30-minute timer wake; tri-state battery/external/unknown source | Exact-artifact wake/current qualification and revision-sensitive AXP2101 rail gating |
 | Waveshare RLCD 4.2 | Connected, static reflective display | Shared Wi-Fi explicitly fully awake; no target power state machine | Shared modem sleep and opportunistic Light-sleep | Exact usage model, input wake, and whether connectionless operation is desirable |
 | M5Stack Tough | Backlight/panel sleep via M5Unified; application continues at 100 Hz | No SoC/PMIC sleep; frequent input/UI wakeups | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | Qualify touch/button/RTC wake before using official `Power_Class` deep/timer sleep |
 | AtomS3 + Atom JoyStick | Panel sleep; connected controller loop remains active; required STM32F030 coprocessor continuously samples inputs | No S3 sleep; M5Stack's coprocessor firmware runs a 48 MHz busy loop with continuous ADC/DMA and exposes no sleep register | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | The STM32 cannot be permanently off while retaining joystick input; qualify a separate interrupt-driven/duty-cycled coprocessor firmware or whole-board power-off |
@@ -122,16 +122,24 @@ processor that can safely receive an always-off image.
 
 ### Frame boundary
 
-`eink_display_sleep()` sends the panel controller's deep-sleep command after a
-refresh. The Frame application still runs its 50 ms UI loop, 10 ms button
-timer, network polling, settings server, Wi-Fi, BLE, and PMIC configuration.
-Calling this “device deep sleep” would be false.
+`eink_display_sleep()` only sends the panel controller's deep-sleep command.
+The new Frame manager separately enters ESP32-S3 Deep-sleep after the configured
+battery timeout only when the bridge and stopped zone state are known, config is
+durable, provisioning/display/callback work is idle, BLE has quiesced, and KEY
+is released. External VBUS and an unreadable PMIC status both fail awake. KEY
+(GPIO4, active low) and a 30-minute recovery timer are configured before any
+service teardown; wake is a full reboot. A timer wake gets a 60-second state-sync
+grace before it can sleep again. Connected-idle button and UI polling are reduced
+from 10/50 ms to 100 ms, and the PMIC is not polled until every cheaper sleep
+inhibitor has cleared; VBUS is then re-read immediately before teardown.
 
 The first-party PhotoPainter power demo performs ESP32-S3 Deep-sleep and writes
 AXP2101 registers 0x26, 0x80, 0x90, and 0x91. Issue #160 deliberately forbids
 copying that rail sequence before exact-revision bench proof because the
 available schematic/tutorial/demo evidence is inconsistent about the e-paper
-rail and restore sequence. This audit preserves that safety boundary.
+rail and restore sequence. This slice fixes the dominant MCU/radio activity
+without crossing that revision-sensitive rail boundary; it does not claim the
+whole board reaches the vendor's published current before measurement.
 
 ### M5 boundary
 
@@ -195,7 +203,8 @@ revision-sensitive rail writes.
 - FNB-C2 traces show repeatable reductions in average energy for the intended
   workload, not merely a lower instantaneous screenshot.
 - Exact artifacts pass sustained boot, input, display, Wi-Fi, BLE, and recovery
-  checks before public beta.
+  checks before stable/OTA promotion; the opt-in beta labels missing hardware
+  evidence explicitly.
 
 ### Decision criteria
 
@@ -254,8 +263,9 @@ revision-sensitive rail writes.
 - Benefit: makes “true sleep” a testable board contract rather than a UI label.
 - Failure mode: an incorrect inhibitor or wake source can make a controller
   unavailable; default-off rollout and fail-awake checks are required.
-- Decision: selected as the durable direction. Waveshare Dial hardening and the
-  four exact M5 beta profiles are included now; Frame still follows issue #160.
+- Decision: selected as the durable direction. Waveshare Dial hardening, the
+  Frame ESP32-S3 manager, and the four exact M5 beta profiles are included now;
+  Frame PMIC rail gating remains a measured follow-up under issue #160.
 
 ### Candidate D — redesign: discontinuous controller
 
@@ -288,10 +298,10 @@ revision-sensitive rail writes.
 
 | Risk | Cheapest decisive evidence | Gate |
 | --- | --- | --- |
-| Modem sleep harms control reliability | Sustained polling/commands on weak RSSI and a representative AP; disconnect/recovery counts | Before public beta |
+| Modem sleep harms control reliability | Sustained polling/commands on weak RSSI and a representative AP; disconnect/recovery counts | Before stable promotion |
 | Automatic Light-sleep rarely runs | Current waveform and optional ESP-IDF PM lock statistics | Before deeper task refactor |
 | Dial cannot wake or wake-loops | Repeated encoder A/B wake, held encoder, cold boot, and reset tests | Before distributing main image |
-| BLE teardown corrupts preference/bond state | Connected, disconnected, scanning, disabled, and teardown-timeout sleep cycles | Before public beta |
+| BLE teardown corrupts preference/bond state | Connected, disconnected, scanning, disabled, and teardown-timeout sleep cycles | Before stable promotion |
 | Auxiliary image is flashed to the wrong SoC | Boot-log chip identity plus physical USB orientation checklist | Every auxiliary flash |
 | Auxiliary ESP32 is not a dominant load | A/B board-energy trace with identical main firmware | Before further auxiliary work |
 | 20 Hz M5 asleep input misses taps | Short/long/edge touch, encoder, and button qualification on every affected profile | Before accepting cadence change |
@@ -324,7 +334,8 @@ The authoritative branch implements:
 7. A separately flashed classic-ESP32 always-off image that holds DAC XSMT low,
    disables every wake source and RTC retention domain, and enters Deep-sleep
    immediately without logging or a task loop.
-8. CI packaging for the auxiliary image, deliberately excluded from releases.
+8. CI and beta-release packaging for the auxiliary image, with a separate
+   browser-flasher card for the auxiliary USB orientation.
 9. One tested M5 beta transition policy across Dial, StickS3, StopWatch, and
    StackChan: dim → connected display sleep → exact-board power-off.
 10. Physical M5 input wakes connected sleep; setup mode inhibits it; a late
@@ -335,14 +346,22 @@ The authoritative branch implements:
 12. StackChan connected sleep stops speaker playback/I2S/amplifier, releases
     torque, cuts the servo VM rail, clears queued choreography, and restores
     enabled peripherals on wake.
+13. Frame battery-idle ESP32-S3 Deep-sleep with a pure inhibitor policy, PMIC
+    battery/external/unknown classification, transient BLE quiesce, GPIO4 KEY
+    wake, and a 30-minute recovery timer.
+14. Frame's unnecessary 10 ms input wake and 50 ms UI wake are both reduced to
+    100 ms; PMIC I2C reads are lazy and freshly qualified at sleep entry.
+15. A prerelease-only v2.7 beta delivery path whose release and beta web flasher
+    link all ten firmware images and whose CI verifies GitHub still classifies
+    the tag as a prerelease rather than the stable OTA release.
 
 It does not implement or claim:
 
-- Frame S3 Deep-sleep or AXP2101 rail gating.
+- Frame AXP2101 rail gating or a whole-board sub-milliamp result.
 - A measured current, percentage reduction, or battery-life number.
 - A safe original-M5Dial external-power detector; the hardware exposes none to
   the controller in the checked schematic/API.
-- A public release or hardware-qualified artifact.
+- Hardware qualification of the public beta artifact.
 
 ## Build and artifact evidence
 
@@ -375,7 +394,9 @@ remains the Linux sanitizer authority.
 | ESP-IDF station Wi-Fi power save defaults to `WIFI_PS_MIN_MODEM` | Verified | ESP-IDF 5.5 Wi-Fi API documentation | Say “documented default”; do not imply a fixed current because DTIM and traffic matter |
 | Automatic Light-sleep requires PM configuration, tickless idle, and all tasks/locks permitting idle | Verified | ESP-IDF 5.5 Power Management guide | Say “enabled/opportunistic,” never “the device is now in Light-sleep” without a trace |
 | Shared firmware forced `WIFI_PS_NONE` | Verified | Pre-change `common/wifi_manager.c` at `97b700f` | Safe to call a source-proven cross-target drain |
-| Frame device Deep-sleeps after every e-paper update | Contradicted | `eink_display.c` sleeps only the panel controller; `main_frame.c` and services continue | Replace with “the e-paper controller sleeps; the device remains connected and active” |
+| Frame device Deep-sleeps after every e-paper update | Contradicted | `eink_display.c` sleeps only the panel controller; the new manager independently sleeps the S3 only after its battery/stopped/idle policy passes | Distinguish panel sleep, S3 Deep-sleep, and PMIC rail state |
+| Frame can safely use AXP2101 status register 0x00 bit 5 as “charging” | Contradicted | AXP2101 register semantics and pinned driver evidence identify it as VBUS-good | Use battery/external/unknown source classification; unknown fails awake |
+| Frame now reaches the PhotoPainter vendor's whole-board sleep-current figure | Unverified | The S3 sleeps, but this slice deliberately does not copy the vendor's revision-sensitive AXP2101 rail writes | Measure the beta first; qualify PMIC rails separately if they dominate |
 | The exact Waveshare Dial is a dual-MCU ESP32-S3 + ESP32 board | Verified | Waveshare product wiki and schematic archive | Always name the exact Waveshare ESP32-S3-Knob-Touch-LCD-1.8 |
 | The primary S3 can shut down the second ESP32 | Contradicted | Classic ESP32 enable is pulled to 3.3 V; no S3 control net appears in the exact schematic | Use separate auxiliary firmware; do not claim main-firmware-only theoretical minimum |
 | The auxiliary ESP32 can be literally power-gated in firmware | Contradicted | Its enable is hard-pulled high and no controllable load switch is present | Define “always off” as immediate no-wake Deep-sleep with all RTC retention off; measure residual board current |
@@ -405,8 +426,8 @@ remains the Linux sanitizer authority.
 - Atom JoyStick STM32 current is unmeasured. Its official source is visibly
   active, but source alone cannot quantify its share of board energy.
 - Auto Light-sleep residency and the identity of remaining PM locks are unknown.
-- Frame's charging state is still Boolean; issue #160 requires a tri-state
-  `{charging, not_charging, unknown}` before true sleep.
+- Frame ESP32-S3 KEY/timer wake and residual board current are unmeasured; the
+  new tri-state PMIC source gate fails awake on I2C/status uncertainty.
 - M5 target connected-sleep and power-off wake behavior has not been physically
   qualified for these artifacts.
 - Original M5Dial external-power status is unobservable through the checked
@@ -417,7 +438,7 @@ remains the Linux sanitizer authority.
 
 ### Expert review and source gaps
 
-- A hardware/power review is required before any Frame AXP2101 rail writes.
+- A hardware/power review is still required before any Frame AXP2101 rail writes.
 - The FNB-C2's behavior and burden at the bottom of its range should be checked
   against a known reference if microamp claims will be published.
 - Exact AP beacon/DTIM settings, RSSI, battery voltage, temperature, and charger
@@ -431,6 +452,10 @@ remains the Linux sanitizer authority.
 ### Corrections made during this audit
 
 - Corrected “e-ink sleeps” to distinguish panel sleep from device sleep.
+- Corrected Frame's PMIC semantics: register 0x00 bit 5 is VBUS-good, not active
+  charging, and a failed status read is now an explicit unknown/fail-awake state.
+- Added a separate, inhibitor-gated Frame ESP32-S3 Deep-sleep state with
+  preflighted KEY/timer wake instead of treating panel sleep as sufficient.
 - Corrected the implied single-SoC Dial model to include the always-enabled
   auxiliary ESP32 and fixed peripherals.
 - Corrected the AtomS3 JoyStick model to include its required STM32F030
@@ -529,7 +554,8 @@ reconnects, refreshes, or charges.
 firmware families, with `codex/issue-226-m5-betas` as the authoritative branch,
 while preserving exact-hardware recovery gates.
 
-**Status:** CONTINUE to draft artifact; PAUSE before public beta/release.
+**Status:** CONTINUE to an explicitly hardware-unverified prerelease; PAUSE
+before stable/OTA promotion.
 
 ### Alignment check
 
@@ -538,9 +564,9 @@ while preserving exact-hardware recovery gates.
   directly explain plausible whole-board waste.
 - **Aligned:** yes. Each change either lowers connected-idle work, stages true
   board shutdown, or makes a hidden always-on load explicit.
-- **Sufficient:** sufficient for the pre-instrument source pass, not sufficient
-  for a battery-life claim. Frame PMIC work and StackChan BSP-task work remain
-  gated because source evidence cannot prove their safe physical behavior.
+- **Sufficient:** sufficient for the pre-instrument source pass and an opt-in
+  beta, not sufficient for a battery-life claim or stable promotion. Frame PMIC
+  work and StackChan BSP-task work remain measurement-gated.
 - **Mechanism clear:** yes. Radio modem sleep + startup DFS + automatic
   Light-sleep address shared SoC/radio idle; target ladders separately address
   panels, PMIC/power-hold, BLE, a second MCU, haptic, speaker, and servo rail.
@@ -579,6 +605,13 @@ the per-target state-machine frame. It did not justify a universal PMIC recipe.
    dark UI; policy application now wakes and reconciles that state.
 5. Force-suspending StackChan's private motion task was rejected because it can
    freeze the BSP mutex; its residual cadence is a measurement-ranked follow-up.
+6. Frame could cancel a sleep attempt while BLE teardown was in flight and
+   strand the BLE host quiesced. The shared owner now accepts a transient cancel
+   command that resumes the prior enabled state without rewriting NVS or bonds;
+   aborted attempts also clear their provisional wake sources.
+7. Frame's 10 ms button poll, 50 ms UI loop, and eager PMIC I2C sampling were
+   unnecessary for its one-second safety holds and retained-display UI. The beta
+   uses 100 ms cadences and lazy/final source qualification instead.
 
 ### Needs human verification
 
@@ -592,9 +625,9 @@ the per-target state-machine frame. It did not justify a universal PMIC recipe.
 
 ### Decision
 
-Continue through a local branch commit and bench-test artifacts. The completion
-gate is intentionally open: do not mark issue #228 fixed or promote a public
-beta until the exact-artifact hardware checklist is recorded.
+Ship an opt-in prerelease with explicit hardware-unverified labels and all
+firmware links. The stable/OTA completion gate remains open until the
+exact-artifact hardware checklist and energy traces are recorded.
 
 ## Dissent
 

@@ -3,11 +3,32 @@
 
 ## Firmware maturity
 
-- **HiPhi Dial — Beta:** physically exercised on current hardware, including
-  display, Wi-Fi, artwork, settings persistence, and BLE media-remote control.
-- **HiPhi Frame — Alpha:** packaged for early hardware testing. The current
-  shared-stack build has not completed equivalent Frame regression coverage;
-  expect rough edges and report target-specific failures.
+- **HiPhi Dial — Beta:** physically exercised on current hardware. For minimum
+  idle draw, install both the main firmware and the one-time auxiliary ESP32
+  parking image.
+- **HiPhi Frame and HiPhi RLCD — Alpha:** packaged for exact-hardware testing.
+  Frame now enters ESP32-S3 Deep-sleep on battery when stopped and idle, with
+  KEY and timer wake; PMIC rail-current qualification remains open.
+- **AtomS3 JoyStick, M5Stack Tough, M5 Dial, M5StickS3, StopWatch, and
+  StackChan — hardware-unverified beta/alpha:** compile- and policy-validated;
+  exact-artifact physical testing is still required.
+
+## Every firmware image
+
+The [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html) contains
+every target. Merged images for command-line flashing are linked directly:
+
+- [HiPhi Dial](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_dial_merged.bin)
+- [Waveshare Dial auxiliary ESP32 parking image](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_knob_aux_park_merged.bin)
+- [HiPhi Frame](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_frame_merged.bin)
+- [HiPhi RLCD](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_rlcd_merged.bin)
+- [AtomS3 JoyStick Deck](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_joy_merged.bin)
+- [M5Stack Tough](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_tough_merged.bin)
+- [M5 Dial Lab](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_m5dial_merged.bin)
+- [M5StickS3 Twist Remote](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_sticks3_merged.bin)
+- [M5Stack StopWatch](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stopwatch_merged.bin)
+- [StackChan Playback Companion](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stackchan_merged.bin)
+- [SHA-256 checksums](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/SHA256SUMS.txt)
 
 ## Updating
 

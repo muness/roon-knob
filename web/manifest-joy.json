@@ -1,0 +1,14 @@
+{
+  "name": "AtomS3 JoyStick Deck (Beta)",
+  "version": "{{VERSION}}",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [
+      { "path": "hiphi_joy_bootloader.bin", "offset": 0 },
+      { "path": "hiphi_joy_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_joy_ota_data_initial.bin", "offset": 53248 },
+      { "path": "hiphi_joy.bin", "offset": 65536 }
+    ]
+  }]
+}

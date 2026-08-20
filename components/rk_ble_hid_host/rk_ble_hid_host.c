@@ -51,6 +51,7 @@ typedef enum {
     COMMAND_BOOT,
     COMMAND_SET_ENABLED,
     COMMAND_PREPARE_FOR_SLEEP,
+    COMMAND_CANCEL_SLEEP,
     COMMAND_SCAN,
     COMMAND_PAIR,
     COMMAND_FORGET,
@@ -995,6 +996,28 @@ static void process_command(const command_t *command) {
         s.start_retry_reload_nvs = false;
         request_stop();
         break;
+    case COMMAND_CANCEL_SLEEP:
+        if (s.fatal_teardown) {
+            set_state(RK_BLE_HID_HOST_STATE_ERROR,
+                      RK_BLE_HID_HOST_ERROR_TEARDOWN);
+            break;
+        }
+        s.sleep_quiesce_pending = false;
+        status_set_sleep_quiesced(false);
+        s.reconnect_attempts = 0;
+        s.reconnect_due = 0;
+        s.start_retry_attempts = 0;
+        s.start_retry_due = 0;
+        s.start_retry_reload_nvs = false;
+        if (s.status.enabled) {
+            if (s.status.state == RK_BLE_HID_HOST_STATE_DISABLED) {
+                start_stack();
+            } else if (s.status.state == RK_BLE_HID_HOST_STATE_READY) {
+                schedule_reconnect();
+                publish_status();
+            }
+        }
+        break;
     case COMMAND_SCAN: {
         if (s.status.state != RK_BLE_HID_HOST_STATE_READY) {
             set_state(s.status.state, RK_BLE_HID_HOST_ERROR_INVALID_STATE);
@@ -1444,6 +1467,12 @@ rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void) {
         return RK_BLE_HID_HOST_OK;
     }
     const command_t command = {.type = COMMAND_PREPARE_FOR_SLEEP};
+    return enqueue_command(&command);
+}
+
+rk_ble_hid_host_result_t rk_ble_hid_host_cancel_sleep(void) {
+    if (!s.owner_task) return RK_BLE_HID_HOST_ERR_INVALID_STATE;
+    const command_t command = {.type = COMMAND_CANCEL_SLEEP};
     return enqueue_command(&command);
 }
 

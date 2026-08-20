@@ -120,3 +120,13 @@ void platform_task_run_pending(void) {
         }
     }
 }
+
+bool platform_task_has_pending(void) {
+    if (!s_initialized) {
+        return false;
+    }
+    os_mutex_lock(&s_ui_mutex);
+    bool pending = s_head != s_tail;
+    os_mutex_unlock(&s_ui_mutex);
+    return pending;
+}

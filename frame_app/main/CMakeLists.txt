@@ -1,5 +1,7 @@
 set(SRC_FILES
     "main_frame.c"
+    "frame_power_manager.c"
+    "frame_power_policy.c"
     "eink_display.c"
     "eink_dither.c"
     "eink_ui.c"

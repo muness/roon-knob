@@ -15,7 +15,9 @@ BOOTLOADER_OFFSETS = {
     "ESP32-C6": 0x0,
     "ESP32-H2": 0x0,
 }
-COMMON_OFFSETS = (0x8000, 0xD000, 0x10000)
+PARTITION_OFFSET = 0x8000
+OTA_DATA_OFFSET = 0xD000
+APPLICATION_OFFSET = 0x10000
 
 
 def fail(message: str) -> None:
@@ -42,10 +44,22 @@ def main() -> None:
     bootloader_offset = BOOTLOADER_OFFSETS.get(chip_family)
     if bootloader_offset is None:
         fail(f"unsupported chip family: {chip_family}")
-    required_offsets = (bootloader_offset, *COMMON_OFFSETS)
-
-    if len(parts) != len(required_offsets):
-        fail(f"expected {len(required_offsets)} parts, found {len(parts)}")
+    if len(parts) == 3:
+        # Factory/single-app images have no otadata partition.
+        required_offsets = (
+            bootloader_offset,
+            PARTITION_OFFSET,
+            APPLICATION_OFFSET,
+        )
+    elif len(parts) == 4:
+        required_offsets = (
+            bootloader_offset,
+            PARTITION_OFFSET,
+            OTA_DATA_OFFSET,
+            APPLICATION_OFFSET,
+        )
+    else:
+        fail(f"expected 3 factory parts or 4 OTA parts, found {len(parts)}")
 
     offsets = []
     nvs_end = args.nvs_offset + args.nvs_size

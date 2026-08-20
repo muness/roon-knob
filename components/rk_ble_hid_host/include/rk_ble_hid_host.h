@@ -114,6 +114,13 @@ rk_ble_hid_host_result_t rk_ble_hid_host_set_enabled(bool enabled);
  */
 rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void);
 
+/**
+ * Cancel a transient sleep quiesce without changing the persisted enabled
+ * preference or peer metadata. The owner resumes the host asynchronously when
+ * it was enabled before the quiesce.
+ */
+rk_ble_hid_host_result_t rk_ble_hid_host_cancel_sleep(void);
+
 /** Start a bounded five-second HID scan. */
 rk_ble_hid_host_result_t rk_ble_hid_host_scan_start(void);
 

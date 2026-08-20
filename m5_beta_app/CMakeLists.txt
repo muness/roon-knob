@@ -7,7 +7,7 @@ if(NOT HIPHI_M5_TARGET IN_LIST _valid_targets)
     message(FATAL_ERROR "HIPHI_M5_TARGET must be one of: ${_valid_targets}")
 endif()
 
-set(PROJECT_VER "0.1.0-beta.1")
+set(PROJECT_VER "2.7.0-beta.1")
 set(_sdkconfig_defaults
     "sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults")
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")

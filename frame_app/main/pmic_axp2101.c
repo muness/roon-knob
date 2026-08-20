@@ -122,12 +122,19 @@ bool pmic_init(void) {
     return true;
 }
 
-bool pmic_is_charging(void) {
-    if (!s_initialized) return false;
+pmic_power_source_t pmic_power_source(void) {
+    if (!s_initialized) return PMIC_POWER_SOURCE_UNKNOWN;
     uint8_t status;
-    if (pmic_read_reg(AXP2101_STATUS1, &status) != ESP_OK) return false;
-    // Bit 5 of STATUS1 indicates charging
-    return (status & 0x20) != 0;
+    if (pmic_read_reg(AXP2101_STATUS1, &status) != ESP_OK) {
+        return PMIC_POWER_SOURCE_UNKNOWN;
+    }
+    // AXP2101 register 0x00 bit 5 is VBUS-good, not charger activity.
+    return (status & 0x20) ? PMIC_POWER_SOURCE_EXTERNAL
+                           : PMIC_POWER_SOURCE_BATTERY;
+}
+
+bool pmic_is_charging(void) {
+    return pmic_power_source() == PMIC_POWER_SOURCE_EXTERNAL;
 }
 
 int pmic_get_battery_percent(void) {
