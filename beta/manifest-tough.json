@@ -1,6 +1,6 @@
 {
   "name": "M5Stack Tough Console (Alpha)",
-  "version": "2.7.0-beta.1",
+  "version": "2.7.0-alpha.1",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32",

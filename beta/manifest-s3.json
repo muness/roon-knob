@@ -1,6 +1,6 @@
 {
-  "name": "HiPhi Dial (Beta)",
-  "version": "2.7.0-beta.1",
+  "name": "HiPhi Dial (Alpha)",
+  "version": "2.7.0-alpha.1",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",

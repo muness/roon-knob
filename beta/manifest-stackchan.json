@@ -1,6 +1,6 @@
 {
-  "name": "StackChan Playback Companion (Beta)",
-  "version": "2.7.0-beta.1",
+  "name": "StackChan Playback Companion (Alpha)",
+  "version": "2.7.0-alpha.1",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",
