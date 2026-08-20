@@ -3,14 +3,15 @@
 
 ## Firmware maturity
 
-- **HiPhi Dial — Beta:** physically exercised on current hardware. For minimum
-  idle draw, install both the main firmware and the one-time auxiliary ESP32
-  parking image.
-- **HiPhi Frame and HiPhi RLCD — Alpha:** packaged for exact-hardware testing.
+- **Every v2.7 firmware target — Alpha:** the exact release artifacts are
+  software-validated but have not completed physical regression testing. For
+  minimum HiPhi Dial idle draw, install both the main firmware and the one-time
+  auxiliary ESP32 parking image.
+- **HiPhi Frame and HiPhi RLCD:** packaged for exact-hardware testing.
   Frame now enters ESP32-S3 Deep-sleep on battery when stopped and idle, with
   KEY and timer wake; PMIC rail-current qualification remains open.
 - **AtomS3 JoyStick, M5Stack Tough, M5 Dial, M5StickS3, StopWatch, and
-  StackChan — hardware-unverified beta/alpha:** compile- and policy-validated;
+  StackChan:** compile- and policy-validated;
   exact-artifact physical testing is still required.
 
 ## Every firmware image
@@ -32,7 +33,7 @@ every target. Merged images for command-line flashing are linked directly:
 
 ## Updating
 
-**Beta/Alpha prereleases:** Install explicitly from the
+**Alpha prereleases:** Install explicitly from the
 [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html) or download the
 release assets. Prereleases are not published through automatic OTA and do not
 replace the stable web flasher.

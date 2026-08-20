@@ -1,10 +1,10 @@
-# Form-native M5 beta targets
+# Form-native M5 alpha targets
 
 These profiles are deliberately separate firmware artifacts. M5Unified detects
 the physical board at boot, and `m5_platform` rejects a binary whose compiled
 profile does not match that board.
 
-| Web beta | Exact product | Flash / PSRAM profile | Hero interaction | Basic controls |
+| Web alpha | Exact product | Flash / PSRAM profile | Hero interaction | Basic controls |
 |---|---|---|---|---|
 | M5 Dial Lab | M5 Dial K130 | 8 MB / none | The round face is a live volume arc driven by the encoder | Press: play/pause; touch: room picker; turn/press: navigate/select |
 | StickS3 Twist Remote | M5StickS3 K150 | 8 MB / 8 MB OPI | Hold the device button and twist the handheld itself for volume | Secondary click: play/pause; secondary hold: rooms; primary/secondary: navigate/select |
@@ -20,7 +20,7 @@ their bootloader, partition table, OTA data, application offsets, and assets.
 That evidence establishes build and web-flash readiness, not physical hardware
 behavior. Until an immutable PR-preview artifact passes flash, sustained boot,
 display, input, Wi-Fi provisioning, and control checks on the exact product,
-the preview pages and PR remain labeled **hardware-unverified beta**.
+the preview pages and PR remain labeled **hardware-unverified alpha**.
 
 StackChan body language is off by default and persisted only after an explicit
 hold on the face. A new track triggers a short two-step dance; losing an active

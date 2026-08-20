@@ -1,5 +1,5 @@
 {
-  "name": "StackChan Playback Companion (Beta)",
+  "name": "StackChan Playback Companion (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{

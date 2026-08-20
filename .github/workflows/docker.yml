@@ -1288,7 +1288,7 @@ jobs:
 
             cat > "pr-preview/${manifest}" << EOF
           {
-            "name": "${display_name} (PR #${PR_NUM} Hardware-Unverified Beta)",
+            "name": "${display_name} (PR #${PR_NUM} Hardware-Unverified Alpha)",
             "version": "pr-${PR_NUM}",
             "new_install_prompt_erase": true,
             "builds": [{"chipFamily": "ESP32-S3", "parts": [
@@ -1308,7 +1308,7 @@ jobs:
 
           cat > "pr-preview/${DIAL_MANIFEST_FILE}" << EOF
           {
-            "name": "HiPhi Dial Beta (PR #${PR_NUM} Preview)",
+            "name": "HiPhi Dial Alpha (PR #${PR_NUM} Preview)",
             "version": "pr-${PR_NUM}",
             "new_install_prompt_erase": true,
             "builds": [{"chipFamily": "ESP32-S3", "parts": [
@@ -1348,7 +1348,7 @@ jobs:
 
           cat > "pr-preview/${JOY_MANIFEST_FILE}" << EOF
           {
-            "name": "AtomS3 JoyStick Beta (PR #${PR_NUM} Preview)",
+            "name": "AtomS3 JoyStick Alpha (PR #${PR_NUM} Preview)",
             "version": "pr-${PR_NUM}",
             "new_install_prompt_erase": true,
             "builds": [{"chipFamily": "ESP32-S3", "parts": [
@@ -1362,7 +1362,7 @@ jobs:
 
           cat > "pr-preview/${TOUGH_MANIFEST_FILE}" << EOF
           {
-            "name": "M5Stack Tough Beta (PR #${PR_NUM} Preview)",
+            "name": "M5Stack Tough Alpha (PR #${PR_NUM} Preview)",
             "version": "pr-${PR_NUM}",
             "new_install_prompt_erase": true,
             "builds": [{"chipFamily": "ESP32", "parts": [
@@ -1533,10 +1533,10 @@ jobs:
             - [Flash HiPhi RLCD](${process.env.RLCD_PAGE_URL}) — \`${process.env.RLCD_FIRMWARE_SHA256}\`
             - [Flash AtomS3 JoyStick](${process.env.JOY_PAGE_URL}) — \`${process.env.JOY_FIRMWARE_SHA256}\`
             - [Flash M5Stack Tough](${process.env.TOUGH_PAGE_URL}) — \`${process.env.TOUGH_FIRMWARE_SHA256}\`
-            - [Flash M5 Dial Lab Beta](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
-            - [Flash M5StickS3 Twist Beta](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
-            - [Flash M5Stack StopWatch Beta](${process.env.STOPWATCH_PAGE_URL}) — \`${process.env.STOPWATCH_FIRMWARE_SHA256}\`
-            - [Flash StackChan Companion Beta](${process.env.STACKCHAN_PAGE_URL}) — \`${process.env.STACKCHAN_FIRMWARE_SHA256}\`
+            - [Flash M5 Dial Lab Alpha](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
+            - [Flash M5StickS3 Twist Alpha](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
+            - [Flash M5Stack StopWatch Alpha](${process.env.STOPWATCH_PAGE_URL}) — \`${process.env.STOPWATCH_FIRMWARE_SHA256}\`
+            - [Flash StackChan Companion Alpha](${process.env.STACKCHAN_PAGE_URL}) — \`${process.env.STACKCHAN_FIRMWARE_SHA256}\`
 
             Each page, manifest, bootloader, partition table, OTA data image, and application binary was fetched from GitHub Pages and compared byte-for-byte with the job workspace. Manifest checks preserve NVS; browser updates must decline the erase prompt to retain settings. Hardware testing remains the active merge gate.
 
@@ -1617,8 +1617,12 @@ jobs:
           mkdir -p gh-pages-build
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            CHANNEL_LABEL=" Beta"
-            CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Beta and Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+            case "${GITHUB_REF_NAME}" in
+              *-alpha.*) CHANNEL_LABEL=" Alpha" ;;
+              *-beta.*) CHANNEL_LABEL=" Beta" ;;
+              *) CHANNEL_LABEL=" Pre-release" ;;
+            esac
+            CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
           else
             CHANNEL_LABEL=""
             CHANNEL_NOTICE=""

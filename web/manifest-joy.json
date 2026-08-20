@@ -1,5 +1,5 @@
 {
-  "name": "AtomS3 JoyStick Deck (Beta)",
+  "name": "AtomS3 JoyStick Deck (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{

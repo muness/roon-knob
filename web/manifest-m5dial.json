@@ -1,5 +1,5 @@
 {
-  "name": "M5 Dial Lab (Beta)",
+  "name": "M5 Dial Lab (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{

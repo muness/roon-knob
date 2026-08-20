@@ -1,5 +1,5 @@
 {
-  "name": "M5StickS3 Twist Remote (Beta)",
+  "name": "M5StickS3 Twist Remote (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{
