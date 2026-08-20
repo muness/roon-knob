@@ -13,6 +13,19 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "common/platform/platform_power.h": (
         "platform_power_snapshot_t",
         "void platform_power_snapshot(platform_power_snapshot_t *out)",
+        "platform_power_diagnostics_t",
+        "platform_power_diagnostics_snapshot",
+        "platform_power_debug_arm_sleep",
+    ),
+    "common/platform/platform_power.c": (
+        "controller_config_snapshot(&config)",
+        "platform_power_diagnostics_enrich(out)",
+    ),
+    "common/power_debug_web.c": (
+        '"/power-debug"',
+        '"/power-debug/sleep"',
+        '"schema_version\\\":1',
+        "power_debug_web_register",
     ),
     "common/bridge_client.c": (
         '"platform/platform_power.h"',
@@ -32,15 +45,26 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "frame_app/main/platform_display_frame.c": (
         "void platform_power_snapshot",
         "pmic_get_battery_percent()",
-        "pmic_is_charging()",
+        "PMIC_POWER_SOURCE_EXTERNAL",
+        "platform_power_diagnostics_enrich",
     ),
-    "rlcd_app/main/platform_display_rlcd.c": ("void platform_power_snapshot",),
-    "atom_app/main/platform_display_atom.c": ("void platform_power_snapshot",),
-    "tough_app/main/platform_display_m5.c": ("void platform_power_snapshot",),
+    "rlcd_app/main/platform_display_rlcd.c": (
+        "void platform_power_snapshot",
+        "platform_power_diagnostics_enrich",
+    ),
+    "atom_app/main/platform_display_atom.c": (
+        "void platform_power_snapshot",
+        "platform_power_diagnostics_enrich",
+    ),
+    "tough_app/main/platform_display_m5.c": (
+        "void platform_power_snapshot",
+        "platform_power_diagnostics_enrich",
+    ),
     "m5_beta_app/main/platform_display_beta.c": (
         "void platform_power_snapshot",
         "m5_platform_battery_level()",
         "m5_platform_battery_is_charging()",
+        "platform_power_diagnostics_enrich",
     ),
     "idf_app/main/battery.c": (
         "BATTERY_SAMPLE_CACHE_MS 15000",
@@ -61,9 +85,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "wifi_mgr_scan_start()",
         "Scanning&hellip; this list will refresh ",
         "automatically.</p>",
-        '"/power-debug"',
-        '"/power-debug/sleep"',
-        "display_power_debug_arm_deep_sleep(15)",
+        "power_debug_web_register(s_server)",
     ),
     "idf_app/main/display_sleep.c": (
         "RTC_DATA_ATTR static power_debug_rtc_t",
@@ -74,21 +96,38 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "frame_app/main/captive_portal.c": (
         "Nearby 2.4 GHz networks",
         "wifi_mgr_scan_start()",
+        "power_debug_web_register(s_server)",
+    ),
+    "frame_app/main/frame_power_manager.c": (
+        "RTC_DATA_ATTR static frame_power_debug_rtc_t",
+        "frame_power_manager_debug_arm",
+        "s_power_debug_rtc.preflight_completions++",
+        "s_power_debug_rtc.entries++",
     ),
     "tough_app/main/captive_portal.c": (
         "wifi_mgr_scan_start()",
         "No nearby networks found",
+        "power_debug_web_register(s_server)",
     ),
     "atom_app/main/touch_ui.cpp": ("wifi_mgr_scan_start()",),
     "tough_app/main/touch_ui.cpp": ("wifi_mgr_scan_start()",),
     "m5_beta_app/main/touch_ui.cpp": ("wifi_mgr_scan_start()",),
     "rlcd_app/main/CMakeLists.txt": (
         '"../../frame_app/main/captive_portal.c"',
+        '"../../common/power_debug_web.c"',
+    ),
+    "idf_app/main/CMakeLists.txt": ('"../../common/power_debug_web.c"',),
+    "frame_app/main/CMakeLists.txt": ('"../../common/power_debug_web.c"',),
+    "tough_app/main/CMakeLists.txt": ('"../../common/power_debug_web.c"',),
+    "atom_app/main/CMakeLists.txt": ('"../../common/power_debug_web.c"',),
+    "m5_beta_app/main/CMakeLists.txt": (
+        '"../../common/power_debug_web.c"',
     ),
     ".github/RELEASE_TEMPLATE.md": (
         "Scanning is exposed in this alpha on all nine physical targets",
         "A platform power snapshot now supplies battery level",
-        "connected\n  settings page links to `/power-debug`",
+        "Every physical target now exposes the same `/power-debug` page",
+        "HiPhi Dial and HiPhi Frame additionally expose a one-time 15-second powered",
     ),
 }
 
@@ -102,6 +141,7 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
         "battery_get_percentage()",
         "battery_is_charging()",
     ),
+    "idf_app/main/config_server.c": ("display_power_debug_snapshot",),
     ".github/RELEASE_TEMPLATE.md": (
         "HiPhi Dial captive page still uses manual SSID entry",
     ),
@@ -135,6 +175,7 @@ def main() -> int:
     print("Platform power/Wi-Fi contract check passed")
     print("- one power snapshot feeds each shared controller poll cycle")
     print("- every physical target exposes the shared non-blocking Wi-Fi scan")
+    print("- every physical target exposes the shared power-debug schema")
     return 0
 
 

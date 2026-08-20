@@ -13,6 +13,7 @@
 #include "platform/platform_display.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_power.h"
+#include "power_debug_web.h"
 #include "os_mutex.h"
 
 #include <esp_err.h>
@@ -699,7 +700,8 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<title>" HIPHI_BRAND " - Zones</title>"
     "<style>%s</style></head><body>"
     "<h1>" HIPHI_BRAND "</h1>"
-    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
+    "<a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -820,7 +822,8 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "select{padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
     "small{color:#aaa;}"
     "</style></head><body><h1>" HIPHI_BRAND "</h1>"
-    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a></nav>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
+    "<a href='/power-debug'>Power</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
     "<p class='status'>Artwork mode keeps the album visible; dim and sleep are the subsequent power-saving stages.</p>"
     "<form method='POST' action='/api/settings'><h3>On battery</h3>"
@@ -1032,6 +1035,8 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t restart = {.uri = "/api/restart", .method = HTTP_POST, .handler = sta_restart_handler};
   if (!register_uri_handler(&restart)) goto fail;
+
+  if (!power_debug_web_register(s_server)) goto fail;
 
   s_server_mode = WEB_SERVER_STA_CONFIG;
   ESP_LOGI(TAG, "STA web server started (zone picker)");

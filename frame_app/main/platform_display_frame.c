@@ -3,6 +3,7 @@
 
 #include "platform/platform_display.h"
 #include "platform/platform_power.h"
+#include "frame_power_manager.h"
 #include "pmic_axp2101.h"
 
 bool platform_display_is_sleeping(void) {
@@ -25,5 +26,14 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
         return;
     }
     out->battery_level = pmic_get_battery_percent();
-    out->external_power = pmic_is_charging();
+    out->external_power =
+        pmic_power_source() == PMIC_POWER_SOURCE_EXTERNAL;
+}
+
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    frame_power_manager_debug_enrich(out);
+}
+
+bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
+    return frame_power_manager_debug_arm(delay_sec);
 }

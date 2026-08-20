@@ -14,9 +14,13 @@
 
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
+#include <esp_attr.h>
 #include <esp_log.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
 #include <esp_timer.h>
+
+#include <string.h>
 
 static const char *TAG = "frame_power";
 
@@ -25,6 +29,23 @@ static const char *TAG = "frame_power";
 #define FRAME_TIMER_WAKE_GRACE_MS (60ULL * 1000ULL)
 #define FRAME_RETRY_COOLDOWN_MS (60ULL * 1000ULL)
 #define FRAME_SOURCE_CACHE_MS 1000ULL
+#define FRAME_POWER_DEBUG_RTC_MAGIC 0x46505752u  // "FPWR"
+
+typedef struct {
+    uint32_t magic;
+    uint32_t attempts;
+    uint32_t preflight_completions;
+    uint32_t entries;
+    uint32_t hardware_wakes;
+    uint32_t last_preflight_flags;
+    uint32_t last_preflight_error;
+    int reset_reason;
+    int wakeup_cause;
+} frame_power_debug_rtc_t;
+
+RTC_DATA_ATTR static frame_power_debug_rtc_t s_power_debug_rtc = {
+    .magic = FRAME_POWER_DEBUG_RTC_MAGIC,
+};
 
 typedef enum {
     FRAME_SLEEP_IDLE = 0,
@@ -40,6 +61,16 @@ static bool s_have_cached_source;
 static uint64_t s_source_checked_ms;
 static frame_power_source_t s_cached_source;
 static frame_power_decision_t s_last_decision = FRAME_POWER_READY;
+static uint64_t s_debug_force_not_before_ms;
+static uint32_t s_debug_arm_count;
+
+static void power_debug_rtc_init(void) {
+    if (s_power_debug_rtc.magic == FRAME_POWER_DEBUG_RTC_MAGIC) {
+        return;
+    }
+    memset(&s_power_debug_rtc, 0, sizeof(s_power_debug_rtc));
+    s_power_debug_rtc.magic = FRAME_POWER_DEBUG_RTC_MAGIC;
+}
 
 static uint64_t now_ms(void) {
     return (uint64_t)esp_timer_get_time() / 1000ULL;
@@ -91,6 +122,8 @@ static const char *decision_name(frame_power_decision_t decision) {
 static bool configure_wake_sources(void) {
     if (!frame_input_wake_button_released() ||
         gpio_get_level(FRAME_WAKE_GPIO) == 0) {
+        s_power_debug_rtc.last_preflight_error =
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE;
         return false;
     }
     if (esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL) != ESP_OK ||
@@ -102,9 +135,13 @@ static bool configure_wake_sources(void) {
                                         ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK ||
         esp_sleep_enable_timer_wakeup(FRAME_TIMER_WAKE_US) != ESP_OK) {
         (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+        s_power_debug_rtc.last_preflight_error =
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
         ESP_LOGE(TAG, "Could not configure KEY/timer wake; staying awake");
         return false;
     }
+    s_power_debug_rtc.last_preflight_flags |=
+        PLATFORM_POWER_PREFLIGHT_WAKE_ARMED;
     return true;
 }
 
@@ -151,6 +188,20 @@ static frame_power_decision_t build_snapshot(
         .wake_button_released = frame_input_wake_button_released(),
     };
     frame_power_decision_t decision = frame_power_policy_decide(snapshot);
+    const bool forced = s_debug_force_not_before_ms > 0 &&
+        current_ms >= s_debug_force_not_before_ms;
+    if (forced) {
+        /* A debug request bypasses user-policy/playing/source gates, but still
+         * honors provisioning, pending work, config durability, and the wake
+         * button so it cannot enter through an unsafe teardown state. */
+        snapshot->enabled = true;
+        snapshot->power_source = FRAME_POWER_SOURCE_BATTERY;
+        snapshot->sleep_not_before_ms = current_ms;
+        snapshot->bridge_connected = true;
+        snapshot->zone_state_known = true;
+        snapshot->playing = false;
+        decision = frame_power_policy_decide(snapshot);
+    }
     if (decision == FRAME_POWER_BLOCK_SOURCE_UNKNOWN) {
         snapshot->power_source = power_source(force_source);
         decision = frame_power_policy_decide(snapshot);
@@ -181,6 +232,15 @@ void frame_power_manager_init(void) {
     s_source_checked_ms = 0;
     s_cached_source = FRAME_POWER_SOURCE_UNKNOWN;
     s_last_decision = FRAME_POWER_READY;
+    s_debug_force_not_before_ms = 0;
+    s_debug_arm_count = 0;
+    power_debug_rtc_init();
+    const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
+    s_power_debug_rtc.reset_reason = (int)esp_reset_reason();
+    s_power_debug_rtc.wakeup_cause = (int)wake;
+    if (wake == ESP_SLEEP_WAKEUP_EXT1 || wake == ESP_SLEEP_WAKEUP_TIMER) {
+        s_power_debug_rtc.hardware_wakes++;
+    }
 #if CONFIG_RK_FRAME_DEEP_SLEEP
     ESP_LOGI(TAG, "Frame Deep-sleep enabled; wake=%s, timeout=configured",
              s_timer_wake ? "timer" : "cold-or-key");
@@ -210,6 +270,11 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
     }
 
     if (s_state == FRAME_SLEEP_IDLE) {
+        power_debug_rtc_init();
+        s_power_debug_rtc.attempts++;
+        s_power_debug_rtc.last_preflight_flags = 0;
+        s_power_debug_rtc.last_preflight_error =
+            PLATFORM_POWER_PREFLIGHT_ERROR_NONE;
         if (!configure_wake_sources()) {
             s_retry_not_before_ms = snapshot.now_ms + FRAME_RETRY_COOLDOWN_MS;
             return;
@@ -217,6 +282,8 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
         frame_ble_sleep_status_t ble =
             ble_hid_host_frame_prepare_for_sleep();
         if (ble == FRAME_BLE_SLEEP_FAILED) {
+            s_power_debug_rtc.last_preflight_error =
+                PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
             ESP_LOGW(TAG, "BLE quiesce rejected; staying awake");
             (void)cancel_sleep_attempt();
             return;
@@ -225,6 +292,8 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
         if (ble != FRAME_BLE_SLEEP_READY) {
             return;
         }
+        s_power_debug_rtc.last_preflight_flags |=
+            PLATFORM_POWER_PREFLIGHT_BLE_OFF;
     } else {
         frame_ble_sleep_status_t ble =
             ble_hid_host_frame_prepare_for_sleep();
@@ -232,23 +301,77 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
             return;
         }
         if (ble == FRAME_BLE_SLEEP_FAILED) {
+            s_power_debug_rtc.last_preflight_error =
+                PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
             ESP_LOGW(TAG, "BLE did not quiesce; staying awake");
             (void)cancel_sleep_attempt();
             return;
         }
+        s_power_debug_rtc.last_preflight_flags |=
+            PLATFORM_POWER_PREFLIGHT_BLE_OFF;
     }
 
     // Re-read VBUS immediately before teardown so a recently attached cable
     // cannot be hidden by the one-second connected-idle cache.
     decision = build_snapshot(runtime_transition_pending, true, &snapshot);
     if (decision != FRAME_POWER_READY) {
+        s_power_debug_rtc.last_preflight_error =
+            PLATFORM_POWER_PREFLIGHT_ERROR_POLICY;
         (void)cancel_sleep_attempt();
         return;
     }
 
     ESP_LOGI(TAG, "Entering ESP32-S3 Deep-sleep; KEY or 30-minute timer wakes");
+    s_power_debug_rtc.last_preflight_flags |=
+        PLATFORM_POWER_PREFLIGHT_DISPLAY_SAFE;
     captive_portal_stop();
     platform_input_shutdown();
+    s_power_debug_rtc.last_preflight_flags |=
+        PLATFORM_POWER_PREFLIGHT_OUTPUTS_SAFE;
     wifi_mgr_stop();
+    s_power_debug_rtc.last_preflight_flags |=
+        PLATFORM_POWER_PREFLIGHT_WIFI_OFF;
+    s_power_debug_rtc.preflight_completions++;
+    s_power_debug_rtc.entries++;
+    s_debug_force_not_before_ms = 0;
     esp_deep_sleep_start();
+}
+
+void frame_power_manager_debug_enrich(platform_power_diagnostics_t *out) {
+    if (!out) {
+        return;
+    }
+    power_debug_rtc_init();
+#if CONFIG_RK_FRAME_DEEP_SLEEP
+    out->capabilities = PLATFORM_POWER_CAP_SOC_DEEP_SLEEP |
+        PLATFORM_POWER_CAP_RTC_EVIDENCE |
+        PLATFORM_POWER_CAP_FORCED_TEST;
+#endif
+    out->deep_sleep_timer_active = s_debug_force_not_before_ms > 0;
+    out->debug_sleep_override_armed = s_debug_force_not_before_ms > 0;
+    out->debug_sleep_arms = s_debug_arm_count;
+    out->power_off_attempts = s_power_debug_rtc.attempts;
+    out->preflight_completions = s_power_debug_rtc.preflight_completions;
+    out->power_off_entries = s_power_debug_rtc.entries;
+    out->hardware_wakes = s_power_debug_rtc.hardware_wakes;
+    out->last_preflight_flags = s_power_debug_rtc.last_preflight_flags;
+    out->last_preflight_error = s_power_debug_rtc.last_preflight_error;
+    out->reset_reason = s_power_debug_rtc.reset_reason;
+    out->wakeup_cause = s_power_debug_rtc.wakeup_cause;
+}
+
+bool frame_power_manager_debug_arm(uint32_t delay_sec) {
+#if CONFIG_RK_FRAME_DEEP_SLEEP
+    if (delay_sec < 5 || delay_sec > 300) {
+        return false;
+    }
+    s_debug_force_not_before_ms = now_ms() + (uint64_t)delay_sec * 1000ULL;
+    s_debug_arm_count++;
+    ESP_LOGI(TAG, "Power debug armed one-time Deep-sleep in %lu sec",
+             (unsigned long)delay_sec);
+    return true;
+#else
+    (void)delay_sec;
+    return false;
+#endif
 }

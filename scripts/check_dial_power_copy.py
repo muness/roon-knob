@@ -42,7 +42,7 @@ REQUIRED = {
         "The existing Deep-sleep path now shuts down cleanly",
         "The otherwise-unused second ESP32 is parked",
         "Normal logs are quiet, but power transitions remain observable",
-        "A powered Deep-sleep test leaves evidence behind",
+        "The shared powered test records Dial-specific evidence",
         "source- and build-verified mechanisms, not a battery-life result",
         "a nearly full\nbattery can temporarily receive the charging policy",
     ),

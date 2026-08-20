@@ -12,3 +12,9 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     out->battery_level = -1;
     out->external_power = false;
 }
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    if (!out) return;
+    /* Reflective LCD Art mode reduces work but is not a whole-display or SoC
+     * sleep state, so do not advertise an unqualified power-off capability. */
+    out->capabilities = 0;
+}

@@ -25,3 +25,7 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     out->battery_level = -1;
     out->external_power = true;
 }
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    if (!out) return;
+    out->capabilities = PLATFORM_POWER_CAP_DISPLAY_SLEEP;
+}

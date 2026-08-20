@@ -51,6 +51,23 @@ both its captive setup and connected settings pages, refreshes the list when
 the asynchronous scan completes, and fills the manual SSID field when a result
 is selected.
 
+## Shared power diagnostics
+
+Every physical target now exposes the same `/power-debug` page and JSON schema
+from its connected device UI. It reports the target's actual capability class,
+active source-specific timeouts, battery/external-power snapshot, current
+display state, transition counters where available, and whether retained
+power-off evidence or a powered test is supported. Unsupported whole-device
+sleep paths are stated explicitly instead of being implied by missing data.
+
+HiPhi Dial and HiPhi Frame additionally expose a one-time 15-second powered
+Deep-sleep test because both have implemented ESP32-S3 Deep-sleep and hardware
+wake paths. Their RTC-retained counters distinguish a policy block, incomplete
+preflight, requested Deep-sleep entry, and successful hardware wake. Other
+targets still expose the common diagnostics but do not offer a destructive
+test until their board power-off/wake path can retain useful evidence.
+These are firmware breadcrumbs, not current measurements.
+
 ## HiPhi Dial power-saving changes
 
 The exact Waveshare ESP32-S3-Knob-Touch-LCD-1.8 contains **two programmable
@@ -84,12 +101,10 @@ exercise the full power-saving path:
   two-second request/response/parse messages and memory watermarks move to
   debug level. Info logs identify the selected battery/external-power policy,
   effective timeouts, completed Deep-sleep preflight, entry, and encoder wake.
-- **A powered Deep-sleep test leaves evidence behind.** The Dial's connected
-  settings page links to `/power-debug`, which shows the active policy and
-  transition counters. Its one-time test bypasses the plugged-in timeout,
-  records RTC-retained shutdown checkpoints, and reports the reset/wake cause
-  after encoder wake. These are firmware breadcrumbs, not current measurements
-  and not proof of the auxiliary ESP32's draw.
+- **The shared powered test records Dial-specific evidence.** Its one-time test
+  bypasses the plugged-in timeout, records RTC-retained shutdown checkpoints,
+  and reports the reset/wake cause after encoder wake. It cannot prove the
+  auxiliary ESP32's draw.
 
 When the Dial is using its default battery policy during normal connected
 operation, the UI enters Art mode after 30 seconds, dims 30 seconds later, turns

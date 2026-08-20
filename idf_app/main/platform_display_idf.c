@@ -691,3 +691,80 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     out->battery_level = battery_get_percentage();
     out->external_power = battery_is_charging();
 }
+
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    if (!out) {
+        return;
+    }
+    display_power_debug_snapshot_t dial = {0};
+    display_power_debug_snapshot(&dial);
+    out->capabilities = PLATFORM_POWER_CAP_DISPLAY_SLEEP |
+        PLATFORM_POWER_CAP_SOC_DEEP_SLEEP |
+        PLATFORM_POWER_CAP_RTC_EVIDENCE |
+        PLATFORM_POWER_CAP_FORCED_TEST |
+        PLATFORM_POWER_CAP_AUXILIARY_SOC;
+    switch (dial.display_state) {
+    case DISPLAY_STATE_ART_MODE:
+        out->state = PLATFORM_POWER_STATE_ART;
+        break;
+    case DISPLAY_STATE_DIM:
+        out->state = PLATFORM_POWER_STATE_DIM;
+        break;
+    case DISPLAY_STATE_SLEEP:
+        out->state = PLATFORM_POWER_STATE_DISPLAY_SLEEP;
+        break;
+    case DISPLAY_STATE_NORMAL:
+    default:
+        out->state = PLATFORM_POWER_STATE_ACTIVE;
+        break;
+    }
+    out->policy_known = dial.power_policy_known;
+    out->automatic_light_sleep_configured =
+        dial.automatic_light_sleep_configured;
+    out->deep_sleep_timer_active = dial.deep_sleep_timer_active;
+    out->debug_sleep_override_armed = dial.debug_sleep_override_armed;
+    out->art_timeout_sec = dial.art_timeout_sec;
+    out->dim_timeout_sec = dial.dim_timeout_sec;
+    out->display_sleep_timeout_sec = dial.panel_sleep_timeout_sec;
+    out->power_off_timeout_sec = dial.deep_sleep_timeout_sec;
+    out->art_transitions = dial.art_transitions;
+    out->dim_transitions = dial.dim_transitions;
+    out->display_sleep_transitions = dial.panel_sleep_transitions;
+    out->runtime_wakes = dial.runtime_wakes;
+    out->debug_sleep_arms = dial.debug_sleep_arms;
+    out->power_off_attempts = dial.deep_sleep_attempts;
+    out->preflight_completions = dial.preflight_completions;
+    out->power_off_entries = dial.deep_sleep_entries;
+    out->hardware_wakes = dial.encoder_wakes;
+    out->last_preflight_flags = dial.last_preflight_flags;
+    switch (dial.last_preflight_error) {
+    case 0:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_NONE;
+        break;
+    case 1:
+    case 3:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        break;
+    case 2:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE;
+        break;
+    case 4:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
+        break;
+    case 5:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS;
+        break;
+    case 6:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WIFI;
+        break;
+    default:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_POLICY;
+        break;
+    }
+    out->reset_reason = dial.reset_reason;
+    out->wakeup_cause = dial.wakeup_cause;
+}
+
+bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
+    return display_power_debug_arm_deep_sleep(delay_sec);
+}

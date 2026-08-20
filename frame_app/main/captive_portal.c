@@ -3,6 +3,7 @@
 #include "controller_config.h"
 #include "eink_ui.h"
 #include "wifi_manager.h"
+#include "power_debug_web.h"
 
 #ifndef PLATFORM_PORTAL_PRODUCT_NAME
 #define PLATFORM_PORTAL_PRODUCT_NAME "HiPhi Frame"
@@ -830,7 +831,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Settings</title><style>%s</style>%s</head><body>"
       "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
       "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
-      "<a href='/settings'>Settings</a></nav>"
+      "<a href='/settings'>Settings</a><a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Unified Hi-Fi Control</h2>"
       "<p class='status'>Enter the address of your Unified Hi-Fi Control server. "
       "Leave it blank to use network discovery.</p>"
@@ -1015,7 +1016,8 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
       "border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
       ".wifi-choice small{color:#aaa;float:right;}</style>%s</head><body>"
       "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
-      "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a></nav>"
+      "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
+      "<a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Saved Wi-Fi networks</h2>%s</div>"
       "<div class='card'><h2>Add a Wi-Fi network</h2>"
       "<p class='status'><a href='/wifi?scan=%s'>%s nearby 2.4 GHz networks</a> or type a hidden network below.</p>"
@@ -1098,7 +1100,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Zones</title>"
     "<style>%s</style>%s</head><body>"
     "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
-    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -1234,7 +1236,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - BLE Remote</title>"
     "<style>%s</style>%s%s</head><body>"
     "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
-    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>BLE Media Remote</h2>",
@@ -1567,6 +1569,8 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t wifi_add = {.uri = "/api/wifi", .method = HTTP_POST, .handler = sta_wifi_add_handler};
   if (!register_uri_handler(&wifi_add)) goto fail;
+
+  if (!power_debug_web_register(s_server)) goto fail;
 
   s_server_mode = WEB_SERVER_STA_CONFIG;
   ESP_LOGI(TAG, "STA web server started (zone picker + BLE config)");

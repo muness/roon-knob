@@ -20,3 +20,8 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     out->battery_level = m5_platform_battery_level();
     out->external_power = m5_platform_battery_is_charging();
 }
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    if (!out) return;
+    out->capabilities = PLATFORM_POWER_CAP_DISPLAY_SLEEP |
+        PLATFORM_POWER_CAP_BOARD_POWER_OFF;
+}

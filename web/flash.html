@@ -131,6 +131,11 @@
       Not sure which chip? Just try - ESP Web Tools detects the chip and warns if it doesn't match.
     </div>
 
+    <div class="info-box">
+      <strong>Shared power evidence</strong><br>
+      Every device's connected web UI exposes <code>/power-debug</code> with the same HTML and JSON schema. Dial and Frame also offer a one-time powered Deep-sleep test; other targets explicitly report when an implemented, evidence-retaining test is unavailable.
+    </div>
+
     <!-- HiPhi Dial -->
     <div class="card" id="dial-card">
       <h2>HiPhi Dial <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
@@ -144,7 +149,7 @@
           <li><strong>Radio:</strong> Wi-Fi modem sleep replaces the previous always-awake mode while the Dial stays associated between polls.</li>
           <li><strong>Main processor:</strong> automatic Light-sleep and clock scaling can run whenever the firmware is idle.</li>
           <li><strong>Battery checks:</strong> one cached 16-sample ADC reading supplies level and power-source policy for 15 seconds instead of repeating that work throughout every status cycle.</li>
-          <li><strong>Power diagnostics:</strong> the connected settings page links to a power-debug view with a one-time plugged-in Deep-sleep test and RTC-retained entry/wake evidence.</li>
+          <li><strong>Power diagnostics:</strong> the shared power-debug view adds Dial-specific RTC-retained entry/wake evidence and a one-time plugged-in Deep-sleep test.</li>
           <li><strong>Deep sleep:</strong> the panel, Wi-Fi, and BLE stop; the backlight stays latched off; and turning the encoder wakes the main ESP32-S3 without leaving its RTC peripheral domain on.</li>
           <li><strong>Second processor:</strong> a separate one-time parking image immediately Deep-sleeps the otherwise-unused classic ESP32 and mutes its audio DAC on every boot.</li>
         </ul>
