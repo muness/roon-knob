@@ -5,14 +5,54 @@
 
 - **Every v2.7 firmware target — Alpha:** the exact release artifacts are
   software-validated but have not completed physical regression testing. For
-  minimum HiPhi Dial idle draw, install both the main firmware and the one-time
-  auxiliary ESP32 parking image.
+  the full HiPhi Dial power-saving path, install both the main firmware and the
+  one-time auxiliary ESP32 parking image.
 - **HiPhi Frame and HiPhi RLCD:** packaged for exact-hardware testing.
   Frame now enters ESP32-S3 Deep-sleep on battery when stopped and idle, with
   KEY and timer wake; PMIC rail-current qualification remains open.
 - **AtomS3 JoyStick, M5Stack Tough, M5 Dial, M5StickS3, StopWatch, and
   Kizz:** compile- and policy-validated;
   exact-artifact physical testing is still required.
+
+## HiPhi Dial power-saving changes
+
+The exact Waveshare ESP32-S3-Knob-Touch-LCD-1.8 contains **two programmable
+processors**, and both are part of the board's power budget. Install both the
+main HiPhi Dial firmware and the one-time auxiliary ESP32 parking image to
+exercise the full power-saving path:
+
+- **Wi-Fi can rest while staying connected.** The main firmware no longer
+  forces the radio into its fully awake mode. It uses modem sleep between
+  beacons and controller polls while remaining associated with the access
+  point.
+- **The main ESP32-S3 can nap between jobs.** Dynamic frequency scaling and
+  automatic Light-sleep are enabled whenever application tasks and radio locks
+  permit them.
+- **The existing Deep-sleep path now shuts down cleanly.** Before sleep, BLE is
+  quiesced without deleting its enabled preference or bonds, Wi-Fi and the LCD
+  panel stop, and the backlight pin is latched off. The encoder wake circuit
+  uses the board's external pull-ups instead of keeping the RTC peripheral
+  domain powered. Turning the knob wakes through a fresh boot and reconnect.
+- **The otherwise-unused second ESP32 is parked.** The separate auxiliary image
+  mutes the audio DAC, disables every wake source and RTC memory domain, and
+  enters Deep-sleep immediately on every boot. The board hard-wires this chip's
+  enable pin high, so this is the strongest software-off state available rather
+  than literal power removal.
+
+When the Dial is using its default battery policy during normal connected
+operation, the UI enters Art mode after 30 seconds, dims 30 seconds later, turns
+the panel off after a further 60 seconds, and puts the main ESP32-S3 into
+Deep-sleep 20 minutes after that. Charging defaults keep panel sleep and
+Deep-sleep disabled. Server-provided settings can change these timeouts.
+
+These are source- and build-verified mechanisms, not a battery-life result. No
+current, percentage improvement, or runtime number is claimed until the exact
+release images are measured on the exact board. Fixed regulators, the charger,
+display logic, haptic controller, microphone, SD interface, and other
+board-level loads remain in the measurement budget. The current firmware also
+selects battery versus charging policy with a voltage heuristic; a nearly full
+battery can temporarily receive the charging policy, and that boundary still
+needs exact-board measurement rather than an unqualified threshold change.
 
 ## Every firmware image
 
