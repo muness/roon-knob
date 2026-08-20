@@ -2,6 +2,7 @@
 // E-ink has no backlight/sleep — it retains image without power.
 
 #include "platform/platform_display.h"
+#include "platform/platform_power.h"
 #include "pmic_axp2101.h"
 
 bool platform_display_is_sleeping(void) {
@@ -19,10 +20,10 @@ void platform_display_apply_config(const rk_cfg_t *cfg, bool is_charging) {
     // policy is target-owned and is qualified separately under issue #160.
 }
 
-bool platform_battery_is_charging(void) {
-    return pmic_is_charging();
-}
-
-int platform_battery_get_level(void) {
-    return pmic_get_battery_percent();
+void platform_power_snapshot(platform_power_snapshot_t *out) {
+    if (!out) {
+        return;
+    }
+    out->battery_level = pmic_get_battery_percent();
+    out->external_power = pmic_is_charging();
 }

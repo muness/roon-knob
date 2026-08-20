@@ -52,7 +52,7 @@ static void *s_lvgl_psram_pool_memory = NULL;
 static lv_mem_pool_t s_lvgl_psram_pool = NULL;
 
 static void log_memory(const char *stage) {
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "%s: internal free=%u largest=%u DMA free=%u largest=%u PSRAM free=%u largest=%u",
              stage,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -94,7 +94,7 @@ static bool add_lvgl_psram_pool(void) {
 static void log_lvgl_memory(const char *stage) {
     lv_mem_monitor_t monitor = {0};
     lv_mem_monitor(&monitor);
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "%s: LVGL total=%u free=%u largest=%u used=%u%% fragmented=%u%%",
              stage,
              (unsigned)monitor.total_size,
@@ -305,23 +305,21 @@ static void ui_loop_task(void *arg) {
             check_ota_status();
         }
 
-        // Keep early boot telemetry frequent enough to attribute BLE allocations,
-        // then reduce it to once per minute for normal operation.
+        // Retain health telemetry for debug builds without flooding normal
+        // firmware or waking UART output every few seconds.
         static uint32_t stack_check_counter = 0;
-        static uint8_t early_telemetry_samples = 0;
-        const uint32_t stack_check_interval =
-            early_telemetry_samples < 6 ? 500 : 6000;
-        if (++stack_check_counter >= stack_check_interval) {
+        if (++stack_check_counter >= 6000) {
             stack_check_counter = 0;
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             uint32_t free_bytes = hwm * sizeof(StackType_t);
             uint32_t used_bytes = UI_LOOP_STACK_SIZE - free_bytes;
-            ESP_LOGI(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
+            ESP_LOGD(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
                      (unsigned int)used_bytes, UI_LOOP_STACK_SIZE, (unsigned int)free_bytes);
             log_lvgl_memory("UI loop watermark");
             log_memory("UI loop watermark");
-            if (early_telemetry_samples < 6) {
-                early_telemetry_samples++;
+            if (free_bytes < 2048) {
+                ESP_LOGW(TAG, "UI loop stack margin is low: %u bytes free",
+                         (unsigned int)free_bytes);
             }
         }
 

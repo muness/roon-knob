@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Guard shared power snapshots and Wi-Fi scan coverage across every target."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+REQUIRED: dict[str, tuple[str, ...]] = {
+    "common/platform/platform_power.h": (
+        "platform_power_snapshot_t",
+        "void platform_power_snapshot(platform_power_snapshot_t *out)",
+    ),
+    "common/bridge_client.c": (
+        '"platform/platform_power.h"',
+        "fetch_now_playing(&state, &power)",
+        "wait_for_poll_interval(&power)",
+        "check_charging_state_change(power.external_power)",
+    ),
+    "common/ui.c": (
+        '"platform/platform_power.h"',
+        "platform_power_snapshot(&power)",
+    ),
+    "idf_app/main/platform_display_idf.c": (
+        "void platform_power_snapshot",
+        "battery_get_percentage()",
+        "battery_is_charging()",
+    ),
+    "frame_app/main/platform_display_frame.c": (
+        "void platform_power_snapshot",
+        "pmic_get_battery_percent()",
+        "pmic_is_charging()",
+    ),
+    "rlcd_app/main/platform_display_rlcd.c": ("void platform_power_snapshot",),
+    "atom_app/main/platform_display_atom.c": ("void platform_power_snapshot",),
+    "tough_app/main/platform_display_m5.c": ("void platform_power_snapshot",),
+    "m5_beta_app/main/platform_display_beta.c": (
+        "void platform_power_snapshot",
+        "m5_platform_battery_level()",
+        "m5_platform_battery_is_charging()",
+    ),
+    "idf_app/main/battery.c": (
+        "BATTERY_SAMPLE_CACHE_MS 15000",
+        "s_cached_voltage_valid",
+        "s_battery_mutex",
+    ),
+    "common/wifi_manager.c": (
+        "esp_wifi_scan_start(&config, false)",
+        "WIFI_MODE_APSTA",
+    ),
+    "idf_app/main/captive_portal.c": (
+        "Nearby 2.4 GHz networks",
+        "wifi_mgr_scan_start()",
+        "this list will refresh automatically",
+    ),
+    "idf_app/main/config_server.c": (
+        "Nearby 2.4 GHz networks",
+        "wifi_mgr_scan_start()",
+        "Scanning&hellip; this list will refresh ",
+        "automatically.</p>",
+        '"/power-debug"',
+        '"/power-debug/sleep"',
+        "display_power_debug_arm_deep_sleep(15)",
+    ),
+    "idf_app/main/display_sleep.c": (
+        "RTC_DATA_ATTR static power_debug_rtc_t",
+        "s_power_debug_rtc.preflight_completions++",
+        "s_power_debug_rtc.deep_sleep_entries++",
+        "s_power_debug_rtc.encoder_wakes++",
+    ),
+    "frame_app/main/captive_portal.c": (
+        "Nearby 2.4 GHz networks",
+        "wifi_mgr_scan_start()",
+    ),
+    "tough_app/main/captive_portal.c": (
+        "wifi_mgr_scan_start()",
+        "No nearby networks found",
+    ),
+    "atom_app/main/touch_ui.cpp": ("wifi_mgr_scan_start()",),
+    "tough_app/main/touch_ui.cpp": ("wifi_mgr_scan_start()",),
+    "m5_beta_app/main/touch_ui.cpp": ("wifi_mgr_scan_start()",),
+    "rlcd_app/main/CMakeLists.txt": (
+        '"../../frame_app/main/captive_portal.c"',
+    ),
+    ".github/RELEASE_TEMPLATE.md": (
+        "Scanning is exposed in this alpha on all nine physical targets",
+        "A platform power snapshot now supplies battery level",
+        "connected\n  settings page links to `/power-debug`",
+    ),
+}
+
+FORBIDDEN: dict[str, tuple[str, ...]] = {
+    "common/platform/platform_display.h": ("platform_battery_",),
+    "common/bridge_client.c": (
+        "platform_battery_get_level()",
+        "platform_battery_is_charging()",
+    ),
+    "common/ui.c": (
+        "battery_get_percentage()",
+        "battery_is_charging()",
+    ),
+    ".github/RELEASE_TEMPLATE.md": (
+        "HiPhi Dial captive page still uses manual SSID entry",
+    ),
+}
+
+
+def main() -> int:
+    failures: list[str] = []
+    for relative, needles in REQUIRED.items():
+        path = ROOT / relative
+        if not path.is_file():
+            failures.append(f"{relative}: required file is missing")
+            continue
+        text = path.read_text(encoding="utf-8")
+        for needle in needles:
+            if needle not in text:
+                failures.append(f"{relative}: missing contract {needle!r}")
+
+    for relative, needles in FORBIDDEN.items():
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for needle in needles:
+            if needle in text:
+                failures.append(f"{relative}: forbidden legacy path {needle!r}")
+
+    if failures:
+        print("Platform power/Wi-Fi contract check FAILED", file=sys.stderr)
+        for failure in failures:
+            print(f"- {failure}", file=sys.stderr)
+        return 1
+
+    print("Platform power/Wi-Fi contract check passed")
+    print("- one power snapshot feeds each shared controller poll cycle")
+    print("- every physical target exposes the shared non-blocking Wi-Fi scan")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

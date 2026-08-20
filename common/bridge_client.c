@@ -6,6 +6,7 @@
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
+#include "platform/platform_power.h"
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "os_mutex.h"
@@ -33,7 +34,7 @@ static bool fetch_knob_config(void);
 static void apply_knob_config(const rk_cfg_t *cfg);
 static void check_config_sha(const char *new_sha);
 static void check_zones_sha(const char *new_sha);
-static void check_charging_state_change(void);
+static void check_charging_state_change(bool current_external_power);
 
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
@@ -293,13 +294,14 @@ static bool bridge_endpoint_snapshot(char *bridge_base, size_t bridge_len,
     return true;
 }
 
-static bool fetch_now_playing(struct now_playing_state *state);
+static bool fetch_now_playing(struct now_playing_state *state,
+                              const platform_power_snapshot_t *power);
 static bool refresh_zone_label(bool prefer_zone_id);
 static void parse_zones_from_response(const char *resp);
 static const char *extract_json_string(const char *start, const char *key, char *out, size_t len);
 static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
-static void wait_for_poll_interval(void);
+static void wait_for_poll_interval(const platform_power_snapshot_t *power);
 static void bridge_poll_thread(void *arg);
 static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
@@ -588,7 +590,7 @@ static void post_ui_zone_name(const char *name) {
     post_ui_zone_name_copy(copy);
 }
 
-static void wait_for_poll_interval(void) {
+static void wait_for_poll_interval(const platform_power_snapshot_t *power) {
     // Use longer delay when display is sleeping, on battery, or bridge unreachable
     uint32_t delay_ms;
     if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
@@ -603,7 +605,7 @@ static void wait_for_poll_interval(void) {
         } else {
             delay_ms = POLL_DELAY_SLEEPING_MS;  // Default 30s when playing
         }
-    } else if (platform_battery_is_charging()) {
+    } else if (power && power->external_power) {
         delay_ms = POLL_DELAY_AWAKE_CHARGING_MS;  // Fast polling when plugged in
     } else {
         delay_ms = POLL_DELAY_AWAKE_BATTERY_MS;   // Slower on battery to save power
@@ -687,8 +689,9 @@ static void maybe_update_bridge_base(void) {
     }
 }
 
-static bool fetch_now_playing(struct now_playing_state *state) {
-    if (!state) {
+static bool fetch_now_playing(struct now_playing_state *state,
+                              const platform_power_snapshot_t *power) {
+    if (!state || !power) {
         return false;
     }
     char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
@@ -704,8 +707,8 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     }
 
     // Get battery status for reporting to bridge
-    int battery_level = platform_battery_get_level();
-    bool battery_charging = platform_battery_is_charging();
+    const int battery_level = power->battery_level;
+    const bool battery_charging = power->external_power;
 
     // Get knob ID for config_sha lookup
     char knob_id[16];
@@ -724,17 +727,20 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_charging=%d&knob_id=%s",
                  bridge_base, zone_id, battery_charging ? 1 : 0, knob_id);
     }
-    LOGI("now_playing request zone=%s url=%s", zone_id, url);
+    LOGD("now_playing request zone=%s url=%s", zone_id, url);
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_get(url, &resp, &resp_len);
-    LOGI("now_playing response ret=%d bytes=%u", ret, (unsigned)resp_len);
+    LOGD("now_playing response ret=%d bytes=%u", ret, (unsigned)resp_len);
     if (ret != 0 || !resp) {
+        LOGW("now_playing request failed: ret=%d response=%s", ret,
+             resp ? "present" : "missing");
         platform_http_free(resp);
         return false;
     }
 
     if (strstr(resp, "\"error\"") || resp_len == 0) {
+        LOGW("now_playing response was empty or reported an error");
         platform_http_free(resp);
         return false;
     }
@@ -811,7 +817,7 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (image_key) {
         extract_json_string(image_key, "\"image_key\"", state->image_key, sizeof(state->image_key));
     }
-    LOGI("now_playing parsed playing=%s image_key=%s zone=%s",
+    LOGD("now_playing parsed playing=%s image_key=%s zone=%s",
          state->is_playing ? "true" : "false", state->image_key, zone_id);
     /* A partial response may omit artwork metadata. Keep the last good key;
      * the bridge normally supplies a string (or an empty string) here. */
@@ -1058,10 +1064,16 @@ static void bridge_poll_thread(void *arg) {
     struct now_playing_state state;
     default_now_playing(&state);
     while (atomic_load_explicit(&s_running, memory_order_acquire)) {
+        platform_power_snapshot_t power = {
+            .battery_level = -1,
+            .external_power = true,
+        };
+        platform_power_snapshot(&power);
+
         // Skip HTTP requests if network is not ready yet (or in BLE mode)
         // In BLE mode, s_network_ready is false, so we just sleep without logging
         if (!atomic_load_explicit(&s_network_ready, memory_order_acquire)) {
-            wait_for_poll_interval();
+            wait_for_poll_interval(&power);
             continue;
         }
 
@@ -1079,7 +1091,7 @@ static void bridge_poll_thread(void *arg) {
         if (!s_state.zone_resolved) {
             refresh_zone_label(true);
         }
-        bool ok = fetch_now_playing(&state);
+        bool ok = fetch_now_playing(&state, &power);
         post_ui_status(ok);
 
         // Track play state for extended sleep polling
@@ -1094,7 +1106,7 @@ static void bridge_poll_thread(void *arg) {
         }
 
         // Always check charging state (works in AP mode too)
-        check_charging_state_change();
+        check_charging_state_change(power.external_power);
 
         // Handle bridge connection status (mirrors WiFi retry pattern)
         if (ok) {
@@ -1102,6 +1114,7 @@ static void bridge_poll_thread(void *arg) {
             post_ui_update(&state);
             if (!s_last_net_ok) {
                 // Just connected - clear status, restore zone name, mark verified
+                LOGI("Hi-Fi Control connection established");
                 reset_bridge_fail_count();
                 post_ui_message("Hi-Fi Control: Connected");
                 post_ui_network_status("");
@@ -1118,6 +1131,7 @@ static void bridge_poll_thread(void *arg) {
             }
         } else if (!ok && s_last_net_ok) {
             // Just lost connection to bridge - start retry tracking
+            LOGW("Hi-Fi Control connection lost; retrying");
             // line1=main content (bottom), line2=header (top)
             increment_bridge_fail_count();
             s_bridge_verified = false;
@@ -1206,7 +1220,7 @@ static void bridge_poll_thread(void *arg) {
             }
         }
         s_last_net_ok = ok;
-        wait_for_poll_interval();
+        wait_for_poll_interval(&power);
     }
 }
 
@@ -1672,7 +1686,12 @@ static void apply_knob_config(const rk_cfg_t *cfg) {
     }
 
     // Get current charging state
-    bool is_charging = platform_battery_is_charging();
+    platform_power_snapshot_t power = {
+        .battery_level = -1,
+        .external_power = true,
+    };
+    platform_power_snapshot(&power);
+    bool is_charging = power.external_power;
     uint16_t rotation = rk_cfg_get_rotation(cfg, is_charging);
 
     LOGI("Config apply requested: name='%s' rotation=%d (charging=%s)",
@@ -1946,8 +1965,7 @@ static bool fetch_knob_config(void) {
 }
 
 // Check for charging state changes and reapply config if needed
-static void check_charging_state_change(void) {
-    bool current_charging = platform_battery_is_charging();
+static void check_charging_state_change(bool current_charging) {
     if (current_charging != s_last_charging_state) {
         LOGI("Charging state changed: %s -> %s",
              s_last_charging_state ? "charging" : "battery",

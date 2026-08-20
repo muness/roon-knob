@@ -44,10 +44,12 @@ networks while keeping the setup access point available. Setup surfaces can
 show nearby SSIDs, report an empty or failed scan, retry, and still accept a
 manually entered hidden network.
 
-Scanning is exposed in this alpha on HiPhi Frame, HiPhi RLCD, AtomS3 JoyStick,
-M5Stack Tough, M5 Dial, M5StickS3, StopWatch, and Kizz. The classic Waveshare
-HiPhi Dial captive page still uses manual SSID entry; do not describe scanning
-as universal until that final setup surface is migrated.
+Scanning is exposed in this alpha on all nine physical targets: HiPhi Dial,
+HiPhi Frame, HiPhi RLCD, AtomS3 JoyStick, M5Stack Tough, M5 Dial, M5StickS3,
+StopWatch, and Kizz. The classic Waveshare HiPhi Dial now starts a scan from
+both its captive setup and connected settings pages, refreshes the list when
+the asynchronous scan completes, and fills the manual SSID field when a result
+is selected.
 
 ## HiPhi Dial power-saving changes
 
@@ -63,6 +65,11 @@ exercise the full power-saving path:
 - **The main ESP32-S3 can nap between jobs.** Dynamic frequency scaling and
   automatic Light-sleep are enabled whenever application tasks and radio locks
   permit them.
+- **Battery sensing no longer repeats the same work throughout one status
+  cycle.** A platform power snapshot now supplies battery level and external-
+  power state together across every target. On the Waveshare Dial, its slow
+  16-sample ADC reading is cached for 15 seconds instead of being repeated by
+  each level, charging-policy, UI, and polling caller.
 - **The existing Deep-sleep path now shuts down cleanly.** Before sleep, BLE is
   quiesced without deleting its enabled preference or bonds, Wi-Fi and the LCD
   panel stop, and the backlight pin is latched off. The encoder wake circuit
@@ -73,6 +80,16 @@ exercise the full power-saving path:
   enters Deep-sleep immediately on every boot. The board hard-wires this chip's
   enable pin high, so this is the strongest software-off state available rather
   than literal power removal.
+- **Normal logs are quiet, but power transitions remain observable.** Routine
+  two-second request/response/parse messages and memory watermarks move to
+  debug level. Info logs identify the selected battery/external-power policy,
+  effective timeouts, completed Deep-sleep preflight, entry, and encoder wake.
+- **A powered Deep-sleep test leaves evidence behind.** The Dial's connected
+  settings page links to `/power-debug`, which shows the active policy and
+  transition counters. Its one-time test bypasses the plugged-in timeout,
+  records RTC-retained shutdown checkpoints, and reports the reset/wake cause
+  after encoder wake. These are firmware breadcrumbs, not current measurements
+  and not proof of the auxiliary ESP32's draw.
 
 When the Dial is using its default battery policy during normal connected
 operation, the UI enters Art mode after 30 seconds, dims 30 seconds later, turns

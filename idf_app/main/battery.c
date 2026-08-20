@@ -5,6 +5,7 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 // Include platform_time for platform_millis()
@@ -18,6 +19,7 @@ static const char *TAG = "battery";
 #define BATTERY_ADC_ATTEN       ADC_ATTEN_DB_12  // 0-3.3V range (was DB_11, renamed in newer IDF)
 #define BATTERY_VOLTAGE_DIVIDER 2.0f  // From working demo (but reads ~4.9V on USB - needs investigation)
 #define NUM_SAMPLES             16  // Average this many readings
+#define BATTERY_SAMPLE_CACHE_MS 15000  // Voltage/source changes are slow; avoid repeated ADC bursts
 
 // LiPo voltage thresholds
 #define BATTERY_MAX_VOLTAGE     4.2f
@@ -26,7 +28,11 @@ static const char *TAG = "battery";
 
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static adc_cali_handle_t s_cali_handle = NULL;
+static SemaphoreHandle_t s_battery_mutex = NULL;
 static bool s_initialized = false;
+static bool s_cached_voltage_valid = false;
+static float s_cached_voltage = 0.0f;
+static uint64_t s_cached_voltage_at_ms = 0;
 
 // LiPo discharge curve lookup table (voltage -> percentage)
 static const struct {
@@ -92,6 +98,12 @@ bool battery_init(void) {
     ESP_LOGI(TAG, "  ADC Attenuation: %d (DB_12 = 0-3.3V)", BATTERY_ADC_ATTEN);
     ESP_LOGI(TAG, "  Voltage Divider: %.1fx", BATTERY_VOLTAGE_DIVIDER);
 
+    s_battery_mutex = xSemaphoreCreateMutex();
+    if (!s_battery_mutex) {
+        ESP_LOGE(TAG, "Failed to create battery sampling mutex");
+        return false;
+    }
+
     // Configure ADC unit
     adc_oneshot_unit_init_cfg_t init_config = {
         .unit_id = BATTERY_ADC_UNIT,
@@ -100,6 +112,8 @@ bool battery_init(void) {
     esp_err_t err = adc_oneshot_new_unit(&init_config, &s_adc_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init ADC unit: %s", esp_err_to_name(err));
+        vSemaphoreDelete(s_battery_mutex);
+        s_battery_mutex = NULL;
         return false;
     }
     ESP_LOGI(TAG, "ADC unit created successfully");
@@ -115,6 +129,8 @@ bool battery_init(void) {
         ESP_LOGE(TAG, "Failed to config ADC channel: %s", esp_err_to_name(err));
         adc_oneshot_del_unit(s_adc_handle);
         s_adc_handle = NULL;
+        vSemaphoreDelete(s_battery_mutex);
+        s_battery_mutex = NULL;
         return false;
     }
     ESP_LOGI(TAG, "ADC channel configured");
@@ -158,6 +174,20 @@ float battery_get_voltage(void) {
         return 0.0f;
     }
 
+    if (!s_battery_mutex ||
+        xSemaphoreTake(s_battery_mutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGW(TAG, "Could not lock battery sampler");
+        return s_cached_voltage_valid ? s_cached_voltage : 0.0f;
+    }
+
+    const uint64_t now_ms = platform_millis();
+    if (s_cached_voltage_valid &&
+        now_ms - s_cached_voltage_at_ms < BATTERY_SAMPLE_CACHE_MS) {
+        const float cached = s_cached_voltage;
+        xSemaphoreGive(s_battery_mutex);
+        return cached;
+    }
+
     int raw_sum = 0;
     int successful_reads = 0;
 
@@ -177,6 +207,7 @@ float battery_get_voltage(void) {
     if (successful_reads == 0) {
         ESP_LOGW(TAG, "Failed to read ADC - all %d samples failed", NUM_SAMPLES);
         first_read = false;
+        xSemaphoreGive(s_battery_mutex);
         return 0.0f;
     }
 
@@ -195,6 +226,10 @@ float battery_get_voltage(void) {
     float adc_voltage = voltage_mv / 1000.0f;
     float battery_voltage = adc_voltage * BATTERY_VOLTAGE_DIVIDER;
 
+    s_cached_voltage = battery_voltage;
+    s_cached_voltage_at_ms = now_ms;
+    s_cached_voltage_valid = true;
+
     if (first_read) {
         ESP_LOGI(TAG, "First voltage reading:");
         ESP_LOGI(TAG, "  Raw ADC avg: %d (from %d samples)", raw_avg, successful_reads);
@@ -205,6 +240,7 @@ float battery_get_voltage(void) {
         first_read = false;
     }
 
+    xSemaphoreGive(s_battery_mutex);
     return battery_voltage;
 }
 

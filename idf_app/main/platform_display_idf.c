@@ -1,4 +1,5 @@
 #include "platform_display_idf.h"
+#include "platform/platform_power.h"
 #include "platform/platform_display.h"
 #include "display_sleep.h"
 #include "bridge_client.h"
@@ -681,10 +682,12 @@ void platform_display_apply_config(const rk_cfg_t *cfg, bool is_charging) {
     display_update_power_settings(cfg);
 }
 
-bool platform_battery_is_charging(void) {
-    return battery_is_charging();
-}
-
-int platform_battery_get_level(void) {
-    return battery_get_percentage();
+void platform_power_snapshot(platform_power_snapshot_t *out) {
+    if (!out) {
+        return;
+    }
+    /* battery.c caches one voltage sample, so these derived fields are from
+     * the same ADC reading rather than two independent 16-sample bursts. */
+    out->battery_level = battery_get_percentage();
+    out->external_power = battery_is_charging();
 }

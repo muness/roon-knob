@@ -74,9 +74,8 @@ void touch_ui_zone_picker_scroll(int delta);
 void touch_ui_zone_picker_get_selected_id(char *out, size_t len);
 bool touch_ui_zone_picker_is_current_selection(void);
 
-// Battery display refresh. Tough's AXP192 read is not wired up this Alpha
-// (see platform_display_m5.c); platform_battery_get_level() returns -1
-// and this renders as unavailable.
+// Battery display refresh. Tough is treated as an externally powered target
+// with no battery gauge, so this renders as unavailable.
 void touch_ui_update_battery(void);
 
 // Apply shared art/dim/sleep preferences for the current power source.

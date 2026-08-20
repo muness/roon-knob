@@ -3,6 +3,7 @@
 
 #include "config_server.h"
 #include "controller_config.h"
+#include "display_sleep.h"
 #include "http_server_lifecycle.h"
 #include "platform/platform_mdns.h"
 #include "bridge_client.h"
@@ -15,6 +16,7 @@
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_http_server.h>
+#include <esp_sleep.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -47,7 +49,8 @@ static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
 }
 
 // HTML page for config
-// Format args: current_bridge, status_class, status_text, wifi_html, bridge_value
+// Format args: current_bridge, status_class, status_text, wifi_html,
+// scan_html, bridge_value
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
@@ -74,6 +77,8 @@ static const char *HTML_CONFIG =
     ".hint{font-size:12px;color:#666;margin-top:4px;}"
     ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
     ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
+    ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;cursor:pointer;}"
+    ".wifi-choice small{color:#aaa;float:right;}"
     ".section{max-width:400px;}"
     "a{color:#4fc3f7;}"
     ".device{background:#0f0f1a;padding:10px;border-radius:5px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;}"
@@ -81,6 +86,7 @@ static const char *HTML_CONFIG =
     "<h1>HiPhi Dial</h1>"
     "<p class='info'>Configure your HiPhi Dial settings</p>"
     "<p><a href='/ble'>BLE Media Remote settings</a></p>"
+    "<p><a href='/power-debug'>Power debug evidence</a></p>"
     "<div class='current'>"
     "<strong>Current Unified Hi-Fi Control:</strong> %s"
     "</div>"
@@ -92,8 +98,9 @@ static const char *HTML_CONFIG =
         "<p class='hint'>Saved-network changes take effect after restart.</p>"
     "<form method='POST' action='/wifi-add'>"
     "<h2>Add WiFi Network</h2>"
+    "%s"
     "<label>SSID</label>"
-    "<input type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
+    "<input id='ssid' type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
     "<label>Password</label>"
         "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
         "<p class='hint'>Up to two networks. Remove one before replacing it.</p>"
@@ -318,16 +325,71 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
                  "<div class='wifi-entry'><em>No saved networks</em></div>");
     }
 
+    char query[32] = {0};
+    char scan_value[8] = {0};
+    const bool scan_again_requested =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value)) == ESP_OK &&
+        strcmp(scan_value, "again") == 0;
+    rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+    if (scan_again_requested || scan_state == RK_WIFI_SCAN_IDLE) {
+        (void)wifi_mgr_scan_start();
+        scan_state = wifi_mgr_scan_state();
+    }
+    rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+    const size_t network_count =
+        scan_state == RK_WIFI_SCAN_READY
+            ? wifi_mgr_scan_results_copy(networks,
+                                         RK_WIFI_SCAN_MAX_NETWORKS)
+            : 0;
+    char scan_html[3072] = {0};
+    int scan_pos = snprintf(scan_html, sizeof(scan_html),
+                            "<p><strong>Nearby 2.4 GHz networks</strong></p>");
+    if (scan_state == RK_WIFI_SCAN_RUNNING) {
+        snprintf(scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                 "<p class='hint'>Scanning&hellip; this list will refresh "
+                 "automatically.</p><script>setTimeout(function(){location.href='/'},1200)</script>");
+    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
+        snprintf(scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                 "<p class='hint'>Scan failed. Enter an SSID manually or "
+                 "<a href='/?scan=again'>try again</a>.</p>");
+    } else {
+        for (size_t i = 0;
+             i < network_count && scan_pos < (int)sizeof(scan_html);
+             ++i) {
+            char escaped[sizeof(networks[i].ssid) * 6] = {0};
+            html_escape(networks[i].ssid, escaped, sizeof(escaped));
+            scan_pos += snprintf(
+                scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                "<button type='button' class='wifi-choice' data-ssid='%s' "
+                "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+                "%s <small>%d dBm</small></button>",
+                escaped, escaped, networks[i].rssi);
+        }
+        if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+            scan_pos += snprintf(
+                scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                "<p class='hint'>No visible networks found. Enter a hidden "
+                "SSID manually.</p>");
+        }
+        if (scan_pos < (int)sizeof(scan_html)) {
+            snprintf(scan_html + scan_pos,
+                     sizeof(scan_html) - (size_t)scan_pos,
+                     "<p><a href='/?scan=again'>Scan again</a></p>");
+        }
+    }
+
     // Build HTML with current values, saved networks, and bridge status.
-    char *html = heap_caps_malloc(4096,
+    char *html = heap_caps_malloc(8192,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 4096, HTML_CONFIG, current, status_class, status_text,
-             wifi_html, cfg->bridge_base);
+    snprintf(html, 8192, HTML_CONFIG, current, status_class, status_text,
+             wifi_html, scan_html, cfg->bridge_base);
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
@@ -822,6 +884,203 @@ static esp_err_t ble_forget_handler(httpd_req_t *req) {
     return redirect_to_ble(req);
 }
 
+static const char *power_display_state_name(display_state_t state) {
+    switch (state) {
+    case DISPLAY_STATE_NORMAL: return "normal";
+    case DISPLAY_STATE_ART_MODE: return "art";
+    case DISPLAY_STATE_DIM: return "dim";
+    case DISPLAY_STATE_SLEEP: return "panel-sleep";
+    default: return "unknown";
+    }
+}
+
+static const char *power_reset_reason_name(int reason) {
+    switch ((esp_reset_reason_t)reason) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "interrupt-watchdog";
+    case ESP_RST_TASK_WDT: return "task-watchdog";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep-sleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    default: return "other/unknown";
+    }
+}
+
+static const char *power_wakeup_cause_name(int cause) {
+    switch ((esp_sleep_wakeup_cause_t)cause) {
+    case ESP_SLEEP_WAKEUP_UNDEFINED: return "not-deep-sleep";
+    case ESP_SLEEP_WAKEUP_EXT0: return "EXT0";
+    case ESP_SLEEP_WAKEUP_EXT1: return "encoder/EXT1";
+    case ESP_SLEEP_WAKEUP_TIMER: return "timer";
+    case ESP_SLEEP_WAKEUP_TOUCHPAD: return "touch";
+    case ESP_SLEEP_WAKEUP_ULP: return "ULP";
+    default: return "other";
+    }
+}
+
+static const char *power_preflight_error_name(uint32_t error) {
+    switch (error) {
+    case 0: return "none";
+    case 1: return "encoder GPIO configuration";
+    case 2: return "encoder wake line already active";
+    case 3: return "encoder wake-source configuration";
+    case 4: return "BLE quiesce";
+    case 5: return "backlight hold";
+    case 6: return "Wi-Fi stop";
+    default: return "unknown";
+    }
+}
+
+static esp_err_t power_debug_get_handler(httpd_req_t *req) {
+    display_power_debug_snapshot_t power = {0};
+    display_power_debug_snapshot(&power);
+
+    char query[32] = {0};
+    char format[8] = {0};
+    const bool wants_json =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "format", format, sizeof(format)) ==
+            ESP_OK &&
+        strcmp(format, "json") == 0;
+
+    char *body = heap_caps_malloc(6144,
+                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Out of memory");
+        return ESP_FAIL;
+    }
+
+    if (wants_json) {
+        httpd_resp_set_type(req, "application/json");
+        snprintf(
+            body, 6144,
+            "{\"scope\":\"main ESP32-S3; not an ammeter or auxiliary-ESP32 probe\","
+            "\"uptime_ms\":%llu,\"display_state\":\"%s\","
+            "\"policy\":{\"known\":%s,\"source\":\"%s\","
+            "\"art_sec\":%lu,\"dim_sec\":%lu,\"panel_sleep_sec\":%lu,"
+            "\"deep_sleep_sec\":%lu},"
+            "\"runtime\":{\"wifi_modem_sleep_baseline\":%s,"
+            "\"cpu_scaling_policy\":%s,\"automatic_light_sleep_configured\":%s,"
+            "\"deep_sleep_timer_active\":%s,\"debug_override_armed\":%s},"
+            "\"current_boot_transitions\":{\"art\":%lu,\"dim\":%lu,"
+            "\"panel_sleep\":%lu,\"wake\":%lu,\"debug_sleep_arms\":%lu},"
+            "\"rtc_evidence\":{\"attempts\":%lu,\"preflight_completions\":%lu,"
+            "\"entries\":%lu,\"encoder_wakes\":%lu,"
+            "\"last_preflight_flags\":%lu,\"last_preflight_error\":\"%s\","
+            "\"reset_reason\":\"%s\",\"wakeup_cause\":\"%s\"}}",
+            (unsigned long long)power.uptime_ms,
+            power_display_state_name(power.display_state),
+            power.power_policy_known ? "true" : "false",
+            power.external_power ? "external/charging" : "battery",
+            (unsigned long)power.art_timeout_sec,
+            (unsigned long)power.dim_timeout_sec,
+            (unsigned long)power.panel_sleep_timeout_sec,
+            (unsigned long)power.deep_sleep_timeout_sec,
+            power.wifi_modem_sleep_baseline ? "true" : "false",
+            power.cpu_scaling_policy_enabled ? "true" : "false",
+            power.automatic_light_sleep_configured ? "true" : "false",
+            power.deep_sleep_timer_active ? "true" : "false",
+            power.debug_sleep_override_armed ? "true" : "false",
+            (unsigned long)power.art_transitions,
+            (unsigned long)power.dim_transitions,
+            (unsigned long)power.panel_sleep_transitions,
+            (unsigned long)power.runtime_wakes,
+            (unsigned long)power.debug_sleep_arms,
+            (unsigned long)power.deep_sleep_attempts,
+            (unsigned long)power.preflight_completions,
+            (unsigned long)power.deep_sleep_entries,
+            (unsigned long)power.encoder_wakes,
+            (unsigned long)power.last_preflight_flags,
+            power_preflight_error_name(power.last_preflight_error),
+            power_reset_reason_name(power.reset_reason),
+            power_wakeup_cause_name(power.wakeup_cause));
+    } else {
+        httpd_resp_set_type(req, "text/html");
+        snprintf(
+            body, 6144,
+            "<!DOCTYPE html><html><head><meta name='viewport' "
+            "content='width=device-width,initial-scale=1'><title>HiPhi Dial power debug</title>"
+            "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee}"
+            "h1,h2{color:#4fc3f7}table{border-collapse:collapse;max-width:720px;width:100%%}"
+            "td,th{border-bottom:1px solid #444;padding:7px;text-align:left}code{color:#b3e5fc}"
+            "button{padding:12px;background:#ffb300;border:0;border-radius:5px;font-weight:bold}"
+            "a{color:#4fc3f7}</style></head><body><h1>HiPhi Dial power debug</h1>"
+            "<p>This is firmware evidence for the main ESP32-S3. It does not measure current "
+            "or prove the auxiliary ESP32's draw.</p><p><a href='/'>Settings</a> · "
+            "<a href='/power-debug?format=json'>JSON</a></p>"
+            "<h2>Current policy</h2><table>"
+            "<tr><th>State</th><td>%s</td></tr><tr><th>Source</th><td>%s</td></tr>"
+            "<tr><th>Timeouts</th><td>art %lus · dim %lus · panel %lus · Deep-sleep %lus</td></tr>"
+            "<tr><th>Wi-Fi modem-sleep baseline</th><td>%s</td></tr>"
+            "<tr><th>Automatic Light-sleep configured</th><td>%s</td></tr>"
+            "<tr><th>Deep-sleep timer active</th><td>%s%s</td></tr></table>"
+            "<h2>Current boot transitions</h2><p>art %lu · dim %lu · panel sleep %lu · "
+            "runtime wake %lu · debug arms %lu</p>"
+            "<h2>RTC-retained Deep-sleep evidence</h2><table>"
+            "<tr><th>Attempts</th><td>%lu</td></tr><tr><th>Completed preflights</th><td>%lu</td></tr>"
+            "<tr><th>Entries requested</th><td>%lu</td></tr><tr><th>Encoder wakes</th><td>%lu</td></tr>"
+            "<tr><th>Last preflight flags</th><td><code>0x%02lx</code> "
+            "(0x1f means wake, BLE, panel, backlight, and Wi-Fi completed)</td></tr>"
+            "<tr><th>Last preflight error</th><td>%s</td></tr>"
+            "<tr><th>This boot</th><td>reset %s · wake %s · uptime %llums</td></tr></table>"
+            "<h2>Powered test</h2><p>This bypasses the plugged-in timeout once. The display "
+            "turns off, then the main ESP32-S3 enters Deep-sleep after 15 seconds. Serial and "
+            "HTTP stop; turn the encoder to wake, then reload this page.</p>"
+            "<form method='POST' action='/power-debug/sleep'>"
+            "<button type='submit'>Arm one-time 15-second Deep-sleep test</button></form>"
+            "</body></html>",
+            power_display_state_name(power.display_state),
+            power.external_power ? "external/charging" : "battery",
+            (unsigned long)power.art_timeout_sec,
+            (unsigned long)power.dim_timeout_sec,
+            (unsigned long)power.panel_sleep_timeout_sec,
+            (unsigned long)power.deep_sleep_timeout_sec,
+            power.wifi_modem_sleep_baseline ? "yes" : "no",
+            power.automatic_light_sleep_configured ? "yes" : "no",
+            power.deep_sleep_timer_active ? "yes" : "no",
+            power.debug_sleep_override_armed ? " (debug override)" : "",
+            (unsigned long)power.art_transitions,
+            (unsigned long)power.dim_transitions,
+            (unsigned long)power.panel_sleep_transitions,
+            (unsigned long)power.runtime_wakes,
+            (unsigned long)power.debug_sleep_arms,
+            (unsigned long)power.deep_sleep_attempts,
+            (unsigned long)power.preflight_completions,
+            (unsigned long)power.deep_sleep_entries,
+            (unsigned long)power.encoder_wakes,
+            (unsigned long)power.last_preflight_flags,
+            power_preflight_error_name(power.last_preflight_error),
+            power_reset_reason_name(power.reset_reason),
+            power_wakeup_cause_name(power.wakeup_cause),
+            (unsigned long long)power.uptime_ms);
+    }
+
+    httpd_resp_send(req, body, strlen(body));
+    free(body);
+    return ESP_OK;
+}
+
+static esp_err_t power_debug_sleep_handler(httpd_req_t *req) {
+    if (!display_power_debug_arm_deep_sleep(15)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Deep-sleep manager is unavailable");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_status(req, "202 Accepted");
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr(
+        req,
+        "<!DOCTYPE html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Deep-sleep test armed</title><h1>Deep-sleep test armed</h1>"
+        "<p>The display will turn off and the main ESP32-S3 will enter Deep-sleep "
+        "in 15 seconds. Turn the encoder to wake it, then reopen "
+        "<a href='/power-debug'>power debug</a>.</p>");
+    return ESP_OK;
+}
+
 void config_server_start(void) {
     if (!http_server_lifecycle_lock()) {
         ESP_LOGE(TAG, "Could not acquire HTTP lifecycle lock");
@@ -920,6 +1179,20 @@ void config_server_start(void) {
         .handler = ble_forget_handler,
     };
     httpd_register_uri_handler(s_server, &ble_forget);
+
+    httpd_uri_t power_debug_get = {
+        .uri = "/power-debug",
+        .method = HTTP_GET,
+        .handler = power_debug_get_handler,
+    };
+    httpd_register_uri_handler(s_server, &power_debug_get);
+
+    httpd_uri_t power_debug_sleep = {
+        .uri = "/power-debug/sleep",
+        .method = HTTP_POST,
+        .handler = power_debug_sleep_handler,
+    };
+    httpd_register_uri_handler(s_server, &power_debug_sleep);
 
     ESP_LOGI(TAG, "Config server started");
     http_server_lifecycle_unlock();

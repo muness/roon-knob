@@ -12,6 +12,7 @@
 #include "bridge_client.h"
 #include "platform/platform_display.h"
 #include "platform/platform_identity.h"
+#include "platform/platform_power.h"
 #include "os_mutex.h"
 
 #include <esp_err.h>
@@ -902,8 +903,12 @@ static esp_err_t sta_settings_save_handler(httpd_req_t *req) {
                         "Settings could not be saved");
     return ESP_FAIL;
   }
-  platform_display_apply_config(&committed.value,
-                                platform_battery_is_charging());
+  platform_power_snapshot_t power = {
+      .battery_level = -1,
+      .external_power = true,
+  };
+  platform_power_snapshot(&power);
+  platform_display_apply_config(&committed.value, power.external_power);
 #if HIPHI_M5_TARGET_ID == 4
   char personality_value[2] = {0};
   const bool body_enabled = get_form_field(

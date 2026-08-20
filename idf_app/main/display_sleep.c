@@ -6,6 +6,7 @@
 #include "wifi_manager.h"
 #include "battery.h"
 #include "esp_timer.h"
+#include "esp_attr.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_pm.h"
@@ -17,6 +18,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "ui.h"
+
+#include <string.h>
 
 static const char *TAG = "display_sleep";
 
@@ -33,6 +36,41 @@ static const char *TAG = "display_sleep";
 #define DEFAULT_DEEP_SLEEP_TIMEOUT_MS (RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC * 1000)
 #define ENCODER_SUPPRESS_AFTER_WAKE_MS 500      // Ignore encoder ticks for 500ms after wake
 #define BLE_QUIESCE_TIMEOUT_MS 10000
+#define POWER_DEBUG_RTC_MAGIC 0x50445752u  // "PDWR"
+
+enum {
+    POWER_PREFLIGHT_WAKE_ARMED = 1u << 0,
+    POWER_PREFLIGHT_BLE_OFF = 1u << 1,
+    POWER_PREFLIGHT_PANEL_OFF = 1u << 2,
+    POWER_PREFLIGHT_BACKLIGHT_OFF = 1u << 3,
+    POWER_PREFLIGHT_WIFI_OFF = 1u << 4,
+};
+
+enum {
+    POWER_PREFLIGHT_ERROR_NONE = 0,
+    POWER_PREFLIGHT_ERROR_ENCODER_CONFIG = 1,
+    POWER_PREFLIGHT_ERROR_ENCODER_ACTIVE = 2,
+    POWER_PREFLIGHT_ERROR_WAKE_CONFIG = 3,
+    POWER_PREFLIGHT_ERROR_BLE = 4,
+    POWER_PREFLIGHT_ERROR_BACKLIGHT = 5,
+    POWER_PREFLIGHT_ERROR_WIFI = 6,
+};
+
+typedef struct {
+    uint32_t magic;
+    uint32_t deep_sleep_attempts;
+    uint32_t preflight_completions;
+    uint32_t deep_sleep_entries;
+    uint32_t encoder_wakes;
+    uint32_t last_preflight_flags;
+    uint32_t last_preflight_error;
+    int reset_reason;
+    int wakeup_cause;
+} power_debug_rtc_t;
+
+RTC_DATA_ATTR static power_debug_rtc_t s_power_debug_rtc = {
+    .magic = POWER_DEBUG_RTC_MAGIC,
+};
 
 // Default timeout configuration (use charging defaults for cold start - more generous during setup)
 #define DEFAULT_ART_MODE_TIMEOUT_MS (RK_DEFAULT_ART_MODE_CHARGING_TIMEOUT_SEC * 1000)
@@ -76,6 +114,22 @@ static uint32_t s_deep_sleep_timeout_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
 // Power management settings
 static bool s_wifi_power_save_enabled = false;
 static bool s_cpu_freq_scaling_enabled = false;
+static bool s_power_policy_logged = false;
+static bool s_last_policy_external_power = true;
+static uint32_t s_art_transition_count = 0;
+static uint32_t s_dim_transition_count = 0;
+static uint32_t s_panel_sleep_transition_count = 0;
+static uint32_t s_runtime_wake_count = 0;
+static uint32_t s_debug_sleep_arm_count = 0;
+static bool s_debug_sleep_override_armed = false;
+
+static void power_debug_rtc_init(void) {
+    if (s_power_debug_rtc.magic == POWER_DEBUG_RTC_MAGIC) {
+        return;
+    }
+    memset(&s_power_debug_rtc, 0, sizeof(s_power_debug_rtc));
+    s_power_debug_rtc.magic = POWER_DEBUG_RTC_MAGIC;
+}
 
 #if CONFIG_PM_ENABLE
 static esp_pm_lock_handle_t s_pm_cpu_lock = NULL;
@@ -134,6 +188,7 @@ void display_art_mode(void) {
         s_display_state = DISPLAY_STATE_ART_MODE;
         ui_set_controls_visible(false);
         entered_art_mode = true;
+        s_art_transition_count++;
         dim_timeout = s_dim_timeout_ms;
         ESP_LOGI(TAG, "Display entering art mode");
     }
@@ -163,6 +218,7 @@ void display_dim(void) {
         ui_set_controls_visible(false);
         s_display_state = DISPLAY_STATE_DIM;
         entered_dim = true;
+        s_dim_transition_count++;
         sleep_timeout = s_sleep_timeout_ms;
         ESP_LOGI(TAG, "Display dimmed (brightness: %d%%)", (BACKLIGHT_DIM * 100) / 255);
     }
@@ -214,6 +270,7 @@ void display_sleep(void) {
 #endif
 
         s_display_state = DISPLAY_STATE_SLEEP;
+        s_panel_sleep_transition_count++;
         ESP_LOGI(TAG, "Display sleeping");
 
         // Start deep sleep timer (if enabled - timeout already accounts for charging state)
@@ -279,11 +336,13 @@ void display_wake(void) {
     // Reset timers outside of mutex to avoid deadlock
     // Sequential chain: start only the first enabled timer, each transition starts the next
     if (prev_state != DISPLAY_STATE_NORMAL) {
+        s_runtime_wake_count++;
         // Stop all timers first (including deep sleep timer)
         if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
         if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
         if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
         if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
+        s_debug_sleep_override_armed = false;
 
         // Start the first enabled timer in the chain
         if (art_timeout > 0 && s_art_mode_timer != NULL) {
@@ -318,6 +377,7 @@ static void sleep_timer_callback(void *arg) {
 
 // Pending deep sleep flag
 static volatile bool s_pending_deep_sleep = false;
+static volatile uint32_t s_pending_debug_deep_sleep_delay_ms = 0;
 
 // Timer callback for deep sleep
 static void deep_sleep_timer_callback(void *arg) {
@@ -335,6 +395,10 @@ static void recover_from_partial_sleep_entry(const char *reason) {
 // Enter deep sleep - device will reset on wake
 static void enter_deep_sleep(void) {
     ESP_LOGI(TAG, "Preparing for deep sleep...");
+    power_debug_rtc_init();
+    s_power_debug_rtc.deep_sleep_attempts++;
+    s_power_debug_rtc.last_preflight_flags = 0;
+    s_power_debug_rtc.last_preflight_error = POWER_PREFLIGHT_ERROR_NONE;
 
     /* Configure and validate every wake source before tearing anything down.
      * GPIO7/GPIO8 each have an external 10 kOhm pull-up on this exact board,
@@ -351,12 +415,16 @@ static void enter_deep_sleep(void) {
     };
     err = gpio_config(&encoder_config);
     if (err != ESP_OK) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_ENCODER_CONFIG;
         ESP_LOGE(TAG, "Encoder wake GPIO configuration failed: %s",
                  esp_err_to_name(err));
         return;
     }
     if (gpio_get_level(ENCODER_GPIO_A) == 0 ||
         gpio_get_level(ENCODER_GPIO_B) == 0) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_ENCODER_ACTIVE;
         ESP_LOGW(TAG, "Encoder wake line is already active; staying awake");
         return;
     }
@@ -367,20 +435,26 @@ static void enter_deep_sleep(void) {
     err = esp_sleep_enable_ext1_wakeup_io(wake_gpio_mask,
                                           ESP_EXT1_WAKEUP_ANY_LOW);
     if (err != ESP_OK) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
         ESP_LOGE(TAG, "Failed to configure wake sources: %s", esp_err_to_name(err));
         return;
     }
+    s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_WAKE_ARMED;
 
     /* Stop NimBLE through its single lifecycle owner. This transient command
      * does not change the enabled preference, peer metadata, or bond store. */
     if (!ble_hid_host_dial_prepare_for_sleep(BLE_QUIESCE_TIMEOUT_MS)) {
+        s_power_debug_rtc.last_preflight_error = POWER_PREFLIGHT_ERROR_BLE;
         recover_from_partial_sleep_entry("BLE did not quiesce for sleep");
     }
+    s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_BLE_OFF;
 
     // Turn off the panel before removing its backlight.
     if (s_panel_handle != NULL) {
         esp_lcd_panel_disp_on_off(s_panel_handle, false);
     }
+    s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_PANEL_OFF;
 
     /* GPIO47 drives the external backlight FET. It is a digital (non-RTC)
      * GPIO, so explicitly latch it low across Deep-sleep. */
@@ -390,26 +464,36 @@ static void enter_deep_sleep(void) {
     gpio_set_level(PIN_NUM_BK_LIGHT, 0);
     err = gpio_hold_en(PIN_NUM_BK_LIGHT);
     if (err != ESP_OK) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_BACKLIGHT;
         ESP_LOGE(TAG, "Backlight hold failed: %s", esp_err_to_name(err));
         recover_from_partial_sleep_entry("Backlight could not be latched off");
     }
     gpio_deep_sleep_hold_en();
+    s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_BACKLIGHT_OFF;
 
     // Stop WiFi only after every recoverable preflight check has passed.
     err = esp_wifi_stop();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
         err != ESP_ERR_WIFI_NOT_INIT) {
+        s_power_debug_rtc.last_preflight_error = POWER_PREFLIGHT_ERROR_WIFI;
         ESP_LOGW(TAG, "WiFi stop failed: %s", esp_err_to_name(err));
         recover_from_partial_sleep_entry("WiFi did not stop for sleep");
     }
+    s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_WIFI_OFF;
+    s_power_debug_rtc.preflight_completions++;
 
-    ESP_LOGI(TAG, "Entering deep sleep (wake on encoder rotation)...");
+    ESP_LOGI(TAG,
+             "Deep-sleep preflight complete: BLE off, WiFi off, panel off, "
+             "backlight held low; encoder wake armed");
+    ESP_LOGI(TAG, "Entering ESP32-S3 Deep-sleep now");
 
     // Brief delay to ensure log is flushed before power cut
     vTaskDelay(pdMS_TO_TICKS(50));
 
     // Enter deep sleep - this does NOT return
     // Device will reset and run app_main() on wake
+    s_power_debug_rtc.deep_sleep_entries++;
     esp_deep_sleep_start();
 }
 
@@ -435,6 +519,22 @@ void display_process_pending(void) {
     if (s_pending_sleep) {
         s_pending_sleep = false;
         display_sleep();
+    }
+    const uint32_t debug_delay_ms = s_pending_debug_deep_sleep_delay_ms;
+    if (debug_delay_ms > 0) {
+        s_pending_debug_deep_sleep_delay_ms = 0;
+        if (s_display_state == DISPLAY_STATE_SLEEP &&
+            s_deep_sleep_timer != NULL) {
+            (void)esp_timer_stop(s_deep_sleep_timer);
+            if (esp_timer_start_once(s_deep_sleep_timer,
+                                     debug_delay_ms * 1000ULL) == ESP_OK) {
+                ESP_LOGI(TAG,
+                         "Power debug armed one-time Deep-sleep in %lu sec",
+                         (unsigned long)(debug_delay_ms / 1000));
+            } else {
+                ESP_LOGE(TAG, "Power debug could not start Deep-sleep timer");
+            }
+        }
     }
     if (s_pending_deep_sleep) {
         s_pending_deep_sleep = false;
@@ -491,9 +591,13 @@ void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_t
     };
     ESP_ERROR_CHECK(esp_timer_create(&deep_sleep_timer_args, &s_deep_sleep_timer));
 
-    // Check if we woke from deep sleep and set up encoder suppression
+    // Record reset/wake evidence before setting up encoder suppression.
+    power_debug_rtc_init();
     esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
+    s_power_debug_rtc.reset_reason = (int)esp_reset_reason();
+    s_power_debug_rtc.wakeup_cause = (int)wakeup_cause;
     if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) {
+        s_power_debug_rtc.encoder_wakes++;
         s_woke_from_deep_sleep = true;
         s_encoder_suppress_until_ms = esp_timer_get_time() / 1000 + ENCODER_SUPPRESS_AFTER_WAKE_MS;
         ESP_LOGI(TAG, "Woke from deep sleep via encoder - suppressing input for %dms",
@@ -565,6 +669,62 @@ bool display_woke_from_deep_sleep(void) {
     return s_woke_from_deep_sleep;
 }
 
+void display_power_debug_snapshot(display_power_debug_snapshot_t *out) {
+    if (!out) {
+        return;
+    }
+    power_debug_rtc_init();
+    memset(out, 0, sizeof(*out));
+
+    if (s_display_state_mutex) {
+        LOCK_DISPLAY_STATE();
+    }
+    out->display_state = s_display_state;
+    out->power_policy_known = s_power_policy_logged;
+    out->external_power = s_last_policy_external_power;
+    out->wifi_modem_sleep_baseline = true;
+    out->cpu_scaling_policy_enabled = s_cpu_freq_scaling_enabled;
+#if CONFIG_PM_ENABLE
+    out->automatic_light_sleep_configured = s_pm_initialized;
+#endif
+    out->deep_sleep_timer_active =
+        s_deep_sleep_timer && esp_timer_is_active(s_deep_sleep_timer);
+    out->debug_sleep_override_armed = s_debug_sleep_override_armed;
+    out->art_timeout_sec = s_art_mode_timeout_ms / 1000;
+    out->dim_timeout_sec = s_dim_timeout_ms / 1000;
+    out->panel_sleep_timeout_sec = s_sleep_timeout_ms / 1000;
+    out->deep_sleep_timeout_sec = s_deep_sleep_timeout_ms / 1000;
+    out->art_transitions = s_art_transition_count;
+    out->dim_transitions = s_dim_transition_count;
+    out->panel_sleep_transitions = s_panel_sleep_transition_count;
+    out->runtime_wakes = s_runtime_wake_count;
+    out->debug_sleep_arms = s_debug_sleep_arm_count;
+    if (s_display_state_mutex) {
+        UNLOCK_DISPLAY_STATE();
+    }
+
+    out->deep_sleep_attempts = s_power_debug_rtc.deep_sleep_attempts;
+    out->preflight_completions = s_power_debug_rtc.preflight_completions;
+    out->deep_sleep_entries = s_power_debug_rtc.deep_sleep_entries;
+    out->encoder_wakes = s_power_debug_rtc.encoder_wakes;
+    out->last_preflight_flags = s_power_debug_rtc.last_preflight_flags;
+    out->last_preflight_error = s_power_debug_rtc.last_preflight_error;
+    out->reset_reason = s_power_debug_rtc.reset_reason;
+    out->wakeup_cause = s_power_debug_rtc.wakeup_cause;
+    out->uptime_ms = (uint64_t)(esp_timer_get_time() / 1000);
+}
+
+bool display_power_debug_arm_deep_sleep(uint32_t delay_sec) {
+    if (!s_deep_sleep_timer || delay_sec < 5 || delay_sec > 300) {
+        return false;
+    }
+    s_debug_sleep_arm_count++;
+    s_debug_sleep_override_armed = true;
+    s_pending_debug_deep_sleep_delay_ms = delay_sec * 1000;
+    s_pending_sleep = true;
+    return true;
+}
+
 // Update timeout values from config
 void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging) {
     uint32_t new_art_timeout_ms;
@@ -586,11 +746,35 @@ void display_update_timeouts(const rk_cfg_t *cfg, bool is_charging) {
         new_deep_sleep_timeout_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
     }
 
-    // Check if any values changed
-    if (new_art_timeout_ms == s_art_mode_timeout_ms &&
-        new_dim_timeout_ms == s_dim_timeout_ms &&
-        new_sleep_timeout_ms == s_sleep_timeout_ms &&
-        new_deep_sleep_timeout_ms == s_deep_sleep_timeout_ms) {
+    const bool timeouts_changed =
+        new_art_timeout_ms != s_art_mode_timeout_ms ||
+        new_dim_timeout_ms != s_dim_timeout_ms ||
+        new_sleep_timeout_ms != s_sleep_timeout_ms ||
+        new_deep_sleep_timeout_ms != s_deep_sleep_timeout_ms;
+    const bool source_changed =
+        !s_power_policy_logged ||
+        s_last_policy_external_power != is_charging;
+
+    if (source_changed || timeouts_changed) {
+        ESP_LOGI(TAG,
+                 "Power policy selected by voltage heuristic: source=%s "
+                 "art=%lus dim=%lus panel-sleep=%lus Deep-sleep=%lus",
+                 is_charging ? "external/charging" : "battery",
+                 (unsigned long)(new_art_timeout_ms / 1000),
+                 (unsigned long)(new_dim_timeout_ms / 1000),
+                 (unsigned long)(new_sleep_timeout_ms / 1000),
+                 (unsigned long)(new_deep_sleep_timeout_ms / 1000));
+        if (new_deep_sleep_timeout_ms == 0) {
+            ESP_LOGI(TAG,
+                     "ESP32-S3 Deep-sleep is disabled by the active power "
+                     "policy; unplug or configure an external-power timeout "
+                     "to exercise it");
+        }
+        s_power_policy_logged = true;
+        s_last_policy_external_power = is_charging;
+    }
+
+    if (!timeouts_changed) {
         return;  // No change
     }
 
