@@ -1,0 +1,14 @@
+{
+  "name": "HiPhi RLCD (Alpha)",
+  "version": "2.7.0-beta.1",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [
+      { "path": "hiphi_rlcd_bootloader.bin", "offset": 0 },
+      { "path": "hiphi_rlcd_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_rlcd_ota_data_initial.bin", "offset": 53248 },
+      { "path": "hiphi_rlcd.bin", "offset": 65536 }
+    ]
+  }]
+}

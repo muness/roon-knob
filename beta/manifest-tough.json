@@ -1,0 +1,14 @@
+{
+  "name": "M5Stack Tough Console (Alpha)",
+  "version": "2.7.0-beta.1",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32",
+    "parts": [
+      { "path": "hiphi_tough_bootloader.bin", "offset": 4096 },
+      { "path": "hiphi_tough_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_tough_ota_data_initial.bin", "offset": 53248 },
+      { "path": "hiphi_tough.bin", "offset": 65536 }
+    ]
+  }]
+}
