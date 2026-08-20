@@ -178,7 +178,9 @@ static frame_power_decision_t build_snapshot(
         .bridge_connected = bridge_client_is_bridge_connected(),
         .zone_state_known = eink_ui_power_state_known(),
         .playing = eink_ui_is_playing(),
-        .provisioning = wifi_mgr_is_ap_mode() || captive_portal_is_running(),
+        /* The same HTTP server serves connected settings in STA mode. Its
+         * existence is not provisioning and must not permanently veto sleep. */
+        .provisioning = wifi_mgr_is_ap_mode(),
         .ui_pending = eink_ui_has_pending_refresh(),
         .task_pending = platform_task_has_pending(),
         .runtime_transition_pending = runtime_transition_pending,

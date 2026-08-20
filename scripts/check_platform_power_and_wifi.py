@@ -54,6 +54,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "rlcd_app/main/platform_display_rlcd.c": (
         "void platform_power_snapshot",
         "platform_power_diagnostics_enrich",
+        "rlcd_power_manager_debug_enrich",
+        "platform_power_debug_arm_sleep",
     ),
     "atom_app/main/platform_display_atom.c": (
         "void platform_power_snapshot",
@@ -108,6 +110,20 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "s_power_debug_rtc.preflight_completions++",
         "s_power_debug_rtc.entries++",
         "platform_power_prepare_for_deep_sleep()",
+        ".provisioning = wifi_mgr_is_ap_mode()",
+    ),
+    "rlcd_app/main/rlcd_power_manager.c": (
+        "RTC_DATA_ATTR static rlcd_power_debug_rtc_t",
+        "platform_power_prepare_for_deep_sleep()",
+        "esp_sleep_enable_ext1_wakeup_io(1ULL << RLCD_WAKE_GPIO",
+        "ble_hid_host_rlcd_prepare_for_sleep()",
+        "rlcd_display_prepare_for_sleep()",
+        "s_debug.preflight_completions++",
+        "s_debug.entries++",
+    ),
+    "rlcd_app/main/rlcd_display.c": (
+        "ST7305 SLPIN",
+        "esp_lcd_panel_io_tx_param(s_io, 0x10",
     ),
     "tough_app/main/captive_portal.c": (
         "wifi_mgr_scan_start()",
@@ -132,7 +148,9 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "All nine physical controllers now scan for nearby 2.4 GHz",
         "one shared power snapshot now supplies",
         "Every physical controller exposes `/power-debug`",
-        "Dial and Frame also provide the one-time 15-second powered Deep-sleep test",
+        "Dial, Frame, and RLCD also provide the one-time 15-second powered Deep-sleep test",
+        "could therefore\nkeep the processor awake indefinitely",
+        "HiPhi RLCD now sleeps the panel and processor",
     ),
 }
 
@@ -149,6 +167,12 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
     "idf_app/main/config_server.c": ("display_power_debug_snapshot",),
     ".github/RELEASE_TEMPLATE.md": (
         "HiPhi Dial captive page still uses manual SSID entry",
+    ),
+    "frame_app/main/frame_power_manager.c": (
+        "wifi_mgr_is_ap_mode() || captive_portal_is_running()",
+    ),
+    "rlcd_app/main/rlcd_power_manager.c": (
+        "!captive_portal_is_running()",
     ),
 }
 

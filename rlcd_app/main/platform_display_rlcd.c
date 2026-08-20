@@ -1,6 +1,7 @@
 #include "platform/platform_display.h"
 #include "platform/platform_power.h"
 #include "rlcd_ui.h"
+#include "rlcd_power_manager.h"
 
 bool platform_display_is_sleeping(void) { return false; }
 void platform_display_set_rotation(uint16_t degrees) { (void)degrees; }
@@ -13,8 +14,8 @@ void platform_power_snapshot(platform_power_snapshot_t *out) {
     out->external_power = false;
 }
 void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
-    if (!out) return;
-    /* Reflective LCD Art mode reduces work but is not a whole-display or SoC
-     * sleep state, so do not advertise an unqualified power-off capability. */
-    out->capabilities = 0;
+    rlcd_power_manager_debug_enrich(out);
+}
+bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
+    return rlcd_power_manager_debug_arm(delay_sec);
 }

@@ -5,6 +5,7 @@ set(SRC_FILES
     "rlcd_st7305_window.c"
     "rlcd_text.c"
     "rlcd_ui.c"
+    "rlcd_power_manager.c"
     "controller_presentation_rlcd.c"
     "controller_input_profile_rlcd.c"
     "platform_input_rlcd.c"
@@ -41,7 +42,7 @@ idf_component_register(
     SRCS ${SRC_FILES}
     INCLUDE_DIRS "." "../../include" "../../common" "../../frame_app/main"
     REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant lvgl esp_lcd
-    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver json bt esp_hid rk_ble_hid_host
+    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver json bt esp_hid rk_ble_hid_host esp_pm
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

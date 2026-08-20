@@ -92,7 +92,7 @@ Every physical controller exposes `/power-debug` and
 shows the power source, active timeouts, display state, reset and wake cause,
 and the sleep or power-off capabilities that the exact target implements.
 
-Dial and Frame also provide the one-time 15-second powered Deep-sleep test and
+Dial, Frame, and RLCD also provide the one-time 15-second powered Deep-sleep test and
 RTC-retained evidence. Other targets report that the forced test is unsupported
 until their own power-off and wake paths can retain trustworthy evidence. The
 endpoint is passive: it does no background polling when nobody opens it.
@@ -101,8 +101,24 @@ endpoint is passive: it does no background polling when nobody opens it.
 
 On battery, a stopped and idle Frame now shuts down BLE and Wi-Fi, sleeps its
 e-paper controller, and puts the ESP32-S3 into Deep-sleep. The KEY input and a
-timer can wake it. The code path and retained wake evidence are implemented;
-actual PMIC rail current still needs measurement on the release image.
+timer can wake it. This alpha also fixes a blocker that mistook the normal
+connected settings server for active Wi-Fi provisioning and could therefore
+keep the processor awake indefinitely. The code path and retained wake evidence
+are implemented; actual PMIC rail current still needs measurement on the
+release image.
+
+### HiPhi RLCD now sleeps the panel and processor
+
+After its configured battery idle timeout, the Waveshare ESP32-S3-RLCD-4.2
+stops BLE and Wi-Fi, sends the ST7305 its documented Sleep In command, and puts
+the ESP32-S3 into Deep-sleep. Press KEY to wake it. The `/power-debug` page has
+the same retained entry and wake evidence as Dial and Frame.
+
+The board's PWR button controls a separate hardware power latch that firmware
+cannot switch off. Its battery ADC also cannot distinguish USB from battery
+power, so RLCD currently applies the battery idle policy even while USB is
+attached. Board-level sleep current and runtime remain unmeasured until the
+release image is tested with an external meter.
 
 ## Choose your hardware and firmware
 
