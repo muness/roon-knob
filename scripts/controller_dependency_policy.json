@@ -259,6 +259,7 @@
     "dial|idf_app/main/controller_presentation_dial.c|common/ui.h",
     "dial|idf_app/main/display_sleep.c|common/bridge_client.h",
     "dial|idf_app/main/display_sleep.c|common/platform/platform_display.h",
+    "dial|idf_app/main/display_sleep.c|common/platform/platform_power.h",
     "dial|idf_app/main/display_sleep.c|common/ui.h",
     "dial|idf_app/main/display_sleep.c|common/wifi_manager.h",
     "dial|idf_app/main/display_sleep.c|idf_app/main/battery.h",

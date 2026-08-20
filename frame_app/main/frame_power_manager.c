@@ -126,7 +126,7 @@ static bool configure_wake_sources(void) {
             PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE;
         return false;
     }
-    if (esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL) != ESP_OK ||
+    if (!platform_power_prepare_for_deep_sleep() ||
         rtc_gpio_pullup_en(FRAME_WAKE_GPIO) != ESP_OK ||
         rtc_gpio_pulldown_dis(FRAME_WAKE_GPIO) != ESP_OK ||
         esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,
@@ -141,6 +141,7 @@ static bool configure_wake_sources(void) {
         return false;
     }
     s_power_debug_rtc.last_preflight_flags |=
+        PLATFORM_POWER_PREFLIGHT_WAKE_SOURCES_SANITIZED |
         PLATFORM_POWER_PREFLIGHT_WAKE_ARMED;
     return true;
 }

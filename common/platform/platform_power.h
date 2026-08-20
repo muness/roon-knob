@@ -36,6 +36,7 @@ enum {
     PLATFORM_POWER_PREFLIGHT_DISPLAY_SAFE = 1u << 2,
     PLATFORM_POWER_PREFLIGHT_OUTPUTS_SAFE = 1u << 3,
     PLATFORM_POWER_PREFLIGHT_WIFI_OFF = 1u << 4,
+    PLATFORM_POWER_PREFLIGHT_WAKE_SOURCES_SANITIZED = 1u << 5,
 };
 
 typedef enum {
@@ -93,6 +94,12 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out);
 
 /** Arm a target-implemented one-time powered sleep test when supported. */
 bool platform_power_debug_arm_sleep(uint32_t delay_sec);
+
+/**
+ * Disable automatic Light-sleep and clear inherited wake sources before a
+ * target installs the exact wake sources it wants for Deep-sleep.
+ */
+bool platform_power_prepare_for_deep_sleep(void);
 
 #ifdef __cplusplus
 }

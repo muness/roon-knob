@@ -16,10 +16,13 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "platform_power_diagnostics_t",
         "platform_power_diagnostics_snapshot",
         "platform_power_debug_arm_sleep",
+        "platform_power_prepare_for_deep_sleep",
     ),
     "common/platform/platform_power.c": (
         "controller_config_snapshot(&config)",
         "platform_power_diagnostics_enrich(out)",
+        "esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL)",
+        "pm_config.light_sleep_enable",
     ),
     "common/power_debug_web.c": (
         '"/power-debug"',
@@ -92,6 +95,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "s_power_debug_rtc.preflight_completions++",
         "s_power_debug_rtc.deep_sleep_entries++",
         "s_power_debug_rtc.encoder_wakes++",
+        "platform_power_prepare_for_deep_sleep()",
     ),
     "frame_app/main/captive_portal.c": (
         "Nearby 2.4 GHz networks",
@@ -103,6 +107,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "frame_power_manager_debug_arm",
         "s_power_debug_rtc.preflight_completions++",
         "s_power_debug_rtc.entries++",
+        "platform_power_prepare_for_deep_sleep()",
     ),
     "tough_app/main/captive_portal.c": (
         "wifi_mgr_scan_start()",

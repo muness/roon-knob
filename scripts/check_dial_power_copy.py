@@ -38,6 +38,7 @@ REQUIRED = {
         "Wi-Fi modem sleep",
         "Automatic Light-sleep",
         "Main ESP32-S3 Deep-sleep",
+        "temporary timer wake source",
         "The second ESP32 is parked",
         "one shared power snapshot now supplies",
         "16-sample ADC reading is cached for 15 seconds",

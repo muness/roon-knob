@@ -1,6 +1,7 @@
 #include "display_sleep.h"
 #include "captive_portal.h"
 #include "platform/platform_display.h"
+#include "platform/platform_power.h"
 #include "bridge_client.h"
 #include "ble_hid_host_dial.h"
 #include "wifi_manager.h"
@@ -44,6 +45,7 @@ enum {
     POWER_PREFLIGHT_PANEL_OFF = 1u << 2,
     POWER_PREFLIGHT_BACKLIGHT_OFF = 1u << 3,
     POWER_PREFLIGHT_WIFI_OFF = 1u << 4,
+    POWER_PREFLIGHT_WAKE_SOURCES_SANITIZED = 1u << 5,
 };
 
 enum {
@@ -432,6 +434,18 @@ static void enter_deep_sleep(void) {
     // Encoder pins are pulled HIGH, going LOW on rotation
     uint64_t wake_gpio_mask = (1ULL << ENCODER_GPIO_A) | (1ULL << ENCODER_GPIO_B);
 
+    /* ESP-IDF automatic Light-sleep uses the RTC timer as a transient wake
+     * source. Disable it and clear inherited sources before installing the
+     * encoder-only Deep-sleep wake policy. */
+    if (!platform_power_prepare_for_deep_sleep()) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        ESP_LOGE(TAG, "Could not sanitize Deep-sleep wake sources; staying awake");
+        return;
+    }
+    s_power_debug_rtc.last_preflight_flags |=
+        POWER_PREFLIGHT_WAKE_SOURCES_SANITIZED;
+
     err = esp_sleep_enable_ext1_wakeup_io(wake_gpio_mask,
                                           ESP_EXT1_WAKEUP_ANY_LOW);
     if (err != ESP_OK) {
@@ -684,9 +698,6 @@ void display_power_debug_snapshot(display_power_debug_snapshot_t *out) {
     out->external_power = s_last_policy_external_power;
     out->wifi_modem_sleep_baseline = true;
     out->cpu_scaling_policy_enabled = s_cpu_freq_scaling_enabled;
-#if CONFIG_PM_ENABLE
-    out->automatic_light_sleep_configured = s_pm_initialized;
-#endif
     out->deep_sleep_timer_active =
         s_deep_sleep_timer && esp_timer_is_active(s_deep_sleep_timer);
     out->debug_sleep_override_armed = s_debug_sleep_override_armed;

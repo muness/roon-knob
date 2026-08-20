@@ -25,7 +25,6 @@ typedef struct {
     bool external_power;
     bool wifi_modem_sleep_baseline;
     bool cpu_scaling_policy_enabled;
-    bool automatic_light_sleep_configured;
     bool deep_sleep_timer_active;
     bool debug_sleep_override_armed;
     uint32_t art_timeout_sec;

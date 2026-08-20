@@ -719,8 +719,6 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
         break;
     }
     out->policy_known = dial.power_policy_known;
-    out->automatic_light_sleep_configured =
-        dial.automatic_light_sleep_configured;
     out->deep_sleep_timer_active = dial.deep_sleep_timer_active;
     out->debug_sleep_override_armed = dial.debug_sleep_override_armed;
     out->art_timeout_sec = dial.art_timeout_sec;

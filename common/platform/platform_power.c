@@ -7,8 +7,11 @@
 #include <string.h>
 
 #ifdef ESP_PLATFORM
+#include <esp_err.h>
+#include <esp_pm.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <sdkconfig.h>
 #endif
 
 #if defined(__GNUC__)
@@ -27,6 +30,30 @@ PLATFORM_WEAK bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
     return false;
 }
 
+bool platform_power_prepare_for_deep_sleep(void) {
+#ifdef ESP_PLATFORM
+#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
+    esp_pm_config_t config = {0};
+    if (esp_pm_get_configuration(&config) != ESP_OK) {
+        return false;
+    }
+    if (config.light_sleep_enable) {
+        config.light_sleep_enable = false;
+        if (esp_pm_configure(&config) != ESP_OK) {
+            return false;
+        }
+    }
+#endif
+    /* Automatic Light-sleep owns the timer wake source while enabled. Clear
+     * every inherited source so it cannot turn a requested Deep-sleep into a
+     * short timer nap. The target installs only its qualified wake sources
+     * after this common preflight succeeds. */
+    return esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL) == ESP_OK;
+#else
+    return true;
+#endif
+}
+
 void platform_power_diagnostics_snapshot(platform_power_diagnostics_t *out) {
     if (!out) {
         return;
@@ -42,6 +69,13 @@ void platform_power_diagnostics_snapshot(platform_power_diagnostics_t *out) {
 #ifdef ESP_PLATFORM
     out->reset_reason = (int)esp_reset_reason();
     out->wakeup_cause = (int)esp_sleep_get_wakeup_cause();
+#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
+    esp_pm_config_t pm_config = {0};
+    if (esp_pm_get_configuration(&pm_config) == ESP_OK) {
+        out->automatic_light_sleep_configured =
+            pm_config.light_sleep_enable;
+    }
+#endif
 #endif
 
     controller_config_snapshot_t config = {0};

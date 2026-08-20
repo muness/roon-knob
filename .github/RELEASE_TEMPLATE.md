@@ -24,6 +24,10 @@ processors. This alpha changes the power behavior of both:
   mode, dim, panel off, and finally ESP32-S3 Deep-sleep. BLE, Wi-Fi, the LCD,
   and the backlight shut down first. Turning the encoder wakes the Dial with a
   fresh boot and reconnect.
+- **No inherited timer wake:** before Deep-sleep, the shared power preflight
+  disables automatic Light-sleep and clears its temporary timer wake source.
+  A direct powered test exposed and removed the timer reboot that had prevented
+  the main ESP32-S3 from remaining asleep.
 - **The second ESP32 is parked:** install the separate auxiliary parking image
   once. It mutes the audio DAC, disables every wake source, and immediately
   enters Deep-sleep on every boot. The board wires this chip's enable pin high,
