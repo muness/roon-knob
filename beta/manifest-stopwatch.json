@@ -1,6 +1,6 @@
 {
   "name": "M5Stack StopWatch Wrist Remote (Alpha)",
-  "version": "2.7.0-alpha.1",
+  "version": "2.7.0-alpha.2",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",

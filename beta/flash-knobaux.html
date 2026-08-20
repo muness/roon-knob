@@ -61,6 +61,17 @@
       margin-bottom: 20px;
     }
     .info-box strong { color: #3498db; }
+    .power-summary {
+      background: #12382f;
+      border-left: 4px solid #2ecc71;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .power-summary > strong { color: #2ecc71; }
+    .power-summary ul { margin: 10px 0 0; padding-left: 20px; }
+    .power-summary li { margin-bottom: 8px; color: var(--text-muted); line-height: 1.5; }
+    .power-summary .measurement { margin: 10px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
     .warning {
       background: #3d2914;
       border-left: 4px solid #f39c12;
@@ -120,6 +131,11 @@
       Not sure which chip? Just try - ESP Web Tools detects the chip and warns if it doesn't match.
     </div>
 
+    <div class="info-box">
+      <strong>Shared power evidence</strong><br>
+      Every device's connected web UI exposes <code>/power-debug</code> with the same HTML and JSON schema. Dial and Frame also offer a one-time powered Deep-sleep test; other targets explicitly report when an implemented, evidence-retaining test is unavailable.
+    </div>
+
     <!-- HiPhi Dial -->
     <div class="card" id="dial-card">
       <h2>HiPhi Dial <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
@@ -127,6 +143,18 @@
         The round touchscreen controller with rotary input, WiFi playback
         control, and optional BLE media-remote support.
       </p>
+      <div class="power-summary">
+        <strong>Battery work in this alpha</strong>
+        <ul>
+          <li><strong>Radio:</strong> Wi-Fi modem sleep replaces the previous always-awake mode while the Dial stays associated between polls.</li>
+          <li><strong>Main processor:</strong> automatic Light-sleep and clock scaling can run whenever the firmware is idle.</li>
+          <li><strong>Battery checks:</strong> one cached 16-sample ADC reading supplies level and power-source policy for 15 seconds instead of repeating that work throughout every status cycle.</li>
+          <li><strong>Power diagnostics:</strong> the shared power-debug view adds Dial-specific RTC-retained entry/wake evidence and a one-time plugged-in Deep-sleep test.</li>
+          <li><strong>Deep sleep:</strong> the panel, Wi-Fi, and BLE stop; the backlight stays latched off; and turning the encoder wakes the main ESP32-S3 without leaving its RTC peripheral domain on.</li>
+          <li><strong>Second processor:</strong> a separate one-time parking image immediately Deep-sleeps the otherwise-unused classic ESP32 and mutes its audio DAC on every boot.</li>
+        </ul>
+        <p class="measurement"><strong>The Dial works after the main update below. For the lowest idle draw, also use the one-time Auxiliary ESP32 installer farther down this page.</strong> The Waveshare board contains that second processor, and it may otherwise continue drawing power. These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
+      </div>
       <div class="flash-section">
         <esp-web-install-button manifest="manifest-s3.json">
           <button slot="activate">Update HiPhi Dial</button>
@@ -145,7 +173,7 @@
           <li>Wait ~30 seconds for flashing to complete</li>
         </ol>
         <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> · Linux: <code>ttyACM0</code> · Windows: <code>COM*</code></p>
-        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180° - one orientation connects to the ESP32-S3, the other to an unpopulated chip.</p>
+        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180° - one orientation connects to the main ESP32-S3, the other to the auxiliary ESP32.</p>
       </div>
     </div>
 
@@ -254,10 +282,10 @@
     </div>
 
     <div class="card" id="stackchan-card">
-      <h2>StackChan Playback Companion <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
-      <p class="description">An animated playback companion with touch transport, room selection, and optional servo motion.</p>
+      <h2>Kizz Playback Companion <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">Named for Kismet, Kizz is an animated playback companion with touch transport, room selection, and optional servo motion.</p>
       <div class="flash-section">
-        <esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash StackChan Alpha</button></esp-web-install-button>
+        <esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash Kizz Alpha</button></esp-web-install-button>
         <span class="version-info" id="stackchan-version">Loading...</span>
       </div>
       <p class="warning"><strong>Motion is on by default:</strong> give the body room to move before powering on.</p>
@@ -270,7 +298,7 @@
         <esp-web-install-button manifest="manifest-knob-aux.json"><button slot="activate">Park Auxiliary ESP32</button></esp-web-install-button>
         <span class="version-info" id="knobaux-version">Loading...</span>
       </div>
-      <p class="warning"><strong>Waveshare Dial only:</strong> flip the USB-C cable 180&deg; from the main-controller orientation to reach the auxiliary ESP32, install this image once, then flip back and install the HiPhi Dial firmware.</p>
+      <p class="warning"><strong>One-time step for the lowest Dial idle draw:</strong> after updating the main Dial, disconnect USB-C, flip the cable 180&deg;, and reconnect it. Start this installer only if the browser identifies an <strong>ESP32</strong>. Cancel if it identifies an ESP32-S3—that is the main Dial processor. When complete, disconnect USB-C and return the cable to its normal orientation.</p>
     </div>
 
     <div class="warning">
@@ -297,7 +325,7 @@
       dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi RLCD',
       joy: 'AtomS3 JoyStick', tough: 'M5Stack Tough',
       m5dial: 'M5 Dial Lab', sticks3: 'M5StickS3 Twist Remote',
-      stopwatch: 'M5Stack StopWatch', stackchan: 'StackChan',
+      stopwatch: 'M5Stack StopWatch', stackchan: 'Kizz',
       knobaux: 'Waveshare Dial Auxiliary ESP32'
     };
     if (targetNames[targetFilter]) {
