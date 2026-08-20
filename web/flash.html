@@ -153,7 +153,7 @@
           <li><strong>Deep sleep:</strong> the panel, Wi-Fi, and BLE stop; the backlight stays latched off; and turning the encoder wakes the main ESP32-S3 without leaving its RTC peripheral domain on.</li>
           <li><strong>Second processor:</strong> a separate one-time parking image immediately Deep-sleeps the otherwise-unused classic ESP32 and mutes its audio DAC on every boot.</li>
         </ul>
-        <p class="measurement"><strong>Install both Dial images for the full power-saving path.</strong> These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
+        <p class="measurement"><strong>The Dial works after the main update below. For the lowest idle draw, also use the one-time Auxiliary ESP32 installer farther down this page.</strong> The Waveshare board contains that second processor, and it may otherwise continue drawing power. These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
       </div>
       <div class="flash-section">
         <esp-web-install-button manifest="manifest-s3.json">
@@ -298,7 +298,7 @@
         <esp-web-install-button manifest="manifest-knob-aux.json"><button slot="activate">Park Auxiliary ESP32</button></esp-web-install-button>
         <span class="version-info" id="knobaux-version">Loading...</span>
       </div>
-      <p class="warning"><strong>Waveshare Dial only:</strong> flip the USB-C cable 180&deg; from the main-controller orientation to reach the auxiliary ESP32. Confirm the browser identifies an <strong>ESP32</strong>, not an ESP32-S3; cancel if it reports the main S3. Install this image once, then flip back and install the HiPhi Dial firmware.</p>
+      <p class="warning"><strong>One-time step for the lowest Dial idle draw:</strong> after updating the main Dial, disconnect USB-C, flip the cable 180&deg;, and reconnect it. Start this installer only if the browser identifies an <strong>ESP32</strong>. Cancel if it identifies an ESP32-S3—that is the main Dial processor. When complete, disconnect USB-C and return the cable to its normal orientation.</p>
     </div>
 
     <div class="warning">

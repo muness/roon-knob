@@ -56,10 +56,12 @@ whether Deep-sleep was requested, and what caused the wake. These counters are
 firmware evidence, not an ammeter; use an external meter to measure actual
 current and to confirm the auxiliary ESP32's contribution.
 
-For the complete Dial power-saving path, install both:
+The Dial works after installing the main firmware. For the lowest idle draw,
+also park the board's otherwise-unused auxiliary ESP32 once:
 
-1. [HiPhi Dial firmware](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_dial_merged.bin)
-2. [Auxiliary ESP32 parking image](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_knob_aux_park_merged.bin)
+1. Install the [HiPhi Dial firmware](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_dial_merged.bin) on the main ESP32-S3.
+2. Once, flip the USB-C cable to the other orientation and install the
+   [auxiliary ESP32 parking image](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_knob_aux_park_merged.bin).
 
 ## What changed since v2.6.0-beta.1
 

@@ -20,7 +20,7 @@ REQUIRED = {
         "one-time parking image",
         "have not been measured yet",
         "the other to the auxiliary ESP32",
-        "cancel if it reports the main S3",
+        "Cancel if it identifies an ESP32-S3",
     ),
     "web/flash-pr.html": (
         "Battery work in this alpha",
@@ -31,6 +31,8 @@ REQUIRED = {
         "turning the encoder wakes",
         "one-time parking image",
         "have not been measured yet",
+        "Do this once for the lowest idle draw",
+        "Cancel if it identifies an ESP32-S3",
         "the other to the auxiliary ESP32",
     ),
     ".github/RELEASE_TEMPLATE.md": (
@@ -47,7 +49,13 @@ REQUIRED = {
         "firmware evidence, not an ammeter",
         "We have not measured a battery-life improvement yet",
         "A nearly full battery can temporarily receive the plugged-in",
-        "install both",
+        "otherwise-unused auxiliary ESP32 once",
+    ),
+    ".github/workflows/docker.yml": (
+        "build-knob-aux, build-ble-off",
+        "Download Waveshare Dial auxiliary parking firmware",
+        "manifest-knob-aux-${PREVIEW_ID}.json",
+        "Flash HiPhi Dial + one-time auxiliary power step",
     ),
 }
 

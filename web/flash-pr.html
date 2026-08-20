@@ -183,7 +183,7 @@
           <li><strong>Deep sleep:</strong> the panel, Wi-Fi, and BLE stop; the backlight stays latched off; and turning the encoder wakes the main ESP32-S3 without leaving its RTC peripheral domain on.</li>
           <li><strong>Second processor:</strong> a separate one-time parking image immediately Deep-sleeps the otherwise-unused classic ESP32 and mutes its audio DAC on every boot.</li>
         </ul>
-        <p class="measurement"><strong>Install both Dial images for the full power-saving path.</strong> These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
+        <p class="measurement"><strong>For the lowest idle draw, update the main Dial first, then park its auxiliary ESP32 once using the second installer below.</strong> The Dial works without the one-time auxiliary step, but that otherwise-unused processor may continue drawing power. These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
       </div>
       <div class="flash-section">
         <esp-web-install-button manifest="manifest-s3.json">
@@ -205,6 +205,16 @@
         <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> &middot; Linux: <code>ttyACM0</code> &middot; Windows: <code>COM*</code></p>
         <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180&deg; - one orientation connects to the main ESP32-S3, the other to the auxiliary ESP32.</p>
       </div>
+    </div>
+
+    <div class="card" id="knobaux-card">
+      <h2>Waveshare Dial Auxiliary ESP32 <span class="chip-badge">One-time power step</span> <span class="chip-badge">ESP32</span></h2>
+      <p class="description">The Waveshare Dial contains a second, otherwise-unused ESP32. This parking firmware makes that processor enter Deep-sleep immediately on every boot and mutes its audio DAC.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-knob-aux.json"><button slot="activate">Park Auxiliary ESP32</button></esp-web-install-button>
+        <span class="version-info">PR #{{PR_NUMBER}}</span>
+      </div>
+      <p class="warning"><strong>Do this once for the lowest idle draw:</strong> after updating the main Dial above, disconnect USB-C, flip the cable 180&deg;, and reconnect it. Start this installer only if the browser identifies an <strong>ESP32</strong>. Cancel if it identifies an ESP32-S3—that is the main Dial processor. When complete, disconnect USB-C and return the cable to its normal orientation.</p>
     </div>
 
     <!-- HiPhi Frame -->
@@ -352,7 +362,8 @@
     };
     if (targetNames[targetFilter]) {
       document.querySelectorAll('.card').forEach(card => {
-        if (card.id !== `${targetFilter}-card`) card.remove();
+        const keepDialAux = targetFilter === 'dial' && card.id === 'knobaux-card';
+        if (card.id !== `${targetFilter}-card` && !keepDialAux) card.remove();
       });
       document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]} Firmware`;
     }

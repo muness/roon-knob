@@ -1123,7 +1123,7 @@ jobs:
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux, build-ble-off]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
@@ -1170,6 +1170,12 @@ jobs:
           path: m5-beta-artifacts
           merge-multiple: true
 
+      - name: Download Waveshare Dial auxiliary parking firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: aux-artifacts
+
       - name: Read preview commit metadata
         id: preview-commit
         uses: actions/github-script@v8
@@ -1206,6 +1212,12 @@ jobs:
           DIAL_FIRMWARE_FILE="hiphi_dial_merged-${PREVIEW_ID}.bin"
           DIAL_LEGACY_FIRMWARE_FILE="roon_knob_merged-${PREVIEW_ID}.bin"
           DIAL_FLASH_PAGE="flash-dial-${PREVIEW_ID}.html"
+
+          AUX_MANIFEST_FILE="manifest-knob-aux-${PREVIEW_ID}.json"
+          AUX_APPLICATION_FILE="hiphi_knob_aux_park-${PREVIEW_ID}.bin"
+          AUX_BOOTLOADER_FILE="hiphi_knob_aux_park_bootloader-${PREVIEW_ID}.bin"
+          AUX_PARTITION_FILE="hiphi_knob_aux_park_partition-table-${PREVIEW_ID}.bin"
+          AUX_FIRMWARE_FILE="hiphi_knob_aux_park_merged-${PREVIEW_ID}.bin"
 
           FRAME_MANIFEST_FILE="manifest-frame-${PREVIEW_ID}.json"
           FRAME_APPLICATION_FILE="hiphi_frame-${PREVIEW_ID}.bin"
@@ -1249,6 +1261,11 @@ jobs:
           cp esp32s3-artifacts/roon_knob_merged.bin "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
           cmp "pr-preview/${DIAL_APPLICATION_FILE}" "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
           cmp "pr-preview/${DIAL_FIRMWARE_FILE}" "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+
+          cp aux-artifacts/knob_aux_app/build/hiphi_knob_aux_park.bin "pr-preview/${AUX_APPLICATION_FILE}"
+          cp aux-artifacts/knob_aux_app/build/bootloader/bootloader.bin "pr-preview/${AUX_BOOTLOADER_FILE}"
+          cp aux-artifacts/knob_aux_app/build/partition_table/partition-table.bin "pr-preview/${AUX_PARTITION_FILE}"
+          cp aux-artifacts/hiphi_knob_aux_park_merged.bin "pr-preview/${AUX_FIRMWARE_FILE}"
 
           cp frame-artifacts/frame_app/build/hiphi_frame.bin "pr-preview/${FRAME_APPLICATION_FILE}"
           cp frame-artifacts/frame_app/build/bootloader/bootloader.bin "pr-preview/${FRAME_BOOTLOADER_FILE}"
@@ -1321,6 +1338,18 @@ jobs:
               {"path": "${DIAL_PARTITION_FILE}", "offset": 32768},
               {"path": "${DIAL_OTA_DATA_FILE}", "offset": 53248},
               {"path": "${DIAL_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+          cat > "pr-preview/${AUX_MANIFEST_FILE}" << EOF
+          {
+            "name": "Waveshare Dial Auxiliary ESP32 Parking Image (PR #${PR_NUM})",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32", "parts": [
+              {"path": "${AUX_BOOTLOADER_FILE}", "offset": 4096},
+              {"path": "${AUX_PARTITION_FILE}", "offset": 32768},
+              {"path": "${AUX_APPLICATION_FILE}", "offset": 65536}
             ]}]
           }
           EOF
@@ -1408,9 +1437,11 @@ jobs:
               -e "s|manifest-sticks3.json|manifest-sticks3-${PREVIEW_ID}.json|g" \
               -e "s|manifest-stopwatch.json|manifest-stopwatch-${PREVIEW_ID}.json|g" \
               -e "s|manifest-stackchan.json|manifest-stackchan-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-knob-aux.json|${AUX_MANIFEST_FILE}|g" \
               web/flash-pr.html > "pr-preview/${page}"
             python3 scripts/check_flash_manifest.py "pr-preview/${manifest}" --assets-dir pr-preview
           done
+          python3 scripts/check_flash_manifest.py "pr-preview/${AUX_MANIFEST_FILE}" --assets-dir pr-preview
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1454,6 +1485,7 @@ jobs:
             cmp "pr-preview/${asset}" "deployed-preview/${asset}"
           done
           grep -F 'data-target-filter="dial"' "deployed-preview/flash-dial-${PREVIEW_ID}.html"
+          grep -F "manifest-knob-aux-${PREVIEW_ID}.json" "deployed-preview/flash-dial-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="frame"' "deployed-preview/flash-frame-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="rlcd"' "deployed-preview/flash-rlcd-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="joy"' "deployed-preview/flash-joy-${PREVIEW_ID}.html"
@@ -1461,7 +1493,7 @@ jobs:
           for target in m5dial sticks3 stopwatch stackchan; do
             grep -F "data-target-filter=\"${target}\"" "deployed-preview/flash-${target}-${PREVIEW_ID}.html"
           done
-          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-joy-${PREVIEW_ID}.json manifest-tough-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
+          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-knob-aux-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-joy-${PREVIEW_ID}.json manifest-tough-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
             python3 scripts/check_flash_manifest.py "deployed-preview/${manifest}" --assets-dir deployed-preview
           done
 
@@ -1476,6 +1508,7 @@ jobs:
             echo "stopwatch_page_url=${PREVIEW_BASE}/flash-stopwatch-${PREVIEW_ID}.html"
             echo "stackchan_page_url=${PREVIEW_BASE}/flash-stackchan-${PREVIEW_ID}.html"
             echo "dial_firmware_sha256=$(sha256sum "deployed-preview/hiphi_dial_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "aux_firmware_sha256=$(sha256sum "deployed-preview/hiphi_knob_aux_park_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "frame_firmware_sha256=$(sha256sum "deployed-preview/hiphi_frame_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "rlcd_firmware_sha256=$(sha256sum "deployed-preview/hiphi_rlcd_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "joy_firmware_sha256=$(sha256sum "deployed-preview/hiphi_joy_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
@@ -1499,6 +1532,7 @@ jobs:
           STOPWATCH_PAGE_URL: ${{ steps.verify-preview.outputs.stopwatch_page_url }}
           STACKCHAN_PAGE_URL: ${{ steps.verify-preview.outputs.stackchan_page_url }}
           DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.dial_firmware_sha256 }}
+          AUX_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.aux_firmware_sha256 }}
           FRAME_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.frame_firmware_sha256 }}
           RLCD_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.rlcd_firmware_sha256 }}
           JOY_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.joy_firmware_sha256 }}
@@ -1533,7 +1567,7 @@ jobs:
             **PR head:** [\`${headSha.slice(0, 12)}\`](${commitUrl})<br>
             **Commit:** ${process.env.PREVIEW_COMMIT_SUBJECT}
 
-            - [Flash HiPhi Dial](${process.env.DIAL_PAGE_URL}) — \`${process.env.DIAL_FIRMWARE_SHA256}\`
+            - [Flash HiPhi Dial + one-time auxiliary power step](${process.env.DIAL_PAGE_URL}) — main \`${process.env.DIAL_FIRMWARE_SHA256}\`, auxiliary \`${process.env.AUX_FIRMWARE_SHA256}\`
             - [Flash HiPhi Frame](${process.env.FRAME_PAGE_URL}) — \`${process.env.FRAME_FIRMWARE_SHA256}\`
             - [Flash HiPhi RLCD](${process.env.RLCD_PAGE_URL}) — \`${process.env.RLCD_FIRMWARE_SHA256}\`
             - [Flash AtomS3 JoyStick](${process.env.JOY_PAGE_URL}) — \`${process.env.JOY_FIRMWARE_SHA256}\`
