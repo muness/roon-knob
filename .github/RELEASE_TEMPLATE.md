@@ -14,6 +14,41 @@
   Kizz:** compile- and policy-validated;
   exact-artifact physical testing is still required.
 
+## Highlights since v2.6.0-beta.1
+
+### BLE media remotes: carried forward, expanded, and sleep-safe
+
+BLE media-remote support is **not new in this alpha**: v2.6.0-beta.1 already
+shipped the shared host for HiPhi Dial and HiPhi Frame. This alpha carries that
+support forward, adds it to HiPhi RLCD, and makes the Dial/Frame lifecycle safe
+for real processor sleep:
+
+- Pair a separate Bluetooth Low Energy HOGP media remote from the controller's
+  settings page. Play/pause, previous, next, volume up, and volume down control
+  the selected playback zone.
+- Frame and RLCD enable the capability by default. Dial includes it but leaves
+  it disabled until the owner turns on **BLE Media Remote** in settings.
+- Before Dial or Frame enters processor Deep-sleep, the BLE host now stops
+  transiently without deleting its enabled preference, remembered peer, or
+  bond. A failed teardown keeps the controller awake instead of pretending the
+  radio is safely off.
+
+This is a BLE **host** for a physical media remote. It does not turn the HiPhi
+controller into a Bluetooth keyboard, speaker, or Classic Bluetooth audio
+device. Remote compatibility still depends on the exact HOGP report format.
+
+### Nearby Wi-Fi scanning during setup
+
+The shared Wi-Fi manager now performs non-blocking scans for visible 2.4 GHz
+networks while keeping the setup access point available. Setup surfaces can
+show nearby SSIDs, report an empty or failed scan, retry, and still accept a
+manually entered hidden network.
+
+Scanning is exposed in this alpha on HiPhi Frame, HiPhi RLCD, AtomS3 JoyStick,
+M5Stack Tough, M5 Dial, M5StickS3, StopWatch, and Kizz. The classic Waveshare
+HiPhi Dial captive page still uses manual SSID entry; do not describe scanning
+as universal until that final setup surface is migrated.
+
 ## HiPhi Dial power-saving changes
 
 The exact Waveshare ESP32-S3-Knob-Touch-LCD-1.8 contains **two programmable
@@ -53,6 +88,30 @@ board-level loads remain in the measurement budget. The current firmware also
 selects battery versus charging policy with a voltage heuristic; a nearly full
 battery can temporarily receive the charging policy, and that boundary still
 needs exact-board measurement rather than an unqualified threshold change.
+
+## Supported hardware and where to buy it
+
+Firmware profiles are exact-hardware contracts, not product-family guesses.
+Use the model or SKU shown below; links go to the manufacturers' official
+product/store pages, and regional availability can change.
+
+| HiPhi firmware | Exact supported hardware | Official product/store page |
+| --- | --- | --- |
+| **HiPhi Dial** | Waveshare ESP32-S3-Knob-Touch-LCD-1.8; choose a battery-included variant for portable use | [Waveshare](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) |
+| **HiPhi Frame** | Waveshare ESP32-S3-PhotoPainter, 7.3-inch E6 full-color e-paper | [Waveshare](https://www.waveshare.com/product/esp32-s3-photopainter.htm) |
+| **HiPhi RLCD** | Waveshare ESP32-S3-RLCD-4.2 | [Waveshare](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) |
+| **AtomS3 JoyStick Deck** | M5Atom JoyStick with M5AtomS3, SKU K137 | [M5Stack](https://shop.m5stack.com/products/atom-joystick-with-m5atoms3) |
+| **M5Stack Tough Console** | M5Stack Tough, SKU K034 | [M5Stack](https://shop.m5stack.com/products/m5stack-tough-esp32-iot-development-board-kit) |
+| **M5 Dial Lab** | Original M5Stack Dial, SKU K130 | [M5Stack EOL product page](https://shop.m5stack.com/products/m5stack-dial-esp32-s3-smart-rotary-knob-w-1-28-round-touch-screen) |
+| **M5StickS3 Twist Remote** | M5StickS3, SKU K150 | [M5Stack](https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit) |
+| **M5Stack StopWatch Wrist Remote** | M5Stack StopWatch, SKU C152 | [M5Stack](https://shop.m5stack.com/products/m5stack-stopwatch-dev-kit-esp32-s3) |
+| **Kizz Playback Companion** | M5StackChan robot, SKU K151; the optional remote-control bundle is not required | [M5Stack](https://shop.m5stack.com/products/stackchan-kawaii-co-created-open-source-ai-desktop-robot) |
+
+The original M5 Dial K130 is end-of-life. M5Stack's replacement K130-V11 is a
+different revision and has not been qualified for this firmware; do not
+substitute it based only on the shared product name. The Waveshare Dial
+auxiliary parking image is a second firmware image for the same physical HiPhi
+Dial, not a tenth supported device.
 
 ## Every firmware image
 

@@ -43,6 +43,7 @@ jobs:
             tests/test_m5_stackchan_choreography.cpp \
             -o /tmp/test-m5-stackchan-choreography
           /tmp/test-m5-stackchan-choreography
+          python3 scripts/check_alpha_release_notes.py
           python3 scripts/check_dial_identity.py
           python3 scripts/check_dial_power_copy.py
           python3 scripts/check_kizz_identity.py
