@@ -88,6 +88,13 @@ bool touch_ui_is_display_sleeping(void);
 // (mirrors Dial's convention in common/ui.c).
 void touch_ui_show_settings(void);
 
+/* Implemented by the StackChan M5 beta adapter. The shared web server only
+ * calls these when HIPHI_M5_TARGET_ID identifies StackChan. */
+bool touch_ui_stackchan_body_preference(void);
+bool touch_ui_stackchan_sound_preference(void);
+bool touch_ui_post_stackchan_preferences(bool body_enabled,
+                                         bool sound_enabled);
+
 #ifdef __cplusplus
 }
 #endif

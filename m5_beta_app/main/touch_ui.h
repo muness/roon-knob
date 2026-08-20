@@ -34,6 +34,10 @@ void touch_ui_update_battery(void);
 void touch_ui_apply_display_config(const rk_cfg_t *cfg, bool is_charging);
 bool touch_ui_is_display_sleeping(void);
 void touch_ui_show_settings(void);
+bool touch_ui_stackchan_body_preference(void);
+bool touch_ui_stackchan_sound_preference(void);
+bool touch_ui_post_stackchan_preferences(bool body_enabled,
+                                         bool sound_enabled);
 
 #ifdef __cplusplus
 }

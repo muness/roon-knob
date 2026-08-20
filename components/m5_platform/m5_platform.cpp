@@ -1,5 +1,6 @@
 #include "m5_platform.h"
 #include "m5_stackchan_choreography.h"
+#include "m5_stackchan_voice.h"
 #include <M5Unified.h>
 #if CONFIG_M5_PLATFORM_EXPECT_DIAL
 #include <M5Dial.h>
@@ -52,6 +53,30 @@ struct StackChanMotionState {
         M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
     int64_t deadline = 0;
 } s_stackchan_motion;
+
+struct StackChanVoiceState {
+    const m5_stackchan_voice_phrase_t *phrase = nullptr;
+    uint8_t note = 0;
+    int64_t deadline = 0;
+    int64_t last_started[11] = {};
+    bool enabled = true;
+} s_stackchan_voice;
+
+void stackchan_voice_note(uint8_t index) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    const auto &note = s_stackchan_voice.phrase->notes[index];
+    if (!M5.Speaker.tone(note.frequency_hz, note.duration_ms, 0, true)) {
+        ESP_LOGE(TAG, "StackChan speaker rejected note %u for %s",
+                 static_cast<unsigned>(index), s_stackchan_voice.phrase->name);
+        s_stackchan_voice.phrase = nullptr;
+        return;
+    }
+    s_stackchan_voice.deadline = esp_timer_get_time() +
+        static_cast<int64_t>(note.duration_ms + note.gap_ms) * 1000;
+#else
+    (void)index;
+#endif
+}
 
 void stackchan_motion_fail(const char *reason) {
     ESP_LOGE(TAG, "StackChan body language disabled: %s", reason);
@@ -207,6 +232,25 @@ extern "C" bool m5_platform_begin(void) {
             M5StackChan.Motion.setAutoTorqueReleaseEnabled(true);
             M5StackChan.Motion.setTorqueEnabled(false);
             s_stackchan_motion.initialized = true;
+            if (M5.Speaker.isEnabled()) {
+                /* M5Unified's own speaker example uses master=64 and channel
+                 * 255. The enclosed AW88298 is read from listening distance,
+                 * so give the short phrases modest headroom above that while
+                 * retaining the official amplifier configuration. */
+                M5.Speaker.setVolume(96);
+                M5.Speaker.setAllChannelVolume(255);
+                if (M5.Speaker.begin()) {
+                    ESP_LOGI(TAG,
+                             "StackChan proto-voice ready via M5Unified: "
+                             "running=%d master=%u channel=%u",
+                             M5.Speaker.isRunning(), M5.Speaker.getVolume(),
+                             M5.Speaker.getChannelVolume(0));
+                } else {
+                    ESP_LOGW(TAG, "StackChan M5Unified speaker did not start");
+                }
+            } else {
+                ESP_LOGW(TAG, "StackChan speaker unavailable to M5Unified");
+            }
             ESP_LOGI(TAG, "Qualified StackChan via M5Stack BSP: yaw=%d pitch=%d",
                      angles.x, angles.y);
         }
@@ -225,6 +269,7 @@ extern "C" void m5_platform_update(void) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
         if (s_board == M5_PLATFORM_BOARD_STACKCHAN) {
             M5StackChan.update();
+            m5_platform_stackchan_sound_process();
             return;
         }
 #elif CONFIG_M5_PLATFORM_EXPECT_DIAL
@@ -315,11 +360,14 @@ extern "C" bool m5_platform_surface_button_event(
     if (!out || !s_started) return false;
     out->pressed = M5.BtnA.isPressed();
     out->clicked = M5.BtnA.wasClicked();
+    out->single_clicked = M5.BtnA.wasSingleClicked();
+    out->double_clicked = M5.BtnA.wasDoubleClicked();
     out->held = M5.BtnA.wasHold();
     out->secondary_pressed = M5.BtnB.isPressed();
     out->secondary_clicked = M5.BtnB.wasClicked();
     out->secondary_held = M5.BtnB.wasHold();
     return out->pressed || out->clicked || out->held ||
+           out->single_clicked || out->double_clicked ||
            out->secondary_pressed || out->secondary_clicked ||
            out->secondary_held;
 }
@@ -408,7 +456,7 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
     }
     s_stackchan_motion.pending = expression;
     if (expression == M5_PLATFORM_STACKCHAN_DANCE) {
-        s_stackchan_motion.dance_variant = esp_random() % 4;
+        s_stackchan_motion.dance_variant = esp_random() % 8;
     }
     ESP_LOGI(TAG, "StackChan gesture starting: %s",
              expression == M5_PLATFORM_STACKCHAN_DANCE ? "dance" :
@@ -509,6 +557,83 @@ extern "C" bool m5_platform_stackchan_expression_faulted(void) {
 extern "C" m5_platform_stackchan_face_cue_t
 m5_platform_stackchan_face_cue(void) {
     return s_stackchan_motion.face_cue;
+}
+
+extern "C" bool m5_platform_stackchan_sound_trigger(
+    m5_platform_stackchan_sound_t sound) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN ||
+        !s_stackchan_voice.enabled || !M5.Speaker.isEnabled() ||
+        sound < M5_PLATFORM_STACKCHAN_SOUND_MORE ||
+        sound > M5_PLATFORM_STACKCHAN_SOUND_NEW_ROOM) return false;
+
+    const int64_t now = esp_timer_get_time();
+    size_t candidates = 0;
+    for (const auto &phrase : M5_STACKCHAN_VOICE_PHRASES)
+        if (phrase.sound == sound) ++candidates;
+    if (!candidates) return false;
+
+    const size_t wanted = esp_random() % candidates;
+    const m5_stackchan_voice_phrase_t *selected = nullptr;
+    size_t seen = 0;
+    for (const auto &phrase : M5_STACKCHAN_VOICE_PHRASES) {
+        if (phrase.sound != sound) continue;
+        if (seen++ == wanted) { selected = &phrase; break; }
+    }
+    if (!selected) return false;
+
+    const auto sound_index = static_cast<size_t>(sound);
+    if (s_stackchan_voice.last_started[sound_index] &&
+        now - s_stackchan_voice.last_started[sound_index] <
+            static_cast<int64_t>(selected->cooldown_ms) * 1000) return false;
+    if (s_stackchan_voice.phrase &&
+        selected->priority < s_stackchan_voice.phrase->priority) return false;
+
+    s_stackchan_voice.phrase = selected;
+    s_stackchan_voice.note = 0;
+    s_stackchan_voice.last_started[sound_index] = now;
+    ESP_LOGI(TAG, "StackChan voice: %s", selected->name);
+    stackchan_voice_note(0);
+    return true;
+#else
+    (void)sound;
+    return false;
+#endif
+}
+
+extern "C" void m5_platform_stackchan_sound_process(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_stackchan_voice.phrase ||
+        esp_timer_get_time() < s_stackchan_voice.deadline) return;
+    ++s_stackchan_voice.note;
+    if (s_stackchan_voice.note >= s_stackchan_voice.phrase->note_count) {
+        s_stackchan_voice.phrase = nullptr;
+        return;
+    }
+    stackchan_voice_note(s_stackchan_voice.note);
+#endif
+}
+
+extern "C" bool m5_platform_stackchan_sound_enable(bool enabled) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN ||
+        !M5.Speaker.isEnabled()) return false;
+    if (enabled && !M5.Speaker.isRunning() && !M5.Speaker.begin()) {
+        ESP_LOGE(TAG, "StackChan sounds could not start via M5Unified");
+        s_stackchan_voice.enabled = false;
+        return false;
+    }
+    s_stackchan_voice.enabled = enabled;
+    if (!enabled) {
+        s_stackchan_voice.phrase = nullptr;
+        M5.Speaker.stop();
+    }
+    ESP_LOGI(TAG, "StackChan sounds %s", enabled ? "enabled" : "disabled");
+    return true;
+#else
+    (void)enabled;
+    return false;
+#endif
 }
 
 extern "C" void m5_platform_set_brightness(uint8_t brightness) {

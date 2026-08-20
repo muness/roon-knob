@@ -6,6 +6,7 @@
 #include "bridge_client.h"
 #include "m5_platform.h"
 #include "m5_interaction_policy.h"
+#include "m5_stackchan_faces.h"
 #include "platform/platform_http.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_task.h"
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <esp_timer.h>
 #include <esp_log.h>
+#include <esp_random.h>
 #include <freertos/task.h>
 #include <inttypes.h>
 #include <nvs.h>
@@ -73,9 +75,12 @@ struct State {
     bool twist_armed = false;
     bool action_flash = false;
     bool body_enabled = false;
+    bool sound_enabled = true;
     bool body_hold_consumed = false;
     bool setup_mode = false;
     bool track_seen = false;
+    bool playback_seen = false;
+    bool zone_seen = false;
     bool controls_mode = false;
     bool art_mode = false;
     bool gesture_consumed = false;
@@ -108,6 +113,8 @@ struct State {
     int artwork_width = 0;
     int artwork_height = 0;
     uint16_t art_timeout_sec = 0;
+    uint8_t action_face_variant = 0;
+    uint8_t ambient_face_variant = 0;
 } s;
 
 std::atomic_bool s_artwork_loading{false};
@@ -131,6 +138,8 @@ constexpr char kStackChanBodyKey[] = "body_on";
  * created while the servo driver could not arm and should not suppress the
  * first real body-language build. Choices made from this build persist. */
 constexpr char kStackChanBodyPreferenceKey[] = "body_pref_v3";
+constexpr char kStackChanSoundKey[] = "sound_on";
+constexpr char kStackChanSoundPreferenceKey[] = "sound_pref_v1";
 
 void copy_text(char *out, size_t len, const char *value) {
     if (out && len) std::snprintf(out, len, "%s", value ? value : "");
@@ -174,7 +183,8 @@ void stackchan_draw_thick_line(lgfx::LovyanGFX *target, int x0, int y0, int x1,
  * cues rather than tiny emoji changes: StackChan is normally read from across
  * a room, and the face must remain legible while the head is moving. */
 void stackchan_draw_performance_face(
-    lgfx::LovyanGFX *target, m5_platform_stackchan_face_cue_t cue, int w) {
+    lgfx::LovyanGFX *target, m5_platform_stackchan_face_cue_t cue, int w,
+    uint8_t variant = 0) {
     const int cx = w / 2;
     const int left = cx - 64;
     const int right = cx + 64;
@@ -245,6 +255,139 @@ void stackchan_draw_performance_face(
             happy_eye(right, 0);
             target->drawArc(cx, 121, 35, 25, 35, 145, STACK_HOT);
             break;
+        case M5_PLATFORM_STACKCHAN_FACE_ATTENTIVE:
+            open_eye(left, variant == 1 ? -4 : 4, -2, 28, 41);
+            open_eye(right, variant == 2 ? 4 : -4, -2, 28, 41);
+            target->drawArc(cx, 122, 36, 26, 35, 145, STACK_HOT);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_RESTING:
+        case M5_PLATFORM_STACKCHAN_FACE_BORED:
+            target->drawArc(left, eye_y + 3 + (variant == 2 ? 4 : 0),
+                            29, 16, 20, 160, STACK_INK);
+            target->drawArc(right, eye_y + 3 + (variant == 1 ? 4 : 0),
+                            29, 16, 20, 160, STACK_INK);
+            target->drawArc(cx, 121, 25, 17,
+                            cue == M5_PLATFORM_STACKCHAN_FACE_BORED ? 210 : 40,
+                            cue == M5_PLATFORM_STACKCHAN_FACE_BORED ? 330 : 140,
+                            STACK_SECONDARY);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_CURIOUS:
+            open_eye(left, 7, variant == 2 ? -4 : 0, 31, 43);
+            open_eye(right, -4, 3, 23, 35);
+            stackchan_draw_thick_line(target, left - 22, eye_y - 34,
+                                      left + 18, eye_y - 39, STACK_ACCENT, 3);
+            target->fillCircle(cx + 8, 127, variant == 1 ? 12 : 9, STACK_HOT);
+            target->fillCircle(cx + 8, 127, variant == 1 ? 6 : 4, STACK_BG);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_RELIEVED:
+        case M5_PLATFORM_STACKCHAN_FACE_ACCEPTING:
+            happy_eye(left, 0);
+            happy_eye(right, 0);
+            broad_smile(0);
+            if (variant) {
+                target->fillCircle(cx - 50, 121, 4, STACK_HOT);
+                target->fillCircle(cx + 50, 121, 4, STACK_HOT);
+            }
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_GLANCE_LEFT:
+            open_eye(left, -9 - static_cast<int>(variant), variant & 1, 27, 39);
+            open_eye(right, -9 - static_cast<int>(variant), variant & 1, 27, 39);
+            target->drawArc(cx - 7, 122, 31, 22, 35, 145, STACK_HOT);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_GLANCE_RIGHT:
+            open_eye(left, 9 + static_cast<int>(variant), variant & 1, 27, 39);
+            open_eye(right, 9 + static_cast<int>(variant), variant & 1, 27, 39);
+            target->drawArc(cx + 7, 122, 31, 22, 35, 145, STACK_HOT);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_LOUD:
+            if (variant == 2) {
+                open_eye(left, -2, -3, 31, 44);
+                open_eye(right, 2, -3, 31, 44);
+            } else {
+                happy_eye(left, variant == 1 ? -5 : -2);
+                happy_eye(right, variant == 1 ? 5 : 2);
+            }
+            target->fillEllipse(cx, 127, variant == 3 ? 22 : 18,
+                                variant == 3 ? 16 : 23, STACK_HOT);
+            target->fillEllipse(cx, 127, variant == 3 ? 13 : 10,
+                                variant == 3 ? 8 : 14, STACK_BG);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_HUSH:
+            if (variant == 2) {
+                open_eye(left, 8, 8, 25, 36);
+                open_eye(right, -8, 8, 25, 36);
+            } else {
+                target->fillRoundRect(left - 25, eye_y - 2, 50,
+                                      variant == 1 ? 5 : 7, 4, STACK_INK);
+                target->fillRoundRect(right - 25, eye_y - 2, 50,
+                                      variant == 1 ? 5 : 7, 4, STACK_INK);
+            }
+            target->fillCircle(cx, 127, variant == 3 ? 6 : 9, STACK_HOT);
+            target->fillCircle(cx, 127, variant == 3 ? 2 : 4, STACK_BG);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_PROUD:
+        case M5_PLATFORM_STACKCHAN_FACE_CONTENT:
+            happy_eye(left, -2);
+            happy_eye(right, 2);
+            broad_smile(0);
+            if (cue == M5_PLATFORM_STACKCHAN_FACE_PROUD) {
+                stackchan_draw_thick_line(target, left - 20, eye_y - 34,
+                                          left + 18, eye_y - 39,
+                                          STACK_ACCENT, 3);
+                stackchan_draw_thick_line(target, right - 18, eye_y - 39,
+                                          right + 20, eye_y - 34,
+                                          STACK_ACCENT, 3);
+            }
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_SHY:
+            open_eye(left, 8, 8, 25, 36);
+            open_eye(right, -8, 8, 25, 36);
+            target->drawArc(cx, 124, 25, 18, 40, 140, STACK_HOT);
+            if (variant != 1) {
+                target->fillCircle(left - 32, 117, 5, STACK_HOT);
+                target->fillCircle(right + 32, 117, 5, STACK_HOT);
+            }
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_WORRIED:
+        case M5_PLATFORM_STACKCHAN_FACE_FEAR:
+            open_eye(left, 5, cue == M5_PLATFORM_STACKCHAN_FACE_FEAR ? 2 : 7,
+                     cue == M5_PLATFORM_STACKCHAN_FACE_FEAR ? 32 : 28,
+                     cue == M5_PLATFORM_STACKCHAN_FACE_FEAR ? 44 : 40);
+            open_eye(right, -5, cue == M5_PLATFORM_STACKCHAN_FACE_FEAR ? 2 : 7,
+                     cue == M5_PLATFORM_STACKCHAN_FACE_FEAR ? 32 : 28,
+                     cue == M5_PLATFORM_STACKCHAN_FACE_FEAR ? 44 : 40);
+            stackchan_draw_thick_line(target, left - 22, eye_y - 37,
+                                      left + 18, eye_y - 29, STACK_HOT, 3);
+            stackchan_draw_thick_line(target, right - 18, eye_y - 29,
+                                      right + 22, eye_y - 37, STACK_HOT, 3);
+            if (cue == M5_PLATFORM_STACKCHAN_FACE_FEAR) {
+                target->fillEllipse(cx, 128, 13, 20, STACK_HOT);
+                target->fillEllipse(cx, 128, 6, 12, STACK_BG);
+            } else {
+                target->drawArc(cx, 143, 30, 22, 210, 330, STACK_HOT);
+            }
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_STERN:
+        case M5_PLATFORM_STACKCHAN_FACE_ANGER:
+            target->fillRoundRect(left - 25, eye_y - 1, 50,
+                                  cue == M5_PLATFORM_STACKCHAN_FACE_ANGER ? 10 : 7,
+                                  3, STACK_INK);
+            target->fillRoundRect(right - 25, eye_y - 1, 50,
+                                  cue == M5_PLATFORM_STACKCHAN_FACE_ANGER ? 10 : 7,
+                                  3, STACK_INK);
+            stackchan_draw_thick_line(target, left - 22, eye_y - 34,
+                                      left + 18, eye_y - 25, STACK_HOT, 4);
+            stackchan_draw_thick_line(target, right - 18, eye_y - 25,
+                                      right + 22, eye_y - 34, STACK_HOT, 4);
+            target->drawArc(cx, 140, 31, 22, 210, 330, STACK_HOT);
+            break;
+        case M5_PLATFORM_STACKCHAN_FACE_DISGUST:
+            target->fillRoundRect(left - 27, eye_y - 4, 54, 8, 4, STACK_INK);
+            open_eye(right, 8, 7, 22, 32);
+            stackchan_draw_thick_line(target, right - 18, eye_y - 31,
+                                      right + 20, eye_y - 36, STACK_HOT, 3);
+            target->drawArc(cx + 12, 135, 29, 18, 200, 320, STACK_HOT);
+            break;
         case M5_PLATFORM_STACKCHAN_FACE_NEUTRAL:
         default:
             open_eye(left, 0, 1, 27, 39);
@@ -252,6 +395,34 @@ void stackchan_draw_performance_face(
             target->drawArc(cx, 122, 34, 25, 35, 145, STACK_HOT);
             break;
     }
+}
+
+m5_platform_stackchan_face_cue_t stackchan_current_face(
+    bool connection_lost) {
+    const auto performance = m5_platform_stackchan_face_cue();
+    if (performance != M5_PLATFORM_STACKCHAN_FACE_NEUTRAL) return performance;
+    if (connection_lost) return M5_PLATFORM_STACKCHAN_FACE_SAD;
+    if (s.action_flash) {
+        if (std::strcmp(s.action_notice, "PREVIOUS") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_GLANCE_LEFT;
+        if (std::strcmp(s.action_notice, "NEXT") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_GLANCE_RIGHT;
+        if (std::strcmp(s.action_notice, "VOLUME UP") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_LOUD;
+        if (std::strcmp(s.action_notice, "VOLUME DOWN") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_HUSH;
+        if (std::strcmp(s.action_notice, "PLAY") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_POP;
+        if (std::strcmp(s.action_notice, "PAUSE") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_RESTING;
+        if (std::strcmp(s.action_notice, "CONNECTED") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_RELIEVED;
+        if (std::strcmp(s.action_notice, "NEW ROOM") == 0)
+            return M5_PLATFORM_STACKCHAN_FACE_PROUD;
+    }
+    if (!s.online) return M5_PLATFORM_STACKCHAN_FACE_CURIOUS;
+    return s.playing ? M5_PLATFORM_STACKCHAN_FACE_ATTENTIVE
+                     : M5_PLATFORM_STACKCHAN_FACE_RESTING;
 }
 
 void stackchan_draw_marquee(lgfx::LovyanGFX *target, const char *text, int x,
@@ -479,14 +650,40 @@ void save_body_enabled(bool enabled) {
     nvs_close(handle);
 }
 
+bool load_sound_enabled(bool *configured = nullptr) {
+    if (configured) *configured = false;
+    nvs_handle_t handle = 0;
+    uint8_t value = 1;
+    if (nvs_open(kStackChanNvsNamespace, NVS_READONLY, &handle) != ESP_OK)
+        return true;
+    uint8_t preference = 0;
+    if (nvs_get_u8(handle, kStackChanSoundPreferenceKey, &preference) != ESP_OK ||
+        nvs_get_u8(handle, kStackChanSoundKey, &value) != ESP_OK) {
+        nvs_close(handle);
+        return true;
+    }
+    nvs_close(handle);
+    if (configured) *configured = true;
+    return value == 1;
+}
+
+void save_sound_enabled(bool enabled) {
+    nvs_handle_t handle = 0;
+    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
+        return;
+    nvs_set_u8(handle, kStackChanSoundKey, enabled ? 1 : 0);
+    nvs_set_u8(handle, kStackChanSoundPreferenceKey, 1);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
 void body_notice(const char *message) {
     copy_text(s.body_notice, sizeof(s.body_notice), message);
     s.body_notice_until = esp_timer_get_time() + 1800000;
     s.dirty = true;
 }
 
-void toggle_body_language() {
-    const bool wanted = !s.body_enabled;
+void set_body_language(bool wanted) {
     s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
     ESP_LOGI(TAG, "StackChan body toggle: wanted=%d enabled=%d faulted=%d",
              wanted, s.body_enabled,
@@ -497,6 +694,23 @@ void toggle_body_language() {
     body_notice(s.body_enabled ? "BODY LANGUAGE ON" :
                 (wanted ? "SERVOS NOT READY" : "BODY LANGUAGE OFF"));
 }
+
+void toggle_body_language() { set_body_language(!s.body_enabled); }
+
+void set_sounds(bool enabled, bool confirm = true) {
+    s.sound_enabled = m5_platform_stackchan_sound_enable(enabled) && enabled;
+    save_sound_enabled(enabled);
+    ESP_LOGI(TAG, "StackChan sound toggle: wanted=%d enabled=%d", enabled,
+             s.sound_enabled);
+    if (confirm) body_notice(s.sound_enabled ? "SOUNDS ON" : "SOUNDS OFF");
+    /* Enabling should prove itself immediately; disabling has already stopped
+     * the currently queued phrase in the platform adapter. */
+    if (s.sound_enabled && confirm)
+        m5_platform_stackchan_sound_trigger(
+            M5_PLATFORM_STACKCHAN_SOUND_CONNECTED);
+}
+
+void toggle_sounds() { set_sounds(!s.sound_enabled); }
 
 bool dispatch(controller_command_t command) {
     controller_action_t action = controller_action_command(command);
@@ -512,8 +726,27 @@ void flash_action(const char *notice = nullptr) {
     s.action_flash = true;
     s.action_until = esp_timer_get_time() + 550000;
     if (notice) copy_text(s.action_notice, sizeof(s.action_notice), notice);
+    s.action_face_variant = static_cast<uint8_t>(esp_random());
 #if HIPHI_M5_TARGET_ID == 4
     if (s.controls_mode) s.controls_until = esp_timer_get_time() + 7000000;
+    if (notice) {
+        if (std::strcmp(notice, "VOLUME UP") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_MORE);
+        else if (std::strcmp(notice, "VOLUME DOWN") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LESS);
+        else if (std::strcmp(notice, "PREVIOUS") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PREVIOUS);
+        else if (std::strcmp(notice, "NEXT") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_NEXT);
+        else if (std::strcmp(notice, "PLAY") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PLAY);
+        else if (std::strcmp(notice, "PAUSE") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PAUSE);
+        else if (std::strcmp(notice, "CONNECTED") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_CONNECTED);
+        else if (std::strcmp(notice, "NEW ROOM") == 0)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_NEW_ROOM);
+    }
 #endif
     s.dirty = true;
 }
@@ -795,8 +1028,12 @@ void render_stackchan_delight() {
     if (reveal) {
         stackchan_draw_center(target, "NOW PLAYING", w / 2, 20, 1,
                               STACK_ACCENT);
+        auto reveal_face = m5_platform_stackchan_face_cue();
+        if (reveal_face == M5_PLATFORM_STACKCHAN_FACE_NEUTRAL)
+            reveal_face = M5_PLATFORM_STACKCHAN_FACE_ATTENTIVE;
         stackchan_draw_performance_face(
-            target, m5_platform_stackchan_face_cue(), w);
+            target, reveal_face, w,
+            m5_stackchan_face_variant(reveal_face, s.ambient_face_variant));
 
         target->fillRect(0, 153, w, h - 153, STACK_BG);
         target->fillRect(0, 153, w, 2, STACK_CONTROL);
@@ -882,34 +1119,18 @@ void render_stackchan_delight() {
         return;
     }
 
-    const int bob = s.action_flash ? -3 : 0;
-    const uint32_t eye = s.online ? STACK_INK : STACK_SECONDARY;
-    if (connection_lost) {
-        target->fillEllipse(w / 2 - 64, 80, 27, 10, eye);
-        target->fillEllipse(w / 2 + 64, 80, 27, 10, eye);
-        target->drawArc(w / 2, 137, 38, 27, 210, 330, STACK_SECONDARY);
-    } else if (s.playing) {
-        const bool previous = std::strcmp(s.action_notice, "PREVIOUS") == 0;
-        const bool next = std::strcmp(s.action_notice, "NEXT") == 0;
-        const int glance = s.action_flash ? (next ? 9 : (previous ? -9 : 0)) : 0;
-        target->fillEllipse(w / 2 - 64, 82 + bob, 29, 43, eye);
-        target->fillEllipse(w / 2 + 64, 82 + bob, 29, 43, eye);
-        target->fillCircle(w / 2 - 57 + glance, 70 + bob, 8, STACK_ACCENT);
-        target->fillCircle(w / 2 + 71 + glance, 70 + bob, 8, STACK_ACCENT);
-        target->drawArc(w / 2, 133 + bob, 41, 31, 30, 150, STACK_HOT);
-    } else {
-        target->fillRoundRect(w / 2 - 103, 79 + bob, 67, 9, 5, eye);
-        target->fillRoundRect(w / 2 + 36, 79 + bob, 67, 9, 5, eye);
-        target->fillRoundRect(w / 2 - 25, 131 + bob, 50, 7, 4,
-                              STACK_SECONDARY);
-    }
+    const auto face = stackchan_current_face(connection_lost);
+    const uint8_t face_entropy = s.action_flash ? s.action_face_variant
+                                                 : s.ambient_face_variant;
+    stackchan_draw_performance_face(
+        target, face, w, m5_stackchan_face_variant(face, face_entropy));
     const char *expression = s.action_flash && s.action_notice[0]
                                  ? s.action_notice
                                  : (s.body_notice[0] ? s.body_notice
                                     : (connection_lost ? "I LOST THE MUSIC"
                                        : (!s.online ? "CONNECTING..."
-                                          : (s.body_enabled ? "READY"
-                                             : "BODY OFF"))));
+                                          : (!s.body_enabled ? "BODY OFF"
+                                             : ""))));
     stackchan_draw_center(target, expression, w / 2, 40, 1,
                           connection_lost ? STACK_HOT :
                           (s.action_flash ? STACK_HOT : STACK_INK));
@@ -982,14 +1203,26 @@ void render() {
     if (s.settings) {
 #if HIPHI_M5_TARGET_ID == 4
         M5.Display.fillScreen(STACK_BG);
-        stackchan_draw_center(&M5.Display, "SETUP", M5.Display.width()/2, 45,
-                              2, STACK_INK);
-        stackchan_draw_center(&M5.Display, s.network, M5.Display.width()/2, 100,
-                              1, STACK_SECONDARY);
-        M5.Display.fillRoundRect(42, M5.Display.height()-60,
-                                 M5.Display.width()-84, 44, 14, STACK_CONTROL);
+        const int w = M5.Display.width();
+        stackchan_draw_center(&M5.Display, "PERSONALITY", w/2, 27, 2,
+                              STACK_INK);
+        M5.Display.fillRoundRect(24, 57, w-48, 46, 14, STACK_CONTROL);
+        stackchan_draw_text(&M5.Display, "BODY", 42, 69, 1, STACK_INK);
+        stackchan_draw_text(&M5.Display,
+                            s.body_enabled ? "ON" : "OFF", w-79, 69, 1,
+                            s.body_enabled ? STACK_ACCENT : STACK_TERTIARY);
+        M5.Display.fillRoundRect(24, 111, w-48, 46, 14, STACK_CONTROL);
+        stackchan_draw_text(&M5.Display, "SOUNDS", 42, 123, 1, STACK_INK);
+        stackchan_draw_text(&M5.Display,
+                            s.sound_enabled ? "ON" : "OFF", w-79, 123, 1,
+                            s.sound_enabled ? STACK_ACCENT : STACK_TERTIARY);
+        stackchan_draw_center(&M5.Display,
+                              "BUTTON x2 = SOUNDS", w/2, 174, 1,
+                              STACK_TERTIARY);
+        M5.Display.fillRoundRect(42, M5.Display.height()-48,
+                                 M5.Display.width()-84, 34, 12, STACK_CONTROL);
         stackchan_draw_center(&M5.Display, "CLOSE", M5.Display.width()/2,
-                              M5.Display.height()-38, 1, STACK_INK);
+                              M5.Display.height()-31, 1, STACK_INK);
 #else
         M5.Display.fillScreen(BG);
         draw_centered("SETUP", M5.Display.height()/2 - 30, 2, ACCENT);
@@ -1099,6 +1332,17 @@ void process_input() {
         m5_platform_set_brightness(20); s.sleeping = true;
     }
 #else
+    if (buttons.double_clicked) {
+        toggle_sounds();
+        return;
+    }
+    if (buttons.single_clicked) {
+        s.settings = !s.settings;
+        s.picker = false;
+        s.art_mode = false;
+        s.dirty = true;
+        return;
+    }
     if (touched) {
         s.last_activity_us = now;
         /* Transport remains direct even in Art mode: artwork is the controller,
@@ -1151,8 +1395,14 @@ void process_input() {
         }
     } else if (s.settings) {
         if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED) {
-            s.settings = false;
-            s.dirty = true;
+            if (touch.y >= 52 && touch.y < 108) {
+                toggle_body_language();
+            } else if (touch.y >= 108 && touch.y < 164) {
+                toggle_sounds();
+            } else if (touch.y >= 184) {
+                s.settings = false;
+                s.dirty = true;
+            }
         }
     } else if (touched && touch.state == M5_PLATFORM_TOUCH_DRAGGING &&
                !s.gesture_consumed && touch.y < 160 &&
@@ -1238,6 +1488,13 @@ extern "C" void touch_ui_init(void) {
              wanted, configured, s.body_enabled,
              m5_platform_stackchan_expression_faulted());
     (void)configured;
+    bool sound_configured = false;
+    const bool sound_wanted = load_sound_enabled(&sound_configured);
+    s.sound_enabled =
+        m5_platform_stackchan_sound_enable(sound_wanted) && sound_wanted;
+    ESP_LOGI(TAG,
+             "StackChan sound startup: wanted=%d configured=%d enabled=%d",
+             sound_wanted, sound_configured, s.sound_enabled);
 #endif
     s.setup_mode = wifi_mgr_is_ap_mode();
     render();
@@ -1300,13 +1557,28 @@ extern "C" void touch_ui_process(void) {
 extern "C" void touch_ui_set_status(bool v){
     if(s.online!=v){
         const bool lost = s.online && !v;
+        const bool found = !s.online && v;
         s.online=v;if(v)s.ever_online=true;s.dirty=true;
         if (lost && s.body_enabled)
             m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_SAD);
+        if (lost)
+            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LOST);
+        if (found) flash_action("CONNECTED");
     }
 }
 extern "C" void touch_ui_set_message(const char *v){touch_ui_set_network_status(v);}
-extern "C" void touch_ui_set_zone_name(const char *v){if(std::strcmp(s.zone,v?v:"")!=0){copy_text(s.zone,sizeof(s.zone),v);s.dirty=true;}}
+extern "C" void touch_ui_set_zone_name(const char *v){
+    const char *zone=v?v:"";
+    if(std::strcmp(s.zone,zone)!=0){
+        /* Startup can publish the configured label, clear it while resolving,
+         * then publish it again. A room response is only truthful after the
+         * first playback snapshot has established a stable session. */
+        const bool changed=s.zone_seen&&s.playback_seen&&s.online&&zone[0];
+        copy_text(s.zone,sizeof(s.zone),zone);s.dirty=true;
+        if(zone[0])s.zone_seen=true;
+        if(changed)flash_action("NEW ROOM");
+    }
+}
 extern "C" void touch_ui_set_network_status(const char *v){if(std::strcmp(s.network,v?v:"")!=0){copy_text(s.network,sizeof(s.network),v);s.dirty=true;}}
 extern "C" void touch_ui_post_zone_name(const char *v){char *c=strdup(v?v:"");platform_task_post_to_ui([](void*p){touch_ui_set_zone_name(static_cast<char*>(p));free(p);},c);}
 extern "C" void touch_ui_post_network_status(const char *v){char *c=strdup(v?v:"");platform_task_post_to_ui([](void*p){touch_ui_set_network_status(static_cast<char*>(p));free(p);},c);}
@@ -1327,10 +1599,18 @@ extern "C" void touch_ui_post_artwork(const char *v){
         touch_ui_set_artwork(static_cast<char*>(p));free(p);},c))free(c);
 }
 extern "C" void touch_ui_show_volume_change(float v,float step){
-    (void)step;s.volume=v;s.dirty=true;
+    (void)step;
 #if HIPHI_M5_TARGET_ID == 4
-    char notice[32];std::snprintf(notice,sizeof(notice),"VOL %.1f",v);
-    flash_action(notice);
+    const bool up=v>s.volume;
+    const bool already=s.action_flash&&
+        (std::strcmp(s.action_notice,"VOLUME UP")==0||
+         std::strcmp(s.action_notice,"VOLUME DOWN")==0);
+    s.volume=v;s.dirty=true;
+    if(!already)flash_action(up?"VOLUME UP":"VOLUME DOWN");
+#else
+    s.volume=v;s.dirty=true;
+#endif
+#if HIPHI_M5_TARGET_ID == 4
 #else
     flash_action();
 #endif
@@ -1345,6 +1625,7 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
     const bool changed=s.track_seen && title[0] &&
         (std::strcmp(s.track_identity_title,title)!=0 ||
          std::strcmp(s.track_identity_artist,artist)!=0);
+    const bool playback_changed=s.playback_seen&&s.playing!=p;
     copy_text(s.title,sizeof(s.title),title);copy_text(s.artist,sizeof(s.artist),artist);
     copy_text(s.album,sizeof(s.album),album);s.playing=p;s.volume=v;
     s.volume_min=min;s.volume_max=max;s.seek_position=std::max(0,pos);
@@ -1354,12 +1635,17 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
         copy_text(s.track_identity_artist,sizeof(s.track_identity_artist),artist);
         s.track_seen=true;
     }
+    s.playback_seen=true;
+    if(playback_changed&&!changed)flash_action(p?"PLAY":"PAUSE");
     if (changed && p && s.online) {
 #if HIPHI_M5_TARGET_ID == 4
+        s.ambient_face_variant=static_cast<uint8_t>(esp_random());
         s.controls_mode=false;s.controls_until=0;
         s.track_reveal_started=esp_timer_get_time();
         s.track_reveal_until=s.track_reveal_started+7000000;
 #endif
+        m5_platform_stackchan_sound_trigger(
+            M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK);
         const bool dance_started = s.body_enabled &&
             m5_platform_stackchan_expression_trigger(
                 M5_PLATFORM_STACKCHAN_DANCE);
@@ -1387,4 +1673,44 @@ extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging)
 #endif
 }
 extern "C" bool touch_ui_is_display_sleeping(void){return s.sleeping;}
-extern "C" void touch_ui_show_settings(void){s.settings=true;s.picker=false;s.dirty=true;}
+extern "C" void touch_ui_show_settings(void){s.settings=true;s.picker=false;s.art_mode=false;s.dirty=true;}
+extern "C" bool touch_ui_stackchan_body_preference(void) {
+#if HIPHI_M5_TARGET_ID == 4
+    return load_body_enabled(nullptr);
+#else
+    return false;
+#endif
+}
+extern "C" bool touch_ui_stackchan_sound_preference(void) {
+#if HIPHI_M5_TARGET_ID == 4
+    return load_sound_enabled(nullptr);
+#else
+    return false;
+#endif
+}
+extern "C" bool touch_ui_post_stackchan_preferences(bool body_enabled,
+                                                      bool sound_enabled) {
+#if HIPHI_M5_TARGET_ID == 4
+    struct PreferenceRequest { bool body; bool sound; };
+    auto *request = static_cast<PreferenceRequest *>(
+        calloc(1, sizeof(PreferenceRequest)));
+    if (!request) return false;
+    request->body = body_enabled;
+    request->sound = sound_enabled;
+    if (!platform_task_post_to_ui([](void *arg) {
+            auto *preference = static_cast<PreferenceRequest *>(arg);
+            set_body_language(preference->body);
+            set_sounds(preference->sound, false);
+            body_notice("PERSONALITY UPDATED");
+            free(preference);
+        }, request)) {
+        free(request);
+        return false;
+    }
+    return true;
+#else
+    (void)body_enabled;
+    (void)sound_enabled;
+    return false;
+#endif
+}

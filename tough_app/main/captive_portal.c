@@ -698,7 +698,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<title>" HIPHI_BRAND " - Zones</title>"
     "<style>%s</style></head><body>"
     "<h1>" HIPHI_BRAND "</h1>"
-    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -785,6 +785,16 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   const rk_cfg_t *cfg = &snapshot.value;
+  char personality_html[768] = {0};
+#if HIPHI_M5_TARGET_ID == 4
+  snprintf(personality_html, sizeof(personality_html),
+    "<h3>StackChan personality</h3>"
+    "<p class='status'>These are on by default and persist across firmware updates.</p>"
+    "<label>Body language <input type='checkbox' name='stackchan_body_enabled' %s></label>"
+    "<label>Sounds <input type='checkbox' name='stackchan_sound_enabled' %s></label>",
+    touch_ui_stackchan_body_preference() ? "checked" : "",
+    touch_ui_stackchan_sound_preference() ? "checked" : "");
+#endif
   char *html = heap_caps_calloc(1, 12288, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -792,12 +802,12 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
   }
   int pos = snprintf(html, 12288,
     "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>" HIPHI_BRAND " - Display</title><style>%s"
+    "<title>" HIPHI_BRAND " - Settings</title><style>%s"
     "label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0;}"
     "input[type=number]{width:88px;padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
     "input[type=checkbox]{width:22px;height:22px;}small{color:#aaa;}"
     "</style></head><body><h1>" HIPHI_BRAND "</h1>"
-    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a></nav>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
     "<p class='status'>Artwork mode keeps the album visible; dim and sleep are the subsequent power-saving stages.</p>"
     "<form method='POST' action='/api/settings'><h3>On battery</h3>"
@@ -814,15 +824,17 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "<label>Dim seconds <input type='number' min='0' max='65535' name='dim_charging_timeout' value='%u'></label>"
     "<label>Sleep display <input type='checkbox' name='sleep_charging_enabled' %s></label>"
     "<label>Sleep seconds <input type='number' min='0' max='65535' name='sleep_charging_timeout' value='%u'></label>"
+    "%s"
     "<p><small>Zero seconds disables a stage. Deep sleep is intentionally not enabled on Tough until its wake source is qualified.</small></p>"
-    "<button class='btn' type='submit'>Save display settings</button></form></div>"
+    "<button class='btn' type='submit'>Save settings</button></form></div>"
     "</body></html>", STA_CSS,
     cfg->art_mode_battery_enabled ? "checked" : "", cfg->art_mode_battery_timeout_sec,
     cfg->dim_battery_enabled ? "checked" : "", cfg->dim_battery_timeout_sec,
     cfg->sleep_battery_enabled ? "checked" : "", cfg->sleep_battery_timeout_sec,
     cfg->art_mode_charging_enabled ? "checked" : "", cfg->art_mode_charging_timeout_sec,
     cfg->dim_charging_enabled ? "checked" : "", cfg->dim_charging_timeout_sec,
-    cfg->sleep_charging_enabled ? "checked" : "", cfg->sleep_charging_timeout_sec);
+    cfg->sleep_charging_enabled ? "checked" : "", cfg->sleep_charging_timeout_sec,
+    personality_html);
   if (pos < 0) pos = 0;
   if (pos >= 12288) pos = 12287;
   httpd_resp_set_type(req, "text/html");
@@ -880,6 +892,20 @@ static esp_err_t sta_settings_save_handler(httpd_req_t *req) {
   }
   platform_display_apply_config(&committed.value,
                                 platform_battery_is_charging());
+#if HIPHI_M5_TARGET_ID == 4
+  char personality_value[2] = {0};
+  const bool body_enabled = get_form_field(
+      body, "stackchan_body_enabled", personality_value,
+      sizeof(personality_value));
+  const bool sound_enabled = get_form_field(
+      body, "stackchan_sound_enabled", personality_value,
+      sizeof(personality_value));
+  if (!touch_ui_post_stackchan_preferences(body_enabled, sound_enabled)) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Personality settings could not be applied");
+    return ESP_FAIL;
+  }
+#endif
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/settings");
   httpd_resp_send(req, NULL, 0);

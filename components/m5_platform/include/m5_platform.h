@@ -60,6 +60,8 @@ bool m5_platform_joystick_state(m5_platform_joystick_state_t *out);
 typedef struct {
     bool pressed;
     bool clicked;
+    bool single_clicked;
+    bool double_clicked;
     bool held;
     bool secondary_pressed;
     bool secondary_clicked;
@@ -94,6 +96,27 @@ typedef enum {
     M5_PLATFORM_STACKCHAN_FACE_WINK = 5,
     M5_PLATFORM_STACKCHAN_FACE_SAD = 6,
     M5_PLATFORM_STACKCHAN_FACE_SETTLE = 7,
+    M5_PLATFORM_STACKCHAN_FACE_ATTENTIVE = 8,
+    M5_PLATFORM_STACKCHAN_FACE_RESTING = 9,
+    M5_PLATFORM_STACKCHAN_FACE_CURIOUS = 10,
+    M5_PLATFORM_STACKCHAN_FACE_RELIEVED = 11,
+    M5_PLATFORM_STACKCHAN_FACE_GLANCE_LEFT = 12,
+    M5_PLATFORM_STACKCHAN_FACE_GLANCE_RIGHT = 13,
+    M5_PLATFORM_STACKCHAN_FACE_LOUD = 14,
+    M5_PLATFORM_STACKCHAN_FACE_HUSH = 15,
+    M5_PLATFORM_STACKCHAN_FACE_PROUD = 16,
+    M5_PLATFORM_STACKCHAN_FACE_SHY = 17,
+    M5_PLATFORM_STACKCHAN_FACE_WORRIED = 18,
+    /* Kismet's basis-expression families. The earlier cues above are the
+     * music-product vocabulary; these make the underlying affect library
+     * available without inventing a servo gesture for every emotion. */
+    M5_PLATFORM_STACKCHAN_FACE_CONTENT = 19,
+    M5_PLATFORM_STACKCHAN_FACE_ACCEPTING = 20,
+    M5_PLATFORM_STACKCHAN_FACE_STERN = 21,
+    M5_PLATFORM_STACKCHAN_FACE_ANGER = 22,
+    M5_PLATFORM_STACKCHAN_FACE_DISGUST = 23,
+    M5_PLATFORM_STACKCHAN_FACE_FEAR = 24,
+    M5_PLATFORM_STACKCHAN_FACE_BORED = 25,
 } m5_platform_stackchan_face_cue_t;
 
 /* StackChan body language is enabled by default (and can be turned off with a
@@ -105,6 +128,25 @@ bool m5_platform_stackchan_expression_trigger(
 void m5_platform_stackchan_expression_process(void);
 bool m5_platform_stackchan_expression_faulted(void);
 m5_platform_stackchan_face_cue_t m5_platform_stackchan_face_cue(void);
+
+typedef enum {
+    M5_PLATFORM_STACKCHAN_SOUND_MORE = 1,
+    M5_PLATFORM_STACKCHAN_SOUND_LESS = 2,
+    M5_PLATFORM_STACKCHAN_SOUND_PREVIOUS = 3,
+    M5_PLATFORM_STACKCHAN_SOUND_NEXT = 4,
+    M5_PLATFORM_STACKCHAN_SOUND_PLAY = 5,
+    M5_PLATFORM_STACKCHAN_SOUND_PAUSE = 6,
+    M5_PLATFORM_STACKCHAN_SOUND_CONNECTED = 7,
+    M5_PLATFORM_STACKCHAN_SOUND_LOST = 8,
+    M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK = 9,
+    M5_PLATFORM_STACKCHAN_SOUND_NEW_ROOM = 10,
+} m5_platform_stackchan_sound_t;
+
+/* Short affective pitch contours played through M5Unified's Speaker API.
+ * They are original UI sounds, not sampled Kismet audio. */
+bool m5_platform_stackchan_sound_trigger(m5_platform_stackchan_sound_t sound);
+void m5_platform_stackchan_sound_process(void);
+bool m5_platform_stackchan_sound_enable(bool enabled);
 
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */
