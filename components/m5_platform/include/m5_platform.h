@@ -142,11 +142,20 @@ typedef enum {
     M5_PLATFORM_STACKCHAN_SOUND_NEW_ROOM = 10,
 } m5_platform_stackchan_sound_t;
 
+typedef enum {
+    /* LOW deliberately preserves the hardware-tested 96 gain. */
+    M5_PLATFORM_STACKCHAN_VOLUME_LOW = 0,
+    M5_PLATFORM_STACKCHAN_VOLUME_MEDIUM = 1,
+    M5_PLATFORM_STACKCHAN_VOLUME_HIGH = 2,
+} m5_platform_stackchan_volume_t;
+
 /* Short affective pitch contours played through M5Unified's Speaker API.
  * They are original UI sounds, not sampled Kismet audio. */
 bool m5_platform_stackchan_sound_trigger(m5_platform_stackchan_sound_t sound);
 void m5_platform_stackchan_sound_process(void);
 bool m5_platform_stackchan_sound_enable(bool enabled);
+bool m5_platform_stackchan_sound_volume(
+    m5_platform_stackchan_volume_t volume);
 
 /* Target-neutral display power primitives used by the shared controller
  * timeout policy and M5-family renderers. They must run on the UI task. */

@@ -92,8 +92,10 @@ void touch_ui_show_settings(void);
  * calls these when HIPHI_M5_TARGET_ID identifies StackChan. */
 bool touch_ui_stackchan_body_preference(void);
 bool touch_ui_stackchan_sound_preference(void);
+uint8_t touch_ui_stackchan_voice_volume_preference(void);
 bool touch_ui_post_stackchan_preferences(bool body_enabled,
-                                         bool sound_enabled);
+                                         bool sound_enabled,
+                                         uint8_t voice_volume);
 
 #ifdef __cplusplus
 }

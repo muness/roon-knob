@@ -785,15 +785,25 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   const rk_cfg_t *cfg = &snapshot.value;
-  char personality_html[768] = {0};
+  char personality_html[1280] = {0};
 #if HIPHI_M5_TARGET_ID == 4
+  const uint8_t voice_volume =
+      touch_ui_stackchan_voice_volume_preference();
   snprintf(personality_html, sizeof(personality_html),
     "<h3>StackChan personality</h3>"
     "<p class='status'>These are on by default and persist across firmware updates.</p>"
     "<label>Body language <input type='checkbox' name='stackchan_body_enabled' %s></label>"
-    "<label>Sounds <input type='checkbox' name='stackchan_sound_enabled' %s></label>",
+    "<label>Sounds <input type='checkbox' name='stackchan_sound_enabled' %s></label>"
+    "<label>Voice volume <select name='stackchan_voice_volume'>"
+    "<option value='0' %s>Low (current)</option>"
+    "<option value='1' %s>Medium</option>"
+    "<option value='2' %s>High</option>"
+    "</select></label>",
     touch_ui_stackchan_body_preference() ? "checked" : "",
-    touch_ui_stackchan_sound_preference() ? "checked" : "");
+    touch_ui_stackchan_sound_preference() ? "checked" : "",
+    voice_volume == 0 ? "selected" : "",
+    voice_volume == 1 ? "selected" : "",
+    voice_volume == 2 ? "selected" : "");
 #endif
   char *html = heap_caps_calloc(1, 12288, MALLOC_CAP_8BIT);
   if (!html) {
@@ -805,7 +815,9 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "<title>" HIPHI_BRAND " - Settings</title><style>%s"
     "label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0;}"
     "input[type=number]{width:88px;padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
-    "input[type=checkbox]{width:22px;height:22px;}small{color:#aaa;}"
+    "input[type=checkbox]{width:22px;height:22px;}"
+    "select{padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
+    "small{color:#aaa;}"
     "</style></head><body><h1>" HIPHI_BRAND "</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
@@ -900,7 +912,11 @@ static esp_err_t sta_settings_save_handler(httpd_req_t *req) {
   const bool sound_enabled = get_form_field(
       body, "stackchan_sound_enabled", personality_value,
       sizeof(personality_value));
-  if (!touch_ui_post_stackchan_preferences(body_enabled, sound_enabled)) {
+  const uint32_t voice_volume = setting_u32(
+      body, "stackchan_voice_volume", 0);
+  if (voice_volume > 2 ||
+      !touch_ui_post_stackchan_preferences(body_enabled, sound_enabled,
+                                           (uint8_t)voice_volume)) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                         "Personality settings could not be applied");
     return ESP_FAIL;

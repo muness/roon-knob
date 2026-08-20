@@ -76,6 +76,8 @@ struct State {
     bool action_flash = false;
     bool body_enabled = false;
     bool sound_enabled = true;
+    m5_platform_stackchan_volume_t voice_volume =
+        M5_PLATFORM_STACKCHAN_VOLUME_LOW;
     bool body_hold_consumed = false;
     bool setup_mode = false;
     bool track_seen = false;
@@ -140,6 +142,8 @@ constexpr char kStackChanBodyKey[] = "body_on";
 constexpr char kStackChanBodyPreferenceKey[] = "body_pref_v3";
 constexpr char kStackChanSoundKey[] = "sound_on";
 constexpr char kStackChanSoundPreferenceKey[] = "sound_pref_v1";
+constexpr char kStackChanVoiceVolumeKey[] = "voice_vol";
+constexpr char kStackChanVoiceVolumePreferenceKey[] = "voice_vol_v1";
 
 void copy_text(char *out, size_t len, const char *value) {
     if (out && len) std::snprintf(out, len, "%s", value ? value : "");
@@ -677,29 +681,56 @@ void save_sound_enabled(bool enabled) {
     nvs_close(handle);
 }
 
+m5_platform_stackchan_volume_t load_voice_volume(bool *configured = nullptr) {
+    if (configured) *configured = false;
+    nvs_handle_t handle = 0;
+    uint8_t value = M5_PLATFORM_STACKCHAN_VOLUME_LOW;
+    if (nvs_open(kStackChanNvsNamespace, NVS_READONLY, &handle) != ESP_OK)
+        return M5_PLATFORM_STACKCHAN_VOLUME_LOW;
+    uint8_t preference = 0;
+    const bool found =
+        nvs_get_u8(handle, kStackChanVoiceVolumePreferenceKey, &preference) == ESP_OK &&
+        nvs_get_u8(handle, kStackChanVoiceVolumeKey, &value) == ESP_OK;
+    nvs_close(handle);
+    if (!found || value > M5_PLATFORM_STACKCHAN_VOLUME_HIGH)
+        return M5_PLATFORM_STACKCHAN_VOLUME_LOW;
+    if (configured) *configured = true;
+    return static_cast<m5_platform_stackchan_volume_t>(value);
+}
+
+void save_voice_volume(m5_platform_stackchan_volume_t volume) {
+    nvs_handle_t handle = 0;
+    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
+        return;
+    nvs_set_u8(handle, kStackChanVoiceVolumeKey, static_cast<uint8_t>(volume));
+    nvs_set_u8(handle, kStackChanVoiceVolumePreferenceKey, 1);
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
 void body_notice(const char *message) {
     copy_text(s.body_notice, sizeof(s.body_notice), message);
     s.body_notice_until = esp_timer_get_time() + 1800000;
     s.dirty = true;
 }
 
-void set_body_language(bool wanted) {
+void set_body_language(bool wanted, bool persist = true) {
     s.body_enabled = m5_platform_stackchan_expression_enable(wanted) && wanted;
     ESP_LOGI(TAG, "StackChan body toggle: wanted=%d enabled=%d faulted=%d",
              wanted, s.body_enabled,
              m5_platform_stackchan_expression_faulted());
     /* Persist the user's intent, not the result of this one hardware attempt.
      * A transient qualification failure should retry after the next boot. */
-    save_body_enabled(wanted);
+    if (persist) save_body_enabled(wanted);
     body_notice(s.body_enabled ? "BODY LANGUAGE ON" :
                 (wanted ? "SERVOS NOT READY" : "BODY LANGUAGE OFF"));
 }
 
 void toggle_body_language() { set_body_language(!s.body_enabled); }
 
-void set_sounds(bool enabled, bool confirm = true) {
+void set_sounds(bool enabled, bool confirm = true, bool persist = true) {
     s.sound_enabled = m5_platform_stackchan_sound_enable(enabled) && enabled;
-    save_sound_enabled(enabled);
+    if (persist) save_sound_enabled(enabled);
     ESP_LOGI(TAG, "StackChan sound toggle: wanted=%d enabled=%d", enabled,
              s.sound_enabled);
     if (confirm) body_notice(s.sound_enabled ? "SOUNDS ON" : "SOUNDS OFF");
@@ -711,6 +742,23 @@ void set_sounds(bool enabled, bool confirm = true) {
 }
 
 void toggle_sounds() { set_sounds(!s.sound_enabled); }
+
+void set_voice_volume(m5_platform_stackchan_volume_t volume,
+                      bool preview = true, bool persist = true) {
+    if (volume < M5_PLATFORM_STACKCHAN_VOLUME_LOW ||
+        volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return;
+    if (!m5_platform_stackchan_sound_volume(volume)) {
+        body_notice("VOICE LEVEL FAILED");
+        return;
+    }
+    s.voice_volume = volume;
+    if (persist) save_voice_volume(volume);
+    static constexpr const char *NAMES[] = {"VOICE LOW", "VOICE MEDIUM",
+                                            "VOICE HIGH"};
+    body_notice(NAMES[static_cast<size_t>(volume)]);
+    if (preview && s.sound_enabled)
+        m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_MORE);
+}
 
 bool dispatch(controller_command_t command) {
     controller_action_t action = controller_action_command(command);
@@ -1204,25 +1252,36 @@ void render() {
 #if HIPHI_M5_TARGET_ID == 4
         M5.Display.fillScreen(STACK_BG);
         const int w = M5.Display.width();
-        stackchan_draw_center(&M5.Display, "PERSONALITY", w/2, 27, 2,
+        stackchan_draw_center(&M5.Display, "PERSONALITY", w/2, 22, 2,
                               STACK_INK);
-        M5.Display.fillRoundRect(24, 57, w-48, 46, 14, STACK_CONTROL);
-        stackchan_draw_text(&M5.Display, "BODY", 42, 69, 1, STACK_INK);
+        M5.Display.fillRoundRect(24, 45, w-48, 40, 12, STACK_CONTROL);
+        stackchan_draw_text(&M5.Display, "BODY", 42, 56, 1, STACK_INK);
         stackchan_draw_text(&M5.Display,
-                            s.body_enabled ? "ON" : "OFF", w-79, 69, 1,
+                            s.body_enabled ? "ON" : "OFF", w-79, 56, 1,
                             s.body_enabled ? STACK_ACCENT : STACK_TERTIARY);
-        M5.Display.fillRoundRect(24, 111, w-48, 46, 14, STACK_CONTROL);
-        stackchan_draw_text(&M5.Display, "SOUNDS", 42, 123, 1, STACK_INK);
+        M5.Display.fillRoundRect(24, 91, w-48, 40, 12, STACK_CONTROL);
+        stackchan_draw_text(&M5.Display, "SOUNDS", 42, 102, 1, STACK_INK);
         stackchan_draw_text(&M5.Display,
-                            s.sound_enabled ? "ON" : "OFF", w-79, 123, 1,
+                            s.sound_enabled ? "ON" : "OFF", w-79, 102, 1,
                             s.sound_enabled ? STACK_ACCENT : STACK_TERTIARY);
-        stackchan_draw_center(&M5.Display,
-                              "BUTTON x2 = SOUNDS", w/2, 174, 1,
+        M5.Display.fillRoundRect(24, 137, w-48, 40, 12, STACK_CONTROL);
+        stackchan_draw_text(&M5.Display, "VOICE", 36, 148, 1, STACK_INK);
+        static constexpr const char *VOLUME_LABELS[] = {"LOW", "MED", "HIGH"};
+        for (int level = 0; level < 3; ++level) {
+            const int x = 116 + level * 57;
+            const bool selected = static_cast<int>(s.voice_volume) == level;
+            M5.Display.fillRoundRect(x, 143, 53, 28, 8,
+                                    selected ? STACK_ACCENT : STACK_BG);
+            stackchan_draw_center(&M5.Display, VOLUME_LABELS[level], x + 26,
+                                  151, 1,
+                                  selected ? STACK_BG : STACK_TERTIARY);
+        }
+        stackchan_draw_center(&M5.Display, "BUTTON x2: SOUND", w/2, 187, 1,
                               STACK_TERTIARY);
-        M5.Display.fillRoundRect(42, M5.Display.height()-48,
-                                 M5.Display.width()-84, 34, 12, STACK_CONTROL);
+        M5.Display.fillRoundRect(42, M5.Display.height()-37,
+                                 M5.Display.width()-84, 29, 11, STACK_CONTROL);
         stackchan_draw_center(&M5.Display, "CLOSE", M5.Display.width()/2,
-                              M5.Display.height()-31, 1, STACK_INK);
+                              M5.Display.height()-30, 1, STACK_INK);
 #else
         M5.Display.fillScreen(BG);
         draw_centered("SETUP", M5.Display.height()/2 - 30, 2, ACCENT);
@@ -1395,11 +1454,17 @@ void process_input() {
         }
     } else if (s.settings) {
         if (touched && touch.state == M5_PLATFORM_TOUCH_CLICKED) {
-            if (touch.y >= 52 && touch.y < 108) {
+            if (touch.y >= 42 && touch.y < 88) {
                 toggle_body_language();
-            } else if (touch.y >= 108 && touch.y < 164) {
+            } else if (touch.y >= 88 && touch.y < 134) {
                 toggle_sounds();
-            } else if (touch.y >= 184) {
+            } else if (touch.y >= 134 && touch.y < 181) {
+                int level = touch.x < 116
+                    ? (static_cast<int>(s.voice_volume) + 1) % 3
+                    : std::clamp((touch.x - 116) / 57, 0, 2);
+                set_voice_volume(
+                    static_cast<m5_platform_stackchan_volume_t>(level));
+            } else if (touch.y >= 198) {
                 s.settings = false;
                 s.dirty = true;
             }
@@ -1490,11 +1555,18 @@ extern "C" void touch_ui_init(void) {
     (void)configured;
     bool sound_configured = false;
     const bool sound_wanted = load_sound_enabled(&sound_configured);
+    bool volume_configured = false;
+    s.voice_volume = load_voice_volume(&volume_configured);
+    const bool volume_ready =
+        m5_platform_stackchan_sound_volume(s.voice_volume);
     s.sound_enabled =
         m5_platform_stackchan_sound_enable(sound_wanted) && sound_wanted;
     ESP_LOGI(TAG,
-             "StackChan sound startup: wanted=%d configured=%d enabled=%d",
-             sound_wanted, sound_configured, s.sound_enabled);
+             "StackChan sound startup: wanted=%d configured=%d enabled=%d "
+             "level=%u level_configured=%d level_ready=%d",
+             sound_wanted, sound_configured, s.sound_enabled,
+             static_cast<unsigned>(s.voice_volume), volume_configured,
+             volume_ready);
 #endif
     s.setup_mode = wifi_mgr_is_ap_mode();
     render();
@@ -1688,29 +1760,49 @@ extern "C" bool touch_ui_stackchan_sound_preference(void) {
     return false;
 #endif
 }
-extern "C" bool touch_ui_post_stackchan_preferences(bool body_enabled,
-                                                      bool sound_enabled) {
+extern "C" uint8_t touch_ui_stackchan_voice_volume_preference(void) {
 #if HIPHI_M5_TARGET_ID == 4
-    struct PreferenceRequest { bool body; bool sound; };
+    return static_cast<uint8_t>(load_voice_volume(nullptr));
+#else
+    return 0;
+#endif
+}
+extern "C" bool touch_ui_post_stackchan_preferences(bool body_enabled,
+                                                      bool sound_enabled,
+                                                      uint8_t voice_volume) {
+#if HIPHI_M5_TARGET_ID == 4
+    if (voice_volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return false;
+    struct PreferenceRequest { bool body; bool sound; uint8_t volume; };
     auto *request = static_cast<PreferenceRequest *>(
         calloc(1, sizeof(PreferenceRequest)));
     if (!request) return false;
     request->body = body_enabled;
     request->sound = sound_enabled;
+    request->volume = voice_volume;
     if (!platform_task_post_to_ui([](void *arg) {
             auto *preference = static_cast<PreferenceRequest *>(arg);
-            set_body_language(preference->body);
-            set_sounds(preference->sound, false);
+            set_body_language(preference->body, false);
+            set_sounds(preference->sound, false, false);
+            set_voice_volume(static_cast<m5_platform_stackchan_volume_t>(
+                                 preference->volume),
+                             preference->sound, false);
             body_notice("PERSONALITY UPDATED");
             free(preference);
         }, request)) {
         free(request);
         return false;
     }
+    /* The HTTP handler redirects immediately after queueing this work. Commit
+     * the user's intent here so the redirected Settings page never flashes the
+     * previous values while the UI task safely applies hardware changes. */
+    save_body_enabled(body_enabled);
+    save_sound_enabled(sound_enabled);
+    save_voice_volume(static_cast<m5_platform_stackchan_volume_t>(voice_volume));
     return true;
 #else
     (void)body_enabled;
     (void)sound_enabled;
+    (void)voice_volume;
     return false;
 #endif
 }

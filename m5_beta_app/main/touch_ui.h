@@ -36,8 +36,10 @@ bool touch_ui_is_display_sleeping(void);
 void touch_ui_show_settings(void);
 bool touch_ui_stackchan_body_preference(void);
 bool touch_ui_stackchan_sound_preference(void);
+uint8_t touch_ui_stackchan_voice_volume_preference(void);
 bool touch_ui_post_stackchan_preferences(bool body_enabled,
-                                         bool sound_enabled);
+                                         bool sound_enabled,
+                                         uint8_t voice_volume);
 
 #ifdef __cplusplus
 }

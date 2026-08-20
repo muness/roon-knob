@@ -34,6 +34,9 @@ On the current StackChan adapter, both body and sounds default on and persist
 independently. Long-hold the face for body language; double-click the physical
 front button for sounds. A single front-button click opens the on-device
 Personality page, and the web Settings page exposes the same two switches.
+Both settings surfaces also select a persisted voice level: low preserves the
+hardware-approved gain (96), while medium (144) and high (192) provide explicit
+headroom choices through M5Unified's master-volume abstraction.
 
 Recommended defaults:
 

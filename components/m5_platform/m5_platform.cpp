@@ -62,6 +62,8 @@ struct StackChanVoiceState {
     bool enabled = true;
 } s_stackchan_voice;
 
+constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
+
 void stackchan_voice_note(uint8_t index) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     const auto &note = s_stackchan_voice.phrase->notes[index];
@@ -237,7 +239,8 @@ extern "C" bool m5_platform_begin(void) {
                  * 255. The enclosed AW88298 is read from listening distance,
                  * so give the short phrases modest headroom above that while
                  * retaining the official amplifier configuration. */
-                M5.Speaker.setVolume(96);
+                M5.Speaker.setVolume(
+                    STACKCHAN_VOICE_GAINS[M5_PLATFORM_STACKCHAN_VOLUME_LOW]);
                 M5.Speaker.setAllChannelVolume(255);
                 if (M5.Speaker.begin()) {
                     ESP_LOGI(TAG,
@@ -632,6 +635,24 @@ extern "C" bool m5_platform_stackchan_sound_enable(bool enabled) {
     return true;
 #else
     (void)enabled;
+    return false;
+#endif
+}
+
+extern "C" bool m5_platform_stackchan_sound_volume(
+    m5_platform_stackchan_volume_t volume) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN ||
+        !M5.Speaker.isEnabled() ||
+        volume < M5_PLATFORM_STACKCHAN_VOLUME_LOW ||
+        volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return false;
+    const uint8_t gain = STACKCHAN_VOICE_GAINS[static_cast<size_t>(volume)];
+    M5.Speaker.setVolume(gain);
+    ESP_LOGI(TAG, "StackChan voice level=%u gain=%u",
+             static_cast<unsigned>(volume), static_cast<unsigned>(gain));
+    return M5.Speaker.getVolume() == gain;
+#else
+    (void)volume;
     return false;
 #endif
 }
