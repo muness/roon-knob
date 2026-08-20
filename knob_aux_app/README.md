@@ -9,9 +9,15 @@ Bluetooth, A2DP/AVRCP, encoder, audio, and UART services. HiPhi Dial does not
 use that chip, so sleeping only the primary S3 leaves an active radio SoC on
 the same battery rail.
 
-This image drives the PCM5100A XSMT input low, holds that level, and immediately
-enters ESP32 Deep-sleep with no wake source. A hardware reset or bootloader
-entry wakes it only long enough to park again.
+This image drives the PCM5100A XSMT input low, holds that level, disables every
+wake source, powers down the RTC peripheral and memory domains, and enters
+ESP32 Deep-sleep at the first possible point in `app_main`. It has no logging
+delay, connected-idle state, or task loop. A hardware reset or bootloader entry
+wakes it only long enough to mute the DAC and park again.
+
+This is the board's always-off policy, not an optional mode. The schematic ties
+the auxiliary chip's enable pin high, so the primary S3 cannot remove its rail;
+permanent wake-less Deep-sleep is the strongest software-off state available.
 
 ## Build
 
@@ -37,6 +43,7 @@ The operation is recoverable: the official Waveshare demo archive contains
 `ESP32-KNOB_ESP32_0.bin`, which can be reflashed to the same auxiliary chip if
 its original Bluetooth/audio behavior is ever needed.
 
-This image reduces one known source of board-level draw; it is not a current
-claim. The always-powered 3.3 V converter, display logic, haptic controller,
+This image removes one known source of board-level runtime work; it is not a
+zero-current or battery-life claim. The auxiliary ESP32 still has physical
+power, and the always-powered 3.3 V converter, display logic, haptic controller,
 microphone, SD interface, and other leakage paths still require measurement.

@@ -56,11 +56,11 @@ Success has two levels:
 
 | Target | Before this slice | Dominant source-proven gap | This slice | Still open |
 | --- | --- | --- | --- | --- |
-| Waveshare HiPhi Dial / ESP32-S3 Knob 1.8 | LCD/backlight soft sleep; S3 Deep-sleep after the configured timeout | Shared Wi-Fi forced fully awake; RTC peripheral forced on; BLE not quiesced; backlight output not held; second ESP32 cannot be shut down by S3 | Modem sleep baseline, automatic Light-sleep, qualified ext1 wake, BLE quiesce, digital backlight hold, auxiliary-ESP32 parking image | Board current, wake/reconnect, fixed rails, PMIC/charger losses |
+| Waveshare HiPhi Dial / ESP32-S3 Knob 1.8 | LCD/backlight soft sleep; S3 Deep-sleep after the configured timeout | Shared Wi-Fi forced fully awake; RTC peripheral forced on; BLE not quiesced; backlight output not held; second ESP32 cannot be shut down by S3 | Modem sleep baseline, automatic Light-sleep, qualified ext1 wake, BLE quiesce, digital backlight hold, permanent no-wake auxiliary-ESP32 Deep-sleep image | Board current, wake/reconnect, fixed rails, PMIC/charger losses |
 | HiPhi Frame / Waveshare PhotoPainter | E-paper controller sleeps after refresh; S3 and services stay connected | “Panel deep sleep” was being treated as if it were device sleep | Shared modem sleep and opportunistic S3 Light-sleep | Issue #160 default-off S3 sleep manager; PMIC rail work remains bench-gated |
 | Waveshare RLCD 4.2 | Connected, static reflective display | Shared Wi-Fi explicitly fully awake; no target power state machine | Shared modem sleep and opportunistic Light-sleep | Exact usage model, input wake, and whether connectionless operation is desirable |
 | M5Stack Tough | Backlight/panel sleep via M5Unified; application continues at 100 Hz | No SoC/PMIC sleep; frequent input/UI wakeups | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | Qualify touch/button/RTC wake before using official `Power_Class` deep/timer sleep |
-| AtomS3 + Atom JoyStick | Panel sleep; connected controller loop remains active | No SoC sleep; base has its own battery and controller behavior | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | Decide whether battery runtime or always-connected responsiveness owns the profile |
+| AtomS3 + Atom JoyStick | Panel sleep; connected controller loop remains active; required STM32F030 coprocessor continuously samples inputs | No S3 sleep; M5Stack's coprocessor firmware runs a 48 MHz busy loop with continuous ADC/DMA and exposes no sleep register | Shared modem sleep, opportunistic Light-sleep, asleep input cadence reduced to 20 Hz | The STM32 cannot be permanently off while retaining joystick input; qualify a separate interrupt-driven/duty-cycled coprocessor firmware or whole-board power-off |
 | M5Dial beta | No configured dim/sleep policy | Panel, SoC, and radio remain active; exact board has a GPIO46 power-hold path | Shared dim → connected panel sleep → M5Unified power-off ladder; button/touch/encoder wake while connected; setup inhibitor | Original Dial cannot report USB/external power, so source classification and power-button recovery require hardware qualification |
 | M5StickS3 beta | No configured dim/sleep policy | Panel/SoC remain active | Shared power ladder; button/IMU wake while connected; M5PM1 power-off; VBUS-aware external-power policy | Verify exact unit/revision, button wake after power-off, and raise-to-wake thresholds |
 | M5StopWatch beta | After 8 s sets brightness to 20 and marks the UI sleeping | Screen remains lit; SoC remains active | Removed fake sleep; shared power ladder; haptic off before sleep; M5PM1 power-off; VBUS-aware external-power policy | Verify touch/button/raise wake, vibration shutdown, and PMIC power-button recovery |
@@ -89,6 +89,36 @@ Its embedded program strings include active application paths for Classic
 Bluetooth, A2DP/AVRCP, BLE/BT HID, UART, encoder, and audio services. That proves
 the shipped image contains those stacks; it does **not** by itself prove a
 particular steady current or continuous radio transmission.
+
+The auxiliary image is now an explicit **always-off** product invariant. At the
+first possible point in `app_main`, it mutes and holds DAC XSMT low, clears all
+wake sources, forces the RTC peripheral/slow-memory/fast-memory domains off,
+and enters Deep-sleep. It contains no log-drain delay, connected-idle state, or
+task loop. Reset and bootloader entry are the only ways to execute it again,
+and either path immediately returns to the same state. Because the board ties
+the chip's enable high, this is the strongest software-off state available; it
+is not literal rail removal or a zero-current claim.
+
+### Multi-processor inventory
+
+The supported exact-target inventory has two boards with separately
+programmable general-purpose processors:
+
+1. **Waveshare Dial:** ESP32-S3 main plus unused classic ESP32. The second chip
+   contributes no HiPhi function, so permanent wake-less Deep-sleep is correct.
+2. **AtomS3 JoyStick K137:** ESP32-S3 main plus an STM32F030F4P6 that owns both
+   Hall joysticks, four switches, and battery ADC data. It cannot be turned off
+   all the time without removing the controller's input surface. M5Stack's
+   official v2 coprocessor firmware configures a 48 MHz system clock,
+   continuous ADC/DMA, and an empty polling loop with no `WFI`; its published
+   I2C map exposes values, address, versions, and bootloader entry but no sleep
+   command. This is a real residual load and a separate firmware/hardware gate,
+   not a reason to pretend the board is single-SoC.
+
+StackChan's smart servos also contain control electronics, but connected sleep
+already releases torque and removes their VM rail. The remaining targets use
+dedicated display/touch/PMIC/peripheral controllers, not an unused application
+processor that can safely receive an always-off image.
 
 ### Frame boundary
 
@@ -291,8 +321,9 @@ The authoritative branch implements:
    RTC peripheral domain.
 5. Dial transient BLE quiesce without changing the enabled preference or bonds.
 6. Dial backlight GPIO47 low hold across S3 Deep-sleep and release at boot.
-7. A separately flashed classic-ESP32 parking image that holds DAC XSMT low and
-   enters Deep-sleep with no wake source.
+7. A separately flashed classic-ESP32 always-off image that holds DAC XSMT low,
+   disables every wake source and RTC retention domain, and enters Deep-sleep
+   immediately without logging or a task loop.
 8. CI packaging for the auxiliary image, deliberately excluded from releases.
 9. One tested M5 beta transition policy across Dial, StickS3, StopWatch, and
    StackChan: dim → connected display sleep → exact-board power-off.
@@ -347,8 +378,12 @@ remains the Linux sanitizer authority.
 | Frame device Deep-sleeps after every e-paper update | Contradicted | `eink_display.c` sleeps only the panel controller; `main_frame.c` and services continue | Replace with “the e-paper controller sleeps; the device remains connected and active” |
 | The exact Waveshare Dial is a dual-MCU ESP32-S3 + ESP32 board | Verified | Waveshare product wiki and schematic archive | Always name the exact Waveshare ESP32-S3-Knob-Touch-LCD-1.8 |
 | The primary S3 can shut down the second ESP32 | Contradicted | Classic ESP32 enable is pulled to 3.3 V; no S3 control net appears in the exact schematic | Use separate auxiliary firmware; do not claim main-firmware-only theoretical minimum |
+| The auxiliary ESP32 can be literally power-gated in firmware | Contradicted | Its enable is hard-pulled high and no controllable load switch is present | Define “always off” as immediate no-wake Deep-sleep with all RTC retention off; measure residual board current |
 | The factory auxiliary image contains Bluetooth/audio/HID/UART application code | Verified for image contents | Official vendor binary SHA above and embedded program strings | Do not upgrade this to “continuous transmission” or a current number |
 | Parking the auxiliary ESP32 will materially improve runtime | Unverified | Strong mechanism, no A/B energy trace | Present as the highest-value board hypothesis and measure it first |
+| AtomS3 JoyStick is a single-processor target | Contradicted | M5Stack's exact K137 documentation and schematic identify an STM32F030F4P6 at I2C 0x59 | Include the coprocessor in current budgets and power-state design |
+| Atom JoyStick's STM32 can be permanently disabled without losing controls | Contradicted | The exact schematic assigns both joysticks, four switches, and battery ADCs to the STM32 | Retain it while controls must wake; investigate a low-power coprocessor image or whole-board power-off |
+| The factory Atom JoyStick STM32 firmware idles efficiently | Contradicted for checked source | Official v2 source selects 48 MHz, continuous ADC/DMA, and a busy main loop; the public register map has no sleep command | Treat it as a likely low-hanging residual load, but do not flash modified coprocessor firmware without recovery and exact hardware tests |
 | GPIO7/GPIO8 wake no longer requires RTC peripheral forced on | Verified for this schematic/API pairing | External 10 kΩ pull-ups in schematic; ESP-IDF ext1 hold behavior | Hardware-test both encoder directions and held-low recovery |
 | GPIO47 can be held low across ESP32-S3 Deep-sleep | Verified | ESP-IDF GPIO hold documentation plus board backlight gate schematic | Release the hold before LEDC reclaims the pad on boot |
 | `M5.Display.sleep()` is full device sleep | Contradicted | Pinned M5Unified 0.2.19 sets brightness zero and panel sleep only | Call it “connected display sleep” in the implemented ladder |
@@ -367,6 +402,8 @@ remains the Linux sanitizer authority.
   schematic during this audit.
 - Vendor binary contents do not establish the auxiliary ESP32's steady runtime
   state or contribution to total current.
+- Atom JoyStick STM32 current is unmeasured. Its official source is visibly
+  active, but source alone cannot quantify its share of board energy.
 - Auto Light-sleep residency and the identity of remaining PM locks are unknown.
 - Frame's charging state is still Boolean; issue #160 requires a tri-state
   `{charging, not_charging, unknown}` before true sleep.
@@ -396,6 +433,8 @@ remains the Linux sanitizer authority.
 - Corrected “e-ink sleeps” to distinguish panel sleep from device sleep.
 - Corrected the implied single-SoC Dial model to include the always-enabled
   auxiliary ESP32 and fixed peripherals.
+- Corrected the AtomS3 JoyStick model to include its required STM32F030
+  coprocessor and the factory firmware's continuous 48 MHz/ADC workload.
 - Corrected the assumption that GPIO7/GPIO8 require RTC pull-ups by checking the
   exact external pull-ups.
 - Corrected the assumption that display wake needs `WIFI_PS_NONE`; modem sleep
@@ -630,6 +669,8 @@ waste its first sessions rediscovering defects already proven in source.
   <https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/system/power_management.html>
 - ESP-IDF 5.5 Sleep Modes:
   <https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/system/sleep_modes.html>
+- ESP-IDF 5.5 classic ESP32 Sleep Modes (auxiliary processor):
+  <https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32/api-reference/system/sleep_modes.html>
 - ESP-IDF 5.5 ESP32-S3 GPIO hold:
   <https://docs.espressif.com/projects/esp-idf/en/release-v5.5/esp32s3/api-reference/peripherals/gpio.html>
 - Waveshare exact Dial wiki:
@@ -638,6 +679,10 @@ waste its first sessions rediscovering defects already proven in source.
   <https://files.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8/ESP32-S3-Knob-Touch-LCD-1.8-schematic.zip>
 - Waveshare exact Dial demo/factory image archive:
   <https://files.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8/ESP32-S3-Knob-Touch-LCD-1.8-Demo.zip>
+- M5Stack Atom JoyStick K137 exact product documentation and schematic:
+  <https://docs.m5stack.com/en/app/Atom%20JoyStick>
+- M5Stack Atom JoyStick internal STM32 firmware:
+  <https://github.com/m5stack/Atom-JoyStick-Internal-FW>
 - TI PCM5100A product/data sheet:
   <https://www.ti.com/product/PCM5100A>
 - Waveshare PhotoPainter power demo:

@@ -797,6 +797,13 @@ jobs:
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_IDF_TARGET_ESP32=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y" sdkconfig;
+            grep -Fx "CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y" sdkconfig;
+            grep -Fx "CONFIG_LOG_DEFAULT_LEVEL_NONE=y" sdkconfig;
+            grep -F "esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL)" main/main.c;
+            grep -F "ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF" main/main.c;
+            grep -F "ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF" main/main.c;
+            grep -F "ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF" main/main.c;
+            ! grep -E "vTaskDelay|esp_wifi|esp_bt|nimble" main/main.c;
             esptool.py --chip esp32 merge_bin
             -o ../hiphi_knob_aux_park_merged.bin
             --flash_mode dio --flash_freq 40m --flash_size 4MB

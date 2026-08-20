@@ -25,6 +25,20 @@ that matter when changing the Atom target. The firmware target is
   updating reliably on the qualified firmware revision.
 - Four button bits are exposed by `M5Platform` as left, right, A, and B.
 
+### Coprocessor power boundary
+
+This is a multi-processor product, but the STM32 is not a disposable auxiliary
+processor: it owns both Hall joysticks, all four base switches, and both battery
+ADC channels. Permanently disabling it would remove the input surface.
+
+M5Stack's published v2 internal firmware runs the STM32F030 at 48 MHz with
+continuous ADC/DMA and a busy main loop; its public I2C map provides input,
+battery, version, address, and bootloader functions but no sleep command. The
+current HiPhi firmware can reduce how often the ESP32-S3 polls it, but cannot
+put the stock STM32 image to sleep. Any lower-power STM32 replacement must be a
+separate recoverable artifact and preserve I2C wake/latency, calibration, input
+capture, battery reporting, and official bootloader recovery on exact hardware.
+
 The controller UI is glance-first: album art and now-playing text share the
 small display, while the sticks and four buttons provide transport, volume,
 and zone-picker input. There is no touchscreen assumption.
