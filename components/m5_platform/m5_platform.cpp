@@ -475,7 +475,7 @@ extern "C" bool m5_platform_power_snapshot(
         const int16_t vbus_mv = M5.Power.getVBUSVoltage();
         const bool external = vbus_mv >= 4000 ||
             M5.Power.isCharging() == m5::Power_Class::is_charging;
-        /* Original M5Dial's TP4057/VBUS status is not exposed through its
+        /* Dial v1.1's VBUS/charging status is not exposed through its
          * qualified BSP. The other supported PMIC boards do expose VBUS. */
         if (s_board == M5_PLATFORM_BOARD_DIAL) {
             next.source = M5_PLATFORM_POWER_SOURCE_UNKNOWN;

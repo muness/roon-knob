@@ -75,7 +75,7 @@ The work begun for v2.6 moved playback state, commands, configuration,
 connectivity, recovery, input routing, and presentation values behind shared
 controller interfaces rather than cloning the application for each board. It
 also restored HiPhi Frame on the current shared stack and added HiPhi RLCD,
-M5Stack Tough, AtomS3 JoyStick, original M5 Dial, M5StickS3, StopWatch, and
+M5Stack Tough, AtomS3 JoyStick, M5Stack Dial v1.1, M5StickS3, StopWatch, and
 Kizz. Together with the Waveshare Dial, this alpha packages nine physical
 controller profiles.
 
@@ -124,7 +124,7 @@ and the sleep or power-off capabilities that the exact target implements.
 
 All nine controllers provide the one-time 15-second powered terminal-power
 test. Dial, Frame, and RLCD retain evidence in RTC memory across processor
-Deep-sleep. Tough, AtomS3 JoyStick, original M5 Dial, StickS3, StopWatch, and
+Deep-sleep. Tough, AtomS3 JoyStick, M5Stack Dial v1.1, StickS3, StopWatch, and
 Kizz persist the completed shutdown marker in NVS so it survives full PMIC
 rail-off. The endpoint is passive: it does no background polling when nobody
 opens it.
@@ -175,14 +175,14 @@ a similarly named revision.
 | **HiPhi RLCD** | Waveshare ESP32-S3-RLCD-4.2 | [Waveshare](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_rlcd_merged.bin) |
 | **AtomS3 JoyStick Deck** | M5Atom JoyStick with M5AtomS3, SKU K137 | [M5Stack](https://shop.m5stack.com/products/atom-joystick-with-m5atoms3) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_joy_merged.bin) |
 | **M5Stack Tough Console** | M5Stack Tough, SKU K034 | [M5Stack](https://shop.m5stack.com/products/m5stack-tough-esp32-iot-development-board-kit) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_tough_merged.bin) |
-| **M5 Dial Lab** | Original M5Stack Dial, SKU K130 | [M5Stack EOL page](https://shop.m5stack.com/products/m5stack-dial-esp32-s3-smart-rotary-knob-w-1-28-round-touch-screen) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_m5dial_merged.bin) |
+| **M5 Dial Lab** | M5Stack Dial v1.1, SKU K130-V11 | [M5Stack](https://shop.m5stack.com/products/m5stack-dial-v1-1) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_m5dial_merged.bin) |
 | **M5StickS3 Twist Remote** | M5StickS3, SKU K150 | [M5Stack](https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_sticks3_merged.bin) |
 | **M5Stack StopWatch Wrist Remote** | M5Stack StopWatch, SKU C152 | [M5Stack](https://shop.m5stack.com/products/m5stack-stopwatch-dev-kit-esp32-s3) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stopwatch_merged.bin) |
 | **Kizz Playback Companion** | M5StackChan robot, SKU K151; no remote-control bundle required | [M5Stack](https://shop.m5stack.com/products/stackchan-kawaii-co-created-open-source-ai-desktop-robot) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stackchan_merged.bin) |
 
-The original M5 Dial K130 is end-of-life. Its K130-V11 replacement is a
-different revision and is not supported by this image. The auxiliary parking
-image belongs to the Waveshare HiPhi Dial; it is not a tenth controller.
+The M5 Dial image is for the current Dial v1.1 (K130-V11), not the end-of-life
+original Dial (K130). The auxiliary parking image belongs to the Waveshare
+HiPhi Dial; it is not a tenth controller.
 
 [Download SHA-256 checksums](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/SHA256SUMS.txt)
 
