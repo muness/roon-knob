@@ -50,6 +50,7 @@ void ble_store_config_init(void);
 typedef enum {
     COMMAND_BOOT,
     COMMAND_SET_ENABLED,
+    COMMAND_PREPARE_FOR_SLEEP,
     COMMAND_SCAN,
     COMMAND_PAIR,
     COMMAND_FORGET,
@@ -138,6 +139,7 @@ typedef struct {
     bool gap_listener_registered;
     bool forget_pending;
     bool fatal_teardown;
+    bool sleep_quiesce_pending;
     volatile int stop_result;
     rk_ble_hid_host_error_t stop_completion_error;
     uint8_t own_addr_type;
@@ -238,6 +240,12 @@ static rk_ble_hid_host_state_t status_state(void) {
 static void status_set_enabled(bool enabled) {
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
     s.status.enabled = enabled;
+    xSemaphoreGive(s.status_lock);
+}
+
+static void status_set_sleep_quiesced(bool quiesced) {
+    xSemaphoreTake(s.status_lock, portMAX_DELAY);
+    s.status.quiesced_for_sleep = quiesced;
     xSemaphoreGive(s.status_lock);
 }
 
@@ -833,7 +841,10 @@ static void finish_stop_if_ready(void) {
     const rk_ble_hid_host_error_t completion_error =
         s.stop_completion_error;
     s.stop_completion_error = RK_BLE_HID_HOST_ERROR_NONE;
-    if (s.status.enabled && s.start_retry_due && !s.forget_pending) {
+    if (s.sleep_quiesce_pending) {
+        status_set_sleep_quiesced(true);
+        set_state(RK_BLE_HID_HOST_STATE_DISABLED, completion_error);
+    } else if (s.status.enabled && s.start_retry_due && !s.forget_pending) {
         set_state(RK_BLE_HID_HOST_STATE_ERROR, s.start_retry_error);
     } else if (s.status.enabled && !s.forget_pending) {
         start_stack();
@@ -852,6 +863,9 @@ static void request_stop(void) {
     s.callback_scan_generation = 0;
     s.reconnect_due = 0;
     if (!s.stack_started) {
+        if (s.sleep_quiesce_pending) {
+            status_set_sleep_quiesced(true);
+        }
         set_state(RK_BLE_HID_HOST_STATE_DISABLED, s.stop_completion_error);
         s.stop_completion_error = RK_BLE_HID_HOST_ERROR_NONE;
         return;
@@ -943,6 +957,8 @@ static void process_command(const command_t *command) {
         break;
     case COMMAND_SET_ENABLED:
         if (s.fatal_teardown) break;
+        s.sleep_quiesce_pending = false;
+        status_set_sleep_quiesced(false);
         if (nvs_set_enabled(command->data.enabled) != ESP_OK) {
             set_state(RK_BLE_HID_HOST_STATE_ERROR, RK_BLE_HID_HOST_ERROR_NVS);
             break;
@@ -963,6 +979,21 @@ static void process_command(const command_t *command) {
         } else {
             request_stop();
         }
+        break;
+    case COMMAND_PREPARE_FOR_SLEEP:
+        if (s.fatal_teardown) {
+            set_state(RK_BLE_HID_HOST_STATE_ERROR,
+                      RK_BLE_HID_HOST_ERROR_TEARDOWN);
+            break;
+        }
+        s.sleep_quiesce_pending = true;
+        status_set_sleep_quiesced(false);
+        s.reconnect_attempts = 0;
+        s.reconnect_due = 0;
+        s.start_retry_attempts = 0;
+        s.start_retry_due = 0;
+        s.start_retry_reload_nvs = false;
+        request_stop();
         break;
     case COMMAND_SCAN: {
         if (s.status.state != RK_BLE_HID_HOST_STATE_READY) {
@@ -1399,6 +1430,20 @@ rk_ble_hid_host_result_t rk_ble_hid_host_set_enabled(bool enabled) {
         return RK_BLE_HID_HOST_ERR_INVALID_STATE;
     }
     const command_t command = {.type = COMMAND_SET_ENABLED, .data.enabled = enabled};
+    return enqueue_command(&command);
+}
+
+rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void) {
+    if (!s.owner_task) return RK_BLE_HID_HOST_ERR_INVALID_STATE;
+    rk_ble_hid_host_status_t snapshot = {0};
+    if (rk_ble_hid_host_status_copy(&snapshot) != RK_BLE_HID_HOST_OK ||
+        snapshot.state == RK_BLE_HID_HOST_STATE_ERROR) {
+        return RK_BLE_HID_HOST_ERR_INVALID_STATE;
+    }
+    if (snapshot.quiesced_for_sleep) {
+        return RK_BLE_HID_HOST_OK;
+    }
+    const command_t command = {.type = COMMAND_PREPARE_FOR_SLEEP};
     return enqueue_command(&command);
 }
 

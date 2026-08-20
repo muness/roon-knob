@@ -252,6 +252,7 @@
     "dial|idf_app/main/display_sleep.c|common/ui.h",
     "dial|idf_app/main/display_sleep.c|common/wifi_manager.h",
     "dial|idf_app/main/display_sleep.c|idf_app/main/battery.h",
+    "dial|idf_app/main/display_sleep.c|idf_app/main/ble_hid_host_dial.h",
     "dial|idf_app/main/display_sleep.c|idf_app/main/captive_portal.h",
     "dial|idf_app/main/display_sleep.c|idf_app/main/display_sleep.h",
     "dial|idf_app/main/display_sleep.h|common/rk_cfg.h",

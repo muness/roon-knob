@@ -2,6 +2,7 @@
 #include "captive_portal.h"
 #include "platform/platform_display.h"
 #include "bridge_client.h"
+#include "ble_hid_host_dial.h"
 #include "wifi_manager.h"
 #include "battery.h"
 #include "esp_timer.h"
@@ -9,10 +10,10 @@
 #include "esp_log.h"
 #include "esp_pm.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
-#include "driver/rtc_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "ui.h"
@@ -31,6 +32,7 @@ static const char *TAG = "display_sleep";
 // Deep sleep configuration
 #define DEFAULT_DEEP_SLEEP_TIMEOUT_MS (RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC * 1000)
 #define ENCODER_SUPPRESS_AFTER_WAKE_MS 500      // Ignore encoder ticks for 500ms after wake
+#define BLE_QUIESCE_TIMEOUT_MS 10000
 
 // Default timeout configuration (use charging defaults for cold start - more generous during setup)
 #define DEFAULT_ART_MODE_TIMEOUT_MS (RK_DEFAULT_ART_MODE_CHARGING_TIMEOUT_SEC * 1000)
@@ -87,7 +89,7 @@ static void pm_init(void) {
     esp_pm_config_t pm_config = {
         .max_freq_mhz = 240,
         .min_freq_mhz = 80,
-        .light_sleep_enable = false,  // Don't auto-sleep, we control display separately
+        .light_sleep_enable = true,
     };
 
     esp_err_t err = esp_pm_configure(&pm_config);
@@ -107,7 +109,7 @@ static void pm_init(void) {
     esp_pm_lock_acquire(s_pm_cpu_lock);
 
     s_pm_initialized = true;
-    ESP_LOGI(TAG, "Power management initialized (80-240MHz scaling)");
+    ESP_LOGI(TAG, "Power management initialized (80-240MHz scaling, automatic Light-sleep)");
 }
 #endif
 
@@ -199,10 +201,9 @@ void display_sleep(void) {
             ESP_LOGI(TAG, "LVGL task priority lowered");
         }
 
-        // Enable WiFi power save if configured
-        if (s_wifi_power_save_enabled) {
-            wifi_mgr_set_power_save(true);
-        }
+        /* MIN_MODEM is the shared STA baseline. Reassert it here in case a
+         * diagnostic or older runtime path temporarily disabled it. */
+        wifi_mgr_set_power_save(true);
 
         // Release CPU frequency lock to allow scaling down
 #if CONFIG_PM_ENABLE
@@ -248,11 +249,6 @@ void display_wake(void) {
             ESP_LOGI(TAG, "CPU frequency lock acquired (max freq)");
         }
 #endif
-
-        // Disable WiFi power save (need full performance for responsive polling)
-        if (s_wifi_power_save_enabled) {
-            wifi_mgr_set_power_save(false);
-        }
 
         // Turn on display panel first
         esp_lcd_panel_disp_on_off(s_panel_handle, true);
@@ -328,78 +324,83 @@ static void deep_sleep_timer_callback(void *arg) {
     s_pending_deep_sleep = true;  // Defer to UI loop
 }
 
+static void recover_from_partial_sleep_entry(const char *reason) {
+    ESP_LOGE(TAG, "%s; rebooting into the normal fail-awake path", reason);
+    gpio_hold_dis(PIN_NUM_BK_LIGHT);
+    gpio_deep_sleep_hold_dis();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    esp_restart();
+}
+
 // Enter deep sleep - device will reset on wake
 static void enter_deep_sleep(void) {
     ESP_LOGI(TAG, "Preparing for deep sleep...");
 
-    // Turn off backlight (GPIO47 is not RTC-capable, won't be held)
-    display_set_backlight(0);
-
-    // Turn off display panel
-    if (s_panel_handle != NULL) {
-        esp_lcd_panel_disp_on_off(s_panel_handle, false);
-    }
-
-    // Stop WiFi cleanly to reduce wake time on next boot
-    esp_wifi_stop();
-
-    // Configure wake sources: encoder pins (GPIO7 and GPIO8, both RTC-capable)
-    // Keep RTC_PERIPH powered so RTC pull-ups remain active during deep sleep
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
-
-    // Configure RTC GPIO input with pull-ups for reliable wakeup
-    // (digital GPIO pull-ups are lost in deep sleep)
+    /* Configure and validate every wake source before tearing anything down.
+     * GPIO7/GPIO8 each have an external 10 kOhm pull-up on this exact board,
+     * so RTC_PERIPH does not need to remain powered merely to retain internal
+     * pulls. ESP-IDF's ext1 path holds the RTC pads while that domain is off. */
     esp_err_t err;
-
-    err = rtc_gpio_init(ENCODER_GPIO_A);
+    const gpio_config_t encoder_config = {
+        .pin_bit_mask = (1ULL << ENCODER_GPIO_A) |
+                        (1ULL << ENCODER_GPIO_B),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    err = gpio_config(&encoder_config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_init(A) failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Encoder wake GPIO configuration failed: %s",
+                 esp_err_to_name(err));
         return;
     }
-    err = rtc_gpio_init(ENCODER_GPIO_B);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_init(B) failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = rtc_gpio_set_direction(ENCODER_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_set_direction(A) failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = rtc_gpio_set_direction(ENCODER_GPIO_B, RTC_GPIO_MODE_INPUT_ONLY);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_set_direction(B) failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = rtc_gpio_pullup_en(ENCODER_GPIO_A);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_pullup_en(A) failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = rtc_gpio_pullup_en(ENCODER_GPIO_B);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_pullup_en(B) failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = rtc_gpio_pulldown_dis(ENCODER_GPIO_A);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_pulldown_dis(A) failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = rtc_gpio_pulldown_dis(ENCODER_GPIO_B);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rtc_gpio_pulldown_dis(B) failed: %s", esp_err_to_name(err));
+    if (gpio_get_level(ENCODER_GPIO_A) == 0 ||
+        gpio_get_level(ENCODER_GPIO_B) == 0) {
+        ESP_LOGW(TAG, "Encoder wake line is already active; staying awake");
         return;
     }
 
     // Encoder pins are pulled HIGH, going LOW on rotation
     uint64_t wake_gpio_mask = (1ULL << ENCODER_GPIO_A) | (1ULL << ENCODER_GPIO_B);
 
-    err = esp_sleep_enable_ext1_wakeup(wake_gpio_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+    err = esp_sleep_enable_ext1_wakeup_io(wake_gpio_mask,
+                                          ESP_EXT1_WAKEUP_ANY_LOW);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure wake sources: %s", esp_err_to_name(err));
-        // Don't enter deep sleep if wake source config failed
         return;
+    }
+
+    /* Stop NimBLE through its single lifecycle owner. This transient command
+     * does not change the enabled preference, peer metadata, or bond store. */
+    if (!ble_hid_host_dial_prepare_for_sleep(BLE_QUIESCE_TIMEOUT_MS)) {
+        recover_from_partial_sleep_entry("BLE did not quiesce for sleep");
+    }
+
+    // Turn off the panel before removing its backlight.
+    if (s_panel_handle != NULL) {
+        esp_lcd_panel_disp_on_off(s_panel_handle, false);
+    }
+
+    /* GPIO47 drives the external backlight FET. It is a digital (non-RTC)
+     * GPIO, so explicitly latch it low across Deep-sleep. */
+    display_set_backlight(0);
+    ledc_stop(LEDC_SPEED_MODE, LEDC_CHANNEL, 0);
+    gpio_set_direction(PIN_NUM_BK_LIGHT, GPIO_MODE_OUTPUT);
+    gpio_set_level(PIN_NUM_BK_LIGHT, 0);
+    err = gpio_hold_en(PIN_NUM_BK_LIGHT);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Backlight hold failed: %s", esp_err_to_name(err));
+        recover_from_partial_sleep_entry("Backlight could not be latched off");
+    }
+    gpio_deep_sleep_hold_en();
+
+    // Stop WiFi only after every recoverable preflight check has passed.
+    err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
+        err != ESP_ERR_WIFI_NOT_INIT) {
+        ESP_LOGW(TAG, "WiFi stop failed: %s", esp_err_to_name(err));
+        recover_from_partial_sleep_entry("WiFi did not stop for sleep");
     }
 
     ESP_LOGI(TAG, "Entering deep sleep (wake on encoder rotation)...");
@@ -653,9 +654,11 @@ void display_update_power_settings(const rk_cfg_t *cfg) {
                  s_wifi_power_save_enabled, s_cpu_freq_scaling_enabled);
     }
 
-    // If currently sleeping and wifi power save setting changed, apply immediately
-    if (wifi_changed && s_display_state == DISPLAY_STATE_SLEEP) {
-        wifi_mgr_set_power_save(s_wifi_power_save_enabled);
+    /* MIN_MODEM is now the shared STA baseline. The legacy setting may
+     * reassert power saving, but it can no longer downgrade an awake device
+     * to WIFI_PS_NONE and silently recreate the cross-target drain. */
+    if (wifi_changed && s_wifi_power_save_enabled) {
+        wifi_mgr_set_power_save(true);
     }
 
 #if CONFIG_PM_ENABLE

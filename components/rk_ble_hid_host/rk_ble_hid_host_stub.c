@@ -1,6 +1,7 @@
 #include "rk_ble_hid_host.h"
 
 static rk_ble_hid_host_status_t s_status = {
+    .quiesced_for_sleep = true,
     .state = RK_BLE_HID_HOST_STATE_UNAVAILABLE,
     .last_error = RK_BLE_HID_HOST_ERROR_UNAVAILABLE,
 };
@@ -13,6 +14,11 @@ rk_ble_hid_host_result_t rk_ble_hid_host_init(const rk_ble_hid_host_config_t *co
 rk_ble_hid_host_result_t rk_ble_hid_host_set_enabled(bool enabled) {
     (void)enabled;
     return RK_BLE_HID_HOST_ERR_NOT_SUPPORTED;
+}
+
+rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void) {
+    s_status.quiesced_for_sleep = true;
+    return RK_BLE_HID_HOST_OK;
 }
 
 rk_ble_hid_host_result_t rk_ble_hid_host_scan_start(void) {

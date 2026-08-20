@@ -155,6 +155,7 @@ void fixture_set_provisioning_ready(bool ready);
 int fixture_provisioning_start_calls(void);
 int fixture_provisioning_stop_calls(void);
 int fixture_wifi_connect_calls(void);
+wifi_ps_type_t fixture_wifi_power_save(void);
 const char *fixture_wifi_ssid(void);
 const char *fixture_wifi_pass(void);
 bool fixture_timer_active(const char *name);

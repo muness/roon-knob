@@ -456,6 +456,12 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 bool platform_display_init(void) {
     ESP_LOGI(TAG, "Initializing display hardware");
 
+    /* Deep-sleep holds survive the reset boundary. Release the backlight pad
+     * before LEDC takes ownership, while it is still safely pulled off by the
+     * board's external gate resistor. */
+    gpio_deep_sleep_hold_dis();
+    gpio_hold_dis(PIN_NUM_BK_LIGHT);
+
     // Initialize backlight with PWM at reduced brightness (50%)
     ledc_timer_config_t ledc_timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,

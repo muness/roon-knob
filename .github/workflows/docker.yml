@@ -771,6 +771,45 @@ jobs:
             hiphi_${{ matrix.target }}_merged.bin
           retention-days: 30
 
+  build-knob-aux:
+    name: build-waveshare-knob-aux-parking-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build auxiliary ESP32 parking firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32
+          path: knob_aux_app
+          command: >-
+            set -e;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_IDF_TARGET_ESP32=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y" sdkconfig;
+            esptool.py --chip esp32 merge_bin
+            -o ../hiphi_knob_aux_park_merged.bin
+            --flash_mode dio --flash_freq 40m --flash_size 4MB
+            0x1000 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0x10000 build/hiphi_knob_aux_park.bin;
+            esptool.py --chip esp32 image_info build/hiphi_knob_aux_park.bin
+
+      - name: Upload auxiliary parking firmware
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: |
+            knob_aux_app/build/hiphi_knob_aux_park.bin
+            knob_aux_app/build/bootloader/bootloader.bin
+            knob_aux_app/build/partition_table/partition-table.bin
+            hiphi_knob_aux_park_merged.bin
+          retention-days: 30
+
   build-ble-off:
     name: build-ble-off
     runs-on: ubuntu-latest

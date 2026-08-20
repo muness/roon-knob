@@ -74,6 +74,10 @@ typedef struct {
     bool enabled;
     bool connected;
     bool bonded;
+    /** Stack is transiently stopped for imminent device sleep. Preferences
+     * and bond records are unchanged. Cleared on the next normal lifecycle
+     * command or reboot. */
+    bool quiesced_for_sleep;
     rk_ble_hid_host_state_t state;
     rk_ble_hid_host_error_t last_error;
     char bonded_name[RK_BLE_HID_HOST_NAME_MAX_LEN];
@@ -102,6 +106,13 @@ rk_ble_hid_host_result_t rk_ble_hid_host_init(const rk_ble_hid_host_config_t *co
 
 /** Persist and enqueue a lifecycle transition. Calls are accepted asynchronously. */
 rk_ble_hid_host_result_t rk_ble_hid_host_set_enabled(bool enabled);
+
+/**
+ * Transiently stop the BLE host before device Deep-sleep without persisting a
+ * disable preference or erasing peer metadata/bonds. Completion is
+ * asynchronous and reported by status.quiesced_for_sleep.
+ */
+rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void);
 
 /** Start a bounded five-second HID scan. */
 rk_ble_hid_host_result_t rk_ble_hid_host_scan_start(void);

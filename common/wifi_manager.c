@@ -9,8 +9,13 @@
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <nvs_flash.h>
+#include <sdkconfig.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if CONFIG_PM_ENABLE
+#include <esp_pm.h>
+#endif
 
 #include "controller_config.h"
 #include "os_mutex.h"
@@ -21,6 +26,34 @@ static const char *TAG = "wifi_mgr";
 static const uint32_t s_backoff_ms[] = {500, 1000, 2000, 4000, 8000, 16000, 30000};
 static const uint32_t s_provisioning_retry_ms[] = {500, 1000, 2000, 4000, 8000, 16000, 30000};
 static const char *s_last_error = NULL;  // Last disconnect reason for UI display
+
+/*
+ * All supported ESP targets already enable tickless idle in sdkconfig. Keep
+ * any target-owned DFS range intact, but let ESP-IDF enter automatic
+ * Light-sleep whenever every task and radio driver is idle. Targets without a
+ * DFS policy retain ESP-IDF's current equal min/max frequencies, so this shared
+ * baseline cannot silently slow active rendering.
+ */
+static void configure_connected_idle_power(void) {
+#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
+    esp_pm_config_t config = {0};
+    esp_err_t err = esp_pm_get_configuration(&config);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Connected-idle PM state unavailable: %s",
+                 esp_err_to_name(err));
+        return;
+    }
+    config.light_sleep_enable = true;
+    err = esp_pm_configure(&config);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Connected-idle Light-sleep enabled (%d-%d MHz)",
+                 config.min_freq_mhz, config.max_freq_mhz);
+    } else {
+        ESP_LOGW(TAG, "Connected-idle Light-sleep unavailable: %s",
+                 esp_err_to_name(err));
+    }
+#endif
+}
 
 // Map WiFi disconnect reason to human-readable string and event type
 static const char *get_disconnect_reason_str(uint8_t reason, rk_net_evt_t *out_evt) {
@@ -870,6 +903,8 @@ void wifi_mgr_start(void) {
 
     ensure_wifi_loaded();
 
+    configure_connected_idle_power();
+
     esp_err_t err = esp_netif_init();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
@@ -908,8 +943,11 @@ void wifi_mgr_start(void) {
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_cfg));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    // Disable WiFi power save for reliable HTTP polling
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    /* WIFI_PS_MIN_MODEM is ESP-IDF's documented default.  Outgoing HTTP
+     * requests wake the station; between requests it wakes for each DTIM and
+     * remains associated.  The previous unconditional WIFI_PS_NONE kept the
+     * radio awake on every target, including targets whose panel was asleep. */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,

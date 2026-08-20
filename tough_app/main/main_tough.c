@@ -151,7 +151,10 @@ static void ui_loop_task(void *arg) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    /* The sleeping display has no animation work. Poll input at 20 Hz so a
+     * touch/button still wakes promptly while allowing five times longer
+     * tickless-idle windows for the SoC and WiFi driver. */
+    vTaskDelay(pdMS_TO_TICKS(touch_ui_is_display_sleeping() ? 50 : 10));
   }
 }
 
