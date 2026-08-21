@@ -4,6 +4,9 @@
  * a second panel driver or LVGL dependency. */
 
 #include "platform/platform_display.h"
+#include "platform/platform_power.h"
+#include "m5_platform.h"
+#include "m5_terminal_power.h"
 #include "touch_ui.h"
 
 bool platform_display_is_sleeping(void) {
@@ -16,9 +19,20 @@ void platform_display_apply_config(const rk_cfg_t *cfg, bool is_charging) {
     touch_ui_apply_display_config(cfg, is_charging);
 }
 
-/* Tough is a USB-powered appliance with no user-replaceable battery. Treat it
- * as externally powered so the shared defaults keep sleep disabled while
- * still allowing album-art and dim stages. */
-bool platform_battery_is_charging(void) { return true; }
-
-int platform_battery_get_level(void) { return -1; }
+void platform_power_snapshot(platform_power_snapshot_t *out) {
+    if (!out) return;
+    m5_platform_power_snapshot_t snapshot = {0};
+    if (!m5_platform_power_snapshot(&snapshot)) return;
+    out->battery_level = snapshot.battery_level;
+    out->source = snapshot.source == M5_PLATFORM_POWER_SOURCE_EXTERNAL
+        ? PLATFORM_POWER_SOURCE_EXTERNAL
+        : snapshot.source == M5_PLATFORM_POWER_SOURCE_BATTERY
+            ? PLATFORM_POWER_SOURCE_BATTERY : PLATFORM_POWER_SOURCE_UNKNOWN;
+    out->external_power = snapshot.external_power_policy;
+}
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    m5_terminal_power_diagnostics(out);
+}
+bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
+    return m5_terminal_power_debug_arm(delay_sec);
+}

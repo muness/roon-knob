@@ -74,9 +74,8 @@ void touch_ui_zone_picker_scroll(int delta);
 void touch_ui_zone_picker_get_selected_id(char *out, size_t len);
 bool touch_ui_zone_picker_is_current_selection(void);
 
-// Battery display refresh. Tough's AXP192 read is not wired up this Alpha
-// (see platform_display_m5.c); platform_battery_get_level() returns -1
-// and this renders as unavailable.
+// Battery display refresh. Tough is treated as an externally powered target
+// with no battery gauge, so this renders as unavailable.
 void touch_ui_update_battery(void);
 
 // Apply shared art/dim/sleep preferences for the current power source.
@@ -87,6 +86,15 @@ bool touch_ui_is_display_sleeping(void);
 // Minimal settings screen, reachable via long-press on the zone label
 // (mirrors Dial's convention in common/ui.c).
 void touch_ui_show_settings(void);
+
+/* Implemented by the StackChan M5 beta adapter. The shared web server only
+ * calls these when HIPHI_M5_TARGET_ID identifies StackChan. */
+bool touch_ui_stackchan_body_preference(void);
+bool touch_ui_stackchan_sound_preference(void);
+uint8_t touch_ui_stackchan_voice_volume_preference(void);
+bool touch_ui_post_stackchan_preferences(bool body_enabled,
+                                         bool sound_enabled,
+                                         uint8_t voice_volume);
 
 #ifdef __cplusplus
 }

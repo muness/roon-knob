@@ -51,7 +51,9 @@ void wifi_mgr_stop_ap(void);                 // stop AP mode, attempt STA connec
 const char *wifi_mgr_get_last_error(void);   // get last disconnect reason string
 int wifi_mgr_get_retry_count(void);          // get current retry attempt count (0 = connected)
 int wifi_mgr_get_retry_max(void);            // get max retries before AP mode
-void wifi_mgr_set_power_save(bool enable);   // enable/disable WiFi modem sleep
+/* Temporary target override. The shared STA baseline is MIN_MODEM; callers
+ * should normally leave it enabled, including while the display is awake. */
+void wifi_mgr_set_power_save(bool enable);
 /* Start a non-blocking scan for visible 2.4 GHz networks. Results are
  * collected from WIFI_EVENT_SCAN_DONE so web-server tasks never block or put
  * the scan record buffer on their (small) stacks. */

@@ -8,6 +8,7 @@
 #include "captive_portal.h"
 #include "eink_display.h"
 #include "eink_ui.h"
+#include "frame_power_manager.h"
 #include "pmic_axp2101.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
@@ -174,7 +175,11 @@ static void ui_loop_task(void *arg) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(50));
+    frame_power_manager_poll(
+        s_mdns_init_pending || s_ble_init_pending ||
+        atomic_load_explicit(&s_sta_server_pending, memory_order_acquire));
+
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -216,6 +221,7 @@ void app_main(void) {
 
   // Initialize button input
   platform_input_init();
+  frame_power_manager_init();
 
   // Create UI loop task (processes input + e-ink refreshes)
   ESP_LOGI(TAG, "Creating UI loop task");

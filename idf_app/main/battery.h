@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 
+#include "platform/platform_power.h"
+
 /**
  * @brief Initialize battery monitoring
  * @return true on success, false on failure
@@ -25,3 +27,6 @@ int battery_get_percentage(void);
  * @return true if USB connected/charging, false if on battery
  */
 bool battery_is_charging(void);
+
+/** Read the raw and derived values from one cached/coherent ADC sample. */
+bool battery_get_measurement(platform_power_measurement_t *out);

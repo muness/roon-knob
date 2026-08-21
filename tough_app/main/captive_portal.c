@@ -12,6 +12,8 @@
 #include "bridge_client.h"
 #include "platform/platform_display.h"
 #include "platform/platform_identity.h"
+#include "platform/platform_power.h"
+#include "power_debug_web.h"
 #include "os_mutex.h"
 
 #include <esp_err.h>
@@ -327,15 +329,12 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
   const rk_cfg_t *cfg = &snapshot.value;
 
-  char query[32] = {0};
-  char scan_value[8] = {0};
-  const bool scan_requested =
-      httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
-      httpd_query_key_value(query, "scan", scan_value, sizeof(scan_value)) == ESP_OK;
   rk_wifi_network_t scan[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
   rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-  if (scan_requested && (scan_state == RK_WIFI_SCAN_IDLE ||
-                         scan_state == RK_WIFI_SCAN_FAILED)) {
+  /* Every setup page promises a network dropdown. Start the non-blocking scan
+   * on the first visit instead of relying on a board-specific display to do
+   * it as a side effect. */
+  if (scan_state == RK_WIFI_SCAN_IDLE || scan_state == RK_WIFI_SCAN_FAILED) {
     (void)wifi_mgr_scan_start();
     scan_state = wifi_mgr_scan_state();
   }
@@ -351,6 +350,13 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
                          "<option value='%s'>%s (%d dBm)</option>",
                          escaped, escaped, (int)scan[i].rssi);
   }
+  const char *scan_placeholder =
+      scan_state == RK_WIFI_SCAN_RUNNING ? "Scanning for nearby networks..." :
+      scan_state == RK_WIFI_SCAN_FAILED ? "Scan failed - reload to retry" :
+      scan_count == 0 ? "No nearby networks found" :
+      "Choose a nearby network";
+  const char *scan_refresh = scan_state == RK_WIFI_SCAN_RUNNING
+      ? "setTimeout(function(){location.reload();},1200);" : "";
 
   char wifi_html[1024] = "";
   int pos = 0;
@@ -417,7 +423,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
-    "<select id='ssid_scan' name='ssid'><option value=''>Choose a scanned network</option>%s</select>"
+    "<select id='ssid_scan' name='ssid'><option value=''>%s</option>%s</select>"
     "<label>Or enter a hidden network</label>"
     "<input id='ssid_manual' type='text' name='ssid_manual' maxlength='32' placeholder='Hidden WiFi name'>"
     "<label>Password</label>"
@@ -430,11 +436,14 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
     "</div><script>document.getElementById('ssid_scan').addEventListener('change',function(){"
-    "if(this.value)document.getElementById('ssid_manual').value=this.value;});</script></body></html>",
+    "if(this.value)document.getElementById('ssid_manual').value=this.value;});%s"
+    "</script></body></html>",
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
     cfg->wifi_count > 0 ? "</div>" : "",
-    scan_options);
+    scan_placeholder,
+    scan_options,
+    scan_refresh);
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
@@ -691,7 +700,8 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<title>" HIPHI_BRAND " - Zones</title>"
     "<style>%s</style></head><body>"
     "<h1>" HIPHI_BRAND "</h1>"
-    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
+    "<a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -778,6 +788,26 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   const rk_cfg_t *cfg = &snapshot.value;
+  char personality_html[1280] = {0};
+#if HIPHI_M5_TARGET_ID == 4
+  const uint8_t voice_volume =
+      touch_ui_stackchan_voice_volume_preference();
+  snprintf(personality_html, sizeof(personality_html),
+    "<h3>StackChan personality</h3>"
+    "<p class='status'>These are on by default and persist across firmware updates.</p>"
+    "<label>Body language <input type='checkbox' name='stackchan_body_enabled' %s></label>"
+    "<label>Sounds <input type='checkbox' name='stackchan_sound_enabled' %s></label>"
+    "<label>Voice volume <select name='stackchan_voice_volume'>"
+    "<option value='0' %s>Low (current)</option>"
+    "<option value='1' %s>Medium</option>"
+    "<option value='2' %s>High</option>"
+    "</select></label>",
+    touch_ui_stackchan_body_preference() ? "checked" : "",
+    touch_ui_stackchan_sound_preference() ? "checked" : "",
+    voice_volume == 0 ? "selected" : "",
+    voice_volume == 1 ? "selected" : "",
+    voice_volume == 2 ? "selected" : "");
+#endif
   char *html = heap_caps_calloc(1, 12288, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -785,12 +815,15 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
   }
   int pos = snprintf(html, 12288,
     "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>" HIPHI_BRAND " - Display</title><style>%s"
+    "<title>" HIPHI_BRAND " - Settings</title><style>%s"
     "label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0;}"
     "input[type=number]{width:88px;padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
-    "input[type=checkbox]{width:22px;height:22px;}small{color:#aaa;}"
+    "input[type=checkbox]{width:22px;height:22px;}"
+    "select{padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
+    "small{color:#aaa;}"
     "</style></head><body><h1>" HIPHI_BRAND "</h1>"
-    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Display</a></nav>"
+    "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
+    "<a href='/power-debug'>Power</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
     "<p class='status'>Artwork mode keeps the album visible; dim and sleep are the subsequent power-saving stages.</p>"
     "<form method='POST' action='/api/settings'><h3>On battery</h3>"
@@ -807,15 +840,17 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "<label>Dim seconds <input type='number' min='0' max='65535' name='dim_charging_timeout' value='%u'></label>"
     "<label>Sleep display <input type='checkbox' name='sleep_charging_enabled' %s></label>"
     "<label>Sleep seconds <input type='number' min='0' max='65535' name='sleep_charging_timeout' value='%u'></label>"
+    "%s"
     "<p><small>Zero seconds disables a stage. Deep sleep is intentionally not enabled on Tough until its wake source is qualified.</small></p>"
-    "<button class='btn' type='submit'>Save display settings</button></form></div>"
+    "<button class='btn' type='submit'>Save settings</button></form></div>"
     "</body></html>", STA_CSS,
     cfg->art_mode_battery_enabled ? "checked" : "", cfg->art_mode_battery_timeout_sec,
     cfg->dim_battery_enabled ? "checked" : "", cfg->dim_battery_timeout_sec,
     cfg->sleep_battery_enabled ? "checked" : "", cfg->sleep_battery_timeout_sec,
     cfg->art_mode_charging_enabled ? "checked" : "", cfg->art_mode_charging_timeout_sec,
     cfg->dim_charging_enabled ? "checked" : "", cfg->dim_charging_timeout_sec,
-    cfg->sleep_charging_enabled ? "checked" : "", cfg->sleep_charging_timeout_sec);
+    cfg->sleep_charging_enabled ? "checked" : "", cfg->sleep_charging_timeout_sec,
+    personality_html);
   if (pos < 0) pos = 0;
   if (pos >= 12288) pos = 12287;
   httpd_resp_set_type(req, "text/html");
@@ -871,8 +906,30 @@ static esp_err_t sta_settings_save_handler(httpd_req_t *req) {
                         "Settings could not be saved");
     return ESP_FAIL;
   }
-  platform_display_apply_config(&committed.value,
-                                platform_battery_is_charging());
+  platform_power_snapshot_t power = {
+      .battery_level = -1,
+      .external_power = true,
+  };
+  platform_power_snapshot(&power);
+  platform_display_apply_config(&committed.value, power.external_power);
+#if HIPHI_M5_TARGET_ID == 4
+  char personality_value[2] = {0};
+  const bool body_enabled = get_form_field(
+      body, "stackchan_body_enabled", personality_value,
+      sizeof(personality_value));
+  const bool sound_enabled = get_form_field(
+      body, "stackchan_sound_enabled", personality_value,
+      sizeof(personality_value));
+  const uint32_t voice_volume = setting_u32(
+      body, "stackchan_voice_volume", 0);
+  if (voice_volume > 2 ||
+      !touch_ui_post_stackchan_preferences(body_enabled, sound_enabled,
+                                           (uint8_t)voice_volume)) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Personality settings could not be applied");
+    return ESP_FAIL;
+  }
+#endif
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/settings");
   httpd_resp_send(req, NULL, 0);
@@ -978,6 +1035,8 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t restart = {.uri = "/api/restart", .method = HTTP_POST, .handler = sta_restart_handler};
   if (!register_uri_handler(&restart)) goto fail;
+
+  if (!power_debug_web_register(s_server)) goto fail;
 
   s_server_mode = WEB_SERVER_STA_CONFIG;
   ESP_LOGI(TAG, "STA web server started (zone picker)");

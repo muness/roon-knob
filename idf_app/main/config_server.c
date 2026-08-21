@@ -4,6 +4,7 @@
 #include "config_server.h"
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
+#include "power_debug_web.h"
 #include "platform/platform_mdns.h"
 #include "bridge_client.h"
 #include "rk_ble_hid_host.h"
@@ -47,7 +48,8 @@ static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
 }
 
 // HTML page for config
-// Format args: current_bridge, status_class, status_text, wifi_html, bridge_value
+// Format args: current_bridge, status_class, status_text, wifi_html,
+// scan_html, bridge_value
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
@@ -74,6 +76,8 @@ static const char *HTML_CONFIG =
     ".hint{font-size:12px;color:#666;margin-top:4px;}"
     ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
     ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
+    ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;cursor:pointer;}"
+    ".wifi-choice small{color:#aaa;float:right;}"
     ".section{max-width:400px;}"
     "a{color:#4fc3f7;}"
     ".device{background:#0f0f1a;padding:10px;border-radius:5px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;}"
@@ -81,6 +85,7 @@ static const char *HTML_CONFIG =
     "<h1>HiPhi Dial</h1>"
     "<p class='info'>Configure your HiPhi Dial settings</p>"
     "<p><a href='/ble'>BLE Media Remote settings</a></p>"
+    "<p><a href='/power-debug'>Power debug evidence</a></p>"
     "<div class='current'>"
     "<strong>Current Unified Hi-Fi Control:</strong> %s"
     "</div>"
@@ -92,8 +97,9 @@ static const char *HTML_CONFIG =
         "<p class='hint'>Saved-network changes take effect after restart.</p>"
     "<form method='POST' action='/wifi-add'>"
     "<h2>Add WiFi Network</h2>"
+    "%s"
     "<label>SSID</label>"
-    "<input type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
+    "<input id='ssid' type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
     "<label>Password</label>"
         "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
         "<p class='hint'>Up to two networks. Remove one before replacing it.</p>"
@@ -318,16 +324,71 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
                  "<div class='wifi-entry'><em>No saved networks</em></div>");
     }
 
+    char query[32] = {0};
+    char scan_value[8] = {0};
+    const bool scan_again_requested =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value)) == ESP_OK &&
+        strcmp(scan_value, "again") == 0;
+    rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+    if (scan_again_requested || scan_state == RK_WIFI_SCAN_IDLE) {
+        (void)wifi_mgr_scan_start();
+        scan_state = wifi_mgr_scan_state();
+    }
+    rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+    const size_t network_count =
+        scan_state == RK_WIFI_SCAN_READY
+            ? wifi_mgr_scan_results_copy(networks,
+                                         RK_WIFI_SCAN_MAX_NETWORKS)
+            : 0;
+    char scan_html[3072] = {0};
+    int scan_pos = snprintf(scan_html, sizeof(scan_html),
+                            "<p><strong>Nearby 2.4 GHz networks</strong></p>");
+    if (scan_state == RK_WIFI_SCAN_RUNNING) {
+        snprintf(scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                 "<p class='hint'>Scanning&hellip; this list will refresh "
+                 "automatically.</p><script>setTimeout(function(){location.href='/'},1200)</script>");
+    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
+        snprintf(scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                 "<p class='hint'>Scan failed. Enter an SSID manually or "
+                 "<a href='/?scan=again'>try again</a>.</p>");
+    } else {
+        for (size_t i = 0;
+             i < network_count && scan_pos < (int)sizeof(scan_html);
+             ++i) {
+            char escaped[sizeof(networks[i].ssid) * 6] = {0};
+            html_escape(networks[i].ssid, escaped, sizeof(escaped));
+            scan_pos += snprintf(
+                scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                "<button type='button' class='wifi-choice' data-ssid='%s' "
+                "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+                "%s <small>%d dBm</small></button>",
+                escaped, escaped, networks[i].rssi);
+        }
+        if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
+            scan_pos += snprintf(
+                scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
+                "<p class='hint'>No visible networks found. Enter a hidden "
+                "SSID manually.</p>");
+        }
+        if (scan_pos < (int)sizeof(scan_html)) {
+            snprintf(scan_html + scan_pos,
+                     sizeof(scan_html) - (size_t)scan_pos,
+                     "<p><a href='/?scan=again'>Scan again</a></p>");
+        }
+    }
+
     // Build HTML with current values, saved networks, and bridge status.
-    char *html = heap_caps_malloc(4096,
+    char *html = heap_caps_malloc(8192,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 4096, HTML_CONFIG, current, status_class, status_text,
-             wifi_html, cfg->bridge_base);
+    snprintf(html, 8192, HTML_CONFIG, current, status_class, status_text,
+             wifi_html, scan_html, cfg->bridge_base);
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
@@ -920,6 +981,10 @@ void config_server_start(void) {
         .handler = ble_forget_handler,
     };
     httpd_register_uri_handler(s_server, &ble_forget);
+
+    if (!power_debug_web_register(s_server)) {
+        ESP_LOGE(TAG, "Shared power-debug routes unavailable");
+    }
 
     ESP_LOGI(TAG, "Config server started");
     http_server_lifecycle_unlock();

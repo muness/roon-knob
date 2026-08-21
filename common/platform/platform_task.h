@@ -29,6 +29,7 @@ size_t platform_task_internal_heap_free_bytes(void);
 size_t platform_task_internal_heap_largest_free_block_bytes(void);
 bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg);
 void platform_task_run_pending(void);
+bool platform_task_has_pending(void);
 
 #ifdef __cplusplus
 }

@@ -40,9 +40,11 @@ set(SRC_FILES
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
+    "../../common/power_debug_web.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_power.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
 )

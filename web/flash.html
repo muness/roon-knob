@@ -61,6 +61,17 @@
       margin-bottom: 20px;
     }
     .info-box strong { color: #3498db; }
+    .power-summary {
+      background: #12382f;
+      border-left: 4px solid #2ecc71;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .power-summary > strong { color: #2ecc71; }
+    .power-summary ul { margin: 10px 0 0; padding-left: 20px; }
+    .power-summary li { margin-bottom: 8px; color: var(--text-muted); line-height: 1.5; }
+    .power-summary .measurement { margin: 10px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
     .warning {
       background: #3d2914;
       border-left: 4px solid #f39c12;
@@ -120,13 +131,30 @@
       Not sure which chip? Just try - ESP Web Tools detects the chip and warns if it doesn't match.
     </div>
 
+    <div class="info-box">
+      <strong>Shared power evidence</strong><br>
+      Every device's connected web UI exposes <code>/power-debug</code> with the same HTML and JSON schema. Dial and Frame also offer a one-time powered Deep-sleep test; other targets explicitly report when an implemented, evidence-retaining test is unavailable.
+    </div>
+
     <!-- HiPhi Dial -->
     <div class="card" id="dial-card">
-      <h2>HiPhi Dial <span class="chip-badge">Beta</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <h2>HiPhi Dial <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
       <p class="description">
         The round touchscreen controller with rotary input, WiFi playback
         control, and optional BLE media-remote support.
       </p>
+      <div class="power-summary">
+        <strong>Battery work in this alpha</strong>
+        <ul>
+          <li><strong>Radio:</strong> Wi-Fi modem sleep replaces the previous always-awake mode while the Dial stays associated between polls.</li>
+          <li><strong>Main processor:</strong> automatic Light-sleep and clock scaling can run whenever the firmware is idle.</li>
+          <li><strong>Battery checks:</strong> one cached 16-sample ADC reading supplies level and power-source policy for 15 seconds instead of repeating that work throughout every status cycle.</li>
+          <li><strong>Power diagnostics:</strong> the shared power-debug view adds Dial-specific RTC-retained entry/wake evidence and a one-time plugged-in Deep-sleep test.</li>
+          <li><strong>Deep sleep:</strong> the panel, Wi-Fi, and BLE stop; the backlight stays latched off; and turning the encoder wakes the main ESP32-S3 without leaving its RTC peripheral domain on.</li>
+          <li><strong>Second processor:</strong> a separate one-time parking image immediately Deep-sleeps the otherwise-unused classic ESP32 and mutes its audio DAC on every boot.</li>
+        </ul>
+        <p class="measurement"><strong>The Dial works after the main update below. For the lowest idle draw, also use the one-time Auxiliary ESP32 installer farther down this page.</strong> The Waveshare board contains that second processor, and it may otherwise continue drawing power. These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
+      </div>
       <div class="flash-section">
         <esp-web-install-button manifest="manifest-s3.json">
           <button slot="activate">Update HiPhi Dial</button>
@@ -145,7 +173,7 @@
           <li>Wait ~30 seconds for flashing to complete</li>
         </ol>
         <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> · Linux: <code>ttyACM0</code> · Windows: <code>COM*</code></p>
-        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180° - one orientation connects to the ESP32-S3, the other to an unpopulated chip.</p>
+        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180° - one orientation connects to the main ESP32-S3, the other to the auxiliary ESP32.</p>
       </div>
     </div>
 
@@ -203,10 +231,81 @@
       </div>
     </div>
 
+    <div class="card" id="joy-card">
+      <h2>AtomS3 JoyStick Deck <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">A compact two-stick controller for volume, transport, room selection, and now-playing context.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-joy.json"><button slot="activate">Flash AtomS3 JoyStick Alpha</button></esp-web-install-button>
+        <span class="version-info" id="joy-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack AtomS3 mounted in the Atom JoyStick base.</p>
+    </div>
+
+    <div class="card" id="tough-card">
+      <h2>M5Stack Tough Console <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32</span></h2>
+      <p class="description">A rugged touchscreen controller with large transport, volume, room, and display controls.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-tough.json"><button slot="activate">Flash M5Stack Tough Alpha</button></esp-web-install-button>
+        <span class="version-info" id="tough-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack Tough K034 (original ESP32).</p>
+    </div>
+
+    <div class="card" id="m5dial-card">
+      <h2>M5 Dial Lab <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">A full-face volume controller with direct rotary input, press-to-play, and touch room selection.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-m5dial.json"><button slot="activate">Flash M5 Dial Lab Alpha</button></esp-web-install-button>
+        <span class="version-info" id="m5dial-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack Dial v1.1 K130-V11 (not the end-of-life K130).</p>
+    </div>
+
+    <div class="card" id="sticks3-card">
+      <h2>M5StickS3 Twist Remote <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">Hold to arm, twist to change volume, and use the second button for playback.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-sticks3.json"><button slot="activate">Flash StickS3 Twist Alpha</button></esp-web-install-button>
+        <span class="version-info" id="sticks3-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5StickS3 K150.</p>
+    </div>
+
+    <div class="card" id="stopwatch-card">
+      <h2>M5Stack StopWatch Wrist Remote <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">A wrist remote with motion wake, edge-button volume, haptic feedback, and tap-to-play.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-stopwatch.json"><button slot="activate">Flash StopWatch Alpha</button></esp-web-install-button>
+        <span class="version-info" id="stopwatch-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack StopWatch C152.</p>
+    </div>
+
+    <div class="card" id="stackchan-card">
+      <h2>Kizz Playback Companion <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">Named for Kismet, Kizz is an animated playback companion with touch transport, room selection, and optional servo motion.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash Kizz Alpha</button></esp-web-install-button>
+        <span class="version-info" id="stackchan-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>Motion is on by default:</strong> give the body room to move before powering on.</p>
+    </div>
+
+    <div class="card" id="knobaux-card">
+      <h2>Waveshare Dial Auxiliary ESP32 <span class="chip-badge">Parking image</span> <span class="chip-badge">ESP32</span></h2>
+      <p class="description">Parks the otherwise-unused auxiliary processor in Deep-sleep immediately on every boot, with all wake sources and RTC memory domains disabled.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-knob-aux.json"><button slot="activate">Park Auxiliary ESP32</button></esp-web-install-button>
+        <span class="version-info" id="knobaux-version">Loading...</span>
+      </div>
+      <p class="warning"><strong>One-time step for the lowest Dial idle draw:</strong> after updating the main Dial, disconnect USB-C, flip the cable 180&deg;, and reconnect it. Start this installer only if the browser identifies an <strong>ESP32</strong>. Cancel if it identifies an ESP32-S3—that is the main Dial processor. When complete, disconnect USB-C and return the cable to its normal orientation.</p>
+    </div>
+
     <div class="warning">
       <strong>First time?</strong><br>
       HiPhi Dial creates <code>hiphi-dial-setup</code>; HiPhi Frame creates
-      <code>hiphi-frame-setup</code>; HiPhi RLCD creates <code>hiphi-rlcd-setup</code>.
+      <code>hiphi-frame-setup</code>; HiPhi RLCD creates <code>hiphi-rlcd-setup</code>;
+      the M5 beta targets create a network ending in <code>-beta-setup</code>.
       Connect to the matching network to configure Wi-Fi.
     </div>
 
@@ -222,35 +321,38 @@
 
   <script>
     const targetFilter = document.body.dataset.targetFilter;
-    if (targetFilter === 'dial') {
-      document.getElementById('frame-card').remove();
-      document.getElementById('rlcd-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi Dial Firmware';
-    } else if (targetFilter === 'frame') {
-      document.getElementById('dial-card').remove();
-      document.getElementById('rlcd-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi Frame Firmware';
-    } else if (targetFilter === 'rlcd') {
-      document.getElementById('dial-card').remove();
-      document.getElementById('frame-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi RLCD Firmware';
+    const targetNames = {
+      dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi RLCD',
+      joy: 'AtomS3 JoyStick', tough: 'M5Stack Tough',
+      m5dial: 'M5 Dial Lab', sticks3: 'M5StickS3 Twist Remote',
+      stopwatch: 'M5Stack StopWatch', stackchan: 'Kizz',
+      knobaux: 'Waveshare Dial Auxiliary ESP32'
+    };
+    if (targetNames[targetFilter]) {
+      document.querySelectorAll('.card').forEach(card => {
+        if (card.id !== `${targetFilter}-card`) card.remove();
+      });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]} Firmware`;
     }
 
     if (!('serial' in navigator)) {
       document.getElementById('unsupported').style.display = 'block';
     }
-    fetch('/firmware/version')
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('s3-version').textContent = `v${data.version}`;
-        document.getElementById('frame-version').textContent = `v${data.version}`;
-        document.getElementById('rlcd-version').textContent = `v${data.version}`;
-      })
-      .catch(() => {
-        document.getElementById('s3-version').textContent = '(bundled)';
-        document.getElementById('frame-version').textContent = '(bundled)';
-        document.getElementById('rlcd-version').textContent = '(bundled)';
-      });
+    const manifests = {
+      s3: 'manifest-s3.json', frame: 'manifest-frame.json',
+      rlcd: 'manifest-rlcd.json', joy: 'manifest-joy.json',
+      tough: 'manifest-tough.json', m5dial: 'manifest-m5dial.json',
+      sticks3: 'manifest-sticks3.json', stopwatch: 'manifest-stopwatch.json',
+      stackchan: 'manifest-stackchan.json', knobaux: 'manifest-knob-aux.json'
+    };
+    Object.entries(manifests).forEach(([id, manifest]) => {
+      const label = document.getElementById(`${id}-version`);
+      if (!label) return;
+      fetch(manifest)
+        .then(response => response.ok ? response.json() : Promise.reject())
+        .then(data => { label.textContent = `v${data.version}`; })
+        .catch(() => { label.textContent = '(bundled)'; });
+    });
 
     // Dynamic back link: / on hosted web, /admin on bridge
     const backLink = document.getElementById('back-link');

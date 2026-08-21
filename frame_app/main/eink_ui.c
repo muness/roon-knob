@@ -49,6 +49,7 @@ static struct {
     bool playing;
     bool online;
     bool ble_connected;
+    bool power_state_known;
 
     // Dirty flags
     bool dirty;             // Any state changed — needs re-render
@@ -459,6 +460,7 @@ void eink_ui_update(const char *line1, const char *line2, const char *line3,
     (void)volume_min; (void)volume_max; (void)volume_step; (void)seek_position; (void)length;
 
     bool changed = false;
+    s_ui.power_state_known = true;
 
     if (line1 && strcmp(s_ui.track, line1) != 0) {
         snprintf(s_ui.track, sizeof(s_ui.track), "%s", line1);
@@ -521,6 +523,10 @@ void eink_ui_process(void) {
     render_full_screen();
     s_ui.last_render = platform_millis();
 }
+
+bool eink_ui_power_state_known(void) { return s_ui.power_state_known; }
+bool eink_ui_is_playing(void) { return s_ui.playing; }
+bool eink_ui_has_pending_refresh(void) { return s_ui.dirty; }
 
 // BLE status — updated piggyback on next now-playing refresh, never triggers its own
 void eink_ui_set_ble_status(bool connected) {

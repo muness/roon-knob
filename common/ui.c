@@ -10,6 +10,7 @@
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "platform/platform_http.h"
+#include "platform/platform_power.h"
 #include "controller_input.h"
 #include "lvgl.h"
 #include "ui.h"
@@ -17,7 +18,6 @@
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
-#include "battery.h"
 #include "ui_jpeg.h"  // JPEG decoder helper
 #define UI_TAG "ui"
 #else
@@ -759,8 +759,13 @@ static void update_battery_display(void) {
 #ifdef ESP_PLATFORM
     if (!s_battery_icon) return;
 
-    int percent = battery_get_percentage();
-    bool charging = battery_is_charging();
+    platform_power_snapshot_t power = {
+        .battery_level = -1,
+        .external_power = false,
+    };
+    platform_power_snapshot(&power);
+    const int percent = power.battery_level;
+    const bool charging = power.external_power;
 
     // Convert to 4 discrete levels for stability (precision matches fidelity)
     // Critical: ≤10%, Low: 11-25%, Medium: 26-60%, High: ≥61%

@@ -6,6 +6,7 @@
 #include "platform/platform_mdns.h"
 #include "platform/platform_task.h"
 #include "rlcd_display.h"
+#include "rlcd_power_manager.h"
 #include "rlcd_ui.h"
 #include "wifi_manager.h"
 
@@ -69,6 +70,9 @@ static void ui_task(void *arg) {
         if (atomic_exchange(&s_sta_portal_pending, false) && !wifi_mgr_is_ap_mode()) {
             (void)captive_portal_start_sta();
         }
+        rlcd_power_manager_poll(
+            atomic_load(&s_mdns_pending) || atomic_load(&s_ble_pending) ||
+            atomic_load(&s_sta_portal_pending));
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
@@ -87,6 +91,7 @@ void app_main(void) {
     rlcd_ui_init();
     app_controller_init();
     platform_input_init();
+    rlcd_power_manager_init();
     /* LVGL's RGB565 image draw path needs appreciably more stack than the
      * text-only screen; keep the artwork renderer on internal RAM. */
     if (xTaskCreate(ui_task, "rlcd_ui", 16384, NULL, 2, NULL) != pdPASS) {

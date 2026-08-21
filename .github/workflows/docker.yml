@@ -25,9 +25,32 @@ jobs:
 
       - name: Test shared configuration contracts
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Iframe_app/main \
+            tests/test_frame_power_policy.c \
+            frame_app/main/frame_power_policy.c \
+            -o /tmp/test-frame-power-policy
+          /tmp/test-frame-power-policy
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icomponents/m5_platform/include \
+            tests/test_m5_interaction_policy.c \
+            components/m5_platform/m5_interaction_policy.c \
+            -lm -o /tmp/test-m5-interaction-policy
+          /tmp/test-m5-interaction-policy
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -Icomponents/m5_platform/include \
+            -Icomponents/m5_platform \
+            tests/test_m5_stackchan_choreography.cpp \
+            -o /tmp/test-m5-stackchan-choreography
+          /tmp/test-m5-stackchan-choreography
+          python3 scripts/check_alpha_release_notes.py
+          python3 scripts/check_platform_power_and_wifi.py
           python3 scripts/check_dial_identity.py
+          python3 scripts/check_dial_power_copy.py
+          python3 scripts/check_kizz_identity.py
           python3 scripts/check_controller_dependencies.py
           python3 scripts/check_controller_dependencies.py --self-test
+          python3 scripts/check_m5_hardware_boundary.py
           cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
             -DCONTROLLER_CONFIG_TEST \
             -Icommon -Iinclude \
@@ -344,6 +367,7 @@ jobs:
             ccache --zero-stats;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
             grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
             grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
@@ -453,6 +477,7 @@ jobs:
             ccache --zero-stats;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
             grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
             grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
@@ -470,6 +495,10 @@ jobs:
             ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
             grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_frame.map;
             ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map;
+            grep -Fx "CONFIG_RK_FRAME_DEEP_SLEEP=y" sdkconfig;
+            grep -F "esp_sleep_enable_ext1_wakeup_io" main/frame_power_manager.c;
+            ! grep -F "esp_sleep_enable_timer_wakeup" main/frame_power_manager.c;
+            grep -F "pmic_power_source()" main/frame_power_manager.c;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig;
             esptool.py --chip esp32s3 merge_bin
@@ -553,6 +582,7 @@ jobs:
             ccache --zero-stats;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_SPIRAM=y" sdkconfig;
             grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
             grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
@@ -593,6 +623,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          submodules: recursive
       - name: Get firmware version
         id: atom-version
         run: |
@@ -615,9 +646,15 @@ jobs:
             set -e;
             idf.py build;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y" sdkconfig;
+            grep -Fx "CONFIG_M5_PLATFORM_EXPECT_ATOMS3_JOYSTICK=y" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_HZ=1000" sdkconfig;
+            grep -Fx "CONFIG_ARDUINO_SELECTIVE_COMPILATION=y" sdkconfig;
             grep -F "/components/m5_platform/" build/compile_commands.json;
             grep -F "m5stack__m5unified" build/compile_commands.json;
+            grep -F "/components/m5_official/vendor/Atom-JoyStick/" build/compile_commands.json;
+            python3 ../scripts/check_m5_arduino_abi.py build/compile_commands.json;
             esptool.py --chip esp32s3 merge_bin -o ../hiphi_joy_merged.bin --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_joy.bin;
             esptool.py --chip esp32s3 image_info ../hiphi_joy_merged.bin
       - name: Upload AtomS3 Joystick artifact
@@ -630,6 +667,197 @@ jobs:
             atom_app/build/partition_table/partition-table.bin
             atom_app/build/ota_data_initial.bin
             hiphi_joy_merged.bin
+          retention-days: 30
+
+  build-tough:
+    name: build-m5-tough
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Get firmware version
+        id: tough-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' tough_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Inject version into Tough CMakeLists.txt
+        run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.tough-version.outputs.version }}")/' tough_app/CMakeLists.txt
+      - name: Restore Tough managed components
+        uses: actions/cache@v5
+        with:
+          path: tough_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-tough-components-${{ hashFiles('tough_app/dependencies.lock') }}
+      - name: Build M5Stack Tough with pure ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32
+          path: tough_app
+          command: >-
+            set -e;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y" sdkconfig;
+            grep -Fx "CONFIG_M5_PLATFORM_EXPECT_TOUGH=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" sdkconfig;
+            grep -F "/components/m5_platform/" build/compile_commands.json;
+            grep -F "m5stack__m5unified" build/compile_commands.json;
+            ! grep -F "espressif__arduino-esp32" build/compile_commands.json;
+            ! grep -F "/official_components/m5_official/" build/compile_commands.json;
+            esptool.py --chip esp32 merge_bin -o ../hiphi_tough_merged.bin --flash_mode dio --flash_freq 40m --flash_size 16MB 0x1000 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_tough.bin;
+            od -An -tu1 -j4096 -N1 ../hiphi_tough_merged.bin | grep -Eq "^[[:space:]]*233[[:space:]]*$";
+            esptool.py --chip esp32 image_info build/bootloader/bootloader.bin;
+            esptool.py --chip esp32 image_info build/hiphi_tough.bin
+      - name: Upload M5Stack Tough artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-tough-firmware
+          path: |
+            tough_app/build/hiphi_tough.bin
+            tough_app/build/bootloader/bootloader.bin
+            tough_app/build/partition_table/partition-table.bin
+            tough_app/build/ota_data_initial.bin
+            hiphi_tough_merged.bin
+          retention-days: 30
+
+  build-m5-betas:
+    name: build-m5-beta-${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: dial
+            flash_size: 8MB
+            psram: false
+            expected: DIAL
+          - target: sticks3
+            flash_size: 8MB
+            psram: true
+            expected: STICKS3
+          - target: stopwatch
+            flash_size: 16MB
+            psram: true
+            expected: STOPWATCH
+          - target: stackchan
+            flash_size: 16MB
+            psram: true
+            expected: STACKCHAN
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Get firmware version
+        id: m5-beta-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' m5_beta_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Inject version into M5 beta CMakeLists.txt
+        run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.m5-beta-version.outputs.version }}")/' m5_beta_app/CMakeLists.txt
+      - name: Restore M5 beta managed components
+        uses: actions/cache@v5
+        with:
+          path: m5_beta_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-components-${{ hashFiles('m5_beta_app/dependencies.lock') }}
+      - name: Build exact M5 beta profile
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: m5_beta_app
+          command: >-
+            set -e;
+            idf.py -B build-${{ matrix.target }}
+            -D HIPHI_M5_TARGET=${{ matrix.target }}
+            -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_${{ matrix.flash_size }}=y" build-${{ matrix.target }}/sdkconfig;
+            if [ "${{ matrix.psram }}" = "true" ]; then grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; else ! grep -Fx "CONFIG_SPIRAM=y" build-${{ matrix.target }}/sdkconfig; fi;
+            grep -Fx "CONFIG_M5_PLATFORM_EXPECT_${{ matrix.expected }}=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" build-${{ matrix.target }}/sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" build-${{ matrix.target }}/sdkconfig;
+            case "${{ matrix.target }}" in
+              dial) ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_FREERTOS_HZ=1000" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_ARDUINO_SELECTIVE_COMPILATION=y" build-${{ matrix.target }}/sdkconfig; grep -F "/components/m5_official/vendor/M5Dial/" build-${{ matrix.target }}/compile_commands.json; python3 ../scripts/check_m5_arduino_abi.py build-${{ matrix.target }}/compile_commands.json ;;
+              sticks3|stopwatch) grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig; ! grep -F "espressif__arduino-esp32" build-${{ matrix.target }}/compile_commands.json; ! grep -F "/components/m5_official/" build-${{ matrix.target }}/compile_commands.json ;;
+              stackchan) grep -Fx "CONFIG_SPIRAM_MODE_QUAD=y" build-${{ matrix.target }}/sdkconfig; ! grep -Fx "CONFIG_SPIRAM_MODE_OCT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_SPIRAM_BOOT_INIT=y" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_FREERTOS_HZ=1000" build-${{ matrix.target }}/sdkconfig; grep -Fx "CONFIG_ARDUINO_SELECTIVE_COMPILATION=y" build-${{ matrix.target }}/sdkconfig; grep -F "/components/m5_official/vendor/StackChan-BSP/" build-${{ matrix.target }}/compile_commands.json; python3 ../scripts/check_m5_arduino_abi.py build-${{ matrix.target }}/compile_commands.json ;;
+            esac;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_${{ matrix.target }}_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size ${{ matrix.flash_size }}
+            0x0 build-${{ matrix.target }}/bootloader/bootloader.bin
+            0x8000 build-${{ matrix.target }}/partition_table/partition-table.bin
+            0xd000 build-${{ matrix.target }}/ota_data_initial.bin
+            0x10000 build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_${{ matrix.target }}_merged.bin
+      - name: Upload M5 beta artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-m5-beta-${{ matrix.target }}
+          path: |
+            m5_beta_app/build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin
+            m5_beta_app/build-${{ matrix.target }}/bootloader/bootloader.bin
+            m5_beta_app/build-${{ matrix.target }}/partition_table/partition-table.bin
+            m5_beta_app/build-${{ matrix.target }}/ota_data_initial.bin
+            hiphi_${{ matrix.target }}_merged.bin
+          retention-days: 30
+
+  build-knob-aux:
+    name: build-waveshare-knob-aux-parking-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: knob-aux-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' knob_aux_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Inject version into auxiliary CMakeLists.txt
+        run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.knob-aux-version.outputs.version }}")/' knob_aux_app/CMakeLists.txt
+
+      - name: Build auxiliary ESP32 parking firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32
+          path: knob_aux_app
+          command: >-
+            set -e;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_IDF_TARGET_ESP32=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y" sdkconfig;
+            grep -Fx "CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y" sdkconfig;
+            grep -Fx "CONFIG_LOG_DEFAULT_LEVEL_NONE=y" sdkconfig;
+            grep -F "esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL)" main/main.c;
+            grep -F "ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF" main/main.c;
+            grep -F "ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF" main/main.c;
+            grep -F "ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF" main/main.c;
+            ! grep -E "vTaskDelay|esp_wifi|esp_bt|nimble" main/main.c;
+            esptool.py --chip esp32 merge_bin
+            -o ../hiphi_knob_aux_park_merged.bin
+            --flash_mode dio --flash_freq 40m --flash_size 4MB
+            0x1000 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0x10000 build/hiphi_knob_aux_park.bin;
+            esptool.py --chip esp32 image_info build/hiphi_knob_aux_park.bin
+
+      - name: Upload auxiliary parking firmware
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: |
+            knob_aux_app/build/hiphi_knob_aux_park.bin
+            knob_aux_app/build/bootloader/bootloader.bin
+            knob_aux_app/build/partition_table/partition-table.bin
+            hiphi_knob_aux_park_merged.bin
           retention-days: 30
 
   build-ble-off:
@@ -660,7 +888,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux, build-ble-off]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -686,6 +914,31 @@ jobs:
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
+
+      - name: Download AtomS3 JoyStick firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-joy-firmware
+          path: joy-artifacts
+
+      - name: Download M5Stack Tough firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-tough-firmware
+          path: tough-artifacts
+
+      - name: Download form-native M5 beta firmware
+        uses: actions/download-artifact@v7
+        with:
+          pattern: hiphi-m5-beta-*
+          path: m5-beta-artifacts
+          merge-multiple: true
+
+      - name: Download Waveshare auxiliary parking firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: aux-artifacts
 
       - name: Get version from tag
         id: version
@@ -759,17 +1012,65 @@ jobs:
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin \
             release-assets/hiphi_rlcd_ota_data_initial.bin
           cp rlcd-artifacts/hiphi_rlcd_merged.bin release-assets/
+
+          cp joy-artifacts/atom_app/build/hiphi_joy.bin release-assets/
+          cp joy-artifacts/atom_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_joy_bootloader.bin
+          cp joy-artifacts/atom_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_joy_partition-table.bin
+          cp joy-artifacts/atom_app/build/ota_data_initial.bin \
+            release-assets/hiphi_joy_ota_data_initial.bin
+          cp joy-artifacts/hiphi_joy_merged.bin release-assets/
+
+          cp tough-artifacts/tough_app/build/hiphi_tough.bin release-assets/
+          cp tough-artifacts/tough_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_tough_bootloader.bin
+          cp tough-artifacts/tough_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_tough_partition-table.bin
+          cp tough-artifacts/tough_app/build/ota_data_initial.bin \
+            release-assets/hiphi_tough_ota_data_initial.bin
+          cp tough-artifacts/hiphi_tough_merged.bin release-assets/
+
+          prepare_m5_release() {
+            local build_target="$1"
+            local release_target="$2"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" \
+              "release-assets/hiphi_${release_target}.bin"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" \
+              "release-assets/hiphi_${release_target}_bootloader.bin"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/partition_table/partition-table.bin" \
+              "release-assets/hiphi_${release_target}_partition-table.bin"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/ota_data_initial.bin" \
+              "release-assets/hiphi_${release_target}_ota_data_initial.bin"
+            cp "m5-beta-artifacts/hiphi_${build_target}_merged.bin" \
+              "release-assets/hiphi_${release_target}_merged.bin"
+          }
+          prepare_m5_release dial m5dial
+          prepare_m5_release sticks3 sticks3
+          prepare_m5_release stopwatch stopwatch
+          prepare_m5_release stackchan stackchan
+
+          cp aux-artifacts/knob_aux_app/build/hiphi_knob_aux_park.bin \
+            release-assets/
+          cp aux-artifacts/knob_aux_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_knob_aux_park_bootloader.bin
+          cp aux-artifacts/knob_aux_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_knob_aux_park_partition-table.bin
+          cp aux-artifacts/hiphi_knob_aux_park_merged.bin release-assets/
+
+          (cd release-assets && sha256sum *.bin > SHA256SUMS.txt)
           ls -la release-assets/
 
       - name: Build release body
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # Start with auto-generated "What's Changed"
-          cat release_notes.md > final_body.md
-
-          # Append template with version substituted
-          sed "s/{{VERSION}}/$VERSION/g" .github/RELEASE_TEMPLATE.md >> final_body.md
+          # Lead with the useful, curated notes. Keep the generated PR list as
+          # reference material at the end instead of making readers dig through
+          # it before learning what the release does.
+          sed "s/{{VERSION}}/$VERSION/g" .github/RELEASE_TEMPLATE.md > final_body.md
+          printf '\n---\n\n## Complete changelog\n\n' >> final_body.md
+          cat release_notes.md >> final_body.md
 
       - name: Check if release exists
         id: check_release
@@ -788,24 +1089,7 @@ jobs:
         with:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
-          files: |
-            release-assets/hiphi_dial.bin
-            release-assets/hiphi_dial_bootloader.bin
-            release-assets/hiphi_dial_partition-table.bin
-            release-assets/hiphi_dial_ota_data_initial.bin
-            release-assets/hiphi_dial_merged.bin
-            release-assets/roon_knob.bin
-            release-assets/roon_knob_merged.bin
-            release-assets/hiphi_frame.bin
-            release-assets/hiphi_frame_bootloader.bin
-            release-assets/hiphi_frame_partition-table.bin
-            release-assets/hiphi_frame_ota_data_initial.bin
-            release-assets/hiphi_frame_merged.bin
-            release-assets/hiphi_rlcd.bin
-            release-assets/hiphi_rlcd_bootloader.bin
-            release-assets/hiphi_rlcd_partition-table.bin
-            release-assets/hiphi_rlcd_ota_data_initial.bin
-            release-assets/hiphi_rlcd_merged.bin
+          files: release-assets/*
           body_path: final_body.md
 
       - name: Upload assets to existing release
@@ -824,6 +1108,14 @@ jobs:
             fi
           done
 
+      - name: Verify prereleases cannot become stable OTA
+        if: ${{ contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq '.prerelease')" = "true"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')" != "${GITHUB_REF_NAME}"
+
   # NOTE: Docker builds moved to unified-hifi-control repo
   # The muness/unified-hifi-control and muness/roon-extension-knob images
   # are now built from https://github.com/cloud-atlas-ai/unified-hifi-control
@@ -831,7 +1123,7 @@ jobs:
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux, build-ble-off]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
@@ -858,6 +1150,31 @@ jobs:
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
+
+      - name: Download AtomS3 JoyStick firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-joy-firmware
+          path: joy-artifacts
+
+      - name: Download M5Stack Tough firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-tough-firmware
+          path: tough-artifacts
+
+      - name: Download form-native M5 beta firmware
+        uses: actions/download-artifact@v7
+        with:
+          pattern: hiphi-m5-beta-*
+          path: m5-beta-artifacts
+          merge-multiple: true
+
+      - name: Download Waveshare Dial auxiliary parking firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: aux-artifacts
 
       - name: Read preview commit metadata
         id: preview-commit
@@ -896,6 +1213,12 @@ jobs:
           DIAL_LEGACY_FIRMWARE_FILE="roon_knob_merged-${PREVIEW_ID}.bin"
           DIAL_FLASH_PAGE="flash-dial-${PREVIEW_ID}.html"
 
+          AUX_MANIFEST_FILE="manifest-knob-aux-${PREVIEW_ID}.json"
+          AUX_APPLICATION_FILE="hiphi_knob_aux_park-${PREVIEW_ID}.bin"
+          AUX_BOOTLOADER_FILE="hiphi_knob_aux_park_bootloader-${PREVIEW_ID}.bin"
+          AUX_PARTITION_FILE="hiphi_knob_aux_park_partition-table-${PREVIEW_ID}.bin"
+          AUX_FIRMWARE_FILE="hiphi_knob_aux_park_merged-${PREVIEW_ID}.bin"
+
           FRAME_MANIFEST_FILE="manifest-frame-${PREVIEW_ID}.json"
           FRAME_APPLICATION_FILE="hiphi_frame-${PREVIEW_ID}.bin"
           FRAME_BOOTLOADER_FILE="hiphi_frame_bootloader-${PREVIEW_ID}.bin"
@@ -912,6 +1235,22 @@ jobs:
           RLCD_FIRMWARE_FILE="hiphi_rlcd_merged-${PREVIEW_ID}.bin"
           RLCD_FLASH_PAGE="flash-rlcd-${PREVIEW_ID}.html"
 
+          JOY_MANIFEST_FILE="manifest-joy-${PREVIEW_ID}.json"
+          JOY_APPLICATION_FILE="hiphi_joy-${PREVIEW_ID}.bin"
+          JOY_BOOTLOADER_FILE="hiphi_joy_bootloader-${PREVIEW_ID}.bin"
+          JOY_PARTITION_FILE="hiphi_joy_partition-table-${PREVIEW_ID}.bin"
+          JOY_OTA_DATA_FILE="hiphi_joy_ota_data_initial-${PREVIEW_ID}.bin"
+          JOY_FIRMWARE_FILE="hiphi_joy_merged-${PREVIEW_ID}.bin"
+          JOY_FLASH_PAGE="flash-joy-${PREVIEW_ID}.html"
+
+          TOUGH_MANIFEST_FILE="manifest-tough-${PREVIEW_ID}.json"
+          TOUGH_APPLICATION_FILE="hiphi_tough-${PREVIEW_ID}.bin"
+          TOUGH_BOOTLOADER_FILE="hiphi_tough_bootloader-${PREVIEW_ID}.bin"
+          TOUGH_PARTITION_FILE="hiphi_tough_partition-table-${PREVIEW_ID}.bin"
+          TOUGH_OTA_DATA_FILE="hiphi_tough_ota_data_initial-${PREVIEW_ID}.bin"
+          TOUGH_FIRMWARE_FILE="hiphi_tough_merged-${PREVIEW_ID}.bin"
+          TOUGH_FLASH_PAGE="flash-tough-${PREVIEW_ID}.html"
+
           # Use immutable names so an older preview can never flash a newer build.
           cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_APPLICATION_FILE}"
           cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin "pr-preview/${DIAL_BOOTLOADER_FILE}"
@@ -922,6 +1261,11 @@ jobs:
           cp esp32s3-artifacts/roon_knob_merged.bin "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
           cmp "pr-preview/${DIAL_APPLICATION_FILE}" "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
           cmp "pr-preview/${DIAL_FIRMWARE_FILE}" "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+
+          cp aux-artifacts/knob_aux_app/build/hiphi_knob_aux_park.bin "pr-preview/${AUX_APPLICATION_FILE}"
+          cp aux-artifacts/knob_aux_app/build/bootloader/bootloader.bin "pr-preview/${AUX_BOOTLOADER_FILE}"
+          cp aux-artifacts/knob_aux_app/build/partition_table/partition-table.bin "pr-preview/${AUX_PARTITION_FILE}"
+          cp aux-artifacts/hiphi_knob_aux_park_merged.bin "pr-preview/${AUX_FIRMWARE_FILE}"
 
           cp frame-artifacts/frame_app/build/hiphi_frame.bin "pr-preview/${FRAME_APPLICATION_FILE}"
           cp frame-artifacts/frame_app/build/bootloader/bootloader.bin "pr-preview/${FRAME_BOOTLOADER_FILE}"
@@ -935,9 +1279,58 @@ jobs:
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin "pr-preview/${RLCD_OTA_DATA_FILE}"
           cp rlcd-artifacts/hiphi_rlcd_merged.bin "pr-preview/${RLCD_FIRMWARE_FILE}"
 
+          cp joy-artifacts/atom_app/build/hiphi_joy.bin "pr-preview/${JOY_APPLICATION_FILE}"
+          cp joy-artifacts/atom_app/build/bootloader/bootloader.bin "pr-preview/${JOY_BOOTLOADER_FILE}"
+          cp joy-artifacts/atom_app/build/partition_table/partition-table.bin "pr-preview/${JOY_PARTITION_FILE}"
+          cp joy-artifacts/atom_app/build/ota_data_initial.bin "pr-preview/${JOY_OTA_DATA_FILE}"
+          cp joy-artifacts/hiphi_joy_merged.bin "pr-preview/${JOY_FIRMWARE_FILE}"
+
+          cp tough-artifacts/tough_app/build/hiphi_tough.bin "pr-preview/${TOUGH_APPLICATION_FILE}"
+          cp tough-artifacts/tough_app/build/bootloader/bootloader.bin "pr-preview/${TOUGH_BOOTLOADER_FILE}"
+          cp tough-artifacts/tough_app/build/partition_table/partition-table.bin "pr-preview/${TOUGH_PARTITION_FILE}"
+          cp tough-artifacts/tough_app/build/ota_data_initial.bin "pr-preview/${TOUGH_OTA_DATA_FILE}"
+          cp tough-artifacts/hiphi_tough_merged.bin "pr-preview/${TOUGH_FIRMWARE_FILE}"
+
+          prepare_m5_beta() {
+            local build_target="$1"
+            local page_target="$2"
+            local display_name="$3"
+            local manifest="manifest-${page_target}-${PREVIEW_ID}.json"
+            local app="hiphi_${page_target}-${PREVIEW_ID}.bin"
+            local boot="hiphi_${page_target}_bootloader-${PREVIEW_ID}.bin"
+            local partition="hiphi_${page_target}_partition-table-${PREVIEW_ID}.bin"
+            local ota="hiphi_${page_target}_ota_data_initial-${PREVIEW_ID}.bin"
+            local merged="hiphi_${page_target}_merged-${PREVIEW_ID}.bin"
+
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" "pr-preview/${app}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" "pr-preview/${boot}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/partition_table/partition-table.bin" "pr-preview/${partition}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/ota_data_initial.bin" "pr-preview/${ota}"
+            cp "m5-beta-artifacts/hiphi_${build_target}_merged.bin" "pr-preview/${merged}"
+
+            cat > "pr-preview/${manifest}" << EOF
+          {
+            "name": "${display_name} (PR #${PR_NUM} Hardware-Unverified Alpha)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+              {"path": "${boot}", "offset": 0},
+              {"path": "${partition}", "offset": 32768},
+              {"path": "${ota}", "offset": 53248},
+              {"path": "${app}", "offset": 65536}
+            ]}]
+          }
+          EOF
+          }
+
+          prepare_m5_beta dial m5dial "M5 Dial Form-Native"
+          prepare_m5_beta sticks3 sticks3 "M5StickS3 Twist Remote"
+          prepare_m5_beta stopwatch stopwatch "M5Stack StopWatch Wrist Remote"
+          prepare_m5_beta stackchan stackchan "Kizz Playback Companion"
+
           cat > "pr-preview/${DIAL_MANIFEST_FILE}" << EOF
           {
-            "name": "HiPhi Dial Beta (PR #${PR_NUM} Preview)",
+            "name": "HiPhi Dial Alpha (PR #${PR_NUM} Preview)",
             "version": "pr-${PR_NUM}",
             "new_install_prompt_erase": true,
             "builds": [{"chipFamily": "ESP32-S3", "parts": [
@@ -945,6 +1338,18 @@ jobs:
               {"path": "${DIAL_PARTITION_FILE}", "offset": 32768},
               {"path": "${DIAL_OTA_DATA_FILE}", "offset": 53248},
               {"path": "${DIAL_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+          cat > "pr-preview/${AUX_MANIFEST_FILE}" << EOF
+          {
+            "name": "Waveshare Dial Auxiliary ESP32 Parking Image (PR #${PR_NUM})",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32", "parts": [
+              {"path": "${AUX_BOOTLOADER_FILE}", "offset": 4096},
+              {"path": "${AUX_PARTITION_FILE}", "offset": 32768},
+              {"path": "${AUX_APPLICATION_FILE}", "offset": 65536}
             ]}]
           }
           EOF
@@ -975,11 +1380,42 @@ jobs:
           }
           EOF
 
-          for target in dial frame rlcd; do
+          cat > "pr-preview/${JOY_MANIFEST_FILE}" << EOF
+          {
+            "name": "AtomS3 JoyStick Alpha (PR #${PR_NUM} Preview)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+              {"path": "${JOY_BOOTLOADER_FILE}", "offset": 0},
+              {"path": "${JOY_PARTITION_FILE}", "offset": 32768},
+              {"path": "${JOY_OTA_DATA_FILE}", "offset": 53248},
+              {"path": "${JOY_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+
+          cat > "pr-preview/${TOUGH_MANIFEST_FILE}" << EOF
+          {
+            "name": "M5Stack Tough Alpha (PR #${PR_NUM} Preview)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32", "parts": [
+              {"path": "${TOUGH_BOOTLOADER_FILE}", "offset": 4096},
+              {"path": "${TOUGH_PARTITION_FILE}", "offset": 32768},
+              {"path": "${TOUGH_OTA_DATA_FILE}", "offset": 53248},
+              {"path": "${TOUGH_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+
+          for target in dial frame rlcd joy tough m5dial sticks3 stopwatch stackchan; do
             case "$target" in
               dial) page="$DIAL_FLASH_PAGE"; manifest="$DIAL_MANIFEST_FILE" ;;
               frame) page="$FRAME_FLASH_PAGE"; manifest="$FRAME_MANIFEST_FILE" ;;
               rlcd) page="$RLCD_FLASH_PAGE"; manifest="$RLCD_MANIFEST_FILE" ;;
+              joy) page="$JOY_FLASH_PAGE"; manifest="$JOY_MANIFEST_FILE" ;;
+              tough) page="$TOUGH_FLASH_PAGE"; manifest="$TOUGH_MANIFEST_FILE" ;;
+              *) page="flash-${target}-${PREVIEW_ID}.html"; manifest="manifest-${target}-${PREVIEW_ID}.json" ;;
             esac
             sed \
               -e "s/{{PR_NUMBER}}/${PR_NUM}/g" \
@@ -995,9 +1431,17 @@ jobs:
               -e "s|manifest-s3.json|${DIAL_MANIFEST_FILE}|g" \
               -e "s|manifest-frame.json|${FRAME_MANIFEST_FILE}|g" \
               -e "s|manifest-rlcd.json|${RLCD_MANIFEST_FILE}|g" \
+              -e "s|manifest-joy.json|${JOY_MANIFEST_FILE}|g" \
+              -e "s|manifest-tough.json|${TOUGH_MANIFEST_FILE}|g" \
+              -e "s|manifest-m5dial.json|manifest-m5dial-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-sticks3.json|manifest-sticks3-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-stopwatch.json|manifest-stopwatch-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-stackchan.json|manifest-stackchan-${PREVIEW_ID}.json|g" \
+              -e "s|manifest-knob-aux.json|${AUX_MANIFEST_FILE}|g" \
               web/flash-pr.html > "pr-preview/${page}"
             python3 scripts/check_flash_manifest.py "pr-preview/${manifest}" --assets-dir pr-preview
           done
+          python3 scripts/check_flash_manifest.py "pr-preview/${AUX_MANIFEST_FILE}" --assets-dir pr-preview
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1041,9 +1485,15 @@ jobs:
             cmp "pr-preview/${asset}" "deployed-preview/${asset}"
           done
           grep -F 'data-target-filter="dial"' "deployed-preview/flash-dial-${PREVIEW_ID}.html"
+          grep -F "manifest-knob-aux-${PREVIEW_ID}.json" "deployed-preview/flash-dial-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="frame"' "deployed-preview/flash-frame-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="rlcd"' "deployed-preview/flash-rlcd-${PREVIEW_ID}.html"
-          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json; do
+          grep -F 'data-target-filter="joy"' "deployed-preview/flash-joy-${PREVIEW_ID}.html"
+          grep -F 'data-target-filter="tough"' "deployed-preview/flash-tough-${PREVIEW_ID}.html"
+          for target in m5dial sticks3 stopwatch stackchan; do
+            grep -F "data-target-filter=\"${target}\"" "deployed-preview/flash-${target}-${PREVIEW_ID}.html"
+          done
+          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-knob-aux-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-joy-${PREVIEW_ID}.json manifest-tough-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
             python3 scripts/check_flash_manifest.py "deployed-preview/${manifest}" --assets-dir deployed-preview
           done
 
@@ -1051,9 +1501,21 @@ jobs:
             echo "dial_page_url=${PREVIEW_BASE}/flash-dial-${PREVIEW_ID}.html"
             echo "frame_page_url=${PREVIEW_BASE}/flash-frame-${PREVIEW_ID}.html"
             echo "rlcd_page_url=${PREVIEW_BASE}/flash-rlcd-${PREVIEW_ID}.html"
+            echo "joy_page_url=${PREVIEW_BASE}/flash-joy-${PREVIEW_ID}.html"
+            echo "tough_page_url=${PREVIEW_BASE}/flash-tough-${PREVIEW_ID}.html"
+            echo "m5dial_page_url=${PREVIEW_BASE}/flash-m5dial-${PREVIEW_ID}.html"
+            echo "sticks3_page_url=${PREVIEW_BASE}/flash-sticks3-${PREVIEW_ID}.html"
+            echo "stopwatch_page_url=${PREVIEW_BASE}/flash-stopwatch-${PREVIEW_ID}.html"
+            echo "stackchan_page_url=${PREVIEW_BASE}/flash-stackchan-${PREVIEW_ID}.html"
             echo "dial_firmware_sha256=$(sha256sum "deployed-preview/hiphi_dial_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "aux_firmware_sha256=$(sha256sum "deployed-preview/hiphi_knob_aux_park_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "frame_firmware_sha256=$(sha256sum "deployed-preview/hiphi_frame_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "rlcd_firmware_sha256=$(sha256sum "deployed-preview/hiphi_rlcd_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "joy_firmware_sha256=$(sha256sum "deployed-preview/hiphi_joy_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "tough_firmware_sha256=$(sha256sum "deployed-preview/hiphi_tough_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            for target in m5dial sticks3 stopwatch stackchan; do
+              echo "${target}_firmware_sha256=$(sha256sum "deployed-preview/hiphi_${target}_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            done
           } >> "$GITHUB_OUTPUT"
 
       - name: Post all preview URLs to PR
@@ -1063,9 +1525,22 @@ jobs:
           DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.dial_page_url }}
           FRAME_PAGE_URL: ${{ steps.verify-preview.outputs.frame_page_url }}
           RLCD_PAGE_URL: ${{ steps.verify-preview.outputs.rlcd_page_url }}
+          JOY_PAGE_URL: ${{ steps.verify-preview.outputs.joy_page_url }}
+          TOUGH_PAGE_URL: ${{ steps.verify-preview.outputs.tough_page_url }}
+          M5DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.m5dial_page_url }}
+          STICKS3_PAGE_URL: ${{ steps.verify-preview.outputs.sticks3_page_url }}
+          STOPWATCH_PAGE_URL: ${{ steps.verify-preview.outputs.stopwatch_page_url }}
+          STACKCHAN_PAGE_URL: ${{ steps.verify-preview.outputs.stackchan_page_url }}
           DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.dial_firmware_sha256 }}
+          AUX_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.aux_firmware_sha256 }}
           FRAME_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.frame_firmware_sha256 }}
           RLCD_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.rlcd_firmware_sha256 }}
+          JOY_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.joy_firmware_sha256 }}
+          TOUGH_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.tough_firmware_sha256 }}
+          M5DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.m5dial_firmware_sha256 }}
+          STICKS3_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.sticks3_firmware_sha256 }}
+          STOPWATCH_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.stopwatch_firmware_sha256 }}
+          STACKCHAN_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.stackchan_firmware_sha256 }}
           PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PREVIEW_COMMIT_SUBJECT: ${{ steps.preview-commit.outputs.subject }}
           PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1092,9 +1567,15 @@ jobs:
             **PR head:** [\`${headSha.slice(0, 12)}\`](${commitUrl})<br>
             **Commit:** ${process.env.PREVIEW_COMMIT_SUBJECT}
 
-            - [Flash HiPhi Dial](${process.env.DIAL_PAGE_URL}) — \`${process.env.DIAL_FIRMWARE_SHA256}\`
+            - [Flash HiPhi Dial + one-time auxiliary power step](${process.env.DIAL_PAGE_URL}) — main \`${process.env.DIAL_FIRMWARE_SHA256}\`, auxiliary \`${process.env.AUX_FIRMWARE_SHA256}\`
             - [Flash HiPhi Frame](${process.env.FRAME_PAGE_URL}) — \`${process.env.FRAME_FIRMWARE_SHA256}\`
             - [Flash HiPhi RLCD](${process.env.RLCD_PAGE_URL}) — \`${process.env.RLCD_FIRMWARE_SHA256}\`
+            - [Flash AtomS3 JoyStick](${process.env.JOY_PAGE_URL}) — \`${process.env.JOY_FIRMWARE_SHA256}\`
+            - [Flash M5Stack Tough](${process.env.TOUGH_PAGE_URL}) — \`${process.env.TOUGH_FIRMWARE_SHA256}\`
+            - [Flash M5 Dial Lab Alpha](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
+            - [Flash M5StickS3 Twist Alpha](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
+            - [Flash M5Stack StopWatch Alpha](${process.env.STOPWATCH_PAGE_URL}) — \`${process.env.STOPWATCH_FIRMWARE_SHA256}\`
+            - [Flash Kizz Companion Alpha](${process.env.STACKCHAN_PAGE_URL}) — \`${process.env.STACKCHAN_FIRMWARE_SHA256}\`
 
             Each page, manifest, bootloader, partition table, OTA data image, and application binary was fetched from GitHub Pages and compared byte-for-byte with the job workspace. Manifest checks preserve NVS; browser updates must decline the erase prompt to retain settings. Hardware testing remains the active merge gate.
 
@@ -1145,12 +1626,42 @@ jobs:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
 
+      - name: Download AtomS3 JoyStick firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-joy-firmware
+          path: joy-artifacts
+
+      - name: Download M5Stack Tough firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-tough-firmware
+          path: tough-artifacts
+
+      - name: Download form-native M5 beta firmware
+        uses: actions/download-artifact@v7
+        with:
+          pattern: hiphi-m5-beta-*
+          path: m5-beta-artifacts
+          merge-multiple: true
+
+      - name: Download Waveshare auxiliary parking firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: aux-artifacts
+
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
+          VERSION="${GITHUB_REF_NAME#v}"
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            CHANNEL_LABEL=" Beta"
-            CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Beta and Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+            case "${GITHUB_REF_NAME}" in
+              *-alpha.*) CHANNEL_LABEL=" Alpha" ;;
+              *-beta.*) CHANNEL_LABEL=" Beta" ;;
+              *) CHANNEL_LABEL=" Pre-release" ;;
+            esac
+            CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
           else
             CHANNEL_LABEL=""
             CHANNEL_NOTICE=""
@@ -1169,9 +1680,15 @@ jobs:
           sed -e 's/{{TARGET_FILTER}}/rlcd/g' \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-rlcd.html
-          cp web/manifest-s3.json gh-pages-build/
-          cp web/manifest-frame.json gh-pages-build/
-          cp web/manifest-rlcd.json gh-pages-build/
+          for target in joy tough m5dial sticks3 stopwatch stackchan knobaux; do
+            sed -e "s/{{TARGET_FILTER}}/${target}/g" \
+              -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
+              > "gh-pages-build/flash-${target}.html"
+          done
+          for manifest in web/manifest-*.json; do
+            sed "s/{{VERSION}}/${VERSION}/g" "$manifest" \
+              > "gh-pages-build/$(basename "$manifest")"
+          done
           cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
           cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_dial_bootloader.bin
@@ -1201,12 +1718,59 @@ jobs:
             gh-pages-build/hiphi_rlcd_partition-table.bin
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_rlcd_ota_data_initial.bin
+          cp joy-artifacts/atom_app/build/hiphi_joy.bin gh-pages-build/
+          cp joy-artifacts/atom_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_joy_bootloader.bin
+          cp joy-artifacts/atom_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_joy_partition-table.bin
+          cp joy-artifacts/atom_app/build/ota_data_initial.bin \
+            gh-pages-build/hiphi_joy_ota_data_initial.bin
+          cp joy-artifacts/hiphi_joy_merged.bin gh-pages-build/
+          cp tough-artifacts/tough_app/build/hiphi_tough.bin gh-pages-build/
+          cp tough-artifacts/tough_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_tough_bootloader.bin
+          cp tough-artifacts/tough_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_tough_partition-table.bin
+          cp tough-artifacts/tough_app/build/ota_data_initial.bin \
+            gh-pages-build/hiphi_tough_ota_data_initial.bin
+          cp tough-artifacts/hiphi_tough_merged.bin gh-pages-build/
+
+          prepare_m5_pages() {
+            local build_target="$1"
+            local page_target="$2"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" \
+              "gh-pages-build/hiphi_${page_target}.bin"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" \
+              "gh-pages-build/hiphi_${page_target}_bootloader.bin"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/partition_table/partition-table.bin" \
+              "gh-pages-build/hiphi_${page_target}_partition-table.bin"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/ota_data_initial.bin" \
+              "gh-pages-build/hiphi_${page_target}_ota_data_initial.bin"
+            cp "m5-beta-artifacts/hiphi_${build_target}_merged.bin" \
+              "gh-pages-build/hiphi_${page_target}_merged.bin"
+          }
+          prepare_m5_pages dial m5dial
+          prepare_m5_pages sticks3 sticks3
+          prepare_m5_pages stopwatch stopwatch
+          prepare_m5_pages stackchan stackchan
+
+          cp aux-artifacts/knob_aux_app/build/hiphi_knob_aux_park.bin gh-pages-build/
+          cp aux-artifacts/knob_aux_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_knob_aux_park_bootloader.bin
+          cp aux-artifacts/knob_aux_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_knob_aux_park_partition-table.bin
+          cp aux-artifacts/hiphi_knob_aux_park_merged.bin gh-pages-build/
           python3 scripts/check_flash_manifest.py \
             gh-pages-build/manifest-s3.json --assets-dir gh-pages-build
           python3 scripts/check_flash_manifest.py \
             gh-pages-build/manifest-frame.json --assets-dir gh-pages-build
           python3 scripts/check_flash_manifest.py \
             gh-pages-build/manifest-rlcd.json --assets-dir gh-pages-build
+          for manifest in manifest-joy.json manifest-tough.json manifest-m5dial.json manifest-sticks3.json manifest-stopwatch.json manifest-stackchan.json manifest-knob-aux.json; do
+            python3 scripts/check_flash_manifest.py \
+              "gh-pages-build/${manifest}" --assets-dir gh-pages-build
+          done
+          ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL_NOTICE)\}\}' gh-pages-build
           echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
 
@@ -1225,3 +1789,42 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./gh-pages-build
           destination_dir: beta
+
+      - name: Verify every deployed firmware link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            DEPLOY_BASE="https://roon-knob.muness.com/beta"
+          else
+            DEPLOY_BASE="https://roon-knob.muness.com"
+          fi
+          mkdir -p deployed-release
+          for attempt in $(seq 1 180); do
+            if curl --fail --silent --location "${DEPLOY_BASE}/manifest-s3.json" \
+              --output deployed-release/manifest-s3.json && \
+              grep -F "\"version\": \"${GITHUB_REF_NAME#v}\"" deployed-release/manifest-s3.json; then
+              break
+            fi
+            if [ "$((attempt % 12))" -eq 0 ]; then
+              echo "Waiting for GitHub Pages (${attempt}/180 attempts)..."
+              gh api "repos/${GITHUB_REPOSITORY}/pages/builds/latest" \
+                --jq '{status, commit, created_at, updated_at, error}' || true
+            fi
+            if [ "${attempt}" -eq 180 ]; then
+              echo "Release pages did not become available after 15 minutes"
+              exit 1
+            fi
+            sleep 5
+          done
+          while IFS= read -r asset; do
+            relative="${asset#gh-pages-build/}"
+            curl --fail --silent --show-error --location \
+              "${DEPLOY_BASE}/${relative}" --output "deployed-release/${relative}"
+            cmp "$asset" "deployed-release/${relative}"
+          done < <(find gh-pages-build -maxdepth 1 -type f ! -name CNAME | sort)
+          for target in dial frame rlcd joy tough m5dial sticks3 stopwatch stackchan knobaux; do
+            test -f "deployed-release/flash-${target}.html"
+            grep -F "data-target-filter=\"${target}\"" \
+              "deployed-release/flash-${target}.html"
+          done

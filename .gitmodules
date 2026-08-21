@@ -1,0 +1,9 @@
+[submodule "components/m5_official/vendor/M5Dial"]
+	path = components/m5_official/vendor/M5Dial
+	url = https://github.com/m5stack/M5Dial.git
+[submodule "components/m5_official/vendor/Atom-JoyStick"]
+	path = components/m5_official/vendor/Atom-JoyStick
+	url = https://github.com/m5stack/Atom-JoyStick.git
+[submodule "components/m5_official/vendor/StackChan-BSP"]
+	path = components/m5_official/vendor/StackChan-BSP
+	url = https://github.com/m5stack/StackChan-BSP.git

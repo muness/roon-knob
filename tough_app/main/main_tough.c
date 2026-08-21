@@ -102,7 +102,10 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
   case RK_NET_EVT_AP_STARTED:
     ESP_LOGI(TAG, "WiFi: AP mode started (SSID: %s)", platform_provisioning_ssid());
-    touch_ui_post_network_status("Connect to hiphi-tough-setup\nto configure WiFi");
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Connect to %s\nto configure WiFi",
+             platform_provisioning_ssid());
+    touch_ui_post_network_status(msg);
     touch_ui_post_zone_name("WiFi Setup");
     bridge_client_set_network_ready(false);
     atomic_store_explicit(&s_sta_server_pending, false, memory_order_release);
@@ -148,7 +151,10 @@ static void ui_loop_task(void *arg) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    /* The sleeping display has no animation work. Poll input at 20 Hz so a
+     * touch/button still wakes promptly while allowing five times longer
+     * tickless-idle windows for the SoC and WiFi driver. */
+    vTaskDelay(pdMS_TO_TICKS(touch_ui_is_display_sleeping() ? 50 : 10));
   }
 }
 

@@ -2,10 +2,7 @@
 // Identical functionality: HTTP GET/POST, image download with gzip support
 
 #include "platform/platform_http.h"
-
-#ifndef PLATFORM_HTTP_DEVICE_TYPE
-#define PLATFORM_HTTP_DEVICE_TYPE "frame"
-#endif
+#include "platform/platform_identity.h"
 
 #include <esp_http_client.h>
 #include <esp_heap_caps.h>
@@ -70,7 +67,7 @@ static int http_perform(const char *url, const char *body,
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", PLATFORM_HTTP_DEVICE_TYPE);
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
 
     esp_err_t err = esp_http_client_open(client, body ? strlen(body) : 0);
     if (err != ESP_OK) {
@@ -215,7 +212,7 @@ int platform_http_stream(const char *url, size_t max_bytes,
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", PLATFORM_HTTP_DEVICE_TYPE);
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
 
     int result = -1;
     size_t total_read = 0;
@@ -356,7 +353,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     get_knob_id(knob_id, sizeof(knob_id));
     esp_http_client_set_header(client, "X-Knob-Id", knob_id);
     esp_http_client_set_header(client, "X-Knob-Version", get_knob_version());
-    esp_http_client_set_header(client, "X-Device-Type", PLATFORM_HTTP_DEVICE_TYPE);
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
 
     if (esp_http_client_open(client, 0) != ESP_OK) {
         esp_http_client_cleanup(client);

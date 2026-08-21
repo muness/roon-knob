@@ -4,8 +4,9 @@ Custom firmware and a companion service that turn a [Waveshare ESP32-S3 Knob](ht
 
 See what's playing, adjust volume, skip tracks, and switch zones—all from a physical knob on your desk.
 
-> **Firmware maturity:** HiPhi Dial is **Beta** and has direct hardware-test
-> coverage. HiPhi Frame is **Alpha**: builds are available for early testing,
+> **Firmware maturity:** the current v2.7 prerelease is **Alpha** across every
+> target because its exact artifacts still need physical regression testing.
+> HiPhi Frame builds are available for early testing,
 > but its current shared-stack firmware has not completed equivalent hardware
 > regression coverage.
 

@@ -9,10 +9,11 @@
 #include <stdio.h>
 
 void platform_log_backend(const char *level, const char *fmt, va_list args) {
-    // Route to ESP_LOG at INFO level (bridge_client uses LOGI/LOGW/LOGE)
-    // The level string is "I", "W", or "E"
+    // Route shared controller logging through the target's ESP-IDF filter.
     esp_log_level_t esp_level = ESP_LOG_INFO;
-    if (level && level[0] == 'E') {
+    if (level && level[0] == 'D') {
+        esp_level = ESP_LOG_DEBUG;
+    } else if (level && level[0] == 'E') {
         esp_level = ESP_LOG_ERROR;
     } else if (level && level[0] == 'W') {
         esp_level = ESP_LOG_WARN;

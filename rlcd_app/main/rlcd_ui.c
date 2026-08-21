@@ -686,6 +686,11 @@ void rlcd_ui_hide_zone_picker(void) {
 
 bool rlcd_ui_is_zone_picker_visible(void) { return s_view.picker_visible; }
 
+bool rlcd_ui_power_work_pending(void) {
+    return s_view.dirty || s_full_redraw_pending || s_view.setup_mode ||
+           s_view.picker_visible;
+}
+
 void rlcd_ui_zone_picker_scroll(int delta) {
     if (!s_view.picker_visible || s_view.picker_count == 0 || delta == 0) return;
     int next = s_view.picker_selected + (delta > 0 ? 1 : -1);

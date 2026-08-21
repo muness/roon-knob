@@ -100,6 +100,7 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 # When enabled in bridge config, allows CPU to scale down when idle to save power
 # Trade-off: adds 0.2-40us interrupt latency
 CONFIG_PM_ENABLE=y
+CONFIG_PM_DFS_INIT_AUTO=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 
 # BLE HID host for pairing a separate media remote. ESP32-S3 supports BLE,

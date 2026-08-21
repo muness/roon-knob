@@ -6,6 +6,7 @@
 #include "controller_config.h"
 #include "controller_action_router.h"
 #include "controller_input.h"
+#include "platform/platform_power.h"
 
 #include <stdbool.h>
 
@@ -26,6 +27,10 @@ void app_entry(void) {
         LOGE("configuration owner initialization failed");
         return;
     }
+
+    /* One durable boot event for every physical target. Target power managers
+     * only need to record the later attempt/preflight/entry boundaries. */
+    platform_power_evidence_note_boot();
 
     // Note: mDNS init moved to after WiFi connects (in main_idf.c)
     app_controller_init();

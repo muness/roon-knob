@@ -130,12 +130,18 @@ static const char *HTML_FORM =
     ".wifi-entry{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #333;}"
     ".wifi-entry:last-child{border-bottom:0;}"
     ".btn-rm{background:#c62828;color:#fff;border:0;border-radius:5px;padding:7px 10px;cursor:pointer;}"
+    ".scan{max-width:340px;margin:0 0 16px;}"
+    ".scan p{margin:8px 0;}"
+    ".wifi-choice{display:block;width:100%;text-align:left;background:#0f0f1a;color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;cursor:pointer;}"
+    ".wifi-choice small{color:#aaa;float:right;}"
+    ".scan a{color:#4fc3f7;}"
     "</style></head><body>"
     "<h1>HiPhi Dial</h1>"
     "<p>WiFi Setup</p>"
+    "<!--WIFI_SCAN-->"
     "<form method='GET' action='/configure'>"
     "<label>WiFi Network (SSID)</label>"
-    "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    "<input id='ssid' type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<input type='submit' value='Connect'>"
@@ -268,11 +274,81 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     }
     const rk_cfg_t *cfg = &snapshot.value;
 
+    char query[32] = {0};
+    char scan_value[8] = {0};
+    const bool scan_again_requested =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value)) == ESP_OK &&
+        strcmp(scan_value, "again") == 0;
+    rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
+    if (scan_again_requested || scan_state == RK_WIFI_SCAN_IDLE) {
+        (void)wifi_mgr_scan_start();
+        scan_state = wifi_mgr_scan_state();
+    }
+    rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+    const size_t network_count =
+        scan_state == RK_WIFI_SCAN_READY
+            ? wifi_mgr_scan_results_copy(networks,
+                                         RK_WIFI_SCAN_MAX_NETWORKS)
+            : 0;
+
     httpd_resp_set_type(req, "text/html");
+    static const char scan_marker[] = "<!--WIFI_SCAN-->";
+    const char *scan_at = strstr(HTML_FORM, scan_marker);
     const char *closing = strstr(HTML_FORM, "</body></html>");
-    size_t prefix_len = closing ? (size_t)(closing - HTML_FORM)
-                                : strlen(HTML_FORM);
-    httpd_resp_send_chunk(req, HTML_FORM, prefix_len);
+    const char *prefix_end = scan_at ? scan_at : closing;
+    if (!prefix_end) {
+        prefix_end = HTML_FORM + strlen(HTML_FORM);
+    }
+    httpd_resp_send_chunk(req, HTML_FORM,
+                          (size_t)(prefix_end - HTML_FORM));
+
+    if (scan_at) {
+        httpd_resp_sendstr_chunk(
+            req, "<div class='scan'><strong>Nearby 2.4 GHz networks</strong>");
+        if (scan_state == RK_WIFI_SCAN_RUNNING) {
+            httpd_resp_sendstr_chunk(
+                req,
+                "<p>Scanning&hellip; this list will refresh automatically.</p>"
+                "<script>setTimeout(function(){location.href='/'},1200)</script>");
+        } else if (scan_state == RK_WIFI_SCAN_FAILED) {
+            httpd_resp_sendstr_chunk(
+                req,
+                "<p>Scan failed. You can enter an SSID manually or "
+                "<a href='/?scan=again'>try again</a>.</p>");
+        } else {
+            for (size_t i = 0; i < network_count; ++i) {
+                char escaped[sizeof(networks[i].ssid) * 6] = {0};
+                char row[512];
+                html_escape(networks[i].ssid, escaped, sizeof(escaped));
+                snprintf(
+                    row, sizeof(row),
+                    "<button type='button' class='wifi-choice' data-ssid='%s' "
+                    "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
+                    "%s <small>%d dBm</small></button>",
+                    escaped, escaped, networks[i].rssi);
+                httpd_resp_sendstr_chunk(req, row);
+            }
+            if (network_count == 0) {
+                httpd_resp_sendstr_chunk(
+                    req,
+                    "<p>No visible networks found. You can enter a hidden "
+                    "SSID manually.</p>");
+            }
+            httpd_resp_sendstr_chunk(
+                req, "<p><a href='/?scan=again'>Scan again</a></p>");
+        }
+        httpd_resp_sendstr_chunk(req, "</div>");
+    }
+
+    const char *after_scan =
+        scan_at ? scan_at + strlen(scan_marker) : prefix_end;
+    const char *content_end = closing ? closing : HTML_FORM + strlen(HTML_FORM);
+    if (after_scan < content_end) {
+        httpd_resp_send_chunk(req, after_scan,
+                              (size_t)(content_end - after_scan));
+    }
 
     if (cfg->wifi_count > 0) {
         httpd_resp_sendstr_chunk(req,

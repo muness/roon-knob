@@ -1,5 +1,7 @@
 set(SRC_FILES
     "main_frame.c"
+    "frame_power_manager.c"
+    "frame_power_policy.c"
     "eink_display.c"
     "eink_dither.c"
     "eink_ui.c"
@@ -30,7 +32,9 @@ set(SRC_FILES
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
+    "../../common/power_debug_web.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_power.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
 )
