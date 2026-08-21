@@ -360,8 +360,12 @@ void display_wake(void) {
         if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
         if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
         if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
-        if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
-        s_debug_sleep_override_armed = false;
+        /* The explicit /power-debug/sleep request is a test/integration
+         * command, not an inactivity timeout. Ordinary input may wake the
+         * screen during its countdown but must not silently cancel it. */
+        if (s_deep_sleep_timer != NULL && !s_debug_sleep_override_armed) {
+            esp_timer_stop(s_deep_sleep_timer);
+        }
 
         // Start the first enabled timer in the chain
         if (art_timeout > 0 && s_art_mode_timer != NULL) {
@@ -655,13 +659,22 @@ void display_process_pending(void) {
     }
     if (s_pending_deep_sleep) {
         s_pending_deep_sleep = false;
+        if (s_debug_sleep_override_armed &&
+            display_get_state() != DISPLAY_STATE_SLEEP) {
+            display_sleep();
+        }
         // Check state under lock to avoid race with wake transitions
         bool should_sleep = false;
         LOCK_DISPLAY_STATE();
         should_sleep = (s_display_state == DISPLAY_STATE_SLEEP);
         UNLOCK_DISPLAY_STATE();
         if (should_sleep) {
+            s_debug_sleep_override_armed = false;
             enter_deep_sleep();
+        } else if (s_debug_sleep_override_armed) {
+            s_debug_sleep_override_armed = false;
+            ESP_LOGE(TAG,
+                     "Forced Deep-sleep could not establish display sleep");
         }
     }
 }
@@ -755,7 +768,9 @@ void display_activity_detected(void) {
     if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
     if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
     if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
-    if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
+    if (s_deep_sleep_timer != NULL && !s_debug_sleep_override_armed) {
+        esp_timer_stop(s_deep_sleep_timer);
+    }
 
     // From NORMAL state, start at beginning of timer chain
     if (art_timeout > 0 && s_art_mode_timer != NULL) {

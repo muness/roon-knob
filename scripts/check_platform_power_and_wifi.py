@@ -136,6 +136,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "LCD_CMD_SLEEP_OUT",
         "TOUCH_RESET_GPIO",
         "platform_power_evidence_note_preflight(durable_flags)",
+        "must not silently cancel it",
+        "display_get_state() != DISPLAY_STATE_SLEEP",
     ),
     "frame_app/main/captive_portal.c": (
         "Nearby 2.4 GHz networks",
