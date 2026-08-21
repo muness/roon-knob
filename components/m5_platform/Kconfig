@@ -20,4 +20,13 @@ config M5_PLATFORM_EXPECT_STACKCHAN
     bool "M5StackChan"
 endchoice
 
+config M5_PLATFORM_STACKCHAN_VOICE_WS_URI
+    string "StackChan LAN voice WebSocket URI"
+    depends on M5_PLATFORM_EXPECT_STACKCHAN
+    default ""
+    help
+        Versioned UHC voice gateway used after on-device wake detection.
+        Leave empty to keep voice disabled. Example:
+        ws://192.168.1.10:8088/voice/v1
+
 endmenu

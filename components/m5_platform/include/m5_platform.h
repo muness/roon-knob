@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -40,6 +41,12 @@ m5_platform_board_t m5_platform_board(void);
 const char *m5_platform_board_name(void);
 uint16_t m5_platform_display_width(void);
 uint16_t m5_platform_display_height(void);
+typedef bool (*m5_platform_voice_zone_provider_t)(char *out, size_t len);
+void m5_platform_voice_set_zone_provider(
+    m5_platform_voice_zone_provider_t provider);
+void m5_platform_voice_network_ready(void);
+void m5_platform_voice_feedback(const char *state);
+bool m5_platform_voice_is_listening(void);
 bool m5_platform_touch_event(m5_platform_touch_event_t *out);
 
 typedef struct {

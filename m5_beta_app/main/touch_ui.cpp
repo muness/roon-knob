@@ -71,6 +71,7 @@ struct State {
     bool ever_online = false;
     bool dirty = true;
     bool dimmed = false;
+    bool voice_listening = false;
     bool sleeping = false;
     bool picker = false;
     bool settings = false;
@@ -583,7 +584,10 @@ void start_stackchan_artwork_fetch() {
         return;
     }
     copy_text(job->key, sizeof(job->key), s.artwork_key);
-    if (platform_task_start_internal_stack("stackchan_art", 16384,
+    /* Artwork fetches only use network/heap operations and never write flash.
+     * Keep this large, short-lived worker out of scarce internal RAM so the
+     * ESP-SR voice pipeline and UI task can coexist with album art. */
+    if (platform_task_start_external_stack("stackchan_art", 16384,
                                            stackchan_artwork_task, job) != 0) {
         free(job);
         s_artwork_loading.store(false);
@@ -1152,7 +1156,8 @@ void render_stackchan_delight() {
 
     /* Dial's Art mode contract: the sleeve owns every pixel. It is a
      * persistent display state, not a controls timeout or another dashboard. */
-    if (s.art_mode && s.artwork_pixels && !connection_lost) {
+    if (s.art_mode && !s.voice_listening && s.artwork_pixels &&
+        !connection_lost) {
         if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
         return;
     }
@@ -1221,13 +1226,15 @@ void render_stackchan_delight() {
                                                  : s.ambient_face_variant;
     stackchan_draw_performance_face(
         target, face, w, m5_stackchan_face_variant(face, face_entropy));
-    const char *expression = s.action_flash && s.action_notice[0]
+    const char *expression = s.voice_listening
+                                 ? "LISTENING"
+                                 : (s.action_flash && s.action_notice[0]
                                  ? s.action_notice
                                  : (s.body_notice[0] ? s.body_notice
                                     : (connection_lost ? "I LOST THE MUSIC"
                                        : (!s.online ? "CONNECTING..."
                                           : (!s.body_enabled ? "BODY OFF"
-                                             : ""))));
+                                             : "")))));
     stackchan_draw_center(target, expression, w / 2, 40, 1,
                           connection_lost ? STACK_HOT :
                           (s.action_flash ? STACK_HOT : STACK_INK));
@@ -1649,6 +1656,15 @@ extern "C" void touch_ui_process(void) {
         body_notice("BODY SAFELY DISABLED");
     }
 #if HIPHI_M5_TARGET_ID == 4
+    const bool voice_listening = m5_platform_voice_is_listening();
+    if (voice_listening != s.voice_listening) {
+        s.voice_listening = voice_listening;
+        if (voice_listening) {
+            s.art_mode = false;
+            wake_display();
+        }
+        s.dirty = true;
+    }
     if (s.controls_mode && s.controls_until && now >= s.controls_until) {
         s.controls_mode = false;
         s.controls_until = 0;

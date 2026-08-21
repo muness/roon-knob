@@ -81,6 +81,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     post_runtime_network_status(NULL);
     bridge_client_set_device_ip(ip_opt);
     bridge_client_set_network_ready(true);
+    m5_platform_voice_set_zone_provider(bridge_client_get_current_zone_id);
+    m5_platform_voice_network_ready();
     s_mdns_init_pending = true;
     atomic_store_explicit(&s_sta_server_pending, true, memory_order_release);
     break;
