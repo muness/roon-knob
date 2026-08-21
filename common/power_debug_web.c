@@ -105,6 +105,15 @@ static const char *experiment_state_name(
     }
 }
 
+static const char *experiment_sampling_mode_name(
+    const platform_power_experiment_t *experiment) {
+    if (!experiment || experiment->state == PLATFORM_POWER_EXPERIMENT_IDLE) {
+        return "none";
+    }
+    return experiment->interval_sec > 0
+        ? "software-checkpoint" : "external-profiler";
+}
+
 static bool parse_u32(const char *value, uint32_t *out) {
     if (!value || !value[0] || !out) return false;
     errno = 0;
@@ -410,7 +419,7 @@ static void render_experiment_json(const platform_power_experiment_t *experiment
                 "\"intrusive_wakes\":%lu,\"observer_effect\":%s,\"samples\":[",
                 (unsigned long long)experiment->experiment_id,
                 experiment_state_name(experiment->state),
-                experiment->interval_sec ? "software-checkpoint" : "external-profiler",
+                experiment_sampling_mode_name(experiment),
                 (unsigned long)experiment->interval_sec,
                 (unsigned long)experiment->maximum_duration_sec,
                 (unsigned long)experiment->elapsed_sec,

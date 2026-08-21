@@ -56,6 +56,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         '"events\\\":%s',
         '"sampling_mode\\\":\\\"%s',
         '"software-checkpoint" : "external-profiler"',
+        'return "none"',
         '"power_experiment_supported\\\":%s',
         "parse_u32(value, &interval_sec)",
         "parse_u32(value, &duration_sec)",
