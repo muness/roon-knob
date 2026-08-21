@@ -60,6 +60,30 @@ typedef enum {
     PLATFORM_POWER_PREFLIGHT_ERROR_POLICY,
 } platform_power_preflight_error_t;
 
+#define PLATFORM_POWER_TRACE_MAX_EVENTS 8
+
+typedef enum {
+    PLATFORM_POWER_TRACE_BOOT = 1,
+    PLATFORM_POWER_TRACE_ATTEMPT,
+    PLATFORM_POWER_TRACE_ERROR,
+    PLATFORM_POWER_TRACE_PREFLIGHT,
+    PLATFORM_POWER_TRACE_ENTRY,
+} platform_power_trace_type_t;
+
+/** One compact, NVS-persisted terminal-power lifecycle event. */
+typedef struct {
+    uint32_t sequence;
+    uint32_t boot_id;
+    uint32_t uptime_ms;
+    uint32_t preflight_flags;
+    uint32_t preflight_error;
+    int16_t battery_level;
+    int8_t reset_reason;
+    int8_t wakeup_cause;
+    uint8_t type;
+    uint8_t reserved[3];
+} platform_power_trace_event_t;
+
 /** Shared diagnostics schema; unsupported evidence remains zero/false. */
 typedef struct {
     platform_power_snapshot_t power;
@@ -85,9 +109,16 @@ typedef struct {
     uint32_t hardware_wakes;
     uint32_t last_preflight_flags;
     uint32_t last_preflight_error;
+    uint32_t durable_boots;
+    uint32_t durable_brownouts;
+    bool terminal_entry_pending;
+    bool last_boot_followed_terminal_entry;
+    int last_entry_battery_level;
     int reset_reason;
     int wakeup_cause;
     uint64_t uptime_ms;
+    uint8_t trace_event_count;
+    platform_power_trace_event_t trace_events[PLATFORM_POWER_TRACE_MAX_EVENTS];
 } platform_power_diagnostics_t;
 
 /**
@@ -110,6 +141,18 @@ bool platform_power_debug_arm_sleep(uint32_t delay_sec);
  * target installs the exact wake sources it wants for Deep-sleep.
  */
 bool platform_power_prepare_for_deep_sleep(void);
+
+/**
+ * Brownout-safe terminal-power journal. These lifecycle calls write only at
+ * boot/sleep boundaries; diagnostics polling is read-only after the one boot
+ * record. The NVS record complements RTC evidence and survives complete cell
+ * collapse or PMIC rail removal.
+ */
+void platform_power_evidence_note_boot(void);
+void platform_power_evidence_note_attempt(void);
+void platform_power_evidence_note_error(uint32_t error);
+void platform_power_evidence_note_preflight(uint32_t flags);
+void platform_power_evidence_note_entry(int battery_level);
 
 const char *platform_power_source_name(platform_power_source_t source);
 

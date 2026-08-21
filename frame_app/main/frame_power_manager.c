@@ -59,6 +59,11 @@ static frame_power_decision_t s_last_decision = FRAME_POWER_READY;
 static uint64_t s_debug_force_not_before_ms;
 static uint32_t s_debug_arm_count;
 
+static void record_preflight_error(uint32_t error) {
+    s_power_debug_rtc.last_preflight_error = error;
+    platform_power_evidence_note_error(error);
+}
+
 static void power_debug_rtc_init(void) {
     if (s_power_debug_rtc.magic == FRAME_POWER_DEBUG_RTC_MAGIC) {
         return;
@@ -117,8 +122,7 @@ static const char *decision_name(frame_power_decision_t decision) {
 static bool configure_wake_sources(void) {
     if (!frame_input_wake_button_released() ||
         gpio_get_level(FRAME_WAKE_GPIO) == 0) {
-        s_power_debug_rtc.last_preflight_error =
-            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE);
         return false;
     }
     if (!platform_power_prepare_for_deep_sleep() ||
@@ -129,8 +133,7 @@ static bool configure_wake_sources(void) {
         esp_sleep_enable_ext1_wakeup_io(1ULL << FRAME_WAKE_GPIO,
                                         ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK) {
         (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-        s_power_debug_rtc.last_preflight_error =
-            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
         ESP_LOGE(TAG, "Could not configure KEY/timer wake; staying awake");
         return false;
     }
@@ -262,6 +265,7 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
     if (s_state == FRAME_SLEEP_IDLE) {
         power_debug_rtc_init();
         s_power_debug_rtc.attempts++;
+        platform_power_evidence_note_attempt();
         s_power_debug_rtc.last_preflight_flags = 0;
         s_power_debug_rtc.last_preflight_error =
             PLATFORM_POWER_PREFLIGHT_ERROR_NONE;
@@ -272,8 +276,7 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
         frame_ble_sleep_status_t ble =
             ble_hid_host_frame_prepare_for_sleep();
         if (ble == FRAME_BLE_SLEEP_FAILED) {
-            s_power_debug_rtc.last_preflight_error =
-                PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
+            record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_BLE);
             ESP_LOGW(TAG, "BLE quiesce rejected; staying awake");
             (void)cancel_sleep_attempt();
             return;
@@ -291,8 +294,7 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
             return;
         }
         if (ble == FRAME_BLE_SLEEP_FAILED) {
-            s_power_debug_rtc.last_preflight_error =
-                PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
+            record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_BLE);
             ESP_LOGW(TAG, "BLE did not quiesce; staying awake");
             (void)cancel_sleep_attempt();
             return;
@@ -305,8 +307,7 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
     // cannot be hidden by the one-second connected-idle cache.
     decision = build_snapshot(runtime_transition_pending, true, &snapshot);
     if (decision != FRAME_POWER_READY) {
-        s_power_debug_rtc.last_preflight_error =
-            PLATFORM_POWER_PREFLIGHT_ERROR_POLICY;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_POLICY);
         (void)cancel_sleep_attempt();
         return;
     }
@@ -316,8 +317,7 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
         PLATFORM_POWER_PREFLIGHT_DISPLAY_SAFE;
     captive_portal_stop();
     if (!pmic_prepare_for_deep_sleep()) {
-        s_power_debug_rtc.last_preflight_error =
-            PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS);
         ESP_LOGE(TAG, "E-paper rails did not turn off; staying awake");
         (void)cancel_sleep_attempt();
         return;
@@ -330,6 +330,9 @@ void frame_power_manager_poll(bool runtime_transition_pending) {
         PLATFORM_POWER_PREFLIGHT_WIFI_OFF;
     s_power_debug_rtc.preflight_completions++;
     s_power_debug_rtc.entries++;
+    platform_power_evidence_note_preflight(
+        s_power_debug_rtc.last_preflight_flags);
+    platform_power_evidence_note_entry(pmic_get_battery_percent());
     s_debug_force_not_before_ms = 0;
     esp_deep_sleep_start();
 }

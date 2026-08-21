@@ -27,6 +27,9 @@ processors. This alpha changes the power behavior of both:
   mode, dim, panel off, and finally ESP32-S3 Deep-sleep. BLE, Wi-Fi, the LCD,
   and the backlight shut down first. Turning the encoder wakes the Dial with a
   fresh boot and reconnect.
+- **Complete LCD/touch terminal shutdown:** Display Off alone left the LCD
+  controller running. The Dial now also sends the controller's Sleep In command
+  and holds the touch controller in reset before the ESP32-S3 enters Deep-sleep.
 - **No inherited timer wake:** before Deep-sleep, the shared power preflight
   disables automatic Light-sleep and clears its temporary timer wake source.
   A direct powered test exposed and removed the timer reboot that had prevented
@@ -56,9 +59,18 @@ policy and stay awake longer than expected.
 To test the sleep path while the Dial is plugged in, open `/power-debug` from
 its connected settings page and start the one-time 15-second test. After the
 encoder wakes it, the page reports whether shutdown preparation completed,
-whether Deep-sleep was requested, and what caused the wake. These counters are
+whether Deep-sleep was requested, and what caused the wake. The same test is
+available as `POST /power-debug/sleep` for scripts and integrations. Sleep-entry,
+boot, and brownout evidence is stored in NVS at lifecycle boundaries, so a full
+battery collapse no longer erases the previous entry marker. These counters are
 firmware evidence, not an ammeter; use an external meter to measure actual
 current and to confirm the auxiliary ESP32's contribution.
+
+The earlier v2.7.0-alpha.2 Dial image fully discharged one test unit overnight
+despite reporting a Deep-sleep entry. This build closes the LCD/touch shutdown
+gap and adds evidence that survives brownout, but battery runtime remains
+unproven until an exact image completes an overnight test and external-current
+measurement.
 
 The Dial works after installing the main firmware. For the lowest idle draw,
 also park the board's otherwise-unused auxiliary ESP32 once:
@@ -123,11 +135,14 @@ shows the power source, active timeouts, display state, reset and wake cause,
 and the sleep or power-off capabilities that the exact target implements.
 
 All nine controllers provide the one-time 15-second powered terminal-power
-test. Dial, Frame, and RLCD retain evidence in RTC memory across processor
-Deep-sleep. Tough, AtomS3 JoyStick, M5Stack Dial v1.1, StickS3, StopWatch, and
-Kizz persist the completed shutdown marker in NVS so it survives full PMIC
-rail-off. The endpoint is passive: it does no background polling when nobody
-opens it.
+test through the page and `POST /power-debug/sleep`. Every target writes a
+shared NVS lifecycle journal only at boot and terminal-sleep boundaries. Its
+bounded eight-event tail records the sequence, boot number, uptime, battery,
+preflight flags/error, reset cause, and wake cause for recent boot, attempt,
+error, preflight, and entry events. Summary counters and the previous-entry
+marker survive complete power loss. Dial, Frame, and RLCD additionally retain
+fast RTC evidence across processor Deep-sleep. The endpoint is passive: it does
+no background polling when nobody opens it.
 
 The M5-family targets now share one terminal preflight instead of jumping
 straight from a UI timeout into a board-specific power call. It removes the

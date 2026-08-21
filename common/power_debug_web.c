@@ -6,11 +6,13 @@
 
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define POWER_DEBUG_BODY_SIZE 6144
+#define POWER_DEBUG_BODY_SIZE 8192
+#define POWER_DEBUG_TRACE_SIZE 2048
 #define POWER_DEBUG_TEST_DELAY_SEC 15
 
 static const char *state_name(platform_power_state_t state) {
@@ -76,6 +78,70 @@ static const char *preflight_error_name(uint32_t error) {
     }
 }
 
+static const char *trace_type_name(uint8_t type) {
+    switch ((platform_power_trace_type_t)type) {
+    case PLATFORM_POWER_TRACE_BOOT: return "boot";
+    case PLATFORM_POWER_TRACE_ATTEMPT: return "attempt";
+    case PLATFORM_POWER_TRACE_ERROR: return "error";
+    case PLATFORM_POWER_TRACE_PREFLIGHT: return "preflight";
+    case PLATFORM_POWER_TRACE_ENTRY: return "entry";
+    default: return "unknown";
+    }
+}
+
+static void append_text(char *buffer, size_t capacity, size_t *used,
+                        const char *format, ...) {
+    if (*used >= capacity) return;
+    va_list args;
+    va_start(args, format);
+    const int written = vsnprintf(
+        buffer + *used, capacity - *used, format, args);
+    va_end(args);
+    if (written < 0) return;
+    const size_t available = capacity - *used;
+    *used += (size_t)written >= available ? available - 1 : (size_t)written;
+}
+
+static void render_trace(const platform_power_diagnostics_t *power,
+                         bool json, char *buffer, size_t capacity) {
+    size_t used = 0;
+    append_text(buffer, capacity, &used,
+                json ? "[" : "<table><tr><th>#</th><th>Event</th><th>Boot / uptime</th>"
+                                  "<th>Battery</th><th>Flags / error</th>"
+                                  "<th>Reset / wake</th></tr>");
+    for (uint8_t i = 0; i < power->trace_event_count; ++i) {
+        const platform_power_trace_event_t *event = &power->trace_events[i];
+        if (json) {
+            append_text(
+                buffer, capacity, &used,
+                "%s{\"sequence\":%lu,\"type\":\"%s\",\"boot_id\":%lu,"
+                "\"uptime_ms\":%lu,\"battery_level\":%d,\"flags\":%lu,"
+                "\"error\":\"%s\",\"reset_reason\":\"%s\","
+                "\"wakeup_cause\":\"%s\"}",
+                i ? "," : "", (unsigned long)event->sequence,
+                trace_type_name(event->type), (unsigned long)event->boot_id,
+                (unsigned long)event->uptime_ms, event->battery_level,
+                (unsigned long)event->preflight_flags,
+                preflight_error_name(event->preflight_error),
+                reset_reason_name(event->reset_reason),
+                wakeup_cause_name(event->wakeup_cause));
+        } else {
+            append_text(
+                buffer, capacity, &used,
+                "<tr><td>%lu</td><td>%s</td><td>%lu / %lums</td><td>%d</td>"
+                "<td><code>0x%02lx</code> / %s</td><td>%s / %s</td></tr>",
+                (unsigned long)event->sequence, trace_type_name(event->type),
+                (unsigned long)event->boot_id,
+                (unsigned long)event->uptime_ms, event->battery_level,
+                (unsigned long)event->preflight_flags,
+                preflight_error_name(event->preflight_error),
+                reset_reason_name(event->reset_reason),
+                wakeup_cause_name(event->wakeup_cause));
+        }
+    }
+    append_text(buffer, capacity, &used, json ? "]" : "</table>");
+}
+
 static esp_err_t power_debug_get_handler(httpd_req_t *req) {
     platform_power_diagnostics_t power = {0};
     platform_power_diagnostics_snapshot(&power);
@@ -89,11 +155,15 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
         strcmp(format, "json") == 0;
 
     char *body = malloc(POWER_DEBUG_BODY_SIZE);
-    if (!body) {
+    char *trace = malloc(POWER_DEBUG_TRACE_SIZE);
+    if (!body || !trace) {
+        free(body);
+        free(trace);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                             "Out of memory");
         return ESP_FAIL;
     }
+    render_trace(&power, wants_json, trace, POWER_DEBUG_TRACE_SIZE);
 
     const char *device = platform_device_slug();
     const bool evidence_supported =
@@ -105,7 +175,7 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
         httpd_resp_set_type(req, "application/json");
         snprintf(
             body, POWER_DEBUG_BODY_SIZE,
-            "{\"schema_version\":1,\"device\":\"%s\","
+            "{\"schema_version\":2,\"device\":\"%s\","
             "\"measurement_scope\":\"firmware evidence; not an ammeter\","
             "\"uptime_ms\":%llu,\"state\":\"%s\",\"strategy\":\"%s\","
             "\"capabilities\":%lu,\"battery_level\":%d,"
@@ -121,7 +191,11 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "\"retained_evidence\":{\"supported\":%s,\"attempts\":%lu,"
             "\"preflight_completions\":%lu,\"entries\":%lu,\"hardware_wakes\":%lu,"
             "\"last_preflight_flags\":%lu,\"last_preflight_error\":\"%s\","
-            "\"reset_reason\":\"%s\",\"wakeup_cause\":\"%s\"},"
+            "\"durable_boots\":%lu,\"brownout_boots\":%lu,"
+            "\"entry_pending\":%s,\"last_boot_followed_entry\":%s,"
+            "\"last_entry_battery_level\":%d,"
+            "\"reset_reason\":\"%s\",\"wakeup_cause\":\"%s\","
+            "\"events\":%s},"
             "\"powered_test_supported\":%s}",
             device, (unsigned long long)power.uptime_ms,
             state_name(power.state), strategy_name(power.capabilities),
@@ -150,8 +224,14 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (unsigned long)power.hardware_wakes,
             (unsigned long)power.last_preflight_flags,
             preflight_error_name(power.last_preflight_error),
+            (unsigned long)power.durable_boots,
+            (unsigned long)power.durable_brownouts,
+            power.terminal_entry_pending ? "true" : "false",
+            power.last_boot_followed_terminal_entry ? "true" : "false",
+            power.last_entry_battery_level,
             reset_reason_name(power.reset_reason),
             wakeup_cause_name(power.wakeup_cause),
+            trace,
             test_supported ? "true" : "false");
     } else {
         httpd_resp_set_type(req, "text/html");
@@ -183,7 +263,12 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "<tr><th>Hardware wakes</th><td>%lu</td></tr>"
             "<tr><th>Last preflight flags</th><td><code>0x%02lx</code></td></tr>"
             "<tr><th>Last preflight error</th><td>%s</td></tr>"
+            "<tr><th>Durable boots / brownouts</th><td>%lu / %lu</td></tr>"
+            "<tr><th>Pending entry</th><td>%s</td></tr>"
+            "<tr><th>Last boot followed an entry</th><td>%s</td></tr>"
+            "<tr><th>Entry battery</th><td>%d</td></tr>"
             "<tr><th>This boot</th><td>reset %s · wake %s · uptime %llums</td></tr></table>"
+            "<h2>Persistent event tail</h2>%s"
             "%s</body></html>",
             device, device,
             (power.capabilities & PLATFORM_POWER_CAP_AUXILIARY_SOC)
@@ -214,9 +299,15 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (unsigned long)power.hardware_wakes,
             (unsigned long)power.last_preflight_flags,
             preflight_error_name(power.last_preflight_error),
+            (unsigned long)power.durable_boots,
+            (unsigned long)power.durable_brownouts,
+            power.terminal_entry_pending ? "yes" : "no",
+            power.last_boot_followed_terminal_entry ? "yes" : "no",
+            power.last_entry_battery_level,
             reset_reason_name(power.reset_reason),
             wakeup_cause_name(power.wakeup_cause),
             (unsigned long long)power.uptime_ms,
+            trace,
             test_supported
                 ? "<h2>Powered test</h2><p>This bypasses the external-power timeout once. "
                   "The target enters its implemented sleep path after 15 seconds. Wake it with "
@@ -229,6 +320,7 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
 
     httpd_resp_send(req, body, strlen(body));
     free(body);
+    free(trace);
     return ESP_OK;
 }
 

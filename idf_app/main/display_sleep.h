@@ -2,6 +2,7 @@
 #define DISPLAY_SLEEP_H
 
 #include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "rk_cfg.h"
@@ -51,9 +52,12 @@ typedef struct {
  * @brief Initialize display sleep/dim functionality
  *
  * @param panel_handle LCD panel handle for power control
+ * @param panel_io_handle LCD command transport for explicit Sleep In/Out
  * @param lvgl_task_handle LVGL task handle for priority control (can be NULL)
  */
-void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_task_handle);
+void display_sleep_init(esp_lcd_panel_handle_t panel_handle,
+                        esp_lcd_panel_io_handle_t panel_io_handle,
+                        TaskHandle_t lvgl_task_handle);
 
 /**
  * @brief Enter art mode - hide controls, keep full brightness

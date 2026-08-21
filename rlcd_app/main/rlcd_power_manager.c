@@ -7,6 +7,7 @@
 #include "platform/platform_task.h"
 #include "platform_input_rlcd.h"
 #include "rlcd_display.h"
+#include "rlcd_battery.h"
 #include "rlcd_ui.h"
 #include "wifi_manager.h"
 
@@ -44,6 +45,11 @@ static bool s_ble_quiescing;
 static uint64_t s_retry_not_before_ms;
 static uint64_t s_debug_force_not_before_ms;
 static uint32_t s_debug_arm_count;
+
+static void record_preflight_error(uint32_t error) {
+    s_debug.last_preflight_error = error;
+    platform_power_evidence_note_error(error);
+}
 
 static uint64_t now_ms(void) {
     return (uint64_t)esp_timer_get_time() / 1000ULL;
@@ -91,8 +97,7 @@ static bool sleep_requested(bool runtime_transition_pending) {
 static bool arm_wake(void) {
     if (!rlcd_input_wake_button_released() ||
         gpio_get_level(RLCD_WAKE_GPIO) == 0) {
-        s_debug.last_preflight_error =
-            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE);
         return false;
     }
     if (!platform_power_prepare_for_deep_sleep() ||
@@ -103,8 +108,7 @@ static bool arm_wake(void) {
         esp_sleep_enable_ext1_wakeup_io(1ULL << RLCD_WAKE_GPIO,
                                         ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK) {
         (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-        s_debug.last_preflight_error =
-            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
         ESP_LOGE(TAG, "Could not configure KEY wake; staying awake");
         return false;
     }
@@ -149,6 +153,7 @@ void rlcd_power_manager_poll(bool runtime_transition_pending) {
     if (!s_ble_quiescing) {
         retained_init();
         s_debug.attempts++;
+        platform_power_evidence_note_attempt();
         s_debug.last_preflight_flags = 0;
         s_debug.last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_NONE;
         if (!arm_wake()) {
@@ -161,7 +166,7 @@ void rlcd_power_manager_poll(bool runtime_transition_pending) {
     rlcd_ble_sleep_status_t ble = ble_hid_host_rlcd_prepare_for_sleep();
     if (ble == RLCD_BLE_SLEEP_PENDING) return;
     if (ble == RLCD_BLE_SLEEP_FAILED) {
-        s_debug.last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_BLE);
         ESP_LOGW(TAG, "BLE did not quiesce; staying awake");
         cancel_attempt();
         return;
@@ -169,12 +174,12 @@ void rlcd_power_manager_poll(bool runtime_transition_pending) {
     s_debug.last_preflight_flags |= PLATFORM_POWER_PREFLIGHT_BLE_OFF;
 
     if (!sleep_requested(runtime_transition_pending)) {
-        s_debug.last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_POLICY;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_POLICY);
         cancel_attempt();
         return;
     }
     if (!rlcd_display_prepare_for_sleep()) {
-        s_debug.last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_DISPLAY;
+        record_preflight_error(PLATFORM_POWER_PREFLIGHT_ERROR_DISPLAY);
         cancel_attempt();
         return;
     }
@@ -187,6 +192,8 @@ void rlcd_power_manager_poll(bool runtime_transition_pending) {
     s_debug.last_preflight_flags |= PLATFORM_POWER_PREFLIGHT_WIFI_OFF;
     s_debug.preflight_completions++;
     s_debug.entries++;
+    platform_power_evidence_note_preflight(s_debug.last_preflight_flags);
+    platform_power_evidence_note_entry(rlcd_battery_percent());
     s_debug_force_not_before_ms = 0;
     ESP_LOGI(TAG,
              "Deep-sleep preflight complete: BLE off, WiFi off, ST7305 asleep; KEY wake armed");
