@@ -13,7 +13,7 @@ CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI="ws://192.168.1.101:8088/voice/v1"
 # Enrollment is an independent deployment. Never derive this from the UHC URL.
 CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI="ws://192.168.1.101:8091/v1/device"
 CONFIG_M5_PLATFORM_DEVICE_ID="kizz-1"
-CONFIG_M5_PLATFORM_DEVICE_PROFILE="m5stack_stackchan_v1"
+CONFIG_M5_PLATFORM_DEVICE_PROFILE="m5stack_stackchan_k151_cores3_v1"
 CONFIG_FREERTOS_HZ=1000
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.stackchan.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.stackchan.csv"

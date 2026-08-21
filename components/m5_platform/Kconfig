@@ -43,8 +43,11 @@ config M5_PLATFORM_DEVICE_ID
 
 config M5_PLATFORM_DEVICE_PROFILE
     string "Microphone acoustic device profile"
-    default "m5stack_stackchan_v1" if M5_PLATFORM_EXPECT_STACKCHAN
-    default "m5stack_dial_v1" if M5_PLATFORM_EXPECT_DIAL
-    default "m5stack_frame_v1"
+    default "m5stack_stackchan_k151_cores3_v1" if M5_PLATFORM_EXPECT_STACKCHAN
+    default "unqualified"
+    help
+        Identifies equivalent microphone hardware and preprocessing, not one
+        physical unit. Targets without an implemented and qualified enrollment
+        path must not claim another product's acoustic profile.
 
 endmenu
