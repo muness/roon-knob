@@ -23,6 +23,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <esp_log.h>
@@ -82,8 +83,10 @@ struct StackChanVoiceState {
 
 constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
 esp_websocket_client_handle_t s_voice_ws = nullptr;
+esp_websocket_client_handle_t s_enrollment_ws = nullptr;
 SemaphoreHandle_t s_voice_audio_lock = nullptr;
 SemaphoreHandle_t s_voice_wake_buffer_lock = nullptr;
+SemaphoreHandle_t s_enrollment_lock = nullptr;
 constexpr size_t VOICE_WAKE_BUFFER_SAMPLES = 16000 * 2;
 int16_t *s_voice_wake_buffer = nullptr;
 int16_t *s_voice_staged_wake_sample = nullptr;
@@ -91,12 +94,23 @@ size_t s_voice_wake_buffer_write = 0;
 size_t s_voice_wake_buffer_count = 0;
 size_t s_voice_staged_wake_sample_count = 0;
 bool s_voice_network_ready = false;
+bool s_voice_transport_configured = false;
 std::atomic_bool s_voice_listener_enabled{false};
 std::atomic_bool s_voice_microphone_active{false};
 std::atomic_bool s_voice_waiting_for_response{false};
 std::atomic_bool s_voice_resume_after_sound{false};
 std::atomic_bool s_voice_listening_visual{false};
 std::atomic_bool s_voice_wake_pending{false};
+std::atomic_bool s_enrollment_active{false};
+std::atomic_bool s_enrollment_detected{false};
+bool s_enrollment_sending = false;
+constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
+int16_t *s_enrollment_buffer = nullptr;
+size_t s_enrollment_samples = 0;
+size_t s_enrollment_target_samples = 0;
+char s_enrollment_capture_id[97] = {};
+char s_enrollment_event[513] = {};
+size_t s_enrollment_event_length = 0;
 std::atomic_uint32_t s_voice_audio_epoch{0};
 const esp_afe_sr_iface_t *s_voice_afe = nullptr;
 esp_afe_sr_data_t *s_voice_afe_data = nullptr;
@@ -202,6 +216,151 @@ bool voice_send_audio(const int16_t *pcm, size_t bytes) {
         static_cast<int>(bytes), pdMS_TO_TICKS(1000)) == static_cast<int>(bytes);
 }
 
+bool enrollment_send_text(const char *message) {
+    if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws))
+        return false;
+    const int length = static_cast<int>(strlen(message));
+    return esp_websocket_client_send_text(
+        s_enrollment_ws, message, length, pdMS_TO_TICKS(1000)) == length;
+}
+
+bool enrollment_send_audio(const int16_t *pcm, size_t bytes) {
+    if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws) ||
+        !pcm || !bytes) return false;
+    return esp_websocket_client_send_bin(
+        s_enrollment_ws, reinterpret_cast<const char *>(pcm),
+        static_cast<int>(bytes), pdMS_TO_TICKS(1000)) == static_cast<int>(bytes);
+}
+
+bool enrollment_valid_token(const char *value) {
+    if (!value || !value[0] || strlen(value) > 96) return false;
+    for (const char *cursor = value; *cursor; ++cursor) {
+        if (!isalnum(static_cast<unsigned char>(*cursor)) &&
+            *cursor != '-' && *cursor != '_' && *cursor != '.' && *cursor != ':')
+            return false;
+    }
+    return true;
+}
+
+void enrollment_send_hello() {
+    cJSON *root = cJSON_CreateObject();
+    cJSON *audio = root ? cJSON_AddObjectToObject(root, "audio") : nullptr;
+    cJSON *preprocessing = audio
+        ? cJSON_AddObjectToObject(audio, "preprocessing") : nullptr;
+    if (!root || !audio || !preprocessing) {
+        cJSON_Delete(root);
+        return;
+    }
+    cJSON_AddStringToObject(root, "type", "hello");
+    cJSON_AddStringToObject(root, "device_id", CONFIG_M5_PLATFORM_DEVICE_ID);
+    cJSON_AddStringToObject(root, "device_profile",
+                            CONFIG_M5_PLATFORM_DEVICE_PROFILE);
+    cJSON_AddStringToObject(root, "firmware_sha", HIPHI_FIRMWARE_GIT_SHA);
+    cJSON_AddNumberToObject(audio, "sample_rate", 16000);
+    cJSON_AddNumberToObject(audio, "channels", 1);
+    cJSON_AddStringToObject(audio, "sample_format", "s16le");
+    cJSON_AddStringToObject(audio, "frontend", "m5unified_mic");
+    cJSON_AddStringToObject(audio, "gain_profile", "default");
+    cJSON_AddNumberToObject(preprocessing, "m5unified_magnification", 2);
+    cJSON_AddStringToObject(preprocessing, "wake_frontend",
+                            "tflite_micro_speech");
+    char *message = cJSON_PrintUnformatted(root);
+    if (!message || !enrollment_send_text(message))
+        ESP_LOGW(TAG, "Device enrollment hello could not be sent");
+    cJSON_free(message);
+    cJSON_Delete(root);
+}
+
+void enrollment_send_error(const char *capture_id, const char *reason) {
+    char message[256] = {};
+    snprintf(message, sizeof(message),
+             "{\"type\":\"training_error\",\"capture_id\":\"%s\",\"message\":\"%s\"}",
+             capture_id ? capture_id : "", reason);
+    (void)enrollment_send_text(message);
+}
+
+bool enrollment_start_capture(const char *capture_id, int duration_ms) {
+    if (!enrollment_valid_token(capture_id) || duration_ms < 500 ||
+        duration_ms > 5000 || !s_enrollment_lock || !s_enrollment_buffer) return false;
+    if (!s_voice_microphone_active || s_voice_waiting_for_response) {
+        enrollment_send_error(capture_id, "microphone_unavailable");
+        return false;
+    }
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) != pdTRUE)
+        return false;
+    if (s_enrollment_active || s_enrollment_sending) {
+        xSemaphoreGive(s_enrollment_lock);
+        enrollment_send_error(capture_id, "capture_busy");
+        return false;
+    }
+    strlcpy(s_enrollment_capture_id, capture_id,
+            sizeof(s_enrollment_capture_id));
+    s_enrollment_samples = 0;
+    s_enrollment_target_samples =
+        static_cast<size_t>(duration_ms) * 16000 / 1000;
+    s_enrollment_detected = false;
+    s_voice_wake_pending = false;
+    s_voice_audio_epoch.fetch_add(1, std::memory_order_relaxed);
+    s_enrollment_active = true;
+    xSemaphoreGive(s_enrollment_lock);
+    ESP_LOGI(TAG, "Directed enrollment capture %s started for %d ms",
+             capture_id, duration_ms);
+    m5_platform_voice_feedback("listening");
+    return true;
+}
+
+void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
+    if (!s_enrollment_active || !s_enrollment_lock || !samples) return;
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
+    if (!s_enrollment_active) {
+        xSemaphoreGive(s_enrollment_lock);
+        return;
+    }
+    const size_t remaining = s_enrollment_target_samples - s_enrollment_samples;
+    const size_t copied = std::min(samples, remaining);
+    memcpy(s_enrollment_buffer + s_enrollment_samples, pcm,
+           copied * sizeof(int16_t));
+    s_enrollment_samples += copied;
+    if (s_enrollment_samples < s_enrollment_target_samples) {
+        xSemaphoreGive(s_enrollment_lock);
+        return;
+    }
+    s_enrollment_sending = true;
+    const size_t completed_samples = s_enrollment_samples;
+    char capture_id[sizeof(s_enrollment_capture_id)] = {};
+    strlcpy(capture_id, s_enrollment_capture_id, sizeof(capture_id));
+    xSemaphoreGive(s_enrollment_lock);
+
+    /* Let the streaming inference task consume its final queued frames before
+     * snapshotting provisional detection. The official mic feed pauses only
+     * for this bounded enrollment handoff, never during normal voice use. */
+    vTaskDelay(pdMS_TO_TICKS(150));
+    const bool detected = s_enrollment_detected;
+    s_enrollment_active = false;
+    s_voice_wake_pending = false;
+
+    char header[192] = {};
+    snprintf(header, sizeof(header),
+             "{\"type\":\"training_sample\",\"capture_id\":\"%s\",\"bytes\":%u,\"detected\":%s}",
+             capture_id,
+             static_cast<unsigned>(completed_samples * sizeof(int16_t)),
+             detected ? "true" : "false");
+    const bool sent = enrollment_send_text(header) &&
+        enrollment_send_audio(s_enrollment_buffer,
+                              completed_samples * sizeof(int16_t));
+    if (!sent) ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
+    else ESP_LOGI(TAG, "Enrollment capture %s sent (provisional detected=%s)",
+                  capture_id, detected ? "true" : "false");
+
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_enrollment_sending = false;
+        s_enrollment_samples = 0;
+        s_enrollment_capture_id[0] = '\0';
+        xSemaphoreGive(s_enrollment_lock);
+    }
+    m5_platform_voice_feedback("idle");
+}
+
 void voice_remember_wake_audio(const int16_t *pcm, size_t samples) {
     if (!s_voice_wake_buffer || !s_voice_wake_buffer_lock || !samples) return;
     if (xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(20)) != pdTRUE)
@@ -291,6 +450,7 @@ void voice_feed_task(void *) {
                 ESP_LOGW(TAG, "Kizz wake input dropped %u samples",
                          static_cast<unsigned>(chunk - wake_samples));
 #endif
+            enrollment_capture_audio(pcm, static_cast<size_t>(chunk));
             s_voice_afe->feed(s_voice_afe_data, pcm);
         }
         else vTaskDelay(pdMS_TO_TICKS(5));
@@ -422,7 +582,8 @@ void voice_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_data
     }
     if (event_id != WEBSOCKET_EVENT_DATA) return;
     const auto *event = static_cast<esp_websocket_event_data_t *>(event_data);
-    if (!event || event->op_code != 0x1 || !event->data_ptr ||
+    if (!event || (event->op_code != 0x1 && event->op_code != 0x0) ||
+        !event->data_ptr ||
         event->data_len <= 0 || event->data_len > 512) return;
     char message[513] = {};
     memcpy(message, event->data_ptr, static_cast<size_t>(event->data_len));
@@ -434,21 +595,73 @@ void voice_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_data
     cJSON_Delete(root);
 }
 
+void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
+                         void *event_data) {
+    if (event_id == WEBSOCKET_EVENT_CONNECTED) {
+        ESP_LOGI(TAG, "Independent enrollment service connected");
+        enrollment_send_hello();
+        return;
+    }
+    if (event_id == WEBSOCKET_EVENT_DISCONNECTED ||
+        event_id == WEBSOCKET_EVENT_ERROR) {
+        ESP_LOGW(TAG, "Independent enrollment service unavailable; production voice unchanged");
+        return;
+    }
+    if (event_id != WEBSOCKET_EVENT_DATA) return;
+    const auto *event = static_cast<esp_websocket_event_data_t *>(event_data);
+    if (!event || event->op_code != 0x1 || !event->data_ptr ||
+        event->data_len <= 0 || event->payload_len <= 0 ||
+        event->payload_len > static_cast<int>(sizeof(s_enrollment_event) - 1) ||
+        event->payload_offset < 0 ||
+        event->payload_offset + event->data_len > event->payload_len) return;
+    if (event->payload_offset == 0) {
+        s_enrollment_event_length = static_cast<size_t>(event->payload_len);
+        memset(s_enrollment_event, 0, sizeof(s_enrollment_event));
+    }
+    if (s_enrollment_event_length != static_cast<size_t>(event->payload_len))
+        return;
+    memcpy(s_enrollment_event + event->payload_offset, event->data_ptr,
+           static_cast<size_t>(event->data_len));
+    if (event->payload_offset + event->data_len != event->payload_len) return;
+
+    cJSON *root = cJSON_ParseWithLength(
+        s_enrollment_event, s_enrollment_event_length);
+    s_enrollment_event_length = 0;
+    if (!root) return;
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    if (cJSON_IsString(type) && type->valuestring &&
+        strcmp(type->valuestring, "training_capture") == 0) {
+        cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
+        cJSON *duration_ms = cJSON_GetObjectItemCaseSensitive(root, "duration_ms");
+        if (!cJSON_IsString(capture_id) || !capture_id->valuestring ||
+            !cJSON_IsNumber(duration_ms) ||
+            !enrollment_start_capture(capture_id->valuestring,
+                                      duration_ms->valueint))
+            ESP_LOGW(TAG, "Rejected malformed or unavailable enrollment capture");
+    }
+    cJSON_Delete(root);
+}
+
 void start_voice_transport() {
-    if (s_voice_ws || !s_voice_network_ready) return;
+    if (s_voice_ws || s_enrollment_ws || !s_voice_network_ready) return;
     constexpr const char *voice_uri = CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI;
-    if (!voice_uri[0]) {
-        ESP_LOGI(TAG, "Kizz local voice gateway is not configured");
+    constexpr const char *enrollment_uri = CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI;
+    s_voice_transport_configured = voice_uri[0] != '\0';
+    if (!s_voice_transport_configured && !enrollment_uri[0]) {
+        ESP_LOGI(TAG, "Neither production voice nor enrollment is configured");
         return;
     }
     s_voice_audio_lock = xSemaphoreCreateMutex();
-    s_voice_wake_buffer_lock = xSemaphoreCreateMutex();
-    s_voice_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
-        VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-    s_voice_staged_wake_sample = static_cast<int16_t *>(heap_caps_calloc(
-        VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-    if (!s_voice_audio_lock || !s_voice_wake_buffer_lock || !s_voice_wake_buffer ||
-        !s_voice_staged_wake_sample) {
+    if (s_voice_transport_configured) {
+        s_voice_wake_buffer_lock = xSemaphoreCreateMutex();
+        s_voice_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
+            VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+        s_voice_staged_wake_sample = static_cast<int16_t *>(heap_caps_calloc(
+            VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+    }
+    if (!s_voice_audio_lock || (s_voice_transport_configured &&
+        (!s_voice_wake_buffer_lock || !s_voice_wake_buffer ||
+         !s_voice_staged_wake_sample))) {
         ESP_LOGE(TAG, "Kizz voice audio lock allocation failed");
         return;
     }
@@ -491,31 +704,62 @@ void start_voice_transport() {
         return;
     }
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
-    if (!kizz_wake_word_start([]() { s_voice_wake_pending = true; })) {
+    if (!kizz_wake_word_start([]() {
+            if (s_enrollment_active) s_enrollment_detected = true;
+            else if (s_voice_transport_configured) s_voice_wake_pending = true;
+        })) {
         ESP_LOGE(TAG, "Kizz custom wake model initialization failed");
         s_voice_listener_enabled = false;
         return;
     }
 #endif
 
-    esp_websocket_client_config_t voice_cfg = {};
-    voice_cfg.uri = voice_uri;
-    voice_cfg.buffer_size = 2048;
-    voice_cfg.network_timeout_ms = 10000;
-    voice_cfg.reconnect_timeout_ms = 1000;
-    s_voice_ws = esp_websocket_client_init(&voice_cfg);
-    if (!s_voice_ws) {
-        ESP_LOGE(TAG, "Kizz voice transport allocation failed");
-        return;
+    if (s_voice_transport_configured) {
+        esp_websocket_client_config_t voice_cfg = {};
+        voice_cfg.uri = voice_uri;
+        voice_cfg.buffer_size = 2048;
+        voice_cfg.network_timeout_ms = 10000;
+        voice_cfg.reconnect_timeout_ms = 1000;
+        s_voice_ws = esp_websocket_client_init(&voice_cfg);
+        if (!s_voice_ws) {
+            ESP_LOGE(TAG, "Kizz voice transport allocation failed");
+            return;
+        }
+        ESP_LOGI(TAG, "Starting Kizz local voice gateway at %s", voice_cfg.uri);
+        esp_websocket_register_events(s_voice_ws, WEBSOCKET_EVENT_ANY,
+                                      voice_ws_event, nullptr);
+        esp_websocket_client_start(s_voice_ws);
     }
-    ESP_LOGI(TAG, "Starting Kizz local voice gateway at %s", voice_cfg.uri);
-    esp_websocket_register_events(s_voice_ws, WEBSOCKET_EVENT_ANY,
-                                  voice_ws_event, nullptr);
-    esp_websocket_client_start(s_voice_ws);
+    if (enrollment_uri[0]) {
+        s_enrollment_lock = xSemaphoreCreateMutex();
+        s_enrollment_buffer = static_cast<int16_t *>(heap_caps_calloc(
+            ENROLLMENT_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+        if (!s_enrollment_lock || !s_enrollment_buffer) {
+            ESP_LOGE(TAG, "Enrollment buffer allocation failed; production voice remains enabled");
+        } else {
+            esp_websocket_client_config_t enrollment_cfg = {};
+            enrollment_cfg.uri = enrollment_uri;
+            enrollment_cfg.buffer_size = 2048;
+            enrollment_cfg.network_timeout_ms = 10000;
+            enrollment_cfg.reconnect_timeout_ms = 1000;
+            s_enrollment_ws = esp_websocket_client_init(&enrollment_cfg);
+            if (!s_enrollment_ws) {
+                ESP_LOGE(TAG, "Enrollment transport allocation failed");
+            } else {
+                ESP_LOGI(TAG, "Starting independent enrollment endpoint at %s",
+                         enrollment_cfg.uri);
+                esp_websocket_register_events(
+                    s_enrollment_ws, WEBSOCKET_EVENT_ANY,
+                    enrollment_ws_event, nullptr);
+                esp_websocket_client_start(s_enrollment_ws);
+            }
+        }
+    }
     xTaskCreatePinnedToCore(voice_feed_task, "kizz_afe_feed", 6144,
                             nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(voice_fetch_task, "kizz_afe_fetch", 6144,
-                            nullptr, 5, nullptr, 1);
+    if (s_voice_transport_configured)
+        xTaskCreatePinnedToCore(voice_fetch_task, "kizz_afe_fetch", 6144,
+                                nullptr, 5, nullptr, 1);
 }
 
 void stackchan_voice_note(uint8_t index) {

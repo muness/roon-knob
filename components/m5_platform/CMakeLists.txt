@@ -19,3 +19,16 @@ idf_component_register(
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
+
+execute_process(
+    COMMAND git rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../.."
+    OUTPUT_VARIABLE hiphi_firmware_git_sha
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT hiphi_firmware_git_sha)
+    set(hiphi_firmware_git_sha "unknown")
+endif()
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    HIPHI_FIRMWARE_GIT_SHA="${hiphi_firmware_git_sha}")
