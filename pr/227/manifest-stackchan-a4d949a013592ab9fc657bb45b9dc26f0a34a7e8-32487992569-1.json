@@ -1,0 +1,11 @@
+{
+  "name": "Kizz Playback Companion (PR #227 Hardware-Unverified Alpha)",
+  "version": "pr-227",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_stackchan_bootloader-a4d949a013592ab9fc657bb45b9dc26f0a34a7e8-32487992569-1.bin", "offset": 0},
+    {"path": "hiphi_stackchan_partition-table-a4d949a013592ab9fc657bb45b9dc26f0a34a7e8-32487992569-1.bin", "offset": 32768},
+    {"path": "hiphi_stackchan_ota_data_initial-a4d949a013592ab9fc657bb45b9dc26f0a34a7e8-32487992569-1.bin", "offset": 53248},
+    {"path": "hiphi_stackchan-a4d949a013592ab9fc657bb45b9dc26f0a34a7e8-32487992569-1.bin", "offset": 65536}
+  ]}]
+}
