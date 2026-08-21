@@ -21,6 +21,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "last_boot_followed_terminal_entry",
         "PLATFORM_POWER_TRACE_MAX_EVENTS 8",
         "platform_power_trace_event_t trace_events",
+        "int64_t unix_time_ms",
     ),
     "common/platform/platform_power.c": (
         "controller_config_snapshot(&config)",
@@ -28,7 +29,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL)",
         "pm_config.light_sleep_enable",
         'POWER_EVIDENCE_NAMESPACE = "pwr_evidence"',
-        'POWER_EVIDENCE_KEY = "journal_v3"',
+        'POWER_EVIDENCE_KEY = "journal_v4"',
+        'POWER_EVIDENCE_V3_KEY = "journal_v3"',
         "record.last_boot_followed_entry = record.entry_pending",
         "power_evidence_append(&record, PLATFORM_POWER_TRACE_BOOT",
         "platform_power_evidence_note_boot()",
@@ -39,7 +41,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "common/power_debug_web.c": (
         '"/power-debug"',
         '"/power-debug/sleep"',
-        '"schema_version\\\":2',
+        '"schema_version\\\":3',
+        '"timestamp_utc\\\":%s%s%s',
         '"last_boot_followed_entry\\\"',
         '"events\\\":%s',
         "Persistent event tail",
@@ -50,6 +53,10 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "fetch_now_playing(&state, &power)",
         "wait_for_poll_interval(&power)",
         "check_charging_state_change(power.external_power)",
+    ),
+    "common/wifi_manager.c": (
+        "esp_netif_sntp_init(&config)",
+        "platform_power_evidence_note_time_sync",
     ),
     "common/ui.c": (
         '"platform/platform_power.h"',

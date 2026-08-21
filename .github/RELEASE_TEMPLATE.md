@@ -144,6 +144,11 @@ marker survive complete power loss. Dial, Frame, and RLCD additionally retain
 fast RTC evidence across processor Deep-sleep. The endpoint is passive: it does
 no background polling when nobody opens it.
 
+After the network clock synchronizes, each journal event also carries a UTC
+Unix timestamp and an ISO 8601 UTC rendering. Events written earlier in the
+same boot are backfilled from their monotonic uptime. Until synchronization,
+the endpoint reports the timestamp as unavailable instead of fabricating one.
+
 The M5-family targets now share one terminal preflight instead of jumping
 straight from a UI timeout into a board-specific power call. It removes the
 automatic Light-sleep timer wake, stops input and Wi-Fi, records durable

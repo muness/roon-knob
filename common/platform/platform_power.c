@@ -26,7 +26,47 @@
 
 #ifdef ESP_PLATFORM
 #define POWER_EVIDENCE_MAGIC 0x50575232u /* PWR2 */
-#define POWER_EVIDENCE_VERSION 3u
+#define POWER_EVIDENCE_VERSION 4u
+
+typedef struct {
+    uint32_t sequence;
+    uint32_t boot_id;
+    uint32_t uptime_ms;
+    uint32_t preflight_flags;
+    uint32_t preflight_error;
+    int16_t battery_level;
+    int8_t reset_reason;
+    int8_t wakeup_cause;
+    uint8_t type;
+    uint8_t reserved[3];
+} power_evidence_event_v3_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t boots;
+    uint32_t brownouts;
+    uint32_t attempts;
+    uint32_t preflights;
+    uint32_t entries;
+    uint32_t hardware_wakes;
+    uint32_t last_flags;
+    uint32_t last_error;
+    int32_t last_reset_reason;
+    int32_t last_wakeup_cause;
+    int32_t last_entry_battery_level;
+    uint8_t entry_pending;
+    uint8_t last_boot_followed_entry;
+    uint8_t trace_count;
+    uint8_t trace_next;
+    uint32_t next_trace_sequence;
+    power_evidence_event_v3_t trace[PLATFORM_POWER_TRACE_MAX_EVENTS];
+} power_evidence_record_v3_t;
+
+_Static_assert(sizeof(power_evidence_event_v3_t) == 28,
+               "v3 event migration layout changed");
+_Static_assert(sizeof(power_evidence_record_v3_t) == 284,
+               "v3 journal migration layout changed");
 
 typedef struct {
     uint32_t magic;
@@ -51,7 +91,8 @@ typedef struct {
 } power_evidence_record_t;
 
 static const char *POWER_EVIDENCE_NAMESPACE = "pwr_evidence";
-static const char *POWER_EVIDENCE_KEY = "journal_v3";
+static const char *POWER_EVIDENCE_KEY = "journal_v4";
+static const char *POWER_EVIDENCE_V3_KEY = "journal_v3";
 static SemaphoreHandle_t s_power_evidence_mutex;
 static bool s_power_evidence_boot_recorded;
 
@@ -88,6 +129,44 @@ static void power_evidence_load(power_evidence_record_t *record) {
         stored.trace_count <= PLATFORM_POWER_TRACE_MAX_EVENTS &&
         stored.trace_next < PLATFORM_POWER_TRACE_MAX_EVENTS) {
         *record = stored;
+        nvs_close(handle);
+        return;
+    }
+
+    power_evidence_record_v3_t legacy;
+    size = sizeof(legacy);
+    if (nvs_get_blob(handle, POWER_EVIDENCE_V3_KEY, &legacy, &size) == ESP_OK &&
+        size == sizeof(legacy) && legacy.magic == POWER_EVIDENCE_MAGIC &&
+        legacy.version == 3 &&
+        legacy.trace_count <= PLATFORM_POWER_TRACE_MAX_EVENTS &&
+        legacy.trace_next < PLATFORM_POWER_TRACE_MAX_EVENTS) {
+        record->boots = legacy.boots;
+        record->brownouts = legacy.brownouts;
+        record->attempts = legacy.attempts;
+        record->preflights = legacy.preflights;
+        record->entries = legacy.entries;
+        record->hardware_wakes = legacy.hardware_wakes;
+        record->last_flags = legacy.last_flags;
+        record->last_error = legacy.last_error;
+        record->last_reset_reason = legacy.last_reset_reason;
+        record->last_wakeup_cause = legacy.last_wakeup_cause;
+        record->last_entry_battery_level = legacy.last_entry_battery_level;
+        record->entry_pending = legacy.entry_pending;
+        record->last_boot_followed_entry = legacy.last_boot_followed_entry;
+        record->trace_count = legacy.trace_count;
+        record->trace_next = legacy.trace_next;
+        record->next_trace_sequence = legacy.next_trace_sequence;
+        for (uint8_t i = 0; i < PLATFORM_POWER_TRACE_MAX_EVENTS; ++i) {
+            record->trace[i].sequence = legacy.trace[i].sequence;
+            record->trace[i].boot_id = legacy.trace[i].boot_id;
+            record->trace[i].uptime_ms = legacy.trace[i].uptime_ms;
+            record->trace[i].preflight_flags = legacy.trace[i].preflight_flags;
+            record->trace[i].preflight_error = legacy.trace[i].preflight_error;
+            record->trace[i].battery_level = legacy.trace[i].battery_level;
+            record->trace[i].reset_reason = legacy.trace[i].reset_reason;
+            record->trace[i].wakeup_cause = legacy.trace[i].wakeup_cause;
+            record->trace[i].type = legacy.trace[i].type;
+        }
     }
     nvs_close(handle);
 }
@@ -114,6 +193,7 @@ static void power_evidence_append(power_evidence_record_t *record,
     event->boot_id = record->boots;
     const uint64_t uptime = platform_millis();
     event->uptime_ms = uptime > UINT32_MAX ? UINT32_MAX : (uint32_t)uptime;
+    event->unix_time_ms = platform_utc_now_ms();
     event->preflight_flags = record->last_flags;
     event->preflight_error = record->last_error;
     event->battery_level = (int16_t)battery_level;
@@ -213,6 +293,30 @@ void platform_power_evidence_note_entry(int battery_level) {
                           PLATFORM_POWER_TRACE_ENTRY, battery_level);
 }
 
+void platform_power_evidence_note_time_sync(int64_t unix_time_ms,
+                                            uint64_t uptime_ms) {
+    if (unix_time_ms <= 0 || !power_evidence_lock()) return;
+    power_evidence_record_t record;
+    power_evidence_load(&record);
+    bool changed = false;
+    for (uint8_t i = 0; i < record.trace_count; ++i) {
+        platform_power_trace_event_t *event = &record.trace[i];
+        if (event->boot_id != record.boots || event->unix_time_ms != 0 ||
+            uptime_ms < event->uptime_ms) {
+            continue;
+        }
+        const uint64_t elapsed = uptime_ms - event->uptime_ms;
+        if (elapsed <= (uint64_t)unix_time_ms) {
+            event->unix_time_ms = unix_time_ms - (int64_t)elapsed;
+            changed = true;
+        }
+    }
+    if (changed && !power_evidence_save(&record)) {
+        LOGE("Could not persist synchronized power evidence timestamps");
+    }
+    power_evidence_unlock();
+}
+
 static uint32_t max_u32(uint32_t a, uint32_t b) {
     return a > b ? a : b;
 }
@@ -257,6 +361,11 @@ void platform_power_evidence_note_error(uint32_t error) { (void)error; }
 void platform_power_evidence_note_preflight(uint32_t flags) { (void)flags; }
 void platform_power_evidence_note_entry(int battery_level) {
     (void)battery_level;
+}
+void platform_power_evidence_note_time_sync(int64_t unix_time_ms,
+                                            uint64_t uptime_ms) {
+    (void)unix_time_ms;
+    (void)uptime_ms;
 }
 #endif
 

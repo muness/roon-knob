@@ -10,9 +10,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define POWER_DEBUG_BODY_SIZE 8192
-#define POWER_DEBUG_TRACE_SIZE 2048
+#define POWER_DEBUG_TRACE_SIZE 3072
 #define POWER_DEBUG_TEST_DELAY_SEC 15
 
 static const char *state_name(platform_power_state_t state) {
@@ -89,6 +90,19 @@ static const char *trace_type_name(uint8_t type) {
     }
 }
 
+static bool format_utc_timestamp(int64_t unix_time_ms, char *out,
+                                 size_t out_size) {
+    if (unix_time_ms <= 0 || !out || out_size == 0) return false;
+    const time_t seconds = (time_t)(unix_time_ms / 1000);
+    struct tm utc = {0};
+    if (!gmtime_r(&seconds, &utc)) return false;
+    const int millis = (int)(unix_time_ms % 1000);
+    return snprintf(out, out_size,
+                    "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                    utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
+                    utc.tm_hour, utc.tm_min, utc.tm_sec, millis) > 0;
+}
+
 static void append_text(char *buffer, size_t capacity, size_t *used,
                         const char *format, ...) {
     if (*used >= capacity) return;
@@ -106,21 +120,28 @@ static void render_trace(const platform_power_diagnostics_t *power,
                          bool json, char *buffer, size_t capacity) {
     size_t used = 0;
     append_text(buffer, capacity, &used,
-                json ? "[" : "<table><tr><th>#</th><th>Event</th><th>Boot / uptime</th>"
+                json ? "[" : "<table><tr><th>#</th><th>Event</th><th>UTC / boot / uptime</th>"
                                   "<th>Battery</th><th>Flags / error</th>"
                                   "<th>Reset / wake</th></tr>");
     for (uint8_t i = 0; i < power->trace_event_count; ++i) {
         const platform_power_trace_event_t *event = &power->trace_events[i];
+        char timestamp[32] = {0};
+        const bool timestamp_valid = format_utc_timestamp(
+            event->unix_time_ms, timestamp, sizeof(timestamp));
         if (json) {
             append_text(
                 buffer, capacity, &used,
                 "%s{\"sequence\":%lu,\"type\":\"%s\",\"boot_id\":%lu,"
-                "\"uptime_ms\":%lu,\"battery_level\":%d,\"flags\":%lu,"
+                "\"uptime_ms\":%lu,\"unix_time_ms\":%lld,"
+                "\"timestamp_utc\":%s%s%s,\"battery_level\":%d,\"flags\":%lu,"
                 "\"error\":\"%s\",\"reset_reason\":\"%s\","
                 "\"wakeup_cause\":\"%s\"}",
                 i ? "," : "", (unsigned long)event->sequence,
                 trace_type_name(event->type), (unsigned long)event->boot_id,
-                (unsigned long)event->uptime_ms, event->battery_level,
+                (unsigned long)event->uptime_ms,
+                (long long)event->unix_time_ms,
+                timestamp_valid ? "\"" : "", timestamp_valid ? timestamp : "null",
+                timestamp_valid ? "\"" : "", event->battery_level,
                 (unsigned long)event->preflight_flags,
                 preflight_error_name(event->preflight_error),
                 reset_reason_name(event->reset_reason),
@@ -128,9 +149,10 @@ static void render_trace(const platform_power_diagnostics_t *power,
         } else {
             append_text(
                 buffer, capacity, &used,
-                "<tr><td>%lu</td><td>%s</td><td>%lu / %lums</td><td>%d</td>"
+                "<tr><td>%lu</td><td>%s</td><td>%s<br>%lu / %lums</td><td>%d</td>"
                 "<td><code>0x%02lx</code> / %s</td><td>%s / %s</td></tr>",
                 (unsigned long)event->sequence, trace_type_name(event->type),
+                timestamp_valid ? timestamp : "clock not synchronized",
                 (unsigned long)event->boot_id,
                 (unsigned long)event->uptime_ms, event->battery_level,
                 (unsigned long)event->preflight_flags,
@@ -175,7 +197,7 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
         httpd_resp_set_type(req, "application/json");
         snprintf(
             body, POWER_DEBUG_BODY_SIZE,
-            "{\"schema_version\":2,\"device\":\"%s\","
+            "{\"schema_version\":3,\"device\":\"%s\","
             "\"measurement_scope\":\"firmware evidence; not an ammeter\","
             "\"uptime_ms\":%llu,\"state\":\"%s\",\"strategy\":\"%s\","
             "\"capabilities\":%lu,\"battery_level\":%d,"

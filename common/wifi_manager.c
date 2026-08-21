@@ -5,6 +5,7 @@
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_netif.h>
+#include <esp_netif_sntp.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
@@ -20,7 +21,9 @@
 #include "controller_config.h"
 #include "os_mutex.h"
 #include "platform/platform_identity.h"
+#include "platform/platform_power.h"
 #include "platform/platform_provisioning.h"
+#include "platform/platform_time.h"
 
 static const char *TAG = "wifi_mgr";
 static const uint32_t s_backoff_ms[] = {500, 1000, 2000, 4000, 8000, 16000, 30000};
@@ -145,6 +148,27 @@ static int s_wifi_idx;           // index into this device's saved WiFi list
 static rk_wifi_scan_state_t s_scan_state = RK_WIFI_SCAN_IDLE;
 static rk_wifi_network_t s_scan_results[RK_WIFI_SCAN_MAX_NETWORKS];
 static size_t s_scan_count;
+static bool s_sntp_initialized;
+
+static void time_sync_cb(struct timeval *tv) {
+    if (!tv || tv->tv_sec < 1704067200) return;
+    const int64_t unix_time_ms = (int64_t)tv->tv_sec * 1000 +
+                                 tv->tv_usec / 1000;
+    platform_power_evidence_note_time_sync(unix_time_ms, platform_millis());
+    ESP_LOGI(TAG, "UTC clock synchronized for durable power timestamps");
+}
+
+static void ensure_time_sync_started(void) {
+    if (s_sntp_initialized) return;
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    config.sync_cb = time_sync_cb;
+    const esp_err_t err = esp_netif_sntp_init(&config);
+    if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+        s_sntp_initialized = true;
+    } else {
+        ESP_LOGW(TAG, "Could not start UTC clock sync: %s", esp_err_to_name(err));
+    }
+}
 
 #ifdef ESP_PLATFORM
 /* os_mutex_lock() provides convenient lazy allocation on ESP, but that
@@ -928,6 +952,7 @@ void wifi_mgr_start(void) {
         unlock_wifi_effect();
         return;
     }
+    ensure_time_sync_started();
     if (!s_sta_netif) {
         s_sta_netif = esp_netif_create_default_wifi_sta();
 

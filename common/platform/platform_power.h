@@ -75,6 +75,7 @@ typedef struct {
     uint32_t sequence;
     uint32_t boot_id;
     uint32_t uptime_ms;
+    int64_t unix_time_ms; /**< UTC Unix milliseconds, or 0 before sync. */
     uint32_t preflight_flags;
     uint32_t preflight_error;
     int16_t battery_level;
@@ -153,6 +154,9 @@ void platform_power_evidence_note_attempt(void);
 void platform_power_evidence_note_error(uint32_t error);
 void platform_power_evidence_note_preflight(uint32_t flags);
 void platform_power_evidence_note_entry(int battery_level);
+/** Backfill current-boot events after the non-blocking network clock syncs. */
+void platform_power_evidence_note_time_sync(int64_t unix_time_ms,
+                                            uint64_t uptime_ms);
 
 const char *platform_power_source_name(platform_power_source_t source);
 
