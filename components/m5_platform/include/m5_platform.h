@@ -47,6 +47,10 @@ void m5_platform_voice_set_zone_provider(
 void m5_platform_voice_network_ready(void);
 void m5_platform_voice_feedback(const char *state);
 bool m5_platform_voice_is_listening(void);
+const char *m5_platform_voice_state(void);
+float m5_platform_voice_wake_probability(void);
+float m5_platform_voice_wake_cutoff(void);
+bool m5_platform_voice_diagnostics_enabled(void);
 bool m5_platform_touch_event(m5_platform_touch_event_t *out);
 
 typedef struct {

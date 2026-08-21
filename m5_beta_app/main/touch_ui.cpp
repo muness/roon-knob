@@ -72,6 +72,10 @@ struct State {
     bool dirty = true;
     bool dimmed = false;
     bool voice_listening = false;
+    bool voice_diagnostics = true;
+    char voice_state[16] = "STARTING";
+    uint8_t voice_score_percent = 0;
+    uint8_t voice_cutoff_percent = 0;
     bool sleeping = false;
     bool picker = false;
     bool settings = false;
@@ -107,6 +111,7 @@ struct State {
     int64_t last_activity_us = 0;
     int64_t sleep_started_us = 0;
     int64_t input_next = 0;
+    int64_t voice_diagnostics_next = 0;
     int64_t touch_quarantine_until = 0;
     int64_t haptic_off = 0;
     float last_accel_mag = 1.0f;
@@ -121,6 +126,10 @@ struct State {
     uint16_t dim_timeout_sec = 0;
     uint16_t sleep_timeout_sec = 0;
     uint16_t power_off_timeout_sec = 0;
+    uint16_t configured_art_timeout_sec = 0;
+    uint16_t configured_dim_timeout_sec = 0;
+    uint16_t configured_sleep_timeout_sec = 0;
+    uint16_t configured_power_off_timeout_sec = 0;
     uint8_t action_face_variant = 0;
     uint8_t ambient_face_variant = 0;
 } s;
@@ -179,6 +188,30 @@ void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int
     stackchan_apply_font(target, size);
     target->setTextColor(color);
     target->drawString(text ? text : "", x, y);
+}
+
+void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
+                                      int height) {
+#if HIPHI_M5_TARGET_ID == 4
+    if (!s.voice_diagnostics) return;
+    char label[40];
+    std::snprintf(label, sizeof(label), "%s %u/%u", s.voice_state,
+                  static_cast<unsigned>(s.voice_score_percent),
+                  static_cast<unsigned>(s.voice_cutoff_percent));
+    const bool fault = std::strcmp(s.voice_state, "FAULT") == 0;
+    const bool active = std::strcmp(s.voice_state, "ARMED") != 0;
+    target->fillRoundRect(72, height - 23, width - 144, 21, 8, STACK_BG);
+    target->drawRoundRect(72, height - 23, width - 144, 21, 8,
+                          fault ? STACK_HOT :
+                          (active ? STACK_ACCENT : STACK_CONTROL));
+    stackchan_draw_center(target, label, width / 2, height - 13, 1,
+                          fault ? STACK_HOT :
+                          (active ? STACK_INK : STACK_SECONDARY));
+#else
+    (void)target;
+    (void)width;
+    (void)height;
+#endif
 }
 
 void stackchan_draw_thick_line(lgfx::LovyanGFX *target, int x0, int y0, int x1,
@@ -1150,6 +1183,7 @@ void render_stackchan_delight() {
             if (progress > 0)
                 target->fillRect(0, h - 4, progress, 4, STACK_ACCENT);
         }
+        stackchan_draw_voice_diagnostics(target, w, h);
         if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
         return;
     }
@@ -1158,6 +1192,7 @@ void render_stackchan_delight() {
      * persistent display state, not a controls timeout or another dashboard. */
     if (s.art_mode && !s.voice_listening && s.artwork_pixels &&
         !connection_lost) {
+        stackchan_draw_voice_diagnostics(target, w, h);
         if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
         return;
     }
@@ -1217,6 +1252,7 @@ void render_stackchan_delight() {
                                       : "TAP ABOVE TO RETURN TO FACE");
         stackchan_draw_center(target, hint, w / 2, 229, 1,
                               s.action_flash ? STACK_HOT : STACK_TERTIARY);
+        stackchan_draw_voice_diagnostics(target, w, h);
         if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
         return;
     }
@@ -1254,6 +1290,7 @@ void render_stackchan_delight() {
         if (progress > 0)
             target->fillRect(0, 156, progress, 2, STACK_ACCENT);
     }
+    stackchan_draw_voice_diagnostics(target, w, h);
     if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
 }
 
@@ -1656,6 +1693,38 @@ extern "C" void touch_ui_process(void) {
         body_notice("BODY SAFELY DISABLED");
     }
 #if HIPHI_M5_TARGET_ID == 4
+    if (now >= s.voice_diagnostics_next) {
+        s.voice_diagnostics_next = now + 100000;
+        const char *voice_state = m5_platform_voice_state();
+        const bool diagnostics = m5_platform_voice_diagnostics_enabled();
+        const uint8_t score = static_cast<uint8_t>(std::clamp(
+            static_cast<int>(m5_platform_voice_wake_probability() * 100.0f +
+                             0.5f), 0, 100));
+        const uint8_t cutoff = static_cast<uint8_t>(std::clamp(
+            static_cast<int>(m5_platform_voice_wake_cutoff() * 100.0f + 0.5f),
+            0, 100));
+        if (diagnostics != s.voice_diagnostics) {
+            s.voice_diagnostics = diagnostics;
+            s.art_timeout_sec = diagnostics ? 0 : s.configured_art_timeout_sec;
+            s.dim_timeout_sec = diagnostics ? 0 : s.configured_dim_timeout_sec;
+            s.sleep_timeout_sec = diagnostics ? 0 : s.configured_sleep_timeout_sec;
+            s.power_off_timeout_sec = diagnostics
+                ? 0 : s.configured_power_off_timeout_sec;
+            if (diagnostics) {
+                s.art_mode = false;
+                wake_display();
+            }
+            s.dirty = true;
+        }
+        if (std::strcmp(voice_state, s.voice_state) != 0 ||
+            score != s.voice_score_percent ||
+            cutoff != s.voice_cutoff_percent) {
+            copy_text(s.voice_state, sizeof(s.voice_state), voice_state);
+            s.voice_score_percent = score;
+            s.voice_cutoff_percent = cutoff;
+            s.dirty = true;
+        }
+    }
     const bool voice_listening = m5_platform_voice_is_listening();
     if (voice_listening != s.voice_listening) {
         s.voice_listening = voice_listening;
@@ -1804,9 +1873,14 @@ extern "C" bool touch_ui_zone_picker_is_current_selection(void){return s.zone_se
 extern "C" void touch_ui_update_battery(void){int level=m5_platform_battery_level();if(level!=s.battery){s.battery=level;s.dirty=true;}}
 extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging){
     if (!cfg) return;
-    s.dim_timeout_sec = rk_cfg_get_dim_timeout(cfg, charging);
-    s.sleep_timeout_sec = rk_cfg_get_sleep_timeout(cfg, charging);
-    s.power_off_timeout_sec = rk_cfg_get_deep_sleep_timeout(cfg, charging);
+    s.configured_dim_timeout_sec = rk_cfg_get_dim_timeout(cfg, charging);
+    s.configured_sleep_timeout_sec = rk_cfg_get_sleep_timeout(cfg, charging);
+    s.configured_power_off_timeout_sec =
+        rk_cfg_get_deep_sleep_timeout(cfg, charging);
+    s.dim_timeout_sec = s.voice_diagnostics ? 0 : s.configured_dim_timeout_sec;
+    s.sleep_timeout_sec = s.voice_diagnostics ? 0 : s.configured_sleep_timeout_sec;
+    s.power_off_timeout_sec = s.voice_diagnostics
+        ? 0 : s.configured_power_off_timeout_sec;
     if ((s.sleeping && s.sleep_timeout_sec == 0) ||
         (s.dimmed && !s.sleeping && s.dim_timeout_sec == 0)) {
         wake_display();
@@ -1814,7 +1888,8 @@ extern "C" void touch_ui_apply_display_config(const rk_cfg_t *cfg,bool charging)
         s.last_activity_us = esp_timer_get_time();
     }
 #if HIPHI_M5_TARGET_ID == 4
-    s.art_timeout_sec = rk_cfg_get_art_mode_timeout(cfg, charging);
+    s.configured_art_timeout_sec = rk_cfg_get_art_mode_timeout(cfg, charging);
+    s.art_timeout_sec = s.voice_diagnostics ? 0 : s.configured_art_timeout_sec;
     ESP_LOGI(TAG, "Kizz Art mode policy: timeout=%us charging=%s",
              static_cast<unsigned>(s.art_timeout_sec),
              charging ? "yes" : "no");
