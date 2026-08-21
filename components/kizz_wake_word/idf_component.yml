@@ -1,0 +1,4 @@
+dependencies:
+  micro_wake_word:
+    git: https://github.com/open-horizon-labs/micro_wake_word_standalone.git
+    version: 3f07c45e890d2a22e121014d37f62e9093598907
