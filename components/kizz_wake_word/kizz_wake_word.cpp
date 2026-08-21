@@ -13,7 +13,7 @@
 namespace {
 constexpr float KIZZ_PROBABILITY_CUTOFF = 0.73f;
 constexpr size_t KIZZ_SLIDING_WINDOW = 5;
-constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 30000;
+constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 40000;
 
 extern const uint8_t kizz_model_start[]
     asm("_binary_hiphi_kizz_tflite_start");
@@ -61,7 +61,25 @@ extern "C" bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb) {
         if (s_detected_cb) s_detected_cb();
     });
     s_wake_word->setup();
+    if (s_wake_word->is_failed()) {
+        ESP_LOGE(TAG, "Kizz wake model setup failed");
+        delete s_wake_word;
+        delete s_microphone;
+        s_wake_word = nullptr;
+        s_microphone = nullptr;
+        s_detected_cb = nullptr;
+        return false;
+    }
     s_wake_word->start();
+    if (s_wake_word->status_has_error() || !s_wake_word->is_running()) {
+        ESP_LOGE(TAG, "Kizz wake model failed to start");
+        delete s_wake_word;
+        delete s_microphone;
+        s_wake_word = nullptr;
+        s_microphone = nullptr;
+        s_detected_cb = nullptr;
+        return false;
+    }
     if (xTaskCreatePinnedToCore(detection_task, "kizz_mww", 6144, nullptr, 5,
                                 nullptr, 1) != pdPASS) {
         ESP_LOGE(TAG, "Kizz wake task creation failed");
