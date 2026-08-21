@@ -14,12 +14,12 @@
 #include "freertos/task.h"
 
 namespace {
-constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.74f;
+constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.80f;
 // This model emits a short, high-confidence pulse for a natural Kizz utterance.
 // Averaging five inference outputs diluted a measured 0.831 pulse below the
 // cutoff and caused a false reject even from a fresh boot.
 constexpr size_t KIZZ_DEFAULT_SLIDING_WINDOW = 1;
-constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 40000;
+constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 65536;
 constexpr char KIZZ_NVS_NAMESPACE[] = "kizz_wake";
 constexpr char KIZZ_NVS_CUTOFF_KEY[] = "cutoff_milli";
 constexpr char KIZZ_NVS_WINDOW_KEY[] = "window";
@@ -133,7 +133,7 @@ bool create_wake_word_model() {
         s_wake_word = nullptr;
         return false;
     }
-    ESP_LOGI(TAG, "HiPhi Kizz model ready: cutoff=%.2f window=%u",
+    ESP_LOGI(TAG, "HiPhi Kizz device-specialist model ready: cutoff=%.2f window=%u",
              static_cast<double>(cutoff), static_cast<unsigned>(window));
     return true;
 }
