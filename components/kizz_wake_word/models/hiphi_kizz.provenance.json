@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "file": "hiphi_kizz.tflite",
+    "sha256": "e7ca5cb7b3449729a59e97d49bb71bc77e348ce433202da73d4cdb304400d5fd",
+    "base_model_sha256": "5d98010b6f9816529e6da24ecc338a61183a8b1f01f151888a8840d2d49ff3ad"
+  },
+  "framework": {
+    "repository": "open-horizon-labs/microWakeWord",
+    "commit": "3976e2487e1f",
+    "architecture": {
+      "type": "mixednet",
+      "stride": 3,
+      "first_conv_filters": 32,
+      "first_conv_kernel_size": 5,
+      "pointwise_filters": [64, 64, 64, 64],
+      "mixconv_kernel_sizes": [[5], [7, 11], [9, 15], [23]],
+      "repeat_in_block": [1, 1, 1, 1],
+      "residual_connection": [0, 0, 0, 0]
+    }
+  },
+  "adaptation": {
+    "training_steps": [50, 100],
+    "learning_rates": [0.000005, 0.000001],
+    "freeze_batch_normalization": true,
+    "device_positive_sampling_weight": 0.25,
+    "device_positive_penalty_weight": 1.0,
+    "general_hard_negative_sampling_weight": 12.0,
+    "general_hard_negative_penalty_weight": 6.0
+  },
+  "device_corpus": {
+    "corpus_id": "hiphi-device-v1",
+    "device_profile": "m5stack_stackchan_k151_cores3_room_scale_v2",
+    "manifest_sha256": "4dcca5d6ed68ecdb623fa516cf49fca452281ea69fd214b6be923f25533cd6e6",
+    "training_positives": 8,
+    "training_hard_negatives": 0,
+    "retained_hard_negatives": 8,
+    "audio_committed_to_git": false
+  },
+  "operating_point": {
+    "probability_cutoff": 0.78,
+    "sliding_window": 1
+  },
+  "evaluation": {
+    "general_test_false_rejection_rate": 0.0752,
+    "general_test_observed_false_accepts_per_hour": 0.0,
+    "fixed_reset_sample_per_phrase": 30,
+    "fixed_reset_positive_acceptance_rate": 0.8,
+    "fixed_reset_hard_negative_acceptance_rate": 0.0,
+    "fixed_reset_hi_fi_acceptance_rate": 0.8333333333,
+    "recorded_training_positive_accepts": 4,
+    "recorded_training_positive_attempts": 8,
+    "physical_positive_attempts": 1,
+    "physical_positive_accepts": 1,
+    "physical_replayed_negative_attempts": 8,
+    "physical_replayed_negative_accepts": 0
+  }
+}
