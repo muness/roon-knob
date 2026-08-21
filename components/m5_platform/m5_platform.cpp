@@ -53,6 +53,8 @@ static AtomJoyStick s_atom_joystick;
 namespace {
 enum class StackChanMotionPhase {
     idle,
+    attention_hold,
+    attention_returning,
     first_pose,
     second_pose,
     third_pose,
@@ -1088,6 +1090,31 @@ void stackchan_pose(int yaw, int pitch, int speed) {
 #endif
 }
 
+void stackchan_begin_listening_pose() {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_stackchan_motion.enabled || s_stackchan_motion.faulted ||
+        s_stackchan_motion.phase != StackChanMotionPhase::idle) return;
+    // Breazeal, "Proto-conversations with an anthropomorphic robot" (RO-MAN
+    // 2000), section 3: Kismet leaned toward the speaker while holding eye
+    // contact. Kizz has two axes, so a centered forward lean carries it.
+    stackchan_pose(0, 160, 220);
+    s_stackchan_motion.phase = StackChanMotionPhase::attention_hold;
+    ESP_LOGI(TAG, "Kizz listening posture: forward and centered");
+#endif
+}
+
+void stackchan_end_listening_pose() {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (s_stackchan_motion.phase != StackChanMotionPhase::attention_hold)
+        return;
+    // Kismet leaned back and shifted gaze before taking its turn. The face
+    // supplies the gaze cue; the official BSP returns the body to neutral.
+    M5StackChan.Motion.goHome(220);
+    s_stackchan_motion.phase = StackChanMotionPhase::attention_returning;
+    s_stackchan_motion.deadline = esp_timer_get_time() + 650000;
+#endif
+}
+
 void stackchan_dance_pose(size_t index) {
     const auto &pose =
         M5_STACKCHAN_DANCES[s_stackchan_motion.dance_variant][index];
@@ -1311,11 +1338,13 @@ extern "C" void m5_platform_voice_network_ready(void) {
 extern "C" void m5_platform_voice_feedback(const char *state) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (!state || !s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
+    if (strcmp(state, "listening") != 0) stackchan_end_listening_pose();
     if (strcmp(state, "listening") == 0) {
         /* Keep recording intact. The attentive face is the immediate cue;
          * the chirp comes after the sentence when audio is safely handed off. */
         s_voice_listening_visual = true;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_ATTENTIVE;
+        stackchan_begin_listening_pose();
     } else if (strcmp(state, "thinking") == 0) {
         s_voice_listening_visual = false;
         s_voice_resume_after_sound = false;
@@ -1598,6 +1627,11 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
     if (expression != M5_PLATFORM_STACKCHAN_CELEBRATE &&
         expression != M5_PLATFORM_STACKCHAN_SAD &&
         expression != M5_PLATFORM_STACKCHAN_DANCE) return false;
+    if (s_stackchan_motion.phase == StackChanMotionPhase::attention_hold ||
+        s_stackchan_motion.phase == StackChanMotionPhase::attention_returning) {
+        // A result expression supersedes the neutral listening return.
+        s_stackchan_motion.phase = StackChanMotionPhase::idle;
+    }
     if (s_stackchan_motion.phase != StackChanMotionPhase::idle) {
         /* Connection loss is higher-value body language than another track
          * celebration. Queue exactly one sadness event behind an active move. */
@@ -1638,6 +1672,17 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
 }
 
 extern "C" void m5_platform_stackchan_expression_process(void) {
+    if (s_stackchan_motion.phase == StackChanMotionPhase::attention_hold)
+        return;
+    if (s_stackchan_motion.phase == StackChanMotionPhase::attention_returning) {
+        if (esp_timer_get_time() < s_stackchan_motion.deadline) return;
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        M5StackChan.Motion.setTorqueEnabled(false);
+#endif
+        s_stackchan_motion.phase = StackChanMotionPhase::idle;
+        ESP_LOGI(TAG, "Kizz listening posture returned home");
+        return;
+    }
     if (!s_stackchan_motion.enabled || s_stackchan_motion.faulted ||
         s_stackchan_motion.phase == StackChanMotionPhase::idle ||
         esp_timer_get_time() < s_stackchan_motion.deadline) return;

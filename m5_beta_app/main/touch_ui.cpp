@@ -194,19 +194,85 @@ void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
                                       int height) {
 #if HIPHI_M5_TARGET_ID == 4
     if (!s.voice_diagnostics) return;
-    char label[40];
-    std::snprintf(label, sizeof(label), "%s %u/%u", s.voice_state,
-                  static_cast<unsigned>(s.voice_score_percent),
-                  static_cast<unsigned>(s.voice_cutoff_percent));
+    const int64_t now = esp_timer_get_time();
+    const int phase = static_cast<int>((now / 120000) % 6);
     const bool fault = std::strcmp(s.voice_state, "FAULT") == 0;
-    const bool active = std::strcmp(s.voice_state, "ARMED") != 0;
-    target->fillRoundRect(72, height - 23, width - 144, 21, 8, STACK_BG);
-    target->drawRoundRect(72, height - 23, width - 144, 21, 8,
+    const bool armed = std::strcmp(s.voice_state, "ARMED") == 0;
+    const bool listening = std::strcmp(s.voice_state, "LISTENING") == 0 ||
+                           std::strcmp(s.voice_state, "CAPTURING") == 0;
+    const bool traveling = std::strcmp(s.voice_state, "THINKING") == 0 ||
+                           std::strcmp(s.voice_state, "UPLOADING") == 0 ||
+                           std::strcmp(s.voice_state, "RECOVERING") == 0;
+    const bool active = !armed && !fault;
+    const uint32_t accent = fault ? STACK_HOT :
+                            (active ? STACK_ACCENT : STACK_SECONDARY);
+
+    // This is a state-machine tell, not a second dashboard. A still ready
+    // light means armed; only active voice work moves.
+    const int badge_width = armed ? 110 : 54;
+    constexpr int badge_height = 25;
+    const int badge_x = (width - badge_width) / 2;
+    const int badge_y = height - badge_height - 2;
+    target->fillRoundRect(badge_x, badge_y, badge_width, badge_height, 12,
+                          STACK_BG);
+    target->drawRoundRect(badge_x, badge_y, badge_width, badge_height, 12,
                           fault ? STACK_HOT :
                           (active ? STACK_ACCENT : STACK_CONTROL));
-    stackchan_draw_center(target, label, width / 2, height - 13, 1,
-                          fault ? STACK_HOT :
-                          (active ? STACK_INK : STACK_SECONDARY));
+
+    const int glyph_x = armed ? badge_x + 17 : width / 2;
+    const int glyph_y = badge_y + badge_height / 2;
+    if (armed) {
+        // A steady status lamp says ready without implying that Kizz is
+        // already listening to a command.
+        target->drawCircle(glyph_x, glyph_y, 6, STACK_CONTROL);
+        target->fillCircle(glyph_x, glyph_y, 3, STACK_SECONDARY);
+    } else if (listening) {
+        // Four animated level bars make listening visible without another
+        // acknowledgement sound competing with the microphone.
+        for (int bar = 0; bar < 4; ++bar) {
+            const int distance = std::abs(phase - bar);
+            const int bar_height = 5 + std::max(0, 3 - distance) * 2;
+            target->fillRoundRect(glyph_x - 10 + bar * 5,
+                                  glyph_y - bar_height / 2, 3, bar_height, 2,
+                                  STACK_ACCENT);
+        }
+    } else if (traveling) {
+        for (int dot = 0; dot < 3; ++dot) {
+            const bool lit = dot == (phase / 2) % 3;
+            target->fillCircle(glyph_x - 7 + dot * 7, glyph_y,
+                               lit ? 3 : 2,
+                               lit ? STACK_ACCENT : STACK_CONTROL);
+        }
+    } else if (fault) {
+        target->fillRoundRect(glyph_x - 1, glyph_y - 7, 3, 9, 2, STACK_HOT);
+        target->fillCircle(glyph_x, glyph_y + 6, 2, STACK_HOT);
+    } else {
+        target->drawArc(glyph_x, glyph_y, 8, 7, phase * 60,
+                        phase * 60 + 220, accent);
+    }
+
+    if (armed) {
+        // Wake confidence against the configured cutoff. The marker explains
+        // the threshold without turning Kizz's face into a numeric console.
+        constexpr int gauge_width = 66;
+        constexpr int gauge_height = 7;
+        const int gauge_x = badge_x + 33;
+        const int gauge_y = glyph_y - gauge_height / 2;
+        target->fillRoundRect(gauge_x, gauge_y, gauge_width, gauge_height, 3,
+                              STACK_CONTROL);
+        const int fill = std::clamp(
+            static_cast<int>(gauge_width * s.voice_score_percent / 100),
+            0, gauge_width);
+        if (fill > 0)
+            target->fillRoundRect(gauge_x, gauge_y, fill, gauge_height, 3,
+                                  s.voice_score_percent >= s.voice_cutoff_percent
+                                      ? STACK_HOT : STACK_ACCENT);
+        const int cutoff_x = gauge_x + std::clamp(
+            static_cast<int>(gauge_width * s.voice_cutoff_percent / 100),
+            1, gauge_width - 2);
+        target->drawFastVLine(cutoff_x, gauge_y - 2, gauge_height + 4,
+                              STACK_INK);
+    }
 #else
     (void)target;
     (void)width;
@@ -220,6 +286,32 @@ void stackchan_draw_thick_line(lgfx::LovyanGFX *target, int x0, int y0, int x1,
     for (int offset = -half; offset <= half; ++offset) {
         target->drawLine(x0, y0 + offset, x1, y1 + offset, color);
     }
+}
+
+void stackchan_draw_listening_face(lgfx::LovyanGFX *target, int width) {
+#if HIPHI_M5_TARGET_ID == 4
+    // Kismet acknowledged human speech by perking its ears, maintaining eye
+    // contact, and looking generally attentive. Kizz's ears are graphic, but
+    // the social cue remains the same and reads from across the room.
+    constexpr int ear_top = 45;
+    constexpr int ear_bottom = 105;
+    target->fillTriangle(8, 82, 31, ear_top, 39, ear_bottom, STACK_HOT);
+    target->fillTriangle(16, 80, 29, 57, 33, 94, STACK_ACCENT);
+    target->fillTriangle(width - 8, 82, width - 31, ear_top,
+                         width - 39, ear_bottom, STACK_HOT);
+    target->fillTriangle(width - 16, 80, width - 29, 57,
+                         width - 33, 94, STACK_ACCENT);
+
+    // Raised brows are Kismet's expectant turn-yield cue. They stay lifted
+    // throughout Kizz's listening turn instead of flashing like an alert.
+    stackchan_draw_thick_line(target, width / 2 - 91, 43,
+                              width / 2 - 38, 36, STACK_ACCENT, 4);
+    stackchan_draw_thick_line(target, width / 2 + 38, 36,
+                              width / 2 + 91, 43, STACK_ACCENT, 4);
+#else
+    (void)target;
+    (void)width;
+#endif
 }
 
 /* Face and body are one performance. These are intentionally bold graphic
@@ -1262,8 +1354,9 @@ void render_stackchan_delight() {
                                                  : s.ambient_face_variant;
     stackchan_draw_performance_face(
         target, face, w, m5_stackchan_face_variant(face, face_entropy));
+    if (s.voice_listening) stackchan_draw_listening_face(target, w);
     const char *expression = s.voice_listening
-                                 ? "LISTENING"
+                                 ? ""
                                  : (s.action_flash && s.action_notice[0]
                                  ? s.action_notice
                                  : (s.body_notice[0] ? s.body_notice
@@ -1281,8 +1374,9 @@ void render_stackchan_delight() {
     stackchan_draw_marquee(target, s.artist, 9, 193, w - 18, 1,
                            STACK_SECONDARY,
                            &s_stackchan_marquees[1]);
-    stackchan_draw_center(target, "TOUCH FOR CONTROLS", w / 2, 224, 1,
-                          STACK_TERTIARY);
+    if (!s.voice_diagnostics)
+        stackchan_draw_center(target, "TOUCH FOR CONTROLS", w / 2, 224, 1,
+                              STACK_TERTIARY);
     if (s.seek_length > 0) {
         const int progress = std::clamp(static_cast<int>(
             static_cast<int64_t>(s.seek_position) * w / s.seek_length), 0, w);
@@ -1724,6 +1818,10 @@ extern "C" void touch_ui_process(void) {
             s.voice_cutoff_percent = cutoff;
             s.dirty = true;
         }
+        // Active voice states animate at the diagnostics sampling cadence.
+        // ARMED stays still unless its confidence gauge changes.
+        if (diagnostics && std::strcmp(voice_state, "ARMED") != 0)
+            s.dirty = true;
     }
     const bool voice_listening = m5_platform_voice_is_listening();
     if (voice_listening != s.voice_listening) {
