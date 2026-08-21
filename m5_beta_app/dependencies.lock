@@ -465,6 +465,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 2.9.3
+  espressif/esp_websocket_client:
+    component_hash: dc00233af846f3a744ada283a300e0d586040aadc3ee67361645ecdce4523672
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.8.0
   espressif/jsmn:
     component_hash: d80350c41bbaa827c98a25b6072df00884e72f54885996fab4a4f0aebce6b6c3
     dependencies:
@@ -682,9 +692,10 @@ dependencies:
     version: 0.2.19
 direct_dependencies:
 - espressif/arduino-esp32
+- espressif/esp_websocket_client
 - espressif/mdns
 - idf
 - m5stack/m5unified
-manifest_hash: c2760906bc65fbb7a2cf238353e6add375d241f6061459e5f46f99db802f7180
+manifest_hash: 866648b5c99e52042665937875a73c9666160109df961bdca656553a22cc7676
 target: esp32s3
 version: 2.0.0
