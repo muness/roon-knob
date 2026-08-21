@@ -1,0 +1,11 @@
+{
+  "name": "M5StickS3 Twist Remote (PR #227 Hardware-Unverified Alpha)",
+  "version": "pr-227",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_sticks3_bootloader-660b4c412e7ab6c560341b9a2a86f963bca18401-32496967355-1.bin", "offset": 0},
+    {"path": "hiphi_sticks3_partition-table-660b4c412e7ab6c560341b9a2a86f963bca18401-32496967355-1.bin", "offset": 32768},
+    {"path": "hiphi_sticks3_ota_data_initial-660b4c412e7ab6c560341b9a2a86f963bca18401-32496967355-1.bin", "offset": 53248},
+    {"path": "hiphi_sticks3-660b4c412e7ab6c560341b9a2a86f963bca18401-32496967355-1.bin", "offset": 65536}
+  ]}]
+}
