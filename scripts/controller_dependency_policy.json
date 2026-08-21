@@ -238,6 +238,7 @@
     "dial|common/wifi_manager.h|common/controller_config.h",
     "dial|idf_app/main/battery.c|common/platform/platform_time.h",
     "dial|idf_app/main/battery.c|idf_app/main/battery.h",
+    "dial|idf_app/main/battery.h|common/platform/platform_power.h",
     "dial|idf_app/main/ble_hid_host_dial.c|common/controller_ble_input.h",
     "dial|idf_app/main/ble_hid_host_dial.c|common/platform/platform_task.h",
     "dial|idf_app/main/ble_hid_host_dial.c|components/rk_ble_hid_host/include/rk_ble_hid_host.h",

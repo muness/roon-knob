@@ -38,6 +38,8 @@ enum {
     PLATFORM_POWER_CAP_RTC_EVIDENCE = PLATFORM_POWER_CAP_DURABLE_EVIDENCE,
     PLATFORM_POWER_CAP_FORCED_TEST = 1u << 4,
     PLATFORM_POWER_CAP_AUXILIARY_SOC = 1u << 5,
+    /** Target can run the persistent voltage-curve experiment. */
+    PLATFORM_POWER_CAP_VOLTAGE_EXPERIMENT = 1u << 6,
 };
 
 enum {
@@ -61,6 +63,49 @@ typedef enum {
 } platform_power_preflight_error_t;
 
 #define PLATFORM_POWER_TRACE_MAX_EVENTS 8
+#define PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES 24
+
+typedef struct {
+    bool valid;
+    int32_t raw_adc;
+    int32_t adc_mv;
+    int32_t battery_mv;
+    int16_t battery_level;
+} platform_power_measurement_t;
+
+typedef enum {
+    PLATFORM_POWER_EXPERIMENT_IDLE = 0,
+    PLATFORM_POWER_EXPERIMENT_ARMED,
+    PLATFORM_POWER_EXPERIMENT_RUNNING,
+    PLATFORM_POWER_EXPERIMENT_COMPLETE,
+} platform_power_experiment_state_t;
+
+typedef struct {
+    uint32_t sequence;
+    uint32_t elapsed_sec;
+    int64_t unix_time_ms;
+    int32_t raw_adc;
+    int32_t adc_mv;
+    int32_t battery_mv;
+    int16_t battery_level;
+    int8_t reset_reason;
+    int8_t wakeup_cause;
+} platform_power_experiment_sample_t;
+
+typedef struct {
+    uint64_t experiment_id;
+    platform_power_experiment_state_t state;
+    uint32_t interval_sec; /**< 0 means external-profiler mode. */
+    uint32_t maximum_duration_sec;
+    uint32_t elapsed_sec;
+    uint32_t next_sleep_sec;
+    uint32_t total_samples;
+    uint32_t intrusive_wakes;
+    bool observer_effect;
+    uint8_t sample_count;
+    platform_power_experiment_sample_t
+        samples[PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES];
+} platform_power_experiment_t;
 
 typedef enum {
     PLATFORM_POWER_TRACE_BOOT = 1,
@@ -136,6 +181,30 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out);
 
 /** Arm a target-implemented one-time powered sleep test when supported. */
 bool platform_power_debug_arm_sleep(uint32_t delay_sec);
+
+/** True only where a target has an early, radio/UI-free sampling path. */
+bool platform_power_experiment_supported(void);
+
+/** Replace any previous experiment and persist a newly armed run. */
+bool platform_power_experiment_arm(uint32_t interval_sec,
+                                   uint32_t maximum_duration_sec,
+                                   uint64_t *experiment_id_out);
+
+/** Record the production sleep boundary and return its requested timer wake. */
+bool platform_power_experiment_note_entry(
+    const platform_power_measurement_t *measurement,
+    uint32_t *next_sleep_sec_out);
+
+/**
+ * Record an early boot before UI/radios. Returns true when the target should
+ * immediately re-enter Deep-sleep for the returned interval.
+ */
+bool platform_power_experiment_note_early_boot(
+    const platform_power_measurement_t *measurement,
+    uint32_t *next_sleep_sec_out);
+
+bool platform_power_experiment_snapshot(platform_power_experiment_t *out);
+bool platform_power_experiment_clear(void);
 
 /**
  * Disable automatic Light-sleep and clear inherited wake sources before a

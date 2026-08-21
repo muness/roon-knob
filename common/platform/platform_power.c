@@ -10,6 +10,7 @@
 #ifdef ESP_PLATFORM
 #include <esp_err.h>
 #include <esp_pm.h>
+#include <esp_random.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <nvs.h>
@@ -96,6 +97,32 @@ static const char *POWER_EVIDENCE_V3_KEY = "journal_v3";
 static SemaphoreHandle_t s_power_evidence_mutex;
 static bool s_power_evidence_boot_recorded;
 
+#define POWER_EXPERIMENT_MAGIC 0x50584531u /* PXE1 */
+#define POWER_EXPERIMENT_VERSION 1u
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint64_t experiment_id;
+    uint32_t state;
+    uint32_t interval_sec;
+    uint32_t maximum_duration_sec;
+    uint32_t elapsed_sec;
+    uint32_t next_sleep_sec;
+    uint32_t total_samples;
+    uint32_t intrusive_wakes;
+    uint32_t next_sample_sequence;
+    uint8_t observer_effect;
+    uint8_t sample_count;
+    uint8_t sample_next;
+    uint8_t reserved;
+    platform_power_experiment_sample_t
+        samples[PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES];
+} power_experiment_record_t;
+
+static const char *POWER_EXPERIMENT_NAMESPACE = "pwr_experiment";
+static const char *POWER_EXPERIMENT_KEY = "experiment_v1";
+
 static bool power_evidence_lock(void) {
     if (!s_power_evidence_mutex) {
         s_power_evidence_mutex = xSemaphoreCreateMutex();
@@ -181,6 +208,193 @@ static bool power_evidence_save(const power_evidence_record_t *record) {
     const esp_err_t commit = set == ESP_OK ? nvs_commit(handle) : set;
     nvs_close(handle);
     return set == ESP_OK && commit == ESP_OK;
+}
+
+static void power_experiment_default(power_experiment_record_t *record) {
+    memset(record, 0, sizeof(*record));
+    record->magic = POWER_EXPERIMENT_MAGIC;
+    record->version = POWER_EXPERIMENT_VERSION;
+    record->state = PLATFORM_POWER_EXPERIMENT_IDLE;
+}
+
+static bool power_experiment_load(power_experiment_record_t *record) {
+    power_experiment_default(record);
+    nvs_handle_t handle;
+    if (nvs_open(POWER_EXPERIMENT_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+    size_t size = sizeof(*record);
+    power_experiment_record_t stored;
+    const bool valid =
+        nvs_get_blob(handle, POWER_EXPERIMENT_KEY, &stored, &size) == ESP_OK &&
+        size == sizeof(stored) && stored.magic == POWER_EXPERIMENT_MAGIC &&
+        stored.version == POWER_EXPERIMENT_VERSION &&
+        stored.state <= PLATFORM_POWER_EXPERIMENT_COMPLETE &&
+        stored.sample_count <= PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES &&
+        stored.sample_next < PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES;
+    nvs_close(handle);
+    if (valid) {
+        *record = stored;
+    }
+    return valid;
+}
+
+static bool power_experiment_save(const power_experiment_record_t *record) {
+    nvs_handle_t handle;
+    if (nvs_open(POWER_EXPERIMENT_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    const esp_err_t set = nvs_set_blob(
+        handle, POWER_EXPERIMENT_KEY, record, sizeof(*record));
+    const esp_err_t commit = set == ESP_OK ? nvs_commit(handle) : set;
+    nvs_close(handle);
+    return set == ESP_OK && commit == ESP_OK;
+}
+
+static void power_experiment_append(
+    power_experiment_record_t *record,
+    const platform_power_measurement_t *measurement) {
+    const uint8_t index =
+        record->sample_next % PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES;
+    platform_power_experiment_sample_t *sample = &record->samples[index];
+    memset(sample, 0, sizeof(*sample));
+    sample->sequence = ++record->next_sample_sequence;
+    sample->elapsed_sec = record->elapsed_sec;
+    sample->unix_time_ms = platform_utc_now_ms();
+    sample->raw_adc = measurement && measurement->valid
+        ? measurement->raw_adc : -1;
+    sample->adc_mv = measurement && measurement->valid
+        ? measurement->adc_mv : -1;
+    sample->battery_mv = measurement && measurement->valid
+        ? measurement->battery_mv : -1;
+    sample->battery_level = measurement && measurement->valid
+        ? measurement->battery_level : -1;
+    sample->reset_reason = (int8_t)esp_reset_reason();
+    sample->wakeup_cause = (int8_t)esp_sleep_get_wakeup_cause();
+    record->sample_next =
+        (uint8_t)((index + 1) % PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES);
+    if (record->sample_count < PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES) {
+        record->sample_count++;
+    }
+    record->total_samples++;
+}
+
+static uint32_t power_experiment_next_interval(
+    const power_experiment_record_t *record) {
+    const uint32_t remaining = record->maximum_duration_sec > record->elapsed_sec
+        ? record->maximum_duration_sec - record->elapsed_sec : 0;
+    if (remaining == 0) return 0;
+    if (record->interval_sec == 0) return remaining;
+    return record->interval_sec < remaining ? record->interval_sec : remaining;
+}
+
+bool platform_power_experiment_arm(uint32_t interval_sec,
+                                   uint32_t maximum_duration_sec,
+                                   uint64_t *experiment_id_out) {
+    if (!platform_power_experiment_supported() || maximum_duration_sec == 0) {
+        return false;
+    }
+    power_experiment_record_t record;
+    power_experiment_default(&record);
+    record.experiment_id = ((uint64_t)esp_random() << 32) | esp_random();
+    if (record.experiment_id == 0) record.experiment_id = 1;
+    record.state = PLATFORM_POWER_EXPERIMENT_ARMED;
+    record.interval_sec = interval_sec;
+    record.maximum_duration_sec = maximum_duration_sec;
+    record.observer_effect = interval_sec > 0;
+    if (!power_experiment_save(&record)) return false;
+    if (experiment_id_out) *experiment_id_out = record.experiment_id;
+    return true;
+}
+
+bool platform_power_experiment_note_entry(
+    const platform_power_measurement_t *measurement,
+    uint32_t *next_sleep_sec_out) {
+    power_experiment_record_t record;
+    if (!power_experiment_load(&record) ||
+        record.state != PLATFORM_POWER_EXPERIMENT_ARMED) {
+        return false;
+    }
+    record.state = PLATFORM_POWER_EXPERIMENT_RUNNING;
+    record.elapsed_sec = 0;
+    power_experiment_append(&record, measurement);
+    record.next_sleep_sec = power_experiment_next_interval(&record);
+    if (record.next_sleep_sec == 0 || !power_experiment_save(&record)) {
+        return false;
+    }
+    if (next_sleep_sec_out) *next_sleep_sec_out = record.next_sleep_sec;
+    return true;
+}
+
+bool platform_power_experiment_note_early_boot(
+    const platform_power_measurement_t *measurement,
+    uint32_t *next_sleep_sec_out) {
+    power_experiment_record_t record;
+    if (!power_experiment_load(&record) ||
+        record.state != PLATFORM_POWER_EXPERIMENT_RUNNING) {
+        return false;
+    }
+    const esp_sleep_wakeup_cause_t wake = esp_sleep_get_wakeup_cause();
+    if (wake == ESP_SLEEP_WAKEUP_TIMER) {
+        record.elapsed_sec += record.next_sleep_sec;
+        if (record.interval_sec > 0) record.intrusive_wakes++;
+    }
+    power_experiment_append(&record, measurement);
+
+    const bool continue_sampling =
+        wake == ESP_SLEEP_WAKEUP_TIMER && record.interval_sec > 0 &&
+        record.elapsed_sec < record.maximum_duration_sec;
+    if (continue_sampling) {
+        record.next_sleep_sec = power_experiment_next_interval(&record);
+        if (record.next_sleep_sec > 0 && power_experiment_save(&record)) {
+            if (next_sleep_sec_out) *next_sleep_sec_out = record.next_sleep_sec;
+            return true;
+        }
+    }
+
+    record.state = PLATFORM_POWER_EXPERIMENT_COMPLETE;
+    record.next_sleep_sec = 0;
+    if (!power_experiment_save(&record)) {
+        LOGE("Could not persist completed power experiment");
+    }
+    return false;
+}
+
+bool platform_power_experiment_snapshot(platform_power_experiment_t *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    power_experiment_record_t record;
+    if (!power_experiment_load(&record)) return true;
+    out->experiment_id = record.experiment_id;
+    out->state = (platform_power_experiment_state_t)record.state;
+    out->interval_sec = record.interval_sec;
+    out->maximum_duration_sec = record.maximum_duration_sec;
+    out->elapsed_sec = record.elapsed_sec;
+    out->next_sleep_sec = record.next_sleep_sec;
+    out->total_samples = record.total_samples;
+    out->intrusive_wakes = record.intrusive_wakes;
+    out->observer_effect = record.observer_effect != 0;
+    out->sample_count = record.sample_count;
+    const uint8_t start =
+        record.sample_count == PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES
+            ? record.sample_next : 0;
+    for (uint8_t i = 0; i < record.sample_count; ++i) {
+        out->samples[i] = record.samples[
+            (start + i) % PLATFORM_POWER_EXPERIMENT_MAX_SAMPLES];
+    }
+    return true;
+}
+
+bool platform_power_experiment_clear(void) {
+    nvs_handle_t handle;
+    if (nvs_open(POWER_EXPERIMENT_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_erase_key(handle, POWER_EXPERIMENT_KEY);
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err == ESP_OK;
 }
 
 static void power_evidence_append(power_evidence_record_t *record,
@@ -367,6 +581,33 @@ void platform_power_evidence_note_time_sync(int64_t unix_time_ms,
     (void)unix_time_ms;
     (void)uptime_ms;
 }
+bool platform_power_experiment_arm(uint32_t interval_sec,
+                                   uint32_t maximum_duration_sec,
+                                   uint64_t *experiment_id_out) {
+    (void)interval_sec;
+    (void)maximum_duration_sec;
+    (void)experiment_id_out;
+    return false;
+}
+bool platform_power_experiment_note_entry(
+    const platform_power_measurement_t *measurement,
+    uint32_t *next_sleep_sec_out) {
+    (void)measurement;
+    (void)next_sleep_sec_out;
+    return false;
+}
+bool platform_power_experiment_note_early_boot(
+    const platform_power_measurement_t *measurement,
+    uint32_t *next_sleep_sec_out) {
+    (void)measurement;
+    (void)next_sleep_sec_out;
+    return false;
+}
+bool platform_power_experiment_snapshot(platform_power_experiment_t *out) {
+    if (out) memset(out, 0, sizeof(*out));
+    return out != NULL;
+}
+bool platform_power_experiment_clear(void) { return false; }
 #endif
 
 PLATFORM_WEAK void platform_power_diagnostics_enrich(
@@ -376,6 +617,10 @@ PLATFORM_WEAK void platform_power_diagnostics_enrich(
 
 PLATFORM_WEAK bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
     (void)delay_sec;
+    return false;
+}
+
+PLATFORM_WEAK bool platform_power_experiment_supported(void) {
     return false;
 }
 

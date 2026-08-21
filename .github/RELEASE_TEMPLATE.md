@@ -56,15 +56,17 @@ The Dial still chooses between its battery and plugged-in policies using a
 voltage heuristic. A nearly full battery can temporarily receive the plugged-in
 policy and stay awake longer than expected.
 
-To test the sleep path while the Dial is plugged in, open `/power-debug` from
-its connected settings page and start the one-time 15-second test. After the
-encoder wakes it, the page reports whether shutdown preparation completed,
-whether Deep-sleep was requested, and what caused the wake. The same test is
-available as `POST /power-debug/sleep` for scripts and integrations. Sleep-entry,
-boot, and brownout evidence is stored in NVS at lifecycle boundaries, so a full
-battery collapse no longer erases the previous entry marker. These counters are
-firmware evidence, not an ammeter; use an external meter to measure actual
-current and to confirm the auxiliary ESP32's contribution.
+The Dial's `/power-debug/sleep` endpoint now runs one persistent power
+experiment rather than the earlier one-shot sleep trigger. By default it wakes
+every 20 minutes through a minimal boot path, samples raw ADC and battery
+voltage, commits the bounded record to NVS, and immediately returns to
+Deep-sleep without starting the display, Wi-Fi, BLE, or application. Supply
+`interval_sec=0` when using an external current profiler: the same experiment
+records its entry and final wake but adds no periodic sampling wakes. Both modes
+take a maximum duration, have a unique experiment ID, export JSON or CSV, and
+can be cleared. The export reports if a deliberately denser or longer run has
+wrapped the 24-sample durable ring. Software checkpoints affect the discharge
+curve and are marked as observer effects; neither mode substitutes for an ammeter.
 
 The earlier v2.7.0-alpha.2 Dial image fully discharged one test unit overnight
 despite reporting a Deep-sleep entry. This build closes the LCD/touch shutdown
@@ -134,8 +136,11 @@ Every physical controller exposes `/power-debug` and
 shows the power source, active timeouts, display state, reset and wake cause,
 and the sleep or power-off capabilities that the exact target implements.
 
-All nine controllers provide the one-time 15-second powered terminal-power
-test through the page and `POST /power-debug/sleep`. Every target writes a
+All nine controllers retain the terminal-power evidence described below. On
+the Waveshare Dial, `POST /power-debug/sleep` additionally starts the persistent
+software-voltage or external-profiler experiment described above; other exact
+targets report that early voltage sampling is unsupported until their qualified
+ADC or PMIC path is implemented. Every target writes a
 shared NVS lifecycle journal only at boot and terminal-sleep boundaries. Its
 bounded eight-event tail records the sequence, boot number, uptime, battery,
 preflight flags/error, reset cause, and wake cause for recent boot, attempt,

@@ -716,7 +716,8 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
         PLATFORM_POWER_CAP_SOC_DEEP_SLEEP |
         PLATFORM_POWER_CAP_RTC_EVIDENCE |
         PLATFORM_POWER_CAP_FORCED_TEST |
-        PLATFORM_POWER_CAP_AUXILIARY_SOC;
+        PLATFORM_POWER_CAP_AUXILIARY_SOC |
+        PLATFORM_POWER_CAP_VOLTAGE_EXPERIMENT;
     switch (dial.display_state) {
     case DISPLAY_STATE_ART_MODE:
         out->state = PLATFORM_POWER_STATE_ART;
@@ -782,4 +783,8 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
 
 bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
     return display_power_debug_arm_deep_sleep(delay_sec);
+}
+
+bool platform_power_experiment_supported(void) {
+    return true;
 }

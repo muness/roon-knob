@@ -614,7 +614,24 @@ static void enter_deep_sleep(void) {
     // Enter deep sleep - this does NOT return
     // Device will reset and run app_main() on wake
     s_power_debug_rtc.deep_sleep_entries++;
-    platform_power_evidence_note_entry(battery_get_percentage());
+    platform_power_measurement_t measurement = {0};
+    (void)battery_get_measurement(&measurement);
+    uint32_t experiment_wake_sec = 0;
+    if (platform_power_experiment_note_entry(
+            &measurement, &experiment_wake_sec)) {
+        err = esp_sleep_enable_timer_wakeup(
+            (uint64_t)experiment_wake_sec * 1000000ULL);
+        if (err != ESP_OK) {
+            platform_power_evidence_note_error(
+                PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
+            recover_from_partial_sleep_entry(
+                "Experiment timer wake could not be armed");
+        }
+        ESP_LOGI(TAG, "Power experiment timer armed for %lu seconds",
+                 (unsigned long)experiment_wake_sec);
+    }
+    platform_power_evidence_note_entry(measurement.valid
+        ? measurement.battery_level : battery_get_percentage());
     esp_deep_sleep_start();
 }
 
