@@ -163,11 +163,20 @@ int main(int argc, char **argv) {
     assert_family(contract(demand("play", "primary-control", "control", "required", "dominant")),
                   transport_focus, 7);
 
+    auto transport_precedes_zone = context();
+    assert_family(contract(demand("play", "primary-control", "control", "required", "dominant")),
+                  transport_precedes_zone, 7);
+
     auto volume = context();
     volume.has_transport = false;
     volume.has_zone = false;
     assert_family(contract(demand("level", "primary-control", "control", "required", "dominant")),
                   volume, 8);
+
+    auto volume_precedes_zone = context();
+    volume_precedes_zone.has_transport = false;
+    assert_family(contract(demand("level", "primary-control", "control", "required", "dominant")),
+                  volume_precedes_zone, 8);
 
     auto zones = context();
     zones.has_transport = false;

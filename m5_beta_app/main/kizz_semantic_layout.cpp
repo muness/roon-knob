@@ -345,10 +345,9 @@ Capability capability(const Demand &demand, size_t control_count,
         demand.role == Role::SecondaryContent || demand.role == Role::Status)
         return Capability::Other;
     if (demand.target_kind != "control") return Capability::Other;
-    if (context.has_zone && control_count == 1) return Capability::Zone;
-    if (context.has_volume && !context.has_transport && control_count == 1)
-        return Capability::Volume;
     if (context.has_transport) return Capability::Transport;
+    if (context.has_volume && control_count == 1) return Capability::Volume;
+    if (context.has_zone && control_count == 1) return Capability::Zone;
     return Capability::Other;
 }
 
