@@ -602,8 +602,8 @@ const char *family_signature(NativeFamily family) {
     case NativeFamily::VolumeFocus: return "volume-arc(160,106,110,96)+level(34,182,252,22)+context(12,32,296,32)";
     case NativeFamily::ZoneSelection: return "zone-list(10,44,300,162)+current(10,44,300,30)+confirm(42,214,236,24)";
     case NativeFamily::ListeningConversation: return "voice-face(0,36,320,112)+transcript(8,154,304,24)+response(32,184,280,24)";
-    case NativeFamily::ReviewConfirmation: return "candidate(12,36,296,100)+review(12,142,296,38)+decision(8,190,304,42)";
-    case NativeFamily::StatusRecovery: return "recovery-badge(16,44,288,48)+last-good(16,104,288,50)+retry(42,176,236,32)";
+    case NativeFamily::ReviewConfirmation: return "candidate(12,36,296,100)+voice-confirmation(12,168,296,48)";
+    case NativeFamily::StatusRecovery: return "recovery-badge(16,44,288,48)+network(12,98,296,20)+metadata(12,130,296,20)+automatic-recovery(12,184,296,24)";
     }
     return "none";
 }

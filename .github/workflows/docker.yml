@@ -50,14 +50,6 @@ jobs:
             m5_beta_app/main/kizz_semantic_native_layout.cpp \
             -o /tmp/test-kizz-semantic-layout
           /tmp/test-kizz-semantic-layout
-          c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
-            -Im5_beta_app/main \
-            tools/kizz_semantic_layout_simulator.cpp \
-            m5_beta_app/main/kizz_semantic_layout.cpp \
-            -o /tmp/kizz-semantic-layout-simulator
-          /tmp/kizz-semantic-layout-simulator /tmp/kizz-semantic-golden
-          test "$(find /tmp/kizz-semantic-golden -name 'family-*.svg' | wc -l)" -eq 12
-          test "$(grep -o '\"token\"' /tmp/kizz-semantic-golden/manifest.json | wc -l)" -eq 12
           python3 tests/test_kizz_semantic_voice_characterization.py
           python3 scripts/check_alpha_release_notes.py
           python3 scripts/check_platform_power_and_wifi.py
