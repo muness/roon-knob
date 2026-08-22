@@ -80,6 +80,8 @@ struct State {
     uint8_t voice_cutoff_percent = 0;
     char voice_transcript[161] = {};
     char voice_response[161] = {};
+    char voice_seen_transcript[161] = {};
+    char voice_seen_response[161] = {};
     int64_t voice_transcript_until = 0;
     int64_t voice_response_until = 0;
     bool sleeping = false;
@@ -149,11 +151,11 @@ struct MarqueeState {
     int y = 0;
     int width = 0;
     int size = 0;
-    char value[128] = {};
+    char value[161] = {};
     int64_t started_us = 0;
 };
 
-MarqueeState s_stackchan_marquees[3];
+MarqueeState s_stackchan_marquees[5];
 
 constexpr char kStackChanNvsNamespace[] = "stackchan";
 constexpr char kStackChanBodyKey[] = "body_on";
@@ -188,42 +190,19 @@ void stackchan_draw_text(lgfx::LovyanGFX *target, const char *text, int x, int y
     target->drawString(text ? text : "", x, y);
 }
 
-void stackchan_fit_voice_text(lgfx::LovyanGFX *target, const char *value,
-                              int max_width, char *out, size_t out_len) {
-    if (!out || !out_len) return;
-    copy_text(out, out_len, value);
-    stackchan_apply_font(target, 1);
-    if (target->textWidth(out) <= max_width) return;
-    constexpr char ellipsis[] = "...";
-    size_t length = std::strlen(out);
-    while (length > 0) {
-        while (length > 0 &&
-               (static_cast<unsigned char>(out[length - 1]) & 0xc0) == 0x80)
-            --length;
-        if (length > 0) --length;
-        char candidate[161] = {};
-        std::memcpy(candidate, out, std::min(length, sizeof(candidate) - 1));
-        std::strncat(candidate, ellipsis, sizeof(candidate) -
-                     std::strlen(candidate) - 1);
-        if (target->textWidth(candidate) <= max_width) {
-            copy_text(out, out_len, candidate);
-            return;
-        }
-    }
-    out[0] = '\0';
-}
+void stackchan_draw_marquee(lgfx::LovyanGFX *target, const char *text, int x,
+                            int y, int width, int size, uint32_t color,
+                            MarqueeState *marquee);
 
 void stackchan_draw_voice_bubble(lgfx::LovyanGFX *target, const char *text,
                                  int x, int y, int width, uint32_t fill,
-                                 uint32_t ink, uint32_t border) {
+                                 uint32_t ink, uint32_t border,
+                                 MarqueeState *marquee) {
     if (!text || !text[0]) return;
-    char fitted[161] = {};
-    stackchan_fit_voice_text(target, text, width - 24, fitted,
-                             sizeof(fitted));
-    if (!fitted[0]) return;
     target->fillRoundRect(x, y, width, 21, 9, fill);
     target->drawRoundRect(x, y, width, 21, 9, border);
-    stackchan_draw_text(target, fitted, x + 12, y + 4, 1, ink);
+    stackchan_draw_marquee(target, text, x + 12, y + 4, width - 24, 1, ink,
+                           marquee);
 }
 
 void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int y,
@@ -245,11 +224,11 @@ void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
     if (s.voice_transcript[0] && now < s.voice_transcript_until)
         stackchan_draw_voice_bubble(target, s.voice_transcript, 8, bubble_y,
                                     width - 40, STACK_INK, STACK_BG,
-                                    STACK_SECONDARY);
+                                    STACK_SECONDARY, &s_stackchan_marquees[3]);
     if (s.voice_response[0] && now < s.voice_response_until)
         stackchan_draw_voice_bubble(target, s.voice_response, 32, bubble_y + 24,
                                     width - 40, STACK_ACCENT, STACK_BG,
-                                    STACK_ACCENT);
+                                    STACK_ACCENT, &s_stackchan_marquees[4]);
     const int phase = static_cast<int>((now / 120000) % 6);
     const bool fault = std::strcmp(s.voice_state, "FAULT") == 0;
     const bool armed = std::strcmp(s.voice_state, "ARMED") == 0;
@@ -1865,19 +1844,25 @@ extern "C" void touch_ui_process(void) {
         if (invalidate_conversation) {
             s.voice_transcript[0] = '\0';
             s.voice_response[0] = '\0';
+            s.voice_seen_transcript[0] = '\0';
+            s.voice_seen_response[0] = '\0';
             s.voice_transcript_until = 0;
             s.voice_response_until = 0;
             s.dirty = true;
         }
         if (!invalidate_conversation && transcript[0] &&
-            std::strcmp(transcript, s.voice_transcript) != 0) {
+            std::strcmp(transcript, s.voice_seen_transcript) != 0) {
             copy_text(s.voice_transcript, sizeof(s.voice_transcript), transcript);
+            copy_text(s.voice_seen_transcript, sizeof(s.voice_seen_transcript),
+                      transcript);
             s.voice_transcript_until = now + STACKCHAN_TRANSCRIPT_TTL_US;
             s.dirty = true;
         }
         if (!invalidate_conversation && response[0] &&
-            std::strcmp(response, s.voice_response) != 0) {
+            std::strcmp(response, s.voice_seen_response) != 0) {
             copy_text(s.voice_response, sizeof(s.voice_response), response);
+            copy_text(s.voice_seen_response, sizeof(s.voice_seen_response),
+                      response);
             s.voice_response_until = now + STACKCHAN_RESPONSE_TTL_US;
             s.dirty = true;
         }
@@ -1950,7 +1935,11 @@ extern "C" void touch_ui_process(void) {
         ESP_LOGI(TAG, "Kizz entered Art mode after %us",
                  static_cast<unsigned>(s.art_timeout_sec));
     }
-    if (s.track_reveal_until || stackchan_marquee_needed()) s.dirty = true;
+    const bool voice_bubble_active =
+        (s.voice_transcript[0] && now < s.voice_transcript_until) ||
+        (s.voice_response[0] && now < s.voice_response_until);
+    if (s.track_reveal_until || stackchan_marquee_needed() ||
+        voice_bubble_active) s.dirty = true;
     const bool artwork_transition_pending = art_eligible && !s.art_mode;
 #else
     const bool artwork_transition_pending = false;
