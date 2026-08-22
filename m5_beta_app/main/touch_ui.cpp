@@ -45,6 +45,8 @@ constexpr uint32_t STACK_TERTIARY = 0xaeb9c8;
 constexpr uint32_t STACK_ACCENT = 0x7aa2ff;
 constexpr uint32_t STACK_HOT = 0xff6b8f;
 constexpr uint32_t STACK_CONTROL = 0x252c38;
+constexpr int64_t STACKCHAN_TRANSCRIPT_TTL_US = 4000000;
+constexpr int64_t STACKCHAN_RESPONSE_TTL_US = 5000000;
 #if HIPHI_M5_TARGET_ID == 1 || HIPHI_M5_TARGET_ID == 2
 constexpr int STACKCHAN_ARTWORK_SIZE = 120;
 #elif HIPHI_M5_TARGET_ID == 3
@@ -76,6 +78,10 @@ struct State {
     char voice_state[16] = "STARTING";
     uint8_t voice_score_percent = 0;
     uint8_t voice_cutoff_percent = 0;
+    char voice_transcript[161] = {};
+    char voice_response[161] = {};
+    int64_t voice_transcript_until = 0;
+    int64_t voice_response_until = 0;
     bool sleeping = false;
     bool picker = false;
     bool settings = false;
@@ -182,6 +188,44 @@ void stackchan_draw_text(lgfx::LovyanGFX *target, const char *text, int x, int y
     target->drawString(text ? text : "", x, y);
 }
 
+void stackchan_fit_voice_text(lgfx::LovyanGFX *target, const char *value,
+                              int max_width, char *out, size_t out_len) {
+    if (!out || !out_len) return;
+    copy_text(out, out_len, value);
+    stackchan_apply_font(target, 1);
+    if (target->textWidth(out) <= max_width) return;
+    constexpr char ellipsis[] = "...";
+    size_t length = std::strlen(out);
+    while (length > 0) {
+        while (length > 0 &&
+               (static_cast<unsigned char>(out[length - 1]) & 0xc0) == 0x80)
+            --length;
+        if (length > 0) --length;
+        char candidate[161] = {};
+        std::memcpy(candidate, out, std::min(length, sizeof(candidate) - 1));
+        std::strncat(candidate, ellipsis, sizeof(candidate) -
+                     std::strlen(candidate) - 1);
+        if (target->textWidth(candidate) <= max_width) {
+            copy_text(out, out_len, candidate);
+            return;
+        }
+    }
+    out[0] = '\0';
+}
+
+void stackchan_draw_voice_bubble(lgfx::LovyanGFX *target, const char *text,
+                                 int x, int y, int width, uint32_t fill,
+                                 uint32_t ink, uint32_t border) {
+    if (!text || !text[0]) return;
+    char fitted[161] = {};
+    stackchan_fit_voice_text(target, text, width - 24, fitted,
+                             sizeof(fitted));
+    if (!fitted[0]) return;
+    target->fillRoundRect(x, y, width, 21, 9, fill);
+    target->drawRoundRect(x, y, width, 21, 9, border);
+    stackchan_draw_text(target, fitted, x + 12, y + 4, 1, ink);
+}
+
 void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int y,
                            int size, uint32_t color) {
     target->setTextDatum(lgfx::middle_center);
@@ -194,7 +238,18 @@ void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
                                       int height) {
 #if HIPHI_M5_TARGET_ID == 4
     if (!s.voice_diagnostics) return;
+    // The face and state badge are Kizz's primary voice cues. Conversation
+    // copies occupy a reserved lower band instead of painting over them.
+    const int bubble_y = s.controls_mode ? 40 : 160;
     const int64_t now = esp_timer_get_time();
+    if (s.voice_transcript[0] && now < s.voice_transcript_until)
+        stackchan_draw_voice_bubble(target, s.voice_transcript, 8, bubble_y,
+                                    width - 40, STACK_INK, STACK_BG,
+                                    STACK_SECONDARY);
+    if (s.voice_response[0] && now < s.voice_response_until)
+        stackchan_draw_voice_bubble(target, s.voice_response, 32, bubble_y + 24,
+                                    width - 40, STACK_ACCENT, STACK_BG,
+                                    STACK_ACCENT);
     const int phase = static_cast<int>((now / 120000) % 6);
     const bool fault = std::strcmp(s.voice_state, "FAULT") == 0;
     const bool armed = std::strcmp(s.voice_state, "ARMED") == 0;
@@ -1797,6 +1852,47 @@ extern "C" void touch_ui_process(void) {
         const uint8_t cutoff = static_cast<uint8_t>(std::clamp(
             static_cast<int>(m5_platform_voice_wake_cutoff() * 100.0f + 0.5f),
             0, 100));
+        char transcript[161] = {};
+        char response[161] = {};
+        m5_platform_voice_copy_transcript(transcript, sizeof(transcript));
+        m5_platform_voice_copy_response(response, sizeof(response));
+        const bool voice_state_changed =
+            std::strcmp(voice_state, s.voice_state) != 0;
+        const bool invalidate_conversation =
+            voice_state_changed &&
+            (std::strcmp(voice_state, "LISTENING") == 0 ||
+             std::strcmp(voice_state, "FAULT") == 0);
+        if (invalidate_conversation) {
+            s.voice_transcript[0] = '\0';
+            s.voice_response[0] = '\0';
+            s.voice_transcript_until = 0;
+            s.voice_response_until = 0;
+            s.dirty = true;
+        }
+        if (!invalidate_conversation && transcript[0] &&
+            std::strcmp(transcript, s.voice_transcript) != 0) {
+            copy_text(s.voice_transcript, sizeof(s.voice_transcript), transcript);
+            s.voice_transcript_until = now + STACKCHAN_TRANSCRIPT_TTL_US;
+            s.dirty = true;
+        }
+        if (!invalidate_conversation && response[0] &&
+            std::strcmp(response, s.voice_response) != 0) {
+            copy_text(s.voice_response, sizeof(s.voice_response), response);
+            s.voice_response_until = now + STACKCHAN_RESPONSE_TTL_US;
+            s.dirty = true;
+        }
+        if ((s.voice_transcript_until && now >= s.voice_transcript_until) ||
+            (s.voice_response_until && now >= s.voice_response_until)) {
+            if (s.voice_transcript_until && now >= s.voice_transcript_until) {
+                s.voice_transcript_until = 0;
+                s.voice_transcript[0] = '\0';
+            }
+            if (s.voice_response_until && now >= s.voice_response_until) {
+                s.voice_response_until = 0;
+                s.voice_response[0] = '\0';
+            }
+            s.dirty = true;
+        }
         if (diagnostics != s.voice_diagnostics) {
             s.voice_diagnostics = diagnostics;
             s.art_timeout_sec = diagnostics ? 0 : s.configured_art_timeout_sec;

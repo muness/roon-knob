@@ -88,6 +88,7 @@ constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
 esp_websocket_client_handle_t s_voice_ws = nullptr;
 esp_websocket_client_handle_t s_enrollment_ws = nullptr;
 SemaphoreHandle_t s_voice_audio_lock = nullptr;
+SemaphoreHandle_t s_voice_text_lock = nullptr;
 SemaphoreHandle_t s_voice_wake_buffer_lock = nullptr;
 SemaphoreHandle_t s_enrollment_lock = nullptr;
 constexpr size_t VOICE_WAKE_BUFFER_SAMPLES = 16000 * 2;
@@ -103,6 +104,8 @@ std::atomic_bool s_voice_microphone_active{false};
 std::atomic_bool s_voice_waiting_for_response{false};
 std::atomic_bool s_voice_resume_after_sound{false};
 std::atomic_bool s_voice_listening_visual{false};
+char s_voice_transcript[161] = {};
+char s_voice_response[161] = {};
 std::atomic_bool s_voice_wake_pending{false};
 std::atomic_bool s_voice_remote_endpoint_pending{false};
 std::atomic_bool s_voice_diagnostics_enabled{true};
@@ -790,12 +793,45 @@ void voice_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_data
     if (!root) return;
     cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
     if (cJSON_IsString(type) && type->valuestring &&
+        strcmp(type->valuestring, "transcript") == 0) {
+        cJSON *text = cJSON_GetObjectItemCaseSensitive(root, "text");
+        if (cJSON_IsString(text) && text->valuestring) {
+            if (s_voice_text_lock &&
+                xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+                snprintf(s_voice_transcript, sizeof(s_voice_transcript), "%s",
+                         text->valuestring);
+                xSemaphoreGive(s_voice_text_lock);
+            }
+            ESP_LOGI(TAG, "Kizz transcript: %s", s_voice_transcript);
+        }
+    }
+    if (cJSON_IsString(type) && type->valuestring &&
         strcmp(type->valuestring, "endpoint") == 0) {
         s_voice_remote_endpoint_pending = true;
     }
     cJSON *state = cJSON_GetObjectItemCaseSensitive(root, "state");
-    if (cJSON_IsString(state) && state->valuestring)
+    if (cJSON_IsString(state) && state->valuestring) {
+        cJSON *heard = cJSON_GetObjectItemCaseSensitive(root, "heard");
+        cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+        if (cJSON_IsString(heard) && heard->valuestring) {
+            if (s_voice_text_lock &&
+                xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+                snprintf(s_voice_transcript, sizeof(s_voice_transcript), "%s",
+                         heard->valuestring);
+                xSemaphoreGive(s_voice_text_lock);
+            }
+        }
+        if (cJSON_IsString(message) && message->valuestring) {
+            if (s_voice_text_lock &&
+                xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+                snprintf(s_voice_response, sizeof(s_voice_response), "%s",
+                         message->valuestring);
+                xSemaphoreGive(s_voice_text_lock);
+            }
+            ESP_LOGI(TAG, "Kizz response: %s", s_voice_response);
+        }
         m5_platform_voice_feedback(state->valuestring);
+    }
     cJSON_Delete(root);
 }
 
@@ -908,6 +944,7 @@ void start_voice_transport() {
         return;
     }
     s_voice_audio_lock = xSemaphoreCreateMutex();
+    s_voice_text_lock = xSemaphoreCreateMutex();
     if (s_voice_transport_configured) {
         s_voice_wake_buffer_lock = xSemaphoreCreateMutex();
         s_voice_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
@@ -915,7 +952,7 @@ void start_voice_transport() {
         s_voice_staged_wake_sample = static_cast<int16_t *>(heap_caps_calloc(
             VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
     }
-    if (!s_voice_audio_lock || (s_voice_transport_configured &&
+    if (!s_voice_audio_lock || !s_voice_text_lock || (s_voice_transport_configured &&
         (!s_voice_wake_buffer_lock || !s_voice_wake_buffer ||
          !s_voice_staged_wake_sample))) {
         ESP_LOGE(TAG, "Kizz voice audio lock allocation failed");
@@ -1340,6 +1377,7 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
     if (!state || !s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
     if (strcmp(state, "listening") != 0) stackchan_end_listening_pose();
     if (strcmp(state, "listening") == 0) {
+        m5_platform_voice_clear_conversation();
         /* Keep recording intact. The attentive face is the immediate cue;
          * the chirp comes after the sentence when audio is safely handed off. */
         s_voice_listening_visual = true;
@@ -1414,6 +1452,35 @@ extern "C" const char *m5_platform_voice_state(void) {
 #else
     return "DISABLED";
 #endif
+}
+
+extern "C" void m5_platform_voice_copy_transcript(char *out, size_t len) {
+    if (!out || !len) return;
+    out[0] = '\0';
+    if (s_voice_text_lock &&
+        xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        snprintf(out, len, "%s", s_voice_transcript);
+        xSemaphoreGive(s_voice_text_lock);
+    }
+}
+
+extern "C" void m5_platform_voice_copy_response(char *out, size_t len) {
+    if (!out || !len) return;
+    out[0] = '\0';
+    if (s_voice_text_lock &&
+        xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        snprintf(out, len, "%s", s_voice_response);
+        xSemaphoreGive(s_voice_text_lock);
+    }
+}
+
+extern "C" void m5_platform_voice_clear_conversation(void) {
+    if (s_voice_text_lock &&
+        xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        s_voice_transcript[0] = '\0';
+        s_voice_response[0] = '\0';
+        xSemaphoreGive(s_voice_text_lock);
+    }
 }
 
 extern "C" float m5_platform_voice_wake_probability(void) {
