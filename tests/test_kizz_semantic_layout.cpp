@@ -1,4 +1,5 @@
 #include "../m5_beta_app/main/kizz_semantic_layout.h"
+#include "../m5_beta_app/main/kizz_semantic_native_layout.h"
 
 #include <cassert>
 #include <cstdio>
@@ -79,12 +80,42 @@ extern "C" void touch_ui_apply_semantic_family(uint8_t family_token) {
 }
 
 int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
     std::set<std::string> signatures;
     for (uint8_t family = 1; family <= 12; ++family) {
         assert(kizz_semantic_family_name(family)[0] != '\0');
         signatures.insert(kizz_semantic_family_signature(family));
     }
     assert(signatures.size() == 12);
+
+    // The renderer and process_input consume this same table. Every native
+    // touch region is reachable at 320x240, disjoint from its siblings, and
+    // has a real existing action rather than a decorative label.
+    for (uint8_t family = 1; family <= 12; ++family) {
+        for (size_t i = 0; i < kizz_semantic_hit_region_count(family); ++i) {
+            KizzSemanticHitRegion region = {};
+            assert(kizz_semantic_hit_region(family, i, &region));
+            assert(region.x >= 0 && region.y >= 0);
+            assert(region.x + region.width <= 320);
+            assert(region.y + region.height <= 240);
+            assert(region.action != KizzSemanticAction::None);
+            for (size_t j = i + 1; j < kizz_semantic_hit_region_count(family); ++j) {
+                KizzSemanticHitRegion other = {};
+                assert(kizz_semantic_hit_region(family, j, &other));
+                const bool separated = region.x + region.width <= other.x ||
+                                       other.x + other.width <= region.x ||
+                                       region.y + region.height <= other.y ||
+                                       other.y + other.height <= region.y;
+                assert(separated);
+            }
+            KizzSemanticAction action = KizzSemanticAction::None;
+            assert(kizz_semantic_hit_test(family, region.x + region.width / 2,
+                                          region.y + region.height / 2,
+                                          &action));
+            assert(action == region.action);
+        }
+    }
 
     auto artwork = context();
     assert_family(contract(demand("hero", "hero", "section", "required",
@@ -212,7 +243,5 @@ int main(int argc, char **argv) {
     assert(apply_calls == calls_before + 1);
     assert(!kizz_semantic_apply("slc1-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
 
-    (void)argc;
-    (void)argv;
-    std::cout << "kizz semantic layout conformance: 12 families, admission, selection, idempotence, and artifacts passed\n";
+    std::cout << "kizz semantic layout conformance: 12 families, admission, native hit regions, selection, and idempotence passed\n";
 }
