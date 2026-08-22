@@ -31,14 +31,20 @@ extern "C" {
 #define SURFACE_WIRE_V0_SCHEMA_MAX_CONTROLS 8u
 #define SURFACE_WIRE_V0_SCHEMA_MAX_OPTIONS 6u
 
+/* Schema maxima are immutable wire-compatibility limits. Target builds may
+ * specialize the effective bounds below, but may not expand or disable them. */
+#define SURFACE_WIRE_V0_DEFAULT_MAX_SECTIONS 6u
+#define SURFACE_WIRE_V0_DEFAULT_MAX_CONTROLS 8u
+#define SURFACE_WIRE_V0_DEFAULT_MAX_OPTIONS 6u
+
 #ifndef SURFACE_MAX_SECTIONS
-#define SURFACE_MAX_SECTIONS 6
+#define SURFACE_MAX_SECTIONS SURFACE_WIRE_V0_DEFAULT_MAX_SECTIONS
 #endif
 #ifndef SURFACE_MAX_CONTROLS
-#define SURFACE_MAX_CONTROLS 8
+#define SURFACE_MAX_CONTROLS SURFACE_WIRE_V0_DEFAULT_MAX_CONTROLS
 #endif
 #ifndef SURFACE_MAX_OPTIONS
-#define SURFACE_MAX_OPTIONS 6
+#define SURFACE_MAX_OPTIONS SURFACE_WIRE_V0_DEFAULT_MAX_OPTIONS
 #endif
 
 #ifndef SURFACE_ID_LEN
@@ -121,15 +127,18 @@ typedef struct {
 #else
 #define SURFACE_WIRE_STATIC_ASSERT _Static_assert
 #endif
-SURFACE_WIRE_STATIC_ASSERT(SURFACE_MAX_SECTIONS ==
-                               SURFACE_WIRE_V0_SCHEMA_MAX_SECTIONS,
-                           "wire-v0 section bound drift");
-SURFACE_WIRE_STATIC_ASSERT(SURFACE_MAX_CONTROLS ==
-                               SURFACE_WIRE_V0_SCHEMA_MAX_CONTROLS,
-                           "wire-v0 control bound drift");
-SURFACE_WIRE_STATIC_ASSERT(SURFACE_MAX_OPTIONS ==
-                               SURFACE_WIRE_V0_SCHEMA_MAX_OPTIONS,
-                           "wire-v0 option bound drift");
+SURFACE_WIRE_STATIC_ASSERT(
+    SURFACE_MAX_SECTIONS > 0 &&
+        SURFACE_MAX_SECTIONS <= SURFACE_WIRE_V0_SCHEMA_MAX_SECTIONS,
+    "wire-v0 section bound must be positive and within the schema maximum");
+SURFACE_WIRE_STATIC_ASSERT(
+    SURFACE_MAX_CONTROLS > 0 &&
+        SURFACE_MAX_CONTROLS <= SURFACE_WIRE_V0_SCHEMA_MAX_CONTROLS,
+    "wire-v0 control bound must be positive and within the schema maximum");
+SURFACE_WIRE_STATIC_ASSERT(
+    SURFACE_MAX_OPTIONS > 0 &&
+        SURFACE_MAX_OPTIONS <= SURFACE_WIRE_V0_SCHEMA_MAX_OPTIONS,
+    "wire-v0 option bound must be positive and within the schema maximum");
 #undef SURFACE_WIRE_STATIC_ASSERT
 
 #ifdef __cplusplus

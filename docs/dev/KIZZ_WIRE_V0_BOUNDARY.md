@@ -46,3 +46,37 @@ an in-memory mutation negative test.
 The legacy layout-specific generator is intentionally not a #237 verification
 artifact. The #233/#236 correction must replace that gate with evidence over
 the real generic snapshot/action boundary.
+
+## Bounds and the #236 integration guardrail
+
+The manifest separates three different values:
+
+- **Schema maxima** are the immutable wire-v0 compatibility limits: 6 sections,
+  8 controls per section, and 6 options per control.
+- **Default target bounds** retain those full values in the host and current
+  firmware build.
+- **Target-effective bounds** are the `SURFACE_MAX_*` macros after any
+  compile-time target specialization. Each must remain positive and no greater
+  than its schema maximum. The local header keeps the defaults behind `#ifndef`
+  so a canonical target override remains effective; the manifest checker and
+  compile tests verify both the fallback and override paths.
+
+On the default host ABI, `sizeof(surface_projection_t)` is 66,264 bytes and
+`sizeof(surface_projection_snapshot_t)` is 66,288 bytes. These are sizing facts,
+not permission to put either object on a firmware task stack.
+
+Issue #236 integration must treat that size as a hard storage boundary:
+
+- Never allocate a full projection or snapshot as an automatic local on the
+  12 KiB UI task stack.
+- Use one owned static or bounded buffer for the target-effective model. Where
+  the Kizz target needs external memory, qualify the allocation for Kizz PSRAM
+  explicitly; do not assume a product-family name implies a memory capability.
+- Do not retain duplicate full projection/snapshot copies during admission,
+  rendering, or handoff. Any staging strategy must account for the effective
+  bound and ownership before it is integrated.
+- Measure the actual allocation and report target-effective section/control/
+  option bounds, projection size, snapshot size, storage capability, and peak
+  usage in target telemetry. A passing host compile is not allocation evidence.
+
+This is an integration guardrail for #236, not renderer implementation in #237.

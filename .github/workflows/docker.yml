@@ -58,7 +58,9 @@ jobs:
             /tmp/surface_projection_snapshot.o \
             -o /tmp/test-surface-projection-snapshot
           /tmp/test-surface-projection-snapshot
-          python3 scripts/check_surface_wire_v0_manifest.py --negative-self-test
+          sh tests/test_surface_projection_bounds.sh
+          python3 scripts/check_surface_wire_v0_manifest.py \
+            --negative-self-test --check-overrides
           # The legacy layout-specific generator is intentionally excluded
           # from #237 verification. #233/#236 must replace that gate with
           # evidence over the real generic snapshot/action boundary.

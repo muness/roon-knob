@@ -14,13 +14,37 @@
     "status-line", "detail-request", "voice-intent"
   ],
   "bounds": {
-    "sections": 6,
-    "controlsPerSection": 8,
-    "optionsPerControl": 6,
-    "idChars": 32,
-    "labelChars": 48,
-    "contentChars": 96,
-    "actionRefChars": 64
+    "schemaMaxima": {
+      "sections": 6,
+      "controlsPerSection": 8,
+      "optionsPerControl": 6
+    },
+    "defaultTargetBounds": {
+      "sections": 6,
+      "controlsPerSection": 8,
+      "optionsPerControl": 6
+    },
+    "targetEffectiveMacros": {
+      "sections": "SURFACE_MAX_SECTIONS",
+      "controlsPerSection": "SURFACE_MAX_CONTROLS",
+      "optionsPerControl": "SURFACE_MAX_OPTIONS"
+    },
+    "targetConstraint": {
+      "minimum": 1,
+      "maximum": "schemaMaxima"
+    },
+    "stringLimits": {
+      "idChars": 32,
+      "labelChars": 48,
+      "contentChars": 96,
+      "fallbackChars": 160,
+      "actionRefChars": 64,
+      "iconChars": 12
+    }
+  },
+  "hostDefaultSizes": {
+    "surface_projection_t": 66264,
+    "surface_projection_snapshot_t": 66288
   },
   "projectedAffect": {
     "valence": [-1, 1],

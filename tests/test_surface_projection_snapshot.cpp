@@ -4,6 +4,11 @@
 #include <cmath>
 #include <cstring>
 
+static_assert(sizeof(surface_projection_t) == 66264,
+              "default host projection size drift");
+static_assert(sizeof(surface_projection_snapshot_t) == 66288,
+              "default host snapshot size drift");
+
 namespace {
 
 int sink_calls = 0;
