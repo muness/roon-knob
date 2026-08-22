@@ -1,0 +1,70 @@
+{
+  "schema": "agent-surface-wire-v0-snapshot",
+  "version": 1,
+  "referenceCommit": "0e455fc1",
+  "sections": ["sectionId", "label", "controls"],
+  "items": [
+    "controlId", "kind", "label", "content", "deterministicFallback",
+    "sensitive", "emphasis", "actionRef", "options", "range", "value",
+    "icon"
+  ],
+  "optionFields": ["optionId", "label", "actionRef"],
+  "controlKinds": [
+    "momentary", "toggle", "select-one", "select-continuous",
+    "status-line", "detail-request", "voice-intent"
+  ],
+  "bounds": {
+    "schemaMaxima": {
+      "sections": 6,
+      "controlsPerSection": 8,
+      "optionsPerControl": 6
+    },
+    "defaultTargetBounds": {
+      "sections": 6,
+      "controlsPerSection": 8,
+      "optionsPerControl": 6
+    },
+    "targetEffectiveMacros": {
+      "sections": "SURFACE_MAX_SECTIONS",
+      "controlsPerSection": "SURFACE_MAX_CONTROLS",
+      "optionsPerControl": "SURFACE_MAX_OPTIONS"
+    },
+    "targetConstraint": {
+      "minimum": 1,
+      "maximum": "schemaMaxima"
+    },
+    "stringLimits": {
+      "idChars": 32,
+      "labelChars": 48,
+      "contentChars": 96,
+      "fallbackChars": 160,
+      "actionRefChars": 64,
+      "iconChars": 12
+    }
+  },
+  "hostDefaultSizes": {
+    "surface_projection_t": 66264,
+    "surface_projection_snapshot_t": 66288
+  },
+  "projectedAffect": {
+    "valence": [-1, 1],
+    "arousal": [0, 1],
+    "intensity": [0, 1]
+  },
+  "modelFields": {
+    "surface_projected_affect_t": ["valence", "arousal", "intensity"],
+    "surface_option_t": ["option_id", "label", "action_ref"],
+    "surface_control_t": [
+      "control_id", "kind", "label", "content", "deterministic_fallback",
+      "sensitive", "emphasis", "action_ref", "option_count", "options",
+      "has_range", "range_min", "range_max", "range_step", "has_value",
+      "value", "value_text", "has_text_value", "icon"
+    ],
+    "surface_section_t": ["section_id", "label", "control_count", "controls"],
+    "surface_projection_t": [
+      "projection_id", "origin_llm", "has_affect", "affect", "section_count",
+      "sections"
+    ]
+  },
+  "mediaResourceField": null
+}

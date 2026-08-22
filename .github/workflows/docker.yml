@@ -43,6 +43,28 @@ jobs:
             tests/test_m5_stackchan_choreography.cpp \
             -o /tmp/test-m5-stackchan-choreography
           /tmp/test-m5-stackchan-choreography
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -Im5_beta_app/main \
+            tests/test_kizz_semantic_layout.cpp \
+            m5_beta_app/main/kizz_semantic_layout.cpp \
+            m5_beta_app/main/kizz_semantic_native_layout.cpp \
+            -o /tmp/test-kizz-semantic-layout
+          /tmp/test-kizz-semantic-layout
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon -c common/surface_projection_snapshot.c \
+            -o /tmp/surface_projection_snapshot.o
+          c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -Icommon tests/test_surface_projection_snapshot.cpp \
+            /tmp/surface_projection_snapshot.o \
+            -o /tmp/test-surface-projection-snapshot
+          /tmp/test-surface-projection-snapshot
+          sh tests/test_surface_projection_bounds.sh
+          python3 scripts/check_surface_wire_v0_manifest.py \
+            --negative-self-test --check-overrides
+          # The legacy layout-specific generator is intentionally excluded
+          # from #237 verification. #233/#236 must replace that gate with
+          # evidence over the real generic snapshot/action boundary.
+          python3 tests/test_kizz_semantic_voice_characterization.py
           python3 scripts/check_alpha_release_notes.py
           python3 scripts/check_platform_power_and_wifi.py
           python3 scripts/check_dial_identity.py

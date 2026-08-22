@@ -1,4 +1,5 @@
 #include "touch_ui.h"
+#include "kizz_semantic_native_layout.h"
 
 #include "controller_action.h"
 #include "controller_command.h"
@@ -8,6 +9,7 @@
 #include "m5_terminal_power.h"
 #include "m5_interaction_policy.h"
 #include "m5_stackchan_faces.h"
+#include "kizz_semantic_layout.h"
 #include "platform/platform_http.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_task.h"
@@ -140,7 +142,27 @@ struct State {
     uint16_t configured_power_off_timeout_sec = 0;
     uint8_t action_face_variant = 0;
     uint8_t ambient_face_variant = 0;
+    bool semantic_family_active = false;
+    uint8_t semantic_family = 0;
 } s;
+
+/* Private Kizz realization order.  The corresponding public ABI reports only
+ * semantic fulfillment and never these names, tokens, or geometry. */
+enum class KizzSemanticFamily : uint8_t {
+    ARTWORK_IMMERSIVE = 1,
+    ARTWORK_BOTTOM_TRANSPORT,
+    ARTWORK_SIDE_TRANSPORT,
+    ARTWORK_METADATA_BAND,
+    BALANCED_SPLIT,
+    METADATA_FOCUS,
+    TRANSPORT_FOCUS,
+    VOLUME_FOCUS,
+    ZONE_SELECTION,
+    LISTENING_CONVERSATION,
+    REVIEW_CONFIRMATION,
+    STATUS_RECOVERY,
+};
+static_assert(static_cast<uint8_t>(KizzSemanticFamily::STATUS_RECOVERY) == 12);
 
 std::atomic_bool s_artwork_loading{false};
 M5Canvas s_stackchan_canvas(&M5.Display);
@@ -214,12 +236,15 @@ void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int
 }
 
 void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
-                                      int height) {
+                                      int height, int bubble_y_override = -1,
+                                      int badge_y_override = -1) {
 #if HIPHI_M5_TARGET_ID == 4
     if (!s.voice_diagnostics) return;
     // The face and state badge are Kizz's primary voice cues. Conversation
     // copies occupy a reserved lower band instead of painting over them.
-    const int bubble_y = s.controls_mode ? 40 : 160;
+    const int bubble_y = bubble_y_override >= 0
+                             ? bubble_y_override
+                             : (s.controls_mode ? 40 : 160);
     const int64_t now = esp_timer_get_time();
     if (s.voice_transcript[0] && now < s.voice_transcript_until)
         stackchan_draw_voice_bubble(target, s.voice_transcript, 8, bubble_y,
@@ -246,7 +271,9 @@ void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
     const int badge_width = armed ? 110 : 54;
     constexpr int badge_height = 25;
     const int badge_x = (width - badge_width) / 2;
-    const int badge_y = height - badge_height - 2;
+    const int badge_y = badge_y_override >= 0
+                            ? badge_y_override
+                            : height - badge_height - 2;
     target->fillRoundRect(badge_x, badge_y, badge_width, badge_height, 12,
                           STACK_BG);
     target->drawRoundRect(badge_x, badge_y, badge_width, badge_height, 12,
@@ -1265,6 +1292,162 @@ void render_picker() {
     if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
 }
 
+void semantic_button(lgfx::LovyanGFX *target, uint8_t family_token,
+                     KizzSemanticAction action, const char *label,
+                     bool primary) {
+    KizzSemanticHitRegion region = {};
+    if (!kizz_semantic_hit_region_for_action(family_token, action, &region))
+        return;
+    target->fillRoundRect(region.x, region.y, region.width, region.height, 10,
+                          primary ? STACK_ACCENT : STACK_CONTROL);
+    stackchan_draw_center(target, label, region.x + region.width / 2,
+                          region.y + region.height / 2, 1,
+                          primary ? STACK_BG : STACK_INK);
+}
+
+bool semantic_voice_turn_active() {
+    return s.voice_diagnostics || s.voice_listening ||
+           (std::strcmp(s.voice_state, "ARMED") != 0 &&
+            std::strcmp(s.voice_state, "STARTING") != 0);
+}
+
+void render_semantic_voice_overlay(lgfx::LovyanGFX *target,
+                                   KizzSemanticFamily family, int width,
+                                   int height, bool connection_lost) {
+    if (!semantic_voice_turn_active()) return;
+
+    if (family == KizzSemanticFamily::LISTENING_CONVERSATION) {
+        // This is the one composition that gives the authoritative face the
+        // whole stage. The cue comes from the existing expression lifecycle,
+        // so listening/thinking/result/fault faces remain truthful.
+        const auto face = stackchan_current_face(connection_lost);
+        stackchan_draw_performance_face(
+            target, face, width,
+            m5_stackchan_face_variant(face, s.ambient_face_variant));
+        if (s.voice_listening) stackchan_draw_listening_face(target, width);
+        stackchan_draw_voice_diagnostics(target, width, height, 144);
+        return;
+    }
+
+    // Other families keep their native geometry and receive only the mature
+    // voice overlay. It uses the existing transcript/response marquee slots,
+    // expiry timestamps, and state badge; semantic selection never owns them.
+    if (s.voice_listening) stackchan_draw_listening_face(target, width);
+    stackchan_draw_voice_diagnostics(target, width, height, 36);
+}
+
+/* Twelve private Kizz compositions reuse the mature artwork, metadata, voice,
+ * touch, expression, power, and lifecycle primitives above. */
+void render_semantic_family() {
+    const int w = M5.Display.width();
+    const int h = M5.Display.height();
+    const auto family = static_cast<KizzSemanticFamily>(s.semantic_family);
+    lgfx::LovyanGFX *target = s_stackchan_canvas_ready
+                                 ? static_cast<lgfx::LovyanGFX *>(&s_stackchan_canvas)
+                                 : static_cast<lgfx::LovyanGFX *>(&M5.Display);
+    const bool lost = !s.online && s.ever_online;
+    target->fillScreen(lost ? 0x160d12 : STACK_BG);
+    stackchan_draw_text(target, s.zone[0] ? s.zone : "NO ROOM", 8, 7, 1,
+                        lost ? STACK_HOT : STACK_INK);
+
+    switch (family) {
+    case KizzSemanticFamily::ARTWORK_IMMERSIVE:
+        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 26, w, h - 26, true);
+        else stackchan_draw_performance_face(target, stackchan_current_face(lost), w, 0);
+        target->fillRect(0, h - 31, w, 31, STACK_BG);
+        stackchan_draw_marquee(target, s.title, 8, h - 25, w - 16, 1, STACK_INK, &s_stackchan_marquees[0]);
+        break;
+    case KizzSemanticFamily::ARTWORK_BOTTOM_TRANSPORT:
+        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 27, w, 139, true);
+        else stackchan_draw_center(target, "NO ARTWORK", w / 2, 96, 1, STACK_TERTIARY);
+        stackchan_draw_marquee(target, s.title, 8, 170, w - 16, 1, STACK_INK, &s_stackchan_marquees[0]);
+        semantic_button(target, 2, KizzSemanticAction::PreviousTrack, "PREV", false);
+        semantic_button(target, 2, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
+        semantic_button(target, 2, KizzSemanticAction::NextTrack, "NEXT", false);
+        break;
+    case KizzSemanticFamily::ARTWORK_SIDE_TRANSPORT:
+        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 27, 235, 207, true);
+        else stackchan_draw_center(target, "NO ARTWORK", 117, 120, 1, STACK_TERTIARY);
+        semantic_button(target, 3, KizzSemanticAction::PreviousTrack, "PREV", false);
+        semantic_button(target, 3, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
+        semantic_button(target, 3, KizzSemanticAction::NextTrack, "NEXT", false);
+        break;
+    case KizzSemanticFamily::ARTWORK_METADATA_BAND:
+        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 27, w, 126, true);
+        target->fillRect(0, 153, w, h - 153, 0x101722);
+        stackchan_draw_marquee(target, s.title, 9, 160, w - 18, 1, STACK_INK, &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 9, 179, w - 18, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
+        stackchan_draw_marquee(target, s.album, 9, 198, w - 18, 1, STACK_TERTIARY, &s_stackchan_marquees[2]);
+        semantic_button(target, 4, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
+        break;
+    case KizzSemanticFamily::BALANCED_SPLIT:
+        if (s.artwork_pixels) stackchan_draw_artwork(target, 8, 39, 126, 126, true);
+        stackchan_draw_marquee(target, s.title, 146, 48, w - 154, 2, STACK_INK, &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 146, 77, w - 154, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
+        stackchan_draw_marquee(target, s.album, 146, 98, w - 154, 1, STACK_TERTIARY, &s_stackchan_marquees[2]);
+        semantic_button(target, 5, KizzSemanticAction::PreviousTrack, "PREV", false);
+        semantic_button(target, 5, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
+        semantic_button(target, 5, KizzSemanticAction::NextTrack, "NEXT", false);
+        break;
+    case KizzSemanticFamily::METADATA_FOCUS:
+        stackchan_draw_center(target, "NOW PLAYING", w / 2, 42, 1, STACK_ACCENT);
+        stackchan_draw_marquee(target, s.title, 10, 72, w - 20, 2, STACK_INK, &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 10, 110, w - 20, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
+        stackchan_draw_marquee(target, s.album, 10, 133, w - 20, 1, STACK_TERTIARY, &s_stackchan_marquees[2]);
+        if (s.artwork_pixels) stackchan_draw_artwork(target, 12, 165, 58, 58);
+        semantic_button(target, 6, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
+        semantic_button(target, 6, KizzSemanticAction::NextTrack, "NEXT", false);
+        break;
+    case KizzSemanticFamily::TRANSPORT_FOCUS:
+        stackchan_draw_center(target, s.playing ? "PLAYING" : "PAUSED", w / 2, 47, 2, s.playing ? STACK_ACCENT : STACK_SECONDARY);
+        semantic_button(target, 7, KizzSemanticAction::PreviousTrack, "PREV", false);
+        semantic_button(target, 7, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
+        semantic_button(target, 7, KizzSemanticAction::NextTrack, "NEXT", false);
+        stackchan_draw_marquee(target, s.title, 12, 170, w - 24, 1, STACK_INK, &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.artist, 12, 191, w - 24, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
+        break;
+    case KizzSemanticFamily::VOLUME_FOCUS: {
+        stackchan_draw_center(target, "VOLUME", w / 2, 43, 1, STACK_ACCENT);
+        const float range = std::max(1.0f, s.volume_max - s.volume_min);
+        const float ratio = std::clamp((s.volume - s.volume_min) / range, 0.0f, 1.0f);
+        target->fillRoundRect(18, 75, w - 36, 48, 14, STACK_CONTROL);
+        target->fillRoundRect(18, 75, static_cast<int>((w - 36) * ratio), 48, 14, STACK_ACCENT);
+        char volume[24];
+        std::snprintf(volume, sizeof(volume), "%.1f dB", s.volume);
+        stackchan_draw_center(target, volume, w / 2, 99, 2, STACK_BG);
+        semantic_button(target, 8, KizzSemanticAction::VolumeDown, "-", false);
+        semantic_button(target, 8, KizzSemanticAction::TogglePlayback, "PLAY", true);
+        semantic_button(target, 8, KizzSemanticAction::VolumeUp, "+", false);
+        stackchan_draw_marquee(target, s.title, 10, 207, w - 20, 1, STACK_INK, &s_stackchan_marquees[0]);
+        break;
+    }
+    case KizzSemanticFamily::ZONE_SELECTION:
+        stackchan_draw_center(target, "ROOM PICKER", w / 2, 76, 2, STACK_ACCENT);
+        stackchan_draw_center(target, "USE THE NATIVE ROOM LIST", w / 2, 118, 1,
+                              STACK_SECONDARY);
+        break;
+    case KizzSemanticFamily::LISTENING_CONVERSATION:
+        stackchan_draw_center(target, s.voice_state, w / 2, 36, 1, STACK_ACCENT);
+        break;
+    case KizzSemanticFamily::REVIEW_CONFIRMATION:
+        stackchan_draw_center(target, "CHECK THIS", w / 2, 43, 1, STACK_ACCENT);
+        stackchan_draw_center(target, "VOICE CONFIRMATION", w / 2, 176, 1,
+                              STACK_TERTIARY);
+        stackchan_draw_center(target, "SAY ACCEPT OR REVISE", w / 2, 198, 1,
+                              STACK_SECONDARY);
+        break;
+    case KizzSemanticFamily::STATUS_RECOVERY:
+        stackchan_draw_center(target, lost ? "RECONNECTING" : "READY", w / 2, 53, 2, lost ? STACK_HOT : STACK_ACCENT);
+        stackchan_draw_marquee(target, s.network, 12, 98, w - 24, 1, STACK_SECONDARY, &s_stackchan_marquees[0]);
+        stackchan_draw_marquee(target, s.title, 12, 130, w - 24, 1, STACK_INK, &s_stackchan_marquees[1]);
+        stackchan_draw_center(target, "RECOVERY IS AUTOMATIC", w / 2, 192, 1,
+                              STACK_SECONDARY);
+        break;
+    }
+    render_semantic_voice_overlay(target, family, w, h, lost);
+    if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
+}
+
 /* Kizz is a character first. Information and controls arrive as
  * deliberate temporal layers instead of permanently shrinking the face into
  * the top half of a generic dashboard. */
@@ -1517,7 +1700,8 @@ void render() {
 #elif HIPHI_M5_TARGET_ID == 3
     render_stopwatch();
 #else
-    render_stackchan_delight();
+    if (s.semantic_family_active) render_semantic_family();
+    else render_stackchan_delight();
 #endif
 }
 
@@ -1527,6 +1711,37 @@ void render() {
         controller_input_dispatch_action(&a);
     }
     if (select) simple(CONTROLLER_ACTION_SELECT_ZONE_PICKER);
+}
+
+bool semantic_touch_input(const m5_platform_touch_event_t &touch) {
+    if (!s.semantic_family_active || touch.state != M5_PLATFORM_TOUCH_CLICKED)
+        return false;
+    KizzSemanticAction action = KizzSemanticAction::None;
+    if (!kizz_semantic_hit_test(s.semantic_family, touch.x, touch.y, &action))
+        return false;
+    switch (action) {
+    case KizzSemanticAction::PreviousTrack:
+        stackchan_transport(CONTROLLER_COMMAND_PREVIOUS_TRACK, "PREVIOUS");
+        return true;
+    case KizzSemanticAction::TogglePlayback:
+        toggle_playback();
+        return true;
+    case KizzSemanticAction::NextTrack:
+        stackchan_transport(CONTROLLER_COMMAND_NEXT_TRACK, "NEXT");
+        return true;
+    case KizzSemanticAction::VolumeDown:
+        volume_steps(-1);
+        return true;
+    case KizzSemanticAction::VolumeUp:
+        volume_steps(1);
+        return true;
+    case KizzSemanticAction::OpenZonePicker:
+        simple(CONTROLLER_ACTION_OPEN_ZONE_PICKER);
+        return true;
+    case KizzSemanticAction::None:
+        return false;
+    }
+    return false;
 }
 
 void process_input() {
@@ -1624,6 +1839,7 @@ void process_input() {
     }
     if (touched) {
         s.last_activity_us = now;
+        if (semantic_touch_input(touch)) return;
         /* Transport remains direct even in Art mode: artwork is the controller,
          * not a lock screen. Only a completed tap exits to the control chrome. */
         if (s.art_mode) {
@@ -1751,6 +1967,62 @@ void process_input() {
     }
 #endif
 }
+}
+
+extern "C" bool touch_ui_semantic_admit(const char *contract_json,
+                                          size_t contract_len,
+                                          char *evidence_json,
+                                          size_t evidence_capacity) {
+    kizz_semantic_context_t context = {};
+#if HIPHI_M5_TARGET_ID == 4
+    context.has_artwork = s.artwork_pixels != nullptr;
+    context.has_transport = true;
+    context.has_volume = s.volume_max > s.volume_min;
+    context.has_zone = s.zone_count > 0 || s.zone_seen;
+    context.content_available = s.title[0] != '\0' || s.artist[0] != '\0';
+    context.metadata_overflow = std::strlen(s.title) > 64 ||
+                                std::strlen(s.artist) > 64 ||
+                                std::strlen(s.album) > 64;
+    context.voice_active = std::strcmp(s.voice_state, "ARMED") != 0 &&
+                           std::strcmp(s.voice_state, "STARTING") != 0;
+    context.review_active = std::strcmp(s.voice_state, "REVIEW") == 0 ||
+                            std::strcmp(s.voice_state, "CONFIRMING") == 0 ||
+                            std::strcmp(s.voice_state, "CORRECTION") == 0;
+    context.recovery_active = (!s.online && s.ever_online) ||
+                              std::strcmp(s.voice_state, "FAULT") == 0 ||
+                              std::strcmp(s.voice_state, "RECOVERING") == 0;
+    context.touch_input = true;
+    context.voice_input = true;
+    context.button_input = true;
+#endif
+    kizz_semantic_set_context(&context);
+    return kizz_semantic_admit_json(contract_json, contract_len,
+                                    evidence_json, evidence_capacity);
+}
+
+extern "C" void touch_ui_apply_semantic_family(uint8_t family_token) {
+    if (family_token < 1 || family_token > 12) return;
+    if (!s.semantic_family_active || s.semantic_family != family_token) {
+        // Slots 0..2 belong to the selected composition. Slots 3 and 4 are
+        // the authoritative transcript/response lifecycles and must survive
+        // layout changes unchanged.
+        for (size_t index = 0; index < 3; ++index)
+            s_stackchan_marquees[index] = {};
+    }
+    s.semantic_family = family_token;
+    s.semantic_family_active = true;
+    s.art_mode = false;
+    s.dirty = true;
+}
+
+extern "C" bool touch_ui_semantic_apply(const char *contract_id) {
+    if (!kizz_semantic_apply(contract_id)) return false;
+    if (!kizz_semantic_apply_changed()) return true;
+    s.semantic_family = kizz_semantic_active_family_token();
+    s.semantic_family_active = true;
+    s.art_mode = false;
+    s.dirty = true;
+    return true;
 }
 
 extern "C" void touch_ui_init(void) {
