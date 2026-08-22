@@ -1,9 +1,12 @@
-set(m5_platform_requires m5stack__m5unified esp_websocket_client json esp-sr)
+set(m5_platform_requires m5stack__m5unified esp_websocket_client json esp-sr nvs_flash)
 idf_build_get_property(m5_platform_target HIPHI_M5_TARGET)
 if(m5_platform_target STREQUAL "dial" OR
    m5_platform_target STREQUAL "stackchan" OR
    m5_platform_target STREQUAL "atom_joystick")
     list(APPEND m5_platform_requires m5_official)
+endif()
+if(m5_platform_target STREQUAL "stackchan")
+    list(APPEND m5_platform_requires kizz_wake_word)
 endif()
 
 idf_component_register(
@@ -16,3 +19,16 @@ idf_component_register(
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
+
+execute_process(
+    COMMAND git rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../.."
+    OUTPUT_VARIABLE hiphi_firmware_git_sha
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT hiphi_firmware_git_sha)
+    set(hiphi_firmware_git_sha "unknown")
+endif()
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    HIPHI_FIRMWARE_GIT_SHA="${hiphi_firmware_git_sha}")

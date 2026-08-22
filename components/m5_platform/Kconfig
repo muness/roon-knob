@@ -29,4 +29,25 @@ config M5_PLATFORM_STACKCHAN_VOICE_WS_URI
         Leave empty to keep voice disabled. Example:
         ws://192.168.1.10:8088/voice/v1
 
+config M5_PLATFORM_ENROLLMENT_WS_URI
+    string "Independent wake-word enrollment WebSocket URI"
+    default ""
+    help
+        Full URL of the standalone training service. This endpoint is never
+        derived from, or assumed to share a host with, the production voice
+        gateway. Leave empty outside directed enrollment work.
+
+config M5_PLATFORM_DEVICE_ID
+    string "Microphone device instance ID"
+    default "hiphi-device"
+
+config M5_PLATFORM_DEVICE_PROFILE
+    string "Microphone acoustic device profile"
+    default "m5stack_stackchan_k151_cores3_room_scale_v2" if M5_PLATFORM_EXPECT_STACKCHAN
+    default "unqualified"
+    help
+        Identifies equivalent microphone hardware and preprocessing, not one
+        physical unit. Targets without an implemented and qualified enrollment
+        path must not claim another product's acoustic profile.
+
 endmenu

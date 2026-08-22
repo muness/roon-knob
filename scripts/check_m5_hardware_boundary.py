@@ -24,9 +24,11 @@ SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp"}
 
 FORBIDDEN = {
     "direct ESP pin/bus driver include": re.compile(
-        r"#\s*include\s*[<\"]driver/(?:gpio|uart|i2c)\.h[>\"]"
+        r"#\s*include\s*[<\"]driver/(?:gpio|uart|i2c|i2s(?:_std)?)\.h[>\"]"
     ),
-    "direct ESP pin/bus driver call": re.compile(r"\b(?:gpio|uart|i2c)_[a-zA-Z0-9_]+\s*\("),
+    "direct ESP pin/bus driver call": re.compile(
+        r"\b(?:gpio|uart|i2c|i2s)_[a-zA-Z0-9_]+\s*\("
+    ),
     "Arduino pin access": re.compile(
         r"\b(?:pinMode|digitalRead|digitalWrite|analogRead|analogWrite|ledc[A-Z][A-Za-z0-9_]*)\s*\("
     ),
@@ -39,6 +41,7 @@ REQUIRED_OFFICIAL_APIS = {
     "M5Unified display": "M5.Display",
     "M5Unified touch": "M5.Touch",
     "M5Unified power": "M5.Power",
+    "M5Unified microphone": "M5.Mic",
     "M5Dial encoder": "M5Dial.Encoder",
     "Atom JoyStick library": "s_atom_joystick.getJoy1ADCValueX",
     "StackChan BSP motion": "M5StackChan.Motion",

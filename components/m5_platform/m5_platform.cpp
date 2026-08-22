@@ -11,6 +11,9 @@
 #include "esp_afe_sr_iface.h"
 #include "esp_afe_sr_models.h"
 #include "model_path.h"
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#include "kizz_wake_word.h"
+#endif
 #if CONFIG_M5_PLATFORM_EXPECT_DIAL
 #include <M5Dial.h>
 #elif CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
@@ -20,9 +23,11 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <esp_log.h>
+#include <nvs.h>
 #include <esp_random.h>
 #include <esp_system.h>
 #include <esp_timer.h>
@@ -48,6 +53,8 @@ static AtomJoyStick s_atom_joystick;
 namespace {
 enum class StackChanMotionPhase {
     idle,
+    attention_hold,
+    attention_returning,
     first_pose,
     second_pose,
     third_pose,
@@ -79,28 +86,112 @@ struct StackChanVoiceState {
 
 constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
 esp_websocket_client_handle_t s_voice_ws = nullptr;
+esp_websocket_client_handle_t s_enrollment_ws = nullptr;
 SemaphoreHandle_t s_voice_audio_lock = nullptr;
+SemaphoreHandle_t s_voice_text_lock = nullptr;
+SemaphoreHandle_t s_voice_wake_buffer_lock = nullptr;
+SemaphoreHandle_t s_enrollment_lock = nullptr;
+constexpr size_t VOICE_WAKE_BUFFER_SAMPLES = 16000 * 2;
+int16_t *s_voice_wake_buffer = nullptr;
+int16_t *s_voice_staged_wake_sample = nullptr;
+size_t s_voice_wake_buffer_write = 0;
+size_t s_voice_wake_buffer_count = 0;
+size_t s_voice_staged_wake_sample_count = 0;
 bool s_voice_network_ready = false;
+bool s_voice_transport_configured = false;
 std::atomic_bool s_voice_listener_enabled{false};
 std::atomic_bool s_voice_microphone_active{false};
 std::atomic_bool s_voice_waiting_for_response{false};
 std::atomic_bool s_voice_resume_after_sound{false};
 std::atomic_bool s_voice_listening_visual{false};
+char s_voice_transcript[161] = {};
+char s_voice_response[161] = {};
+std::atomic_bool s_voice_wake_pending{false};
+std::atomic_bool s_voice_remote_endpoint_pending{false};
+std::atomic_bool s_voice_diagnostics_enabled{true};
+std::atomic_bool s_enrollment_active{false};
+std::atomic_bool s_enrollment_detected{false};
+std::atomic_int64_t s_enrollment_suppress_wake_until_us{0};
+std::atomic_bool s_enrollment_sending{false};
+std::atomic_uint32_t s_enrollment_acked_bytes{0};
+constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
+int16_t *s_enrollment_buffer = nullptr;
+size_t s_enrollment_samples = 0;
+size_t s_enrollment_target_samples = 0;
+char s_enrollment_capture_id[97] = {};
+char s_enrollment_event[513] = {};
+size_t s_enrollment_event_length = 0;
 std::atomic_uint32_t s_voice_audio_epoch{0};
+std::atomic_int64_t s_command_end_silence_us{3000000};
+std::atomic_int64_t s_command_max_utterance_us{12000000};
 const esp_afe_sr_iface_t *s_voice_afe = nullptr;
 esp_afe_sr_data_t *s_voice_afe_data = nullptr;
 int64_t s_voice_last_audio_log = 0;
 m5_platform_voice_zone_provider_t s_voice_zone_provider = nullptr;
 
+bool voice_set_endpointing_ms(int end_silence_ms, int max_utterance_ms) {
+    if (end_silence_ms < 300 || end_silence_ms > 5000 ||
+        max_utterance_ms < 3000 || max_utterance_ms > 20000)
+        return false;
+    nvs_handle_t handle;
+    if (nvs_open("kizz_voice", NVS_READWRITE, &handle) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u32(handle, "end_sil_ms",
+                                static_cast<uint32_t>(end_silence_ms));
+    if (err == ESP_OK)
+        err = nvs_set_u32(handle, "max_utt_ms",
+                          static_cast<uint32_t>(max_utterance_ms));
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    if (err != ESP_OK) return false;
+    s_command_end_silence_us = static_cast<int64_t>(end_silence_ms) * 1000;
+    s_command_max_utterance_us = static_cast<int64_t>(max_utterance_ms) * 1000;
+    return true;
+}
+
+bool voice_set_diagnostics_enabled(bool enabled) {
+    nvs_handle_t handle;
+    if (nvs_open("kizz_voice", NVS_READWRITE, &handle) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(handle, "diagnostics", enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    if (err != ESP_OK) return false;
+    s_voice_diagnostics_enabled = enabled;
+    return true;
+}
+
+void voice_load_endpointing() {
+    nvs_handle_t handle;
+    if (nvs_open("kizz_voice", NVS_READONLY, &handle) != ESP_OK) return;
+    uint32_t end_silence_ms = 0;
+    if (nvs_get_u32(handle, "end_sil_ms", &end_silence_ms) == ESP_OK &&
+        end_silence_ms >= 300 && end_silence_ms <= 5000)
+        s_command_end_silence_us =
+            static_cast<int64_t>(end_silence_ms) * 1000;
+    uint32_t max_utterance_ms = 0;
+    if (nvs_get_u32(handle, "max_utt_ms", &max_utterance_ms) == ESP_OK &&
+        max_utterance_ms >= 3000 && max_utterance_ms <= 20000)
+        s_command_max_utterance_us =
+            static_cast<int64_t>(max_utterance_ms) * 1000;
+    uint8_t diagnostics = 0;
+    if (nvs_get_u8(handle, "diagnostics", &diagnostics) == ESP_OK)
+        s_voice_diagnostics_enabled = diagnostics != 0;
+    nvs_close(handle);
+}
+
 bool voice_take_microphone() {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
-    if (!s_voice_listener_enabled || s_voice_microphone_active) return true;
+    if (!s_voice_listener_enabled) return true;
+    if (s_voice_microphone_active) {
+        kizz_wake_word_resume();
+        return true;
+    }
     M5.Speaker.stop();
     M5.Speaker.end();
     auto mic_config = M5.Mic.config();
     /* Keep M5Unified's official CoreS3/StackChan pins, port, channel mode,
-     * callbacks, and the proven gain used by its microphone example. */
-    mic_config.magnification = 2;
+     * and callbacks. A 4x software magnification gives Kizz useful room-scale
+     * speech level while staying within M5Unified's supported microphone API. */
+    mic_config.magnification = 4;
     mic_config.sample_rate = 16000;
     M5.Mic.config(mic_config);
     if (!M5.Mic.begin()) {
@@ -110,10 +201,17 @@ bool voice_take_microphone() {
     }
     ESP_LOGI(TAG, "Kizz audio ownership: speaker -> microphone");
     s_voice_microphone_active = true;
+    if (s_voice_wake_buffer_lock &&
+        xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        s_voice_wake_buffer_write = 0;
+        s_voice_wake_buffer_count = 0;
+        xSemaphoreGive(s_voice_wake_buffer_lock);
+    }
     if (s_voice_afe && s_voice_afe_data) {
         s_voice_afe->reset_buffer(s_voice_afe_data);
         s_voice_afe->reset_vad(s_voice_afe_data);
     }
+    kizz_wake_word_resume();
     s_voice_audio_epoch.fetch_add(1, std::memory_order_relaxed);
     return true;
 #else
@@ -125,12 +223,16 @@ bool voice_take_speaker() {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (!s_voice_listener_enabled) return M5.Speaker.isRunning();
     if (!s_voice_microphone_active) return M5.Speaker.isRunning();
+    kizz_wake_word_pause();
     s_voice_microphone_active = false;
     while (M5.Mic.isRecording()) M5.delay(1);
     M5.Mic.end();
     if (!M5.Speaker.begin()) {
         ESP_LOGE(TAG, "Kizz speaker handoff failed through M5Unified");
-        if (M5.Mic.begin()) s_voice_microphone_active = true;
+        if (M5.Mic.begin()) {
+            s_voice_microphone_active = true;
+            kizz_wake_word_resume();
+        }
         return false;
     }
     ESP_LOGI(TAG, "Kizz audio ownership: microphone -> speaker");
@@ -176,6 +278,268 @@ bool voice_send_audio(const int16_t *pcm, size_t bytes) {
         static_cast<int>(bytes), pdMS_TO_TICKS(1000)) == static_cast<int>(bytes);
 }
 
+bool enrollment_send_text(const char *message) {
+    if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws))
+        return false;
+    const int length = static_cast<int>(strlen(message));
+    return esp_websocket_client_send_text(
+        s_enrollment_ws, message, length, pdMS_TO_TICKS(1000)) == length;
+}
+
+bool enrollment_send_audio(const int16_t *pcm, size_t bytes) {
+    if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws) ||
+        !pcm || !bytes) return false;
+    return esp_websocket_client_send_bin(
+        s_enrollment_ws, reinterpret_cast<const char *>(pcm),
+        static_cast<int>(bytes), pdMS_TO_TICKS(5000)) == static_cast<int>(bytes);
+}
+
+bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
+    constexpr size_t CHUNK_BYTES = 1024;
+    constexpr int ACK_TIMEOUT_MS = 3000;
+    const auto *audio = reinterpret_cast<const uint8_t *>(pcm);
+    for (size_t offset = 0; offset < bytes; offset += CHUNK_BYTES) {
+        const size_t chunk = std::min(CHUNK_BYTES, bytes - offset);
+        if (!enrollment_send_audio(
+                reinterpret_cast<const int16_t *>(audio + offset), chunk)) {
+            ESP_LOGW(TAG, "Enrollment upload send failed at %u/%u bytes",
+                     static_cast<unsigned>(offset),
+                     static_cast<unsigned>(bytes));
+            return false;
+        }
+        const uint32_t expected = static_cast<uint32_t>(offset + chunk);
+        int waited_ms = 0;
+        while (s_enrollment_acked_bytes.load(std::memory_order_relaxed) < expected &&
+               waited_ms < ACK_TIMEOUT_MS && s_enrollment_ws &&
+               esp_websocket_client_is_connected(s_enrollment_ws)) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            waited_ms += 10;
+        }
+        if (s_enrollment_acked_bytes.load(std::memory_order_relaxed) < expected) {
+            ESP_LOGW(TAG, "Enrollment upload ACK timeout at %u/%u bytes (acked=%u)",
+                     static_cast<unsigned>(expected),
+                     static_cast<unsigned>(bytes),
+                     static_cast<unsigned>(s_enrollment_acked_bytes.load(
+                         std::memory_order_relaxed)));
+            return false;
+        }
+        if (expected == bytes || expected % (16 * 1024) == 0)
+            ESP_LOGI(TAG, "Enrollment upload progress %u/%u bytes",
+                     static_cast<unsigned>(expected),
+                     static_cast<unsigned>(bytes));
+    }
+    return true;
+}
+
+bool enrollment_valid_token(const char *value) {
+    if (!value || !value[0] || strlen(value) > 96) return false;
+    for (const char *cursor = value; *cursor; ++cursor) {
+        if (!isalnum(static_cast<unsigned char>(*cursor)) &&
+            *cursor != '-' && *cursor != '_' && *cursor != '.' && *cursor != ':')
+            return false;
+    }
+    return true;
+}
+
+void enrollment_send_hello() {
+    cJSON *root = cJSON_CreateObject();
+    cJSON *audio = root ? cJSON_AddObjectToObject(root, "audio") : nullptr;
+    cJSON *preprocessing = audio
+        ? cJSON_AddObjectToObject(audio, "preprocessing") : nullptr;
+    if (!root || !audio || !preprocessing) {
+        cJSON_Delete(root);
+        return;
+    }
+    cJSON_AddStringToObject(root, "type", "hello");
+    cJSON_AddStringToObject(root, "device_id", CONFIG_M5_PLATFORM_DEVICE_ID);
+    cJSON_AddStringToObject(root, "device_profile",
+                            CONFIG_M5_PLATFORM_DEVICE_PROFILE);
+    cJSON_AddStringToObject(root, "firmware_sha", HIPHI_FIRMWARE_GIT_SHA);
+    cJSON_AddNumberToObject(audio, "sample_rate", 16000);
+    cJSON_AddNumberToObject(audio, "channels", 1);
+    cJSON_AddStringToObject(audio, "sample_format", "s16le");
+    cJSON_AddStringToObject(audio, "frontend", "m5unified_mic");
+    cJSON_AddStringToObject(audio, "gain_profile", "room_scale_4x");
+    cJSON_AddNumberToObject(preprocessing, "m5unified_magnification", 4);
+    cJSON_AddStringToObject(preprocessing, "wake_frontend",
+                            "tflite_micro_speech");
+    char *message = cJSON_PrintUnformatted(root);
+    if (!message || !enrollment_send_text(message))
+        ESP_LOGW(TAG, "Device enrollment hello could not be sent");
+    cJSON_free(message);
+    cJSON_Delete(root);
+}
+
+void enrollment_send_error(const char *capture_id, const char *reason) {
+    char message[256] = {};
+    snprintf(message, sizeof(message),
+             "{\"type\":\"training_error\",\"capture_id\":\"%s\",\"message\":\"%s\"}",
+             capture_id ? capture_id : "", reason);
+    (void)enrollment_send_text(message);
+}
+
+bool enrollment_start_capture(const char *capture_id, int duration_ms) {
+    if (!enrollment_valid_token(capture_id) || duration_ms < 500 ||
+        duration_ms > 5000 || !s_enrollment_lock || !s_enrollment_buffer) return false;
+    if (!s_voice_microphone_active || s_voice_waiting_for_response) {
+        enrollment_send_error(capture_id, "microphone_unavailable");
+        return false;
+    }
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) != pdTRUE)
+        return false;
+    if (s_enrollment_active || s_enrollment_sending) {
+        xSemaphoreGive(s_enrollment_lock);
+        enrollment_send_error(capture_id, "capture_busy");
+        return false;
+    }
+    strlcpy(s_enrollment_capture_id, capture_id,
+            sizeof(s_enrollment_capture_id));
+    s_enrollment_samples = 0;
+    s_enrollment_target_samples =
+        static_cast<size_t>(duration_ms) * 16000 / 1000;
+    s_enrollment_detected = false;
+    s_voice_wake_pending = false;
+    s_voice_audio_epoch.fetch_add(1, std::memory_order_relaxed);
+    s_enrollment_active = true;
+    xSemaphoreGive(s_enrollment_lock);
+    ESP_LOGI(TAG, "Directed enrollment capture %s started for %d ms",
+             capture_id, duration_ms);
+    return true;
+}
+
+void enrollment_upload_task(void *) {
+    vTaskDelay(pdMS_TO_TICKS(150));
+    const size_t completed_samples = s_enrollment_samples;
+    char capture_id[sizeof(s_enrollment_capture_id)] = {};
+    strlcpy(capture_id, s_enrollment_capture_id, sizeof(capture_id));
+    const bool detected = s_enrollment_detected;
+    s_enrollment_acked_bytes.store(0, std::memory_order_relaxed);
+    s_enrollment_suppress_wake_until_us = esp_timer_get_time() + 1000000;
+    s_voice_wake_pending = false;
+
+    char header[192] = {};
+    snprintf(header, sizeof(header),
+             "{\"type\":\"training_sample\",\"capture_id\":\"%s\",\"bytes\":%u,\"detected\":%s}",
+             capture_id,
+             static_cast<unsigned>(completed_samples * sizeof(int16_t)),
+             detected ? "true" : "false");
+    const size_t completed_bytes = completed_samples * sizeof(int16_t);
+    char end[160] = {};
+    snprintf(end, sizeof(end),
+             "{\"type\":\"training_sample_end\",\"capture_id\":\"%s\"}",
+             capture_id);
+    const bool sent = enrollment_send_text(header) &&
+        enrollment_send_audio_chunks(s_enrollment_buffer, completed_bytes) &&
+        enrollment_send_text(end);
+    if (!sent) ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
+    else ESP_LOGI(TAG, "Enrollment capture %s sent (provisional detected=%s)",
+                  capture_id, detected ? "true" : "false");
+
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_enrollment_sending = false;
+        s_enrollment_samples = 0;
+        s_enrollment_capture_id[0] = '\0';
+        xSemaphoreGive(s_enrollment_lock);
+    }
+    vTaskDelete(nullptr);
+}
+
+void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
+    if (!s_enrollment_active || !s_enrollment_lock || !samples) return;
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
+    if (!s_enrollment_active) {
+        xSemaphoreGive(s_enrollment_lock);
+        return;
+    }
+    const size_t remaining = s_enrollment_target_samples - s_enrollment_samples;
+    const size_t copied = std::min(samples, remaining);
+    memcpy(s_enrollment_buffer + s_enrollment_samples, pcm,
+           copied * sizeof(int16_t));
+    s_enrollment_samples += copied;
+    if (s_enrollment_samples < s_enrollment_target_samples) {
+        xSemaphoreGive(s_enrollment_lock);
+        return;
+    }
+    s_enrollment_active = false;
+    s_enrollment_sending = true;
+    xSemaphoreGive(s_enrollment_lock);
+    if (xTaskCreatePinnedToCore(enrollment_upload_task, "kizz_enroll_tx", 4096,
+                                nullptr, 4, nullptr, 0) != pdPASS) {
+        ESP_LOGE(TAG, "Enrollment upload task could not start");
+        if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+            s_enrollment_sending = false;
+            s_enrollment_samples = 0;
+            s_enrollment_capture_id[0] = '\0';
+            xSemaphoreGive(s_enrollment_lock);
+        }
+    }
+}
+
+void voice_remember_wake_audio(const int16_t *pcm, size_t samples) {
+    if (!s_voice_wake_buffer || !s_voice_wake_buffer_lock || !samples) return;
+    if (xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+        return;
+    for (size_t i = 0; i < samples; ++i) {
+        s_voice_wake_buffer[s_voice_wake_buffer_write] = pcm[i];
+        s_voice_wake_buffer_write =
+            (s_voice_wake_buffer_write + 1) % VOICE_WAKE_BUFFER_SAMPLES;
+    }
+    s_voice_wake_buffer_count = std::min(
+        VOICE_WAKE_BUFFER_SAMPLES, s_voice_wake_buffer_count + samples);
+    xSemaphoreGive(s_voice_wake_buffer_lock);
+}
+
+bool voice_stage_wake_sample() {
+    if (!s_voice_wake_buffer || !s_voice_staged_wake_sample ||
+        !s_voice_wake_buffer_lock) return false;
+    if (xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return false;
+    }
+    const size_t count = s_voice_wake_buffer_count;
+    const size_t start =
+        (s_voice_wake_buffer_write + VOICE_WAKE_BUFFER_SAMPLES - count) %
+        VOICE_WAKE_BUFFER_SAMPLES;
+    for (size_t i = 0; i < count; ++i)
+        s_voice_staged_wake_sample[i] =
+            s_voice_wake_buffer[(start + i) % VOICE_WAKE_BUFFER_SAMPLES];
+    s_voice_staged_wake_sample_count = count;
+    xSemaphoreGive(s_voice_wake_buffer_lock);
+    return count > 0;
+}
+
+bool voice_send_staged_wake_sample() {
+    const size_t count = s_voice_staged_wake_sample_count;
+    if (!s_voice_staged_wake_sample || !count) return false;
+    char event[128] = {};
+    snprintf(event, sizeof(event),
+             "{\"type\":\"wake_sample\",\"label\":\"hiphi_kizz\",\"bytes\":%u}",
+             static_cast<unsigned>(count * sizeof(int16_t)));
+    const bool sent = voice_send_text(event) &&
+        voice_send_audio(s_voice_staged_wake_sample, count * sizeof(int16_t));
+    s_voice_staged_wake_sample_count = 0;
+    return sent;
+}
+
+void voice_recover_listener() {
+    s_voice_waiting_for_response = false;
+    if (s_voice_audio_lock &&
+        xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        voice_take_microphone();
+        xSemaphoreGive(s_voice_audio_lock);
+    }
+    m5_platform_voice_feedback("idle");
+}
+
+void voice_rearm_listener_preserve_face() {
+    s_voice_waiting_for_response = false;
+    s_voice_resume_after_sound = false;
+    if (s_voice_audio_lock &&
+        xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        voice_take_microphone();
+        xSemaphoreGive(s_voice_audio_lock);
+    }
+}
+
 void voice_feed_task(void *) {
     const int chunk = s_voice_afe->get_feed_chunksize(s_voice_afe_data);
     ESP_LOGI(TAG, "Kizz official AFE input: %d samples at 16000 Hz", chunk);
@@ -194,14 +558,31 @@ void voice_feed_task(void *) {
             xSemaphoreGive(s_voice_audio_lock);
         }
         if (captured) {
+            voice_remember_wake_audio(pcm, static_cast<size_t>(chunk));
             const int64_t now = esp_timer_get_time();
             if (now - s_voice_last_audio_log >= 2000000) {
                 int peak = 0;
                 for (int i = 0; i < chunk; ++i)
                     peak = std::max(peak, std::abs(static_cast<int>(pcm[i])));
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+                ESP_LOGI(TAG,
+                         "Kizz official mic frame: peak=%d wake_state=%s transitions=%u",
+                         peak, kizz_wake_word_runtime_state(),
+                         static_cast<unsigned>(
+                             kizz_wake_word_transition_count()));
+#else
                 ESP_LOGI(TAG, "Kizz official mic frame: peak=%d", peak);
+#endif
                 s_voice_last_audio_log = now;
             }
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+            const size_t wake_samples =
+                kizz_wake_word_feed(pcm, static_cast<size_t>(chunk));
+            if (wake_samples != static_cast<size_t>(chunk))
+                ESP_LOGW(TAG, "Kizz wake input dropped %u samples",
+                         static_cast<unsigned>(chunk - wake_samples));
+#endif
+            enrollment_capture_audio(pcm, static_cast<size_t>(chunk));
             s_voice_afe->feed(s_voice_afe_data, pcm);
         }
         else vTaskDelay(pdMS_TO_TICKS(5));
@@ -209,12 +590,16 @@ void voice_feed_task(void *) {
 }
 
 void voice_fetch_task(void *) {
-    constexpr int64_t COMMAND_END_SILENCE_US = 1600000;
     bool wake_detected = false;
     bool command_armed = false;
     bool utterance_open = false;
     int64_t wake_detected_at = 0;
+    int64_t utterance_opened_at = 0;
     int64_t last_command_speech_at = 0;
+    size_t command_audio_bytes = 0;
+    uint32_t speech_frames = 0;
+    uint32_t silence_frames = 0;
+    uint32_t turn_id = 0;
     uint32_t audio_epoch = s_voice_audio_epoch;
     for (;;) {
         if (audio_epoch != s_voice_audio_epoch) {
@@ -223,7 +608,12 @@ void voice_fetch_task(void *) {
             command_armed = false;
             utterance_open = false;
             wake_detected_at = 0;
+            utterance_opened_at = 0;
             last_command_speech_at = 0;
+            command_audio_bytes = 0;
+            speech_frames = 0;
+            silence_frames = 0;
+            s_voice_remote_endpoint_pending = false;
         }
         if (s_voice_waiting_for_response) {
             vTaskDelay(pdMS_TO_TICKS(20));
@@ -233,16 +623,31 @@ void voice_fetch_task(void *) {
             s_voice_afe->fetch_with_delay(s_voice_afe_data, pdMS_TO_TICKS(100));
         if (!result || result->ret_value == ESP_FAIL) continue;
         const int64_t now = esp_timer_get_time();
-        if (result->wakeup_state == WAKENET_DETECTED) {
-            ESP_LOGI(TAG, "Kizz wake detected on-device: model=%d word=%d volume=%.1f dBFS",
-                     result->wakenet_model_index, result->wake_word_index,
+        const bool remote_endpoint = wake_detected && command_armed &&
+            utterance_open && s_voice_remote_endpoint_pending.exchange(false);
+        if (s_voice_wake_pending.exchange(false)) {
+            ESP_LOGI(TAG, "Kizz wake detected on-device: custom model volume=%.1f dBFS",
                      static_cast<double>(result->data_volume));
             wake_detected = true;
             command_armed = false;
             utterance_open = false;
             wake_detected_at = now;
+            utterance_opened_at = 0;
+            last_command_speech_at = 0;
+            command_audio_bytes = 0;
+            speech_frames = 0;
+            silence_frames = 0;
+            ++turn_id;
+            s_voice_remote_endpoint_pending = false;
             m5_platform_voice_feedback("listening");
-            voice_send_start();
+            if (!voice_stage_wake_sample())
+                ESP_LOGW(TAG, "Kizz wake training sample could not be staged");
+            if (!voice_send_start()) {
+                ESP_LOGW(TAG, "Kizz voice turn could not start; returning to listening");
+                wake_detected = false;
+                wake_detected_at = 0;
+                voice_recover_listener();
+            }
         } else if (wake_detected && !command_armed) {
             /* WakeNet fires while the wake phrase is still in VAD speech.
              * A natural pause arms the command immediately. If speech is
@@ -254,31 +659,63 @@ void voice_fetch_task(void *) {
             } else if (now - wake_detected_at >= 250000) {
                 command_armed = true;
                 utterance_open = true;
+                utterance_opened_at = now;
                 last_command_speech_at = now;
+                ++speech_frames;
                 ESP_LOGI(TAG, "Kizz command armed during continuous speech");
                 if (result->vad_cache_size > 0)
-                    voice_send_audio(result->vad_cache,
-                                     static_cast<size_t>(result->vad_cache_size));
-                voice_send_audio(result->data,
-                                 static_cast<size_t>(result->data_size));
+                    if (voice_send_audio(result->vad_cache,
+                                         static_cast<size_t>(result->vad_cache_size)))
+                        command_audio_bytes += static_cast<size_t>(result->vad_cache_size);
+                if (voice_send_audio(result->data,
+                                     static_cast<size_t>(result->data_size)))
+                    command_audio_bytes += static_cast<size_t>(result->data_size);
             }
-        } else if (wake_detected && command_armed &&
-                   result->vad_state == VAD_SPEECH) {
-            if (!utterance_open) {
-                utterance_open = true;
-                if (result->vad_cache_size > 0)
-                    voice_send_audio(result->vad_cache,
-                                     static_cast<size_t>(result->vad_cache_size));
-            }
-            last_command_speech_at = now;
-            voice_send_audio(result->data, static_cast<size_t>(result->data_size));
-        } else if (utterance_open &&
-                   now - last_command_speech_at >= COMMAND_END_SILENCE_US) {
-            ESP_LOGI(TAG, "Kizz utterance committed after %.1fs sustained silence",
-                     static_cast<double>(COMMAND_END_SILENCE_US) / 1000000.0);
+        } else if (wake_detected && command_armed && utterance_open &&
+                   (remote_endpoint ||
+                    (result->vad_state != VAD_SPEECH &&
+                     now - last_command_speech_at >=
+                         s_command_end_silence_us.load()) ||
+                    now - utterance_opened_at >=
+                        s_command_max_utterance_us.load())) {
+            const bool maximum_reached =
+                now - utterance_opened_at >= s_command_max_utterance_us.load();
+            const char *reason = remote_endpoint ? "deepgram_flux" :
+                (maximum_reached ? "max_duration" : "vad_silence");
+            const int64_t trailing_silence_us = std::max<int64_t>(
+                0, now - last_command_speech_at);
+            ESP_LOGI(TAG,
+                     "Kizz utterance committed: reason=%s wake_to_commit=%lldms "
+                     "command=%lldms silence=%lldms bytes=%u vad=%u/%u",
+                     reason,
+                     static_cast<long long>((now - wake_detected_at) / 1000),
+                     static_cast<long long>((now - utterance_opened_at) / 1000),
+                     static_cast<long long>(trailing_silence_us / 1000),
+                     static_cast<unsigned>(command_audio_bytes),
+                     static_cast<unsigned>(speech_frames),
+                     static_cast<unsigned>(silence_frames));
+            char telemetry[384] = {};
+            snprintf(telemetry, sizeof(telemetry),
+                     "{\"type\":\"voice_telemetry\",\"event\":\"endpoint\","
+                     "\"turn_id\":%u,\"reason\":\"%s\","
+                     "\"wake_to_commit_ms\":%lld,\"command_ms\":%lld,"
+                     "\"trailing_silence_ms\":%lld,\"audio_bytes\":%u,"
+                     "\"speech_frames\":%u,\"silence_frames\":%u,"
+                     "\"end_silence_ms\":%lld,\"max_utterance_ms\":%lld}",
+                     static_cast<unsigned>(turn_id), reason,
+                     static_cast<long long>((now - wake_detected_at) / 1000),
+                     static_cast<long long>((now - utterance_opened_at) / 1000),
+                     static_cast<long long>(trailing_silence_us / 1000),
+                     static_cast<unsigned>(command_audio_bytes),
+                     static_cast<unsigned>(speech_frames),
+                     static_cast<unsigned>(silence_frames),
+                     static_cast<long long>(s_command_end_silence_us.load() / 1000),
+                     static_cast<long long>(s_command_max_utterance_us.load() / 1000));
+            (void)enrollment_send_text(telemetry);
             wake_detected = false;
             command_armed = false;
             utterance_open = false;
+            utterance_opened_at = 0;
             last_command_speech_at = 0;
             s_voice_waiting_for_response = true;
             if (s_voice_audio_lock &&
@@ -287,9 +724,31 @@ void voice_fetch_task(void *) {
                 xSemaphoreGive(s_voice_audio_lock);
             }
             if (!voice_send_text("{\"type\":\"commit\"}")) {
-                s_voice_waiting_for_response = false;
-                m5_platform_voice_feedback("idle");
+                ESP_LOGW(TAG, "Kizz voice commit failed; returning to listening");
+                voice_recover_listener();
+            } else if (!voice_send_staged_wake_sample()) {
+                ESP_LOGW(TAG, "Kizz wake training sample could not be sent");
             }
+        } else if (wake_detected && command_armed &&
+                   result->vad_state == VAD_SPEECH) {
+            if (!utterance_open) {
+                utterance_open = true;
+                utterance_opened_at = now;
+                if (result->vad_cache_size > 0)
+                    if (voice_send_audio(result->vad_cache,
+                                         static_cast<size_t>(result->vad_cache_size)))
+                        command_audio_bytes += static_cast<size_t>(result->vad_cache_size);
+            }
+            last_command_speech_at = now;
+            ++speech_frames;
+            if (voice_send_audio(result->data,
+                                 static_cast<size_t>(result->data_size)))
+                command_audio_bytes += static_cast<size_t>(result->data_size);
+        } else if (wake_detected && command_armed && utterance_open) {
+            ++silence_frames;
+            if (voice_send_audio(result->data,
+                                 static_cast<size_t>(result->data_size)))
+                command_audio_bytes += static_cast<size_t>(result->data_size);
         } else if (wake_detected && !utterance_open &&
                    now - wake_detected_at >= 6000000) {
             ESP_LOGI(TAG, "Kizz listening timed out without command speech");
@@ -302,9 +761,11 @@ void voice_fetch_task(void *) {
                 xSemaphoreGive(s_voice_audio_lock);
             }
             if (!voice_send_text("{\"type\":\"commit\"}")) {
-                s_voice_waiting_for_response = false;
-                m5_platform_voice_feedback("idle");
+                ESP_LOGW(TAG, "Kizz empty voice commit failed; returning to listening");
+                voice_recover_listener();
             }
+            else if (!voice_send_staged_wake_sample())
+                ESP_LOGW(TAG, "Kizz wake training sample could not be sent");
         }
     }
 }
@@ -318,35 +779,187 @@ void voice_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_data
     }
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED || event_id == WEBSOCKET_EVENT_ERROR) {
         ESP_LOGW(TAG, "Kizz local voice gateway unavailable; native controls remain safe");
+        if (s_voice_waiting_for_response) voice_recover_listener();
         return;
     }
     if (event_id != WEBSOCKET_EVENT_DATA) return;
     const auto *event = static_cast<esp_websocket_event_data_t *>(event_data);
-    if (!event || event->op_code != 0x1 || !event->data_ptr ||
+    if (!event || (event->op_code != 0x1 && event->op_code != 0x0) ||
+        !event->data_ptr ||
         event->data_len <= 0 || event->data_len > 512) return;
     char message[513] = {};
     memcpy(message, event->data_ptr, static_cast<size_t>(event->data_len));
     cJSON *root = cJSON_Parse(message);
     if (!root) return;
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    if (cJSON_IsString(type) && type->valuestring &&
+        strcmp(type->valuestring, "transcript") == 0) {
+        cJSON *text = cJSON_GetObjectItemCaseSensitive(root, "text");
+        if (cJSON_IsString(text) && text->valuestring) {
+            if (s_voice_text_lock &&
+                xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+                snprintf(s_voice_transcript, sizeof(s_voice_transcript), "%s",
+                         text->valuestring);
+                xSemaphoreGive(s_voice_text_lock);
+            }
+            ESP_LOGI(TAG, "Kizz transcript: %s", s_voice_transcript);
+        }
+    }
+    if (cJSON_IsString(type) && type->valuestring &&
+        strcmp(type->valuestring, "endpoint") == 0) {
+        s_voice_remote_endpoint_pending = true;
+    }
     cJSON *state = cJSON_GetObjectItemCaseSensitive(root, "state");
-    if (cJSON_IsString(state) && state->valuestring)
+    if (cJSON_IsString(state) && state->valuestring) {
+        cJSON *heard = cJSON_GetObjectItemCaseSensitive(root, "heard");
+        cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+        if (cJSON_IsString(heard) && heard->valuestring) {
+            if (s_voice_text_lock &&
+                xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+                snprintf(s_voice_transcript, sizeof(s_voice_transcript), "%s",
+                         heard->valuestring);
+                xSemaphoreGive(s_voice_text_lock);
+            }
+        }
+        if (cJSON_IsString(message) && message->valuestring) {
+            if (s_voice_text_lock &&
+                xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+                snprintf(s_voice_response, sizeof(s_voice_response), "%s",
+                         message->valuestring);
+                xSemaphoreGive(s_voice_text_lock);
+            }
+            ESP_LOGI(TAG, "Kizz response: %s", s_voice_response);
+        }
         m5_platform_voice_feedback(state->valuestring);
+    }
+    cJSON_Delete(root);
+}
+
+void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
+                         void *event_data) {
+    if (event_id == WEBSOCKET_EVENT_CONNECTED) {
+        ESP_LOGI(TAG, "Independent enrollment service connected");
+        enrollment_send_hello();
+        return;
+    }
+    if (event_id == WEBSOCKET_EVENT_DISCONNECTED ||
+        event_id == WEBSOCKET_EVENT_ERROR) {
+        ESP_LOGW(TAG, "Independent enrollment service unavailable; production voice unchanged");
+        return;
+    }
+    if (event_id != WEBSOCKET_EVENT_DATA) return;
+    const auto *event = static_cast<esp_websocket_event_data_t *>(event_data);
+    if (!event || event->op_code != 0x1 || !event->data_ptr ||
+        event->data_len <= 0 || event->payload_len <= 0 ||
+        event->payload_len > static_cast<int>(sizeof(s_enrollment_event) - 1) ||
+        event->payload_offset < 0 ||
+        event->payload_offset + event->data_len > event->payload_len) return;
+    if (event->payload_offset == 0) {
+        s_enrollment_event_length = static_cast<size_t>(event->payload_len);
+        memset(s_enrollment_event, 0, sizeof(s_enrollment_event));
+    }
+    if (s_enrollment_event_length != static_cast<size_t>(event->payload_len))
+        return;
+    memcpy(s_enrollment_event + event->payload_offset, event->data_ptr,
+           static_cast<size_t>(event->data_len));
+    if (event->payload_offset + event->data_len != event->payload_len) return;
+
+    cJSON *root = cJSON_ParseWithLength(
+        s_enrollment_event, s_enrollment_event_length);
+    s_enrollment_event_length = 0;
+    if (!root) return;
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    if (cJSON_IsString(type) && type->valuestring &&
+        strcmp(type->valuestring, "training_capture") == 0) {
+        cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
+        cJSON *duration_ms = cJSON_GetObjectItemCaseSensitive(root, "duration_ms");
+        if (!cJSON_IsString(capture_id) || !capture_id->valuestring ||
+            !cJSON_IsNumber(duration_ms) ||
+            !enrollment_start_capture(capture_id->valuestring,
+                                      duration_ms->valueint))
+            ESP_LOGW(TAG, "Rejected malformed or unavailable enrollment capture");
+    } else if (cJSON_IsString(type) && type->valuestring &&
+               strcmp(type->valuestring, "training_chunk") == 0) {
+        cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
+        cJSON *received_bytes = cJSON_GetObjectItemCaseSensitive(
+            root, "received_bytes");
+        if (cJSON_IsString(capture_id) && capture_id->valuestring &&
+            strcmp(capture_id->valuestring, s_enrollment_capture_id) == 0 &&
+            cJSON_IsNumber(received_bytes) && received_bytes->valuedouble >= 0 &&
+            received_bytes->valuedouble <=
+                static_cast<double>(ENROLLMENT_MAX_SAMPLES * sizeof(int16_t))) {
+            s_enrollment_acked_bytes.store(
+                static_cast<uint32_t>(received_bytes->valuedouble),
+                std::memory_order_relaxed);
+        }
+    } else if (cJSON_IsString(type) && type->valuestring &&
+               strcmp(type->valuestring, "wake_config") == 0) {
+        cJSON *cutoff = cJSON_GetObjectItemCaseSensitive(
+            root, "probability_cutoff");
+        cJSON *window = cJSON_GetObjectItemCaseSensitive(
+            root, "sliding_window");
+        cJSON *end_silence = cJSON_GetObjectItemCaseSensitive(
+            root, "end_silence_ms");
+        cJSON *max_utterance = cJSON_GetObjectItemCaseSensitive(
+            root, "max_utterance_ms");
+        cJSON *diagnostics = cJSON_GetObjectItemCaseSensitive(
+            root, "diagnostics_enabled");
+        if (!cJSON_IsNumber(cutoff) || !cJSON_IsNumber(window) ||
+            !cJSON_IsNumber(end_silence) || !cJSON_IsNumber(max_utterance) ||
+            !kizz_wake_word_configure(
+                static_cast<float>(cutoff->valuedouble),
+                static_cast<size_t>(window->valueint)) ||
+            !voice_set_endpointing_ms(end_silence->valueint,
+                                      max_utterance->valueint)) {
+            ESP_LOGW(TAG, "Rejected invalid wake calibration");
+            enrollment_send_text(
+                "{\"type\":\"wake_config_error\",\"reason\":\"invalid_config\"}");
+        } else {
+            if (cJSON_IsBool(diagnostics) &&
+                !voice_set_diagnostics_enabled(cJSON_IsTrue(diagnostics))) {
+                ESP_LOGW(TAG, "Could not persist voice diagnostics setting");
+            }
+            char response[240];
+            snprintf(response, sizeof(response),
+                     "{\"type\":\"wake_config_applied\","
+                     "\"probability_cutoff\":%.3f,\"sliding_window\":%d,"
+                     "\"end_silence_ms\":%d,\"max_utterance_ms\":%d,"
+                     "\"diagnostics_enabled\":%s}",
+                     cutoff->valuedouble, window->valueint,
+                     end_silence->valueint, max_utterance->valueint,
+                     s_voice_diagnostics_enabled ? "true" : "false");
+            enrollment_send_text(response);
+        }
+    }
     cJSON_Delete(root);
 }
 
 void start_voice_transport() {
-    if (s_voice_ws || !s_voice_network_ready) return;
+    if (s_voice_ws || s_enrollment_ws || !s_voice_network_ready) return;
     constexpr const char *voice_uri = CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI;
-    if (!voice_uri[0]) {
-        ESP_LOGI(TAG, "Kizz local voice gateway is not configured");
+    constexpr const char *enrollment_uri = CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI;
+    s_voice_transport_configured = voice_uri[0] != '\0';
+    if (!s_voice_transport_configured && !enrollment_uri[0]) {
+        ESP_LOGI(TAG, "Neither production voice nor enrollment is configured");
         return;
     }
     s_voice_audio_lock = xSemaphoreCreateMutex();
-    if (!s_voice_audio_lock) {
+    s_voice_text_lock = xSemaphoreCreateMutex();
+    if (s_voice_transport_configured) {
+        s_voice_wake_buffer_lock = xSemaphoreCreateMutex();
+        s_voice_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
+            VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+        s_voice_staged_wake_sample = static_cast<int16_t *>(heap_caps_calloc(
+            VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+    }
+    if (!s_voice_audio_lock || !s_voice_text_lock || (s_voice_transport_configured &&
+        (!s_voice_wake_buffer_lock || !s_voice_wake_buffer ||
+         !s_voice_staged_wake_sample))) {
         ESP_LOGE(TAG, "Kizz voice audio lock allocation failed");
         return;
     }
     s_voice_listener_enabled = true;
+    voice_load_endpointing();
     const bool locked =
         xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(100)) == pdTRUE;
     if (!locked || !voice_take_microphone()) {
@@ -369,7 +982,7 @@ void start_voice_transport() {
         s_voice_listener_enabled = false;
         return;
     }
-    afe_config->wakenet_init = true;
+    afe_config->wakenet_init = false;
     afe_config->vad_init = true;
     afe_config->vad_min_speech_ms = 128;
     afe_config->vad_min_noise_ms = 700;
@@ -384,26 +997,67 @@ void start_voice_transport() {
         s_voice_listener_enabled = false;
         return;
     }
-    s_voice_afe->set_wakenet_threshold(s_voice_afe_data, 1, 0.50f);
-
-    esp_websocket_client_config_t voice_cfg = {};
-    voice_cfg.uri = voice_uri;
-    voice_cfg.buffer_size = 2048;
-    voice_cfg.network_timeout_ms = 10000;
-    voice_cfg.reconnect_timeout_ms = 1000;
-    s_voice_ws = esp_websocket_client_init(&voice_cfg);
-    if (!s_voice_ws) {
-        ESP_LOGE(TAG, "Kizz voice transport allocation failed");
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!kizz_wake_word_start([]() {
+            if (s_enrollment_active || s_enrollment_sending)
+                s_enrollment_detected = true;
+            else if (esp_timer_get_time() >=
+                         s_enrollment_suppress_wake_until_us.load() &&
+                     s_voice_transport_configured)
+                s_voice_wake_pending = true;
+        })) {
+        ESP_LOGE(TAG, "Kizz custom wake model initialization failed");
+        s_voice_listener_enabled = false;
         return;
     }
-    ESP_LOGI(TAG, "Starting Kizz local voice gateway at %s", voice_cfg.uri);
-    esp_websocket_register_events(s_voice_ws, WEBSOCKET_EVENT_ANY,
-                                  voice_ws_event, nullptr);
-    esp_websocket_client_start(s_voice_ws);
+#endif
+
+    if (s_voice_transport_configured) {
+        esp_websocket_client_config_t voice_cfg = {};
+        voice_cfg.uri = voice_uri;
+        voice_cfg.buffer_size = 2048;
+        voice_cfg.network_timeout_ms = 10000;
+        voice_cfg.reconnect_timeout_ms = 1000;
+        s_voice_ws = esp_websocket_client_init(&voice_cfg);
+        if (!s_voice_ws) {
+            ESP_LOGE(TAG, "Kizz voice transport allocation failed");
+            return;
+        }
+        ESP_LOGI(TAG, "Starting Kizz local voice gateway at %s", voice_cfg.uri);
+        esp_websocket_register_events(s_voice_ws, WEBSOCKET_EVENT_ANY,
+                                      voice_ws_event, nullptr);
+        esp_websocket_client_start(s_voice_ws);
+    }
+    if (enrollment_uri[0]) {
+        s_enrollment_lock = xSemaphoreCreateMutex();
+        s_enrollment_buffer = static_cast<int16_t *>(heap_caps_calloc(
+            ENROLLMENT_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+        if (!s_enrollment_lock || !s_enrollment_buffer) {
+            ESP_LOGE(TAG, "Enrollment buffer allocation failed; production voice remains enabled");
+        } else {
+            esp_websocket_client_config_t enrollment_cfg = {};
+            enrollment_cfg.uri = enrollment_uri;
+            enrollment_cfg.buffer_size = 2048;
+            enrollment_cfg.network_timeout_ms = 10000;
+            enrollment_cfg.reconnect_timeout_ms = 1000;
+            s_enrollment_ws = esp_websocket_client_init(&enrollment_cfg);
+            if (!s_enrollment_ws) {
+                ESP_LOGE(TAG, "Enrollment transport allocation failed");
+            } else {
+                ESP_LOGI(TAG, "Starting independent enrollment endpoint at %s",
+                         enrollment_cfg.uri);
+                esp_websocket_register_events(
+                    s_enrollment_ws, WEBSOCKET_EVENT_ANY,
+                    enrollment_ws_event, nullptr);
+                esp_websocket_client_start(s_enrollment_ws);
+            }
+        }
+    }
     xTaskCreatePinnedToCore(voice_feed_task, "kizz_afe_feed", 6144,
                             nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(voice_fetch_task, "kizz_afe_fetch", 6144,
-                            nullptr, 5, nullptr, 1);
+    if (s_voice_transport_configured)
+        xTaskCreatePinnedToCore(voice_fetch_task, "kizz_afe_fetch", 6144,
+                                nullptr, 5, nullptr, 1);
 }
 
 void stackchan_voice_note(uint8_t index) {
@@ -470,6 +1124,31 @@ void stackchan_pose(int yaw, int pitch, int speed) {
     (void)yaw;
     (void)pitch;
     (void)speed;
+#endif
+}
+
+void stackchan_begin_listening_pose() {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (!s_stackchan_motion.enabled || s_stackchan_motion.faulted ||
+        s_stackchan_motion.phase != StackChanMotionPhase::idle) return;
+    // Breazeal, "Proto-conversations with an anthropomorphic robot" (RO-MAN
+    // 2000), section 3: Kismet leaned toward the speaker while holding eye
+    // contact. Kizz has two axes, so a centered forward lean carries it.
+    stackchan_pose(0, 160, 220);
+    s_stackchan_motion.phase = StackChanMotionPhase::attention_hold;
+    ESP_LOGI(TAG, "Kizz listening posture: forward and centered");
+#endif
+}
+
+void stackchan_end_listening_pose() {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (s_stackchan_motion.phase != StackChanMotionPhase::attention_hold)
+        return;
+    // Kismet leaned back and shifted gaze before taking its turn. The face
+    // supplies the gaze cue; the official BSP returns the body to neutral.
+    M5StackChan.Motion.goHome(220);
+    s_stackchan_motion.phase = StackChanMotionPhase::attention_returning;
+    s_stackchan_motion.deadline = esp_timer_get_time() + 650000;
 #endif
 }
 
@@ -696,11 +1375,14 @@ extern "C" void m5_platform_voice_network_ready(void) {
 extern "C" void m5_platform_voice_feedback(const char *state) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (!state || !s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
+    if (strcmp(state, "listening") != 0) stackchan_end_listening_pose();
     if (strcmp(state, "listening") == 0) {
+        m5_platform_voice_clear_conversation();
         /* Keep recording intact. The attentive face is the immediate cue;
          * the chirp comes after the sentence when audio is safely handed off. */
         s_voice_listening_visual = true;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_ATTENTIVE;
+        stackchan_begin_listening_pose();
     } else if (strcmp(state, "thinking") == 0) {
         s_voice_listening_visual = false;
         s_voice_resume_after_sound = false;
@@ -710,19 +1392,31 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
         s_voice_listening_visual = false;
         s_voice_resume_after_sound = true;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_PROUD;
-        m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK);
+        if (!m5_platform_stackchan_sound_trigger(
+                M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK))
+            voice_rearm_listener_preserve_face();
         m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_DANCE);
     } else if (strcmp(state, "clarify") == 0) {
         s_voice_listening_visual = false;
         s_voice_resume_after_sound = true;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_WORRIED;
-        m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LOST);
+        if (!m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LOST))
+            voice_rearm_listener_preserve_face();
     } else {
         s_voice_listening_visual = false;
         s_voice_waiting_for_response = false;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
-        if (s_voice_listener_enabled && s_voice_audio_lock &&
-            xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (s_stackchan_voice.phrase) {
+            // An idle transport event can arrive while a connection or result
+            // chirp still owns the speaker. Reopening the shared M5Unified I2S
+            // path here lets later notes steal the pins back from the mic.
+            // Keep the wake runtime paused until sound_process completes the
+            // phrase and performs one ordered speaker -> microphone handoff.
+            s_voice_resume_after_sound = true;
+            ESP_LOGI(TAG, "Kizz listener rearm deferred until sound completes");
+        } else if (s_voice_listener_enabled && s_voice_audio_lock &&
+                   xSemaphoreTake(s_voice_audio_lock,
+                                  pdMS_TO_TICKS(100)) == pdTRUE) {
             voice_take_microphone();
             xSemaphoreGive(s_voice_audio_lock);
         }
@@ -735,6 +1429,81 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
 extern "C" bool m5_platform_voice_is_listening(void) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     return s_voice_listening_visual;
+#else
+    return false;
+#endif
+}
+
+extern "C" const char *m5_platform_voice_state(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    if (s_enrollment_active) return "CAPTURING";
+    if (s_enrollment_sending) return "UPLOADING";
+    if (s_voice_listening_visual) return "LISTENING";
+    if (s_stackchan_voice.phrase) return "SPEAKING";
+    if (s_voice_waiting_for_response) return "THINKING";
+    if (s_voice_resume_after_sound) return "RECOVERING";
+    const char *wake_state = kizz_wake_word_runtime_state();
+    if (strcmp(wake_state, "armed") == 0) return "ARMED";
+    if (strcmp(wake_state, "starting") == 0) return "STARTING";
+    if (strcmp(wake_state, "stopping") == 0) return "STOPPING";
+    if (strcmp(wake_state, "paused") == 0) return "PAUSED";
+    if (strcmp(wake_state, "faulted") == 0) return "FAULT";
+    return "UNKNOWN";
+#else
+    return "DISABLED";
+#endif
+}
+
+extern "C" void m5_platform_voice_copy_transcript(char *out, size_t len) {
+    if (!out || !len) return;
+    out[0] = '\0';
+    if (s_voice_text_lock &&
+        xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        snprintf(out, len, "%s", s_voice_transcript);
+        xSemaphoreGive(s_voice_text_lock);
+    }
+}
+
+extern "C" void m5_platform_voice_copy_response(char *out, size_t len) {
+    if (!out || !len) return;
+    out[0] = '\0';
+    if (s_voice_text_lock &&
+        xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        snprintf(out, len, "%s", s_voice_response);
+        xSemaphoreGive(s_voice_text_lock);
+    }
+}
+
+extern "C" void m5_platform_voice_clear_conversation(void) {
+    if (s_voice_text_lock &&
+        xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        s_voice_transcript[0] = '\0';
+        s_voice_response[0] = '\0';
+        xSemaphoreGive(s_voice_text_lock);
+    }
+}
+
+extern "C" float m5_platform_voice_wake_probability(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    return kizz_wake_word_probability();
+#else
+    return 0.0f;
+#endif
+}
+
+extern "C" float m5_platform_voice_wake_cutoff(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    float cutoff = 0.0f;
+    kizz_wake_word_get_config(&cutoff, nullptr);
+    return cutoff;
+#else
+    return 0.0f;
+#endif
+}
+
+extern "C" bool m5_platform_voice_diagnostics_enabled(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    return s_voice_diagnostics_enabled;
 #else
     return false;
 #endif
@@ -925,6 +1694,11 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
     if (expression != M5_PLATFORM_STACKCHAN_CELEBRATE &&
         expression != M5_PLATFORM_STACKCHAN_SAD &&
         expression != M5_PLATFORM_STACKCHAN_DANCE) return false;
+    if (s_stackchan_motion.phase == StackChanMotionPhase::attention_hold ||
+        s_stackchan_motion.phase == StackChanMotionPhase::attention_returning) {
+        // A result expression supersedes the neutral listening return.
+        s_stackchan_motion.phase = StackChanMotionPhase::idle;
+    }
     if (s_stackchan_motion.phase != StackChanMotionPhase::idle) {
         /* Connection loss is higher-value body language than another track
          * celebration. Queue exactly one sadness event behind an active move. */
@@ -965,6 +1739,17 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
 }
 
 extern "C" void m5_platform_stackchan_expression_process(void) {
+    if (s_stackchan_motion.phase == StackChanMotionPhase::attention_hold)
+        return;
+    if (s_stackchan_motion.phase == StackChanMotionPhase::attention_returning) {
+        if (esp_timer_get_time() < s_stackchan_motion.deadline) return;
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+        M5StackChan.Motion.setTorqueEnabled(false);
+#endif
+        s_stackchan_motion.phase = StackChanMotionPhase::idle;
+        ESP_LOGI(TAG, "Kizz listening posture returned home");
+        return;
+    }
     if (!s_stackchan_motion.enabled || s_stackchan_motion.faulted ||
         s_stackchan_motion.phase == StackChanMotionPhase::idle ||
         esp_timer_get_time() < s_stackchan_motion.deadline) return;
