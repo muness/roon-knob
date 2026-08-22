@@ -1,6 +1,7 @@
 #pragma once
 
 #include "controller_config.h"
+#include "kizz_semantic_layout.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -40,6 +41,10 @@ uint8_t touch_ui_stackchan_voice_volume_preference(void);
 bool touch_ui_post_stackchan_preferences(bool body_enabled,
                                          bool sound_enabled,
                                          uint8_t voice_volume);
+bool touch_ui_semantic_admit(const char *contract_json, size_t contract_len,
+                             char *evidence_json, size_t evidence_capacity);
+bool touch_ui_semantic_apply(const char *contract_id);
+void touch_ui_apply_semantic_family(uint8_t family_token);
 
 #ifdef __cplusplus
 }

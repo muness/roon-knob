@@ -1,6 +1,9 @@
 set(SRC_FILES
     "touch_ui.cpp"
     "controller_presentation_beta.c"
+    "controller_presentation_semantic.c"
+    "kizz_semantic_layout.cpp"
+    "kizz_semantic_native_layout.cpp"
     "controller_input_profile_beta.c"
     "platform_input_beta.c"
     "platform_identity_beta.c"
