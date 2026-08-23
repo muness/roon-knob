@@ -14,7 +14,7 @@
 #include "freertos/task.h"
 
 namespace {
-constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.80f;
+constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.70f;
 // This model emits a short, high-confidence pulse for a natural Kizz utterance.
 // Averaging five inference outputs diluted a measured 0.831 pulse below the
 // cutoff and caused a false reject even from a fresh boot.
@@ -23,6 +23,10 @@ constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 65536;
 constexpr char KIZZ_NVS_NAMESPACE[] = "kizz_wake";
 constexpr char KIZZ_NVS_CUTOFF_KEY[] = "cutoff_milli";
 constexpr char KIZZ_NVS_WINDOW_KEY[] = "window";
+constexpr char KIZZ_NVS_VERSION_KEY[] = "config_v";
+// Version 3 resets devices that retained the earlier specialist-model .80
+// operating point. The current broad model is qualified at .70.
+constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 3;
 
 extern const uint8_t kizz_model_start[]
     asm("_binary_hiphi_kizz_tflite_start");
@@ -50,6 +54,7 @@ std::atomic<WakeRuntimeTarget> s_runtime_target{WakeRuntimeTarget::ARMED};
 std::atomic<uint32_t> s_transition_count{0};
 std::atomic<uint16_t> s_probability_milli{0};
 std::atomic<int64_t> s_probability_peak_at_us{0};
+int64_t s_probability_log_at_us = 0;
 std::atomic_bool s_reconfigure_requested{false};
 std::atomic<uint16_t> s_probability_cutoff_milli{
     static_cast<uint16_t>(KIZZ_DEFAULT_PROBABILITY_CUTOFF * 1000)};
@@ -133,13 +138,34 @@ bool create_wake_word_model() {
         s_wake_word = nullptr;
         return false;
     }
-    ESP_LOGI(TAG, "HiPhi Kizz device-specialist model ready: cutoff=%.2f window=%u",
+    ESP_LOGI(TAG, "HiPhi Kizz broad model ready: cutoff=%.2f window=%u",
              static_cast<double>(cutoff), static_cast<unsigned>(window));
     return true;
 }
 
 void load_persisted_config() {
     nvs_handle_t handle;
+    if (nvs_open(KIZZ_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) return;
+    uint8_t version = 0;
+    const bool current_config =
+        nvs_get_u8(handle, KIZZ_NVS_VERSION_KEY, &version) == ESP_OK &&
+        version == KIZZ_NVS_CONFIG_VERSION;
+    nvs_close(handle);
+    if (!current_config) {
+        s_probability_cutoff_milli =
+            static_cast<uint16_t>(KIZZ_DEFAULT_PROBABILITY_CUTOFF * 1000);
+        s_sliding_window = KIZZ_DEFAULT_SLIDING_WINDOW;
+        if (nvs_open(KIZZ_NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
+            nvs_set_u8(handle, KIZZ_NVS_VERSION_KEY, KIZZ_NVS_CONFIG_VERSION);
+            nvs_set_u16(handle, KIZZ_NVS_CUTOFF_KEY,
+                        static_cast<uint16_t>(KIZZ_DEFAULT_PROBABILITY_CUTOFF * 1000));
+            nvs_set_u8(handle, KIZZ_NVS_WINDOW_KEY,
+                       static_cast<uint8_t>(KIZZ_DEFAULT_SLIDING_WINDOW));
+            nvs_commit(handle);
+            nvs_close(handle);
+        }
+        return;
+    }
     if (nvs_open(KIZZ_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) return;
     uint16_t cutoff_milli = 0;
     uint8_t window = 0;
@@ -206,6 +232,14 @@ void detection_task(void *) {
             now - s_probability_peak_at_us.load() >= 2000000) {
             s_probability_milli = probability_milli;
             s_probability_peak_at_us = now;
+        }
+        if (now - s_probability_log_at_us >= 500000) {
+            s_probability_log_at_us = now;
+            ESP_LOGI(TAG, "Wake probability: current=%.3f peak=%.3f cutoff=%.3f state=%s",
+                     static_cast<double>(probability),
+                     static_cast<double>(s_probability_milli.load() / 1000.0f),
+                     static_cast<double>(s_probability_cutoff_milli.load() / 1000.0f),
+                     kizz_wake_word_runtime_state());
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }

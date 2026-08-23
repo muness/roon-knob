@@ -89,14 +89,7 @@ esp_websocket_client_handle_t s_voice_ws = nullptr;
 esp_websocket_client_handle_t s_enrollment_ws = nullptr;
 SemaphoreHandle_t s_voice_audio_lock = nullptr;
 SemaphoreHandle_t s_voice_text_lock = nullptr;
-SemaphoreHandle_t s_voice_wake_buffer_lock = nullptr;
 SemaphoreHandle_t s_enrollment_lock = nullptr;
-constexpr size_t VOICE_WAKE_BUFFER_SAMPLES = 16000 * 2;
-int16_t *s_voice_wake_buffer = nullptr;
-int16_t *s_voice_staged_wake_sample = nullptr;
-size_t s_voice_wake_buffer_write = 0;
-size_t s_voice_wake_buffer_count = 0;
-size_t s_voice_staged_wake_sample_count = 0;
 bool s_voice_network_ready = false;
 bool s_voice_transport_configured = false;
 std::atomic_bool s_voice_listener_enabled{false};
@@ -201,16 +194,10 @@ bool voice_take_microphone() {
     }
     ESP_LOGI(TAG, "Kizz audio ownership: speaker -> microphone");
     s_voice_microphone_active = true;
-    if (s_voice_wake_buffer_lock &&
-        xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
-        s_voice_wake_buffer_write = 0;
-        s_voice_wake_buffer_count = 0;
-        xSemaphoreGive(s_voice_wake_buffer_lock);
-    }
-    if (s_voice_afe && s_voice_afe_data) {
-        s_voice_afe->reset_buffer(s_voice_afe_data);
-        s_voice_afe->reset_vad(s_voice_afe_data);
-    }
+    /* voice_fetch_task continuously drains the AFE while the speaker owns the
+     * I2S path. Resetting the AFE here races that task inside Espressif's VAD
+     * network and can assert during error recovery. Fresh microphone frames
+     * refill the already-drained pipeline after this handoff. */
     kizz_wake_word_resume();
     s_voice_audio_epoch.fetch_add(1, std::memory_order_relaxed);
     return true;
@@ -246,7 +233,7 @@ bool voice_send_text(const char *message) {
     if (!s_voice_ws || !esp_websocket_client_is_connected(s_voice_ws)) return false;
     const int length = static_cast<int>(strlen(message));
     return esp_websocket_client_send_text(
-        s_voice_ws, message, length, pdMS_TO_TICKS(1000)) == length;
+        s_voice_ws, message, length, pdMS_TO_TICKS(5000)) == length;
 }
 
 bool voice_send_start() {
@@ -475,51 +462,6 @@ void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
     }
 }
 
-void voice_remember_wake_audio(const int16_t *pcm, size_t samples) {
-    if (!s_voice_wake_buffer || !s_voice_wake_buffer_lock || !samples) return;
-    if (xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(20)) != pdTRUE)
-        return;
-    for (size_t i = 0; i < samples; ++i) {
-        s_voice_wake_buffer[s_voice_wake_buffer_write] = pcm[i];
-        s_voice_wake_buffer_write =
-            (s_voice_wake_buffer_write + 1) % VOICE_WAKE_BUFFER_SAMPLES;
-    }
-    s_voice_wake_buffer_count = std::min(
-        VOICE_WAKE_BUFFER_SAMPLES, s_voice_wake_buffer_count + samples);
-    xSemaphoreGive(s_voice_wake_buffer_lock);
-}
-
-bool voice_stage_wake_sample() {
-    if (!s_voice_wake_buffer || !s_voice_staged_wake_sample ||
-        !s_voice_wake_buffer_lock) return false;
-    if (xSemaphoreTake(s_voice_wake_buffer_lock, pdMS_TO_TICKS(100)) != pdTRUE) {
-        return false;
-    }
-    const size_t count = s_voice_wake_buffer_count;
-    const size_t start =
-        (s_voice_wake_buffer_write + VOICE_WAKE_BUFFER_SAMPLES - count) %
-        VOICE_WAKE_BUFFER_SAMPLES;
-    for (size_t i = 0; i < count; ++i)
-        s_voice_staged_wake_sample[i] =
-            s_voice_wake_buffer[(start + i) % VOICE_WAKE_BUFFER_SAMPLES];
-    s_voice_staged_wake_sample_count = count;
-    xSemaphoreGive(s_voice_wake_buffer_lock);
-    return count > 0;
-}
-
-bool voice_send_staged_wake_sample() {
-    const size_t count = s_voice_staged_wake_sample_count;
-    if (!s_voice_staged_wake_sample || !count) return false;
-    char event[128] = {};
-    snprintf(event, sizeof(event),
-             "{\"type\":\"wake_sample\",\"label\":\"hiphi_kizz\",\"bytes\":%u}",
-             static_cast<unsigned>(count * sizeof(int16_t)));
-    const bool sent = voice_send_text(event) &&
-        voice_send_audio(s_voice_staged_wake_sample, count * sizeof(int16_t));
-    s_voice_staged_wake_sample_count = 0;
-    return sent;
-}
-
 void voice_recover_listener() {
     s_voice_waiting_for_response = false;
     if (s_voice_audio_lock &&
@@ -558,7 +500,6 @@ void voice_feed_task(void *) {
             xSemaphoreGive(s_voice_audio_lock);
         }
         if (captured) {
-            voice_remember_wake_audio(pcm, static_cast<size_t>(chunk));
             const int64_t now = esp_timer_get_time();
             if (now - s_voice_last_audio_log >= 2000000) {
                 int peak = 0;
@@ -616,15 +557,25 @@ void voice_fetch_task(void *) {
             s_voice_remote_endpoint_pending = false;
         }
         if (s_voice_waiting_for_response) {
-            vTaskDelay(pdMS_TO_TICKS(20));
+            // Keep draining the official AFE while the response is being
+            // rendered. Pausing fetch() lets the ringbuffer fill, drops mic
+            // frames, and leaves the wake engine paused after a turn.
+            (void)s_voice_afe->fetch_with_delay(s_voice_afe_data,
+                                                pdMS_TO_TICKS(100));
             continue;
         }
         afe_fetch_result_t *result =
             s_voice_afe->fetch_with_delay(s_voice_afe_data, pdMS_TO_TICKS(100));
         if (!result || result->ret_value == ESP_FAIL) continue;
         const int64_t now = esp_timer_get_time();
-        const bool remote_endpoint = wake_detected && command_armed &&
-            utterance_open && s_voice_remote_endpoint_pending.exchange(false);
+        // A streaming provider can decide that a turn ended while the device
+        // is still receiving speech. Treat that signal as a hint, not an
+        // unconditional commit: local VAD must observe a non-speech frame too.
+        const bool remote_endpoint_hint = wake_detected && command_armed &&
+            utterance_open && s_voice_remote_endpoint_pending.load();
+        const bool remote_endpoint = remote_endpoint_hint &&
+            result->vad_state != VAD_SPEECH &&
+            s_voice_remote_endpoint_pending.exchange(false);
         if (s_voice_wake_pending.exchange(false)) {
             ESP_LOGI(TAG, "Kizz wake detected on-device: custom model volume=%.1f dBFS",
                      static_cast<double>(result->data_volume));
@@ -640,8 +591,6 @@ void voice_fetch_task(void *) {
             ++turn_id;
             s_voice_remote_endpoint_pending = false;
             m5_platform_voice_feedback("listening");
-            if (!voice_stage_wake_sample())
-                ESP_LOGW(TAG, "Kizz wake training sample could not be staged");
             if (!voice_send_start()) {
                 ESP_LOGW(TAG, "Kizz voice turn could not start; returning to listening");
                 wake_detected = false;
@@ -726,8 +675,6 @@ void voice_fetch_task(void *) {
             if (!voice_send_text("{\"type\":\"commit\"}")) {
                 ESP_LOGW(TAG, "Kizz voice commit failed; returning to listening");
                 voice_recover_listener();
-            } else if (!voice_send_staged_wake_sample()) {
-                ESP_LOGW(TAG, "Kizz wake training sample could not be sent");
             }
         } else if (wake_detected && command_armed &&
                    result->vad_state == VAD_SPEECH) {
@@ -764,8 +711,6 @@ void voice_fetch_task(void *) {
                 ESP_LOGW(TAG, "Kizz empty voice commit failed; returning to listening");
                 voice_recover_listener();
             }
-            else if (!voice_send_staged_wake_sample())
-                ESP_LOGW(TAG, "Kizz wake training sample could not be sent");
         }
     }
 }
@@ -945,16 +890,7 @@ void start_voice_transport() {
     }
     s_voice_audio_lock = xSemaphoreCreateMutex();
     s_voice_text_lock = xSemaphoreCreateMutex();
-    if (s_voice_transport_configured) {
-        s_voice_wake_buffer_lock = xSemaphoreCreateMutex();
-        s_voice_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
-            VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-        s_voice_staged_wake_sample = static_cast<int16_t *>(heap_caps_calloc(
-            VOICE_WAKE_BUFFER_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-    }
-    if (!s_voice_audio_lock || !s_voice_text_lock || (s_voice_transport_configured &&
-        (!s_voice_wake_buffer_lock || !s_voice_wake_buffer ||
-         !s_voice_staged_wake_sample))) {
+    if (!s_voice_audio_lock || !s_voice_text_lock) {
         ESP_LOGE(TAG, "Kizz voice audio lock allocation failed");
         return;
     }
