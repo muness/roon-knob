@@ -118,11 +118,13 @@ std::atomic_bool s_enrollment_sending{false};
 std::atomic_bool s_false_wake_active{false};
 std::atomic_bool s_false_wake_sending{false};
 constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
+constexpr size_t FALSE_WAKE_PREROLL_SAMPLES = 16000;
 constexpr size_t FALSE_WAKE_MAX_SAMPLES = 16000 * 7;
 constexpr size_t VOICE_COMMAND_MAX_BYTES = 16000 * 2 * 21;
 constexpr size_t VOICE_TX_CHUNK_BYTES = 4096;
 constexpr int64_t VOICE_RESPONSE_TIMEOUT_US = 45000000;
 int16_t *s_enrollment_buffer = nullptr;
+int16_t *s_false_wake_preroll_buffer = nullptr;
 int16_t *s_false_wake_buffer = nullptr;
 uint8_t *s_voice_command_buffer = nullptr;
 size_t s_voice_command_bytes = 0;
@@ -136,6 +138,9 @@ size_t s_enrollment_event_length = 0;
 TaskHandle_t s_enrollment_upload_task = nullptr;
 TaskHandle_t s_false_wake_upload_task = nullptr;
 size_t s_false_wake_samples = 0;
+size_t s_false_wake_preroll_write_index = 0;
+size_t s_false_wake_preroll_count = 0;
+size_t s_false_wake_preroll_samples = 0;
 float s_false_wake_probability = 0.0f;
 uint32_t s_false_wake_turn_id = 0;
 char s_false_wake_outcome[32] = "no_command";
@@ -369,8 +374,26 @@ void false_wake_start_capture() {
     if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws) ||
         s_enrollment_active || s_enrollment_sending || s_false_wake_sending ||
         !s_false_wake_buffer || !s_false_wake_upload_task) return;
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+        return;
     s_false_wake_probability = kizz_wake_word_probability();
     s_false_wake_samples = 0;
+    s_false_wake_preroll_samples = std::min(
+        s_false_wake_preroll_count, FALSE_WAKE_PREROLL_SAMPLES);
+    if (s_false_wake_preroll_buffer && s_false_wake_preroll_samples) {
+        const size_t start =
+            (s_false_wake_preroll_write_index + FALSE_WAKE_PREROLL_SAMPLES -
+             s_false_wake_preroll_samples) % FALSE_WAKE_PREROLL_SAMPLES;
+        const size_t first = std::min(
+            s_false_wake_preroll_samples, FALSE_WAKE_PREROLL_SAMPLES - start);
+        memcpy(s_false_wake_buffer, s_false_wake_preroll_buffer + start,
+               first * sizeof(int16_t));
+        if (first < s_false_wake_preroll_samples) {
+            memcpy(s_false_wake_buffer + first, s_false_wake_preroll_buffer,
+                   (s_false_wake_preroll_samples - first) * sizeof(int16_t));
+        }
+        s_false_wake_samples = s_false_wake_preroll_samples;
+    }
     snprintf(s_false_wake_outcome, sizeof(s_false_wake_outcome), "no_command");
     s_false_wake_energy = 0;
     s_false_wake_peak = 0;
@@ -378,14 +401,22 @@ void false_wake_start_capture() {
     s_false_wake_metric_samples = 0;
     ++s_false_wake_turn_id;
     s_false_wake_active = true;
+    xSemaphoreGive(s_enrollment_lock);
 }
 
 void false_wake_capture_audio(const int16_t *pcm, size_t samples) {
-    if (!s_false_wake_active || !pcm || !samples || !s_false_wake_buffer) return;
-    if (!s_enrollment_lock ||
-        xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+    if (!pcm || !samples || !s_false_wake_preroll_buffer ||
+        !s_enrollment_lock) return;
+    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE)
         return;
-    if (!s_false_wake_active) {
+    for (size_t index = 0; index < samples; ++index) {
+        s_false_wake_preroll_buffer[s_false_wake_preroll_write_index] = pcm[index];
+        s_false_wake_preroll_write_index =
+            (s_false_wake_preroll_write_index + 1) % FALSE_WAKE_PREROLL_SAMPLES;
+        s_false_wake_preroll_count = std::min(
+            s_false_wake_preroll_count + 1, FALSE_WAKE_PREROLL_SAMPLES);
+    }
+    if (!s_false_wake_active || !s_false_wake_buffer) {
         xSemaphoreGive(s_enrollment_lock);
         return;
     }
@@ -428,6 +459,7 @@ void false_wake_discard_capture() {
         return;
     s_false_wake_active = false;
     s_false_wake_samples = 0;
+    s_false_wake_preroll_samples = 0;
     s_false_wake_metric_samples = 0;
     if (s_enrollment_lock) xSemaphoreGive(s_enrollment_lock);
 }
@@ -436,20 +468,29 @@ void false_wake_upload_task(void *) {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         size_t samples = 0;
+        size_t preroll_samples = 0;
+        uint64_t energy = 0;
+        size_t peak = 0;
+        size_t clipped = 0;
+        size_t metric_samples = 0;
         if (s_enrollment_lock &&
             xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
             samples = s_false_wake_samples;
+            preroll_samples = s_false_wake_preroll_samples;
+            energy = s_false_wake_energy;
+            peak = s_false_wake_peak;
+            clipped = s_false_wake_clipped;
+            metric_samples = s_false_wake_metric_samples;
             xSemaphoreGive(s_enrollment_lock);
         }
         const size_t bytes = samples * sizeof(int16_t);
-        const size_t metric_samples = s_false_wake_metric_samples;
         const double rms = metric_samples
-            ? std::sqrt(static_cast<double>(s_false_wake_energy) /
+            ? std::sqrt(static_cast<double>(energy) /
                         static_cast<double>(metric_samples)) / 32768.0
             : 0.0;
         const double rms_dbfs = 20.0 * std::log10(std::max(rms, 0.000001));
         const double clipped_percent = metric_samples
-            ? 100.0 * static_cast<double>(s_false_wake_clipped) /
+            ? 100.0 * static_cast<double>(clipped) /
               static_cast<double>(metric_samples)
             : 0.0;
         const bool c_pass = rms_dbfs >=
@@ -470,13 +511,17 @@ void false_wake_upload_task(void *) {
                  "\"sliding_window\":%u,\"outcome\":\"%s\","
                  "\"verification_mode\":\"%s\",\"c_rms_dbfs\":%.2f,"
                  "\"c_peak\":%u,\"c_clipped_percent\":%.3f,"
-                 "\"c_pass\":%s,\"wake_to_timeout_ms\":6000}",
+                 "\"c_pass\":%s,\"wake_to_timeout_ms\":6000,"
+                 "\"pre_wake_ms\":%u,\"pre_wake_samples\":%u,"
+                 "\"post_wake_samples\":%u}",
                  observation_id, static_cast<unsigned>(bytes),
                  static_cast<double>(s_false_wake_probability),
                  static_cast<double>(cutoff), static_cast<unsigned>(window),
                  s_false_wake_outcome, s_voice_verification_mode, rms_dbfs,
-                 static_cast<unsigned>(s_false_wake_peak), clipped_percent,
-                 c_pass ? "true" : "false");
+                 static_cast<unsigned>(peak), clipped_percent,
+                 c_pass ? "true" : "false", 1000,
+                 static_cast<unsigned>(preroll_samples),
+                 static_cast<unsigned>(samples - preroll_samples));
         bool sent = bytes > 0 && enrollment_send_text(header);
         for (size_t offset = 0; sent && offset < bytes;) {
             const size_t chunk = std::min(VOICE_TX_CHUNK_BYTES, bytes - offset);
@@ -494,6 +539,7 @@ void false_wake_upload_task(void *) {
         ESP_LOGI(TAG, "False-wake observation %s %s (%u bytes)", observation_id,
                  sent ? "quarantined" : "not sent", static_cast<unsigned>(bytes));
         s_false_wake_samples = 0;
+        s_false_wake_preroll_samples = 0;
         s_false_wake_metric_samples = 0;
         s_false_wake_sending = false;
     }
@@ -1387,9 +1433,12 @@ void start_voice_transport() {
         s_enrollment_lock = xSemaphoreCreateMutex();
         s_enrollment_buffer = static_cast<int16_t *>(heap_caps_calloc(
             ENROLLMENT_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+        s_false_wake_preroll_buffer = static_cast<int16_t *>(heap_caps_calloc(
+            FALSE_WAKE_PREROLL_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
         s_false_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
             FALSE_WAKE_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-        if (!s_enrollment_lock || !s_enrollment_buffer || !s_false_wake_buffer) {
+        if (!s_enrollment_lock || !s_enrollment_buffer ||
+            !s_false_wake_preroll_buffer || !s_false_wake_buffer) {
             ESP_LOGE(TAG, "Enrollment buffer allocation failed; production voice remains enabled");
         } else if (xTaskCreatePinnedToCoreWithCaps(
                        enrollment_upload_task, "kizz_enroll_tx", 4096,

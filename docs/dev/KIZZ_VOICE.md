@@ -66,6 +66,13 @@ wakes are stored under `observations/wakes/`; no-command wakes remain in
 `observations/false-wakes/`. Neither path changes `device-corpus.json`.
 Promotion into a hard negative is a separate human-reviewed operation.
 
+Each observation now includes one second of pre-wake audio from a PSRAM ring
+buffer in the same WAV, with `pre_wake_ms`, `pre_wake_samples`, and
+`post_wake_samples` metadata. C metrics remain calculated from post-wake audio
+only. The training fork can correlate observations with UHC's recent STT race
+using `tools/analyze_wake_observations.py`; its output is weak-label evidence,
+not corpus truth.
+
 ### Listening and command capture
 
 When the local detector fires, Kizz shows its listening state and sends a `start`
