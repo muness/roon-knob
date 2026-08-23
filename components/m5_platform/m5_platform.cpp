@@ -929,6 +929,7 @@ void voice_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_data
     cJSON_Delete(root);
 }
 
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
 void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
                          void *event_data) {
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
@@ -1156,6 +1157,7 @@ void start_voice_transport() {
     }
     ESP_LOGI(TAG, "Kizz AFE voice workers started with PSRAM stacks");
 }
+#endif
 
 void stackchan_voice_note(uint8_t index) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
