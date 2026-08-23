@@ -1,0 +1,11 @@
+{
+  "name": "M5Stack Tough Alpha (PR #239 Preview)",
+  "version": "pr-239",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32", "parts": [
+    {"path": "hiphi_tough_bootloader-7d5bf23b3a10d8033f4b4900f80f1d095b61bf0c-32645861250-2.bin", "offset": 4096},
+    {"path": "hiphi_tough_partition-table-7d5bf23b3a10d8033f4b4900f80f1d095b61bf0c-32645861250-2.bin", "offset": 32768},
+    {"path": "hiphi_tough_ota_data_initial-7d5bf23b3a10d8033f4b4900f80f1d095b61bf0c-32645861250-2.bin", "offset": 53248},
+    {"path": "hiphi_tough-7d5bf23b3a10d8033f4b4900f80f1d095b61bf0c-32645861250-2.bin", "offset": 65536}
+  ]}]
+}
