@@ -54,8 +54,13 @@ assert "SO_SNDTIMEO" in http_upload
 assert "send_all" in http_upload
 assert "X-Device-ID: %s" in http_upload
 assert "X-Detected: %s" in http_upload
+assert "X-Audio-Offset: %u" in http_upload
+assert "X-Audio-Total: %u" in http_upload
 start_capture = function_body("bool enrollment_start_capture", "void enrollment_upload_task")
 assert 'strncmp(upload_url, "http://", 7)' in start_capture
+assert "!s_enrollment_upload_task" in start_capture
+assert "xTaskCreatePinnedToCoreWithCaps" in start_transport
+assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in start_transport
 assert "wake_dropped_since_log" in source
 assert 'strcmp(type->valuestring, "training_chunk")' not in source
 assert 'strcmp(type->valuestring, "stored")' not in source

@@ -310,35 +310,9 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
     addrinfo *addresses = nullptr;
     if (getaddrinfo(host_port, port, &hints, &addresses) != 0 || !addresses)
         return false;
-    int fd = socket(addresses->ai_family, addresses->ai_socktype,
-                    addresses->ai_protocol);
-    if (fd < 0) {
-        freeaddrinfo(addresses);
-        return false;
-    }
-    timeval timeout = {};
-    timeout.tv_sec = 5;
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    const int connect_result =
-        connect(fd, addresses->ai_addr, addresses->ai_addrlen);
-    bool sent = connect_result == 0;
-    if (!sent) {
-        ESP_LOGW(TAG, "Enrollment HTTP connect failed: errno=%d", errno);
-    }
-    freeaddrinfo(addresses);
-
-    char header[768] = {};
-    const int header_length = snprintf(
-        header, sizeof(header),
-        "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/octet-stream\r\n"
-        "Content-Length: %u\r\nConnection: close\r\nX-Device-ID: %s\r\n"
-        "X-Detected: %s\r\nX-Capture-ID: %s\r\n\r\n",
-        path, host_port, static_cast<unsigned>(bytes),
-        CONFIG_M5_PLATFORM_DEVICE_ID, detected ? "true" : "false", capture_id);
-    auto send_all = [fd](const char *data, size_t length) {
+    auto send_all = [](int fd, const char *data, size_t length) {
         size_t offset = 0;
-        const int64_t deadline = esp_timer_get_time() + 5000000;
+        const int64_t deadline = esp_timer_get_time() + 3000000;
         while (offset < length) {
             const int result = send(fd, data + offset, length - offset, 0);
             if (result > 0) {
@@ -359,32 +333,71 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
         }
         return true;
     };
-    sent = sent && header_length > 0 &&
-        header_length < static_cast<int>(sizeof(header)) &&
-        send_all(header, static_cast<size_t>(header_length));
+
     size_t written = 0;
-    constexpr size_t chunk_bytes = 1024;
+    int status = 0;
+    constexpr size_t chunk_bytes = 2048;
     // The capture lives in PSRAM. Stage network writes through internal RAM:
-    // lwIP can accept the header from the task stack but stalls when handed
-    // the external-RAM capture buffer directly on this ESP32-S3 target.
+    // the Wi-Fi/lwIP path must not be handed the external-RAM buffer directly.
     auto *chunk = static_cast<uint8_t *>(heap_caps_malloc(
         chunk_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    sent = sent && chunk;
+    bool sent = chunk != nullptr;
     while (sent && written < bytes) {
         const size_t length = std::min(chunk_bytes, bytes - written);
         memcpy(chunk, reinterpret_cast<const uint8_t *>(pcm) + written, length);
-        sent = send_all(reinterpret_cast<const char *>(chunk), length);
-        if (sent) written += length;
-        vTaskDelay(1);
+        bool segment_sent = false;
+        for (int attempt = 0; attempt < 3 && !segment_sent; ++attempt) {
+            int fd = socket(addresses->ai_family, addresses->ai_socktype,
+                            addresses->ai_protocol);
+            if (fd < 0) {
+                ESP_LOGW(TAG, "Enrollment HTTP socket failed: errno=%d", errno);
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
+            }
+            timeval timeout = {};
+            timeout.tv_sec = 3;
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+            bool request_sent =
+                connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
+            if (!request_sent) {
+                ESP_LOGW(TAG, "Enrollment HTTP connect failed: errno=%d", errno);
+            }
+
+            char header[768] = {};
+            const int header_length = snprintf(
+                header, sizeof(header),
+                "POST %s HTTP/1.1\r\nHost: %s\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Content-Length: %u\r\nConnection: close\r\n"
+                "X-Device-ID: %s\r\nX-Detected: %s\r\n"
+                "X-Capture-ID: %s\r\nX-Audio-Offset: %u\r\n"
+                "X-Audio-Total: %u\r\n\r\n",
+                path, host_port, static_cast<unsigned>(length),
+                CONFIG_M5_PLATFORM_DEVICE_ID,
+                detected ? "true" : "false", capture_id,
+                static_cast<unsigned>(written),
+                static_cast<unsigned>(bytes));
+            request_sent = request_sent && header_length > 0 &&
+                header_length < static_cast<int>(sizeof(header)) &&
+                send_all(fd, header, static_cast<size_t>(header_length)) &&
+                send_all(fd, reinterpret_cast<const char *>(chunk), length);
+            char response[96] = {};
+            const int received = request_sent
+                ? recv(fd, response, sizeof(response) - 1, 0) : -1;
+            status = 0;
+            if (received > 0) sscanf(response, "HTTP/%*s %d", &status);
+            shutdown(fd, SHUT_RDWR);
+            close(fd);
+            segment_sent = request_sent && status >= 200 && status < 300;
+            if (!segment_sent) vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        sent = segment_sent;
+        if (segment_sent) written += length;
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     heap_caps_free(chunk);
-    char response[64] = {};
-    const int received = sent ? recv(fd, response, sizeof(response) - 1, 0) : -1;
-    int status = 0;
-    if (received > 0) sscanf(response, "HTTP/%*s %d", &status);
-    shutdown(fd, SHUT_RDWR);
-    close(fd);
-    sent = sent && status >= 200 && status < 300;
+    freeaddrinfo(addresses);
     ESP_LOGI(TAG, "Enrollment HTTP upload %s status=%d bytes=%u/%u",
              capture_id, status, static_cast<unsigned>(written),
              static_cast<unsigned>(bytes));
