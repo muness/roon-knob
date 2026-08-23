@@ -67,5 +67,11 @@ assert "wake_dropped_since_log" in source
 assert 'strcmp(type->valuestring, "training_chunk")' not in source
 assert 'strcmp(type->valuestring, "stored")' not in source
 assert "CONFIG_LWIP_MAX_SOCKETS=16" in STACKCHAN_DEFAULTS
+assert "CONFIG_LWIP_TCP_MSL=5000" in STACKCHAN_DEFAULTS
+
+HTTP_SOURCE = (
+    Path(__file__).parents[1] / "tough_app/main/platform_http_tough.c"
+).read_text()
+assert 'esp_http_client_set_header(client, "Connection", "close")' in HTTP_SOURCE
 
 print("Kizz production/enrollment transport separation passed")

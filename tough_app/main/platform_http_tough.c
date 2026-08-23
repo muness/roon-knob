@@ -61,6 +61,13 @@ static int http_perform(const char *url, const char *body,
     }
 
     esp_http_client_set_header(client, "Accept", "application/json");
+    /*
+     * The controller polls frequently and also keeps voice/enrollment WebSockets
+     * open. Ask the bridge to close each one-shot response so the bridge, not
+     * the ESP32, owns TIME_WAIT. Otherwise active closes can exhaust lwIP's
+     * small socket table before an independent transport can connect.
+     */
+    esp_http_client_set_header(client, "Connection", "close");
     if (body) {
         esp_http_client_set_header(client, "Content-Type", content_type ? content_type : "application/json");
     }
