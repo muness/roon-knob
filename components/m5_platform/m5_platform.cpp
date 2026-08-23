@@ -276,36 +276,47 @@ bool enrollment_send_text(const char *message) {
         s_enrollment_ws, message, length, pdMS_TO_TICKS(1000)) == length;
 }
 
-bool enrollment_send_audio(const int16_t *pcm, size_t bytes) {
+bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
     if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws) ||
         !pcm || !bytes) return false;
-    return esp_websocket_client_send_bin(
-        s_enrollment_ws, reinterpret_cast<const char *>(pcm),
-        static_cast<int>(bytes), pdMS_TO_TICKS(5000)) == static_cast<int>(bytes);
-}
-
-bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
-    // Four KiB remains comfortably below the service's message limit while
-    // reducing round trips enough that enrollment does not monopolize the
-    // detector for tens of seconds per sample.
+    // Send one fragmented WebSocket message. Sending each chunk as a complete
+    // message made aiohttp answer every chunk while esp_websocket_client was
+    // trying to start the next write; on physical Kizz that repeatedly closed
+    // the transport after 4096 bytes. Fragmentation preserves one ordered
+    // binary sample and lets the server validate and acknowledge it once.
     constexpr size_t CHUNK_BYTES = 4096;
     const auto *audio = reinterpret_cast<const uint8_t *>(pcm);
-    for (size_t offset = 0; offset < bytes; offset += CHUNK_BYTES) {
+    size_t offset = 0;
+    const size_t first = std::min(CHUNK_BYTES, bytes);
+    if (esp_websocket_client_send_bin_partial(
+            s_enrollment_ws, reinterpret_cast<const char *>(audio),
+            static_cast<int>(first), pdMS_TO_TICKS(5000)) !=
+        static_cast<int>(first)) {
+        ESP_LOGW(TAG, "Enrollment upload initial fragment failed");
+        return false;
+    }
+    offset = first;
+    while (offset < bytes) {
         const size_t chunk = std::min(CHUNK_BYTES, bytes - offset);
-        if (!enrollment_send_audio(
-                reinterpret_cast<const int16_t *>(audio + offset), chunk)) {
+        if (esp_websocket_client_send_cont_msg(
+                s_enrollment_ws,
+                reinterpret_cast<const char *>(audio + offset),
+                static_cast<int>(chunk), pdMS_TO_TICKS(5000)) !=
+            static_cast<int>(chunk)) {
             ESP_LOGW(TAG, "Enrollment upload send failed at %u/%u bytes",
                      static_cast<unsigned>(offset),
                      static_cast<unsigned>(bytes));
             return false;
         }
-        const uint32_t expected = static_cast<uint32_t>(offset + chunk);
+        offset += chunk;
+        const uint32_t expected = static_cast<uint32_t>(offset);
         if (expected == bytes || expected % (16 * 1024) == 0)
             ESP_LOGI(TAG, "Enrollment upload progress %u/%u bytes",
                      static_cast<unsigned>(expected),
                      static_cast<unsigned>(bytes));
     }
-    return true;
+    return esp_websocket_client_send_fin(s_enrollment_ws,
+                                         pdMS_TO_TICKS(5000)) >= 0;
 }
 
 bool enrollment_valid_token(const char *value) {
