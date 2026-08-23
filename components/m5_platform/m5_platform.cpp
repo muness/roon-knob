@@ -426,6 +426,15 @@ void enrollment_upload_task(void *) {
     if (!sent) {
         ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
         enrollment_send_error(capture_id, "upload_failed");
+        // A half-open socket can still report connected and receive a capture
+        // request while every outbound frame fails. Force this independent
+        // client through a fresh handshake; production voice is untouched.
+        if (s_enrollment_ws) {
+            ESP_LOGW(TAG, "Restarting stalled enrollment transport");
+            esp_websocket_client_stop(s_enrollment_ws);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            esp_websocket_client_start(s_enrollment_ws);
+        }
     } else {
         ESP_LOGI(TAG, "Enrollment capture %s sent (provisional detected=%s)",
                  capture_id, detected ? "true" : "false");
