@@ -95,6 +95,7 @@ bool s_voice_transport_configured = false;
 std::atomic_bool s_voice_listener_enabled{false};
 std::atomic_bool s_voice_microphone_active{false};
 std::atomic_bool s_voice_waiting_for_response{false};
+std::atomic_int64_t s_voice_response_deadline_us{0};
 std::atomic_bool s_voice_resume_after_sound{false};
 std::atomic_bool s_voice_listening_visual{false};
 char s_voice_transcript[161] = {};
@@ -108,6 +109,7 @@ std::atomic_int64_t s_enrollment_suppress_wake_until_us{0};
 std::atomic_bool s_enrollment_sending{false};
 std::atomic_uint32_t s_enrollment_acked_bytes{0};
 constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
+constexpr int64_t VOICE_RESPONSE_TIMEOUT_US = 45000000;
 int16_t *s_enrollment_buffer = nullptr;
 size_t s_enrollment_samples = 0;
 size_t s_enrollment_target_samples = 0;
@@ -282,7 +284,10 @@ bool enrollment_send_audio(const int16_t *pcm, size_t bytes) {
 }
 
 bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
-    constexpr size_t CHUNK_BYTES = 1024;
+    // Four KiB remains comfortably below the service's message limit while
+    // reducing round trips enough that enrollment does not monopolize the
+    // detector for tens of seconds per sample.
+    constexpr size_t CHUNK_BYTES = 4096;
     constexpr int ACK_TIMEOUT_MS = 3000;
     const auto *audio = reinterpret_cast<const uint8_t *>(pcm);
     for (size_t offset = 0; offset < bytes; offset += CHUNK_BYTES) {
@@ -428,6 +433,12 @@ void enrollment_upload_task(void *) {
         s_enrollment_capture_id[0] = '\0';
         xSemaphoreGive(s_enrollment_lock);
     }
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    // A provisional detection pauses the model even though enrollment
+    // deliberately suppresses the production turn. Restore the independent
+    // detector after every directed capture, including failed uploads.
+    kizz_wake_word_resume();
+#endif
     vTaskDelete(nullptr);
 }
 
@@ -464,6 +475,7 @@ void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
 
 void voice_recover_listener() {
     s_voice_waiting_for_response = false;
+    s_voice_response_deadline_us = 0;
     if (s_voice_audio_lock &&
         xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
         voice_take_microphone();
@@ -474,6 +486,7 @@ void voice_recover_listener() {
 
 void voice_rearm_listener_preserve_face() {
     s_voice_waiting_for_response = false;
+    s_voice_response_deadline_us = 0;
     s_voice_resume_after_sound = false;
     if (s_voice_audio_lock &&
         xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
@@ -519,7 +532,8 @@ void voice_feed_task(void *) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
             const size_t wake_samples =
                 kizz_wake_word_feed(pcm, static_cast<size_t>(chunk));
-            if (wake_samples != static_cast<size_t>(chunk))
+            if (wake_samples != static_cast<size_t>(chunk) &&
+                strcmp(kizz_wake_word_runtime_state(), "paused") != 0)
                 ESP_LOGW(TAG, "Kizz wake input dropped %u samples",
                          static_cast<unsigned>(chunk - wake_samples));
 #endif
@@ -557,6 +571,20 @@ void voice_fetch_task(void *) {
             s_voice_remote_endpoint_pending = false;
         }
         if (s_voice_waiting_for_response) {
+            const int64_t deadline = s_voice_response_deadline_us.load();
+            if (deadline > 0 && esp_timer_get_time() >= deadline) {
+                ESP_LOGE(TAG,
+                         "Kizz voice response timed out; recovering listener locally");
+                s_voice_response_deadline_us = 0;
+                if (s_voice_text_lock &&
+                    xSemaphoreTake(s_voice_text_lock,
+                                   pdMS_TO_TICKS(20)) == pdTRUE) {
+                    snprintf(s_voice_response, sizeof(s_voice_response),
+                             "Voice response timed out");
+                    xSemaphoreGive(s_voice_text_lock);
+                }
+                m5_platform_voice_feedback("clarify");
+            }
             // Keep draining the official AFE while the response is being
             // rendered. Pausing fetch() lets the ringbuffer fill, drops mic
             // frames, and leaves the wake engine paused after a turn.
@@ -667,6 +695,8 @@ void voice_fetch_task(void *) {
             utterance_opened_at = 0;
             last_command_speech_at = 0;
             s_voice_waiting_for_response = true;
+            s_voice_response_deadline_us =
+                esp_timer_get_time() + VOICE_RESPONSE_TIMEOUT_US;
             if (s_voice_audio_lock &&
                 xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
                 voice_take_speaker();
@@ -702,6 +732,8 @@ void voice_fetch_task(void *) {
             wake_detected = false;
             command_armed = false;
             s_voice_waiting_for_response = true;
+            s_voice_response_deadline_us =
+                esp_timer_get_time() + VOICE_RESPONSE_TIMEOUT_US;
             if (s_voice_audio_lock &&
                 xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
                 voice_take_speaker();
@@ -719,6 +751,7 @@ void voice_ws_event(void *, esp_event_base_t, int32_t event_id, void *event_data
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         ESP_LOGI(TAG, "Kizz local voice gateway connected");
         s_voice_waiting_for_response = false;
+        s_voice_response_deadline_us = 0;
         m5_platform_voice_feedback("idle");
         return;
     }
@@ -954,6 +987,7 @@ void start_voice_transport() {
         voice_cfg.buffer_size = 2048;
         voice_cfg.network_timeout_ms = 10000;
         voice_cfg.reconnect_timeout_ms = 1000;
+        voice_cfg.enable_close_reconnect = true;
         s_voice_ws = esp_websocket_client_init(&voice_cfg);
         if (!s_voice_ws) {
             ESP_LOGE(TAG, "Kizz voice transport allocation failed");
@@ -976,6 +1010,7 @@ void start_voice_transport() {
             enrollment_cfg.buffer_size = 2048;
             enrollment_cfg.network_timeout_ms = 10000;
             enrollment_cfg.reconnect_timeout_ms = 1000;
+            enrollment_cfg.enable_close_reconnect = true;
             s_enrollment_ws = esp_websocket_client_init(&enrollment_cfg);
             if (!s_enrollment_ws) {
                 ESP_LOGE(TAG, "Enrollment transport allocation failed");
@@ -1341,6 +1376,7 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
     } else {
         s_voice_listening_visual = false;
         s_voice_waiting_for_response = false;
+        s_voice_response_deadline_us = 0;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_NEUTRAL;
         if (s_stackchan_voice.phrase) {
             // An idle transport event can arrive while a connection or result

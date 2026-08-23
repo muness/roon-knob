@@ -31,4 +31,16 @@ assert "reset_vad" not in take_microphone
 send_text = function_body("bool voice_send_text", "bool voice_send_start")
 assert "pdMS_TO_TICKS(5000)" in send_text
 
+# A clean server-side CLOSE must reconnect just like a transport error. A
+# response deadline on the device prevents either service from leaving the
+# microphone paused forever when the remote process wedges.
+start_transport = function_body("void start_voice_transport()", "void stackchan_voice_note")
+assert start_transport.count("enable_close_reconnect = true") == 2
+fetch_task = function_body("void voice_fetch_task", "void voice_ws_event")
+assert "VOICE_RESPONSE_TIMEOUT_US" in fetch_task
+assert "Voice response timed out" in fetch_task
+upload_task = function_body("void enrollment_upload_task", "void enrollment_capture_audio")
+assert "kizz_wake_word_resume()" in upload_task
+assert "CHUNK_BYTES = 4096" in source
+
 print("Kizz production/enrollment transport separation passed")
