@@ -241,7 +241,10 @@ void detection_task(void *) {
                      static_cast<double>(s_probability_cutoff_milli.load() / 1000.0f),
                      kizz_wake_word_runtime_state());
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
+        // One RTOS tick is intentional. At the configured tick rate,
+        // pdMS_TO_TICKS(1) rounds to zero and a higher-priority detector would
+        // starve the AFE task instead of yielding between inference passes.
+        vTaskDelay(1);
     }
 }
 }  // namespace

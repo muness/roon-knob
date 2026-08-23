@@ -47,5 +47,7 @@ assert "if (!kizz_semantic_apply_changed()) return true;" in source
 # and can absorb short processing bursts without dropping a wake phrase.
 assert "ExternalAudioMicrophone(32768)" in wake_source
 assert 'detection_task, "kizz_mww", 6144, nullptr, 6' in wake_source
+assert "vTaskDelay(1);" in wake_source
+assert "vTaskDelay(pdMS_TO_TICKS(1));" not in wake_source
 
 print("Kizz semantic voice lifecycle characterization passed")
