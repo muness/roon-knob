@@ -8,6 +8,10 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_LWIP_LOCAL_HOSTNAME="hiphi-kizz-beta"
+# Voice, enrollment, now-playing, DNS, and reconnect overlap can exceed IDF's
+# default budget of ten. Keep headroom so one stalled LAN connection cannot
+# starve the independent voice and training transports.
+CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_M5_PLATFORM_EXPECT_STACKCHAN=y
 CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI="ws://192.168.1.101:8088/voice/v1"
 # Enrollment is an independent deployment. Never derive this from the UHC URL.

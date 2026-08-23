@@ -3,6 +3,9 @@ from pathlib import Path
 
 SOURCE = Path(__file__).parents[1] / "components/m5_platform/m5_platform.cpp"
 source = SOURCE.read_text()
+STACKCHAN_DEFAULTS = (
+    Path(__file__).parents[1] / "m5_beta_app/sdkconfig.stackchan.defaults"
+).read_text()
 
 
 def function_body(signature: str, next_signature: str) -> str:
@@ -54,5 +57,6 @@ assert 'strncmp(upload_url, "http://", 7)' in start_capture
 assert "wake_dropped_since_log" in source
 assert 'strcmp(type->valuestring, "training_chunk")' not in source
 assert 'strcmp(type->valuestring, "stored")' not in source
+assert "CONFIG_LWIP_MAX_SOCKETS=16" in STACKCHAN_DEFAULTS
 
 print("Kizz production/enrollment transport separation passed")

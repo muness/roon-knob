@@ -284,7 +284,10 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
     esp_http_client_config_t config = {};
     config.url = url;
     config.method = HTTP_METHOD_POST;
-    config.timeout_ms = 20000;
+    // Fail promptly if the LAN endpoint is unavailable. Enrollment is
+    // independent of production voice and must never pin a scarce socket for
+    // an entire voice-response timeout.
+    config.timeout_ms = 5000;
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) return false;
 
