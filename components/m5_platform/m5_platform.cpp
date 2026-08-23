@@ -108,6 +108,7 @@ std::atomic_bool s_enrollment_detected{false};
 std::atomic_int64_t s_enrollment_suppress_wake_until_us{0};
 std::atomic_bool s_enrollment_sending{false};
 std::atomic_uint32_t s_enrollment_acked_bytes{0};
+std::atomic_bool s_enrollment_stored{false};
 constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
 constexpr int64_t VOICE_RESPONSE_TIMEOUT_US = 45000000;
 int16_t *s_enrollment_buffer = nullptr;
@@ -288,7 +289,6 @@ bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
     // reducing round trips enough that enrollment does not monopolize the
     // detector for tens of seconds per sample.
     constexpr size_t CHUNK_BYTES = 4096;
-    constexpr int ACK_TIMEOUT_MS = 8000;
     const auto *audio = reinterpret_cast<const uint8_t *>(pcm);
     for (size_t offset = 0; offset < bytes; offset += CHUNK_BYTES) {
         const size_t chunk = std::min(CHUNK_BYTES, bytes - offset);
@@ -300,21 +300,6 @@ bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
             return false;
         }
         const uint32_t expected = static_cast<uint32_t>(offset + chunk);
-        int waited_ms = 0;
-        while (s_enrollment_acked_bytes.load(std::memory_order_relaxed) < expected &&
-               waited_ms < ACK_TIMEOUT_MS && s_enrollment_ws &&
-               esp_websocket_client_is_connected(s_enrollment_ws)) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            waited_ms += 10;
-        }
-        if (s_enrollment_acked_bytes.load(std::memory_order_relaxed) < expected) {
-            ESP_LOGW(TAG, "Enrollment upload ACK timeout at %u/%u bytes (acked=%u)",
-                     static_cast<unsigned>(expected),
-                     static_cast<unsigned>(bytes),
-                     static_cast<unsigned>(s_enrollment_acked_bytes.load(
-                         std::memory_order_relaxed)));
-            return false;
-        }
         if (expected == bytes || expected % (16 * 1024) == 0)
             ESP_LOGI(TAG, "Enrollment upload progress %u/%u bytes",
                      static_cast<unsigned>(expected),
@@ -406,6 +391,7 @@ void enrollment_upload_task(void *) {
     strlcpy(capture_id, s_enrollment_capture_id, sizeof(capture_id));
     const bool detected = s_enrollment_detected;
     s_enrollment_acked_bytes.store(0, std::memory_order_relaxed);
+    s_enrollment_stored.store(false, std::memory_order_relaxed);
     s_enrollment_suppress_wake_until_us = esp_timer_get_time() + 1000000;
     s_voice_wake_pending = false;
 
@@ -420,10 +406,27 @@ void enrollment_upload_task(void *) {
     snprintf(end, sizeof(end),
              "{\"type\":\"training_sample_end\",\"capture_id\":\"%s\"}",
              capture_id);
-    const bool sent = enrollment_send_text(header) &&
+    const bool frames_sent = enrollment_send_text(header) &&
         enrollment_send_audio_chunks(s_enrollment_buffer, completed_bytes) &&
         enrollment_send_text(end);
+    int commit_wait_ms = 0;
+    while (frames_sent &&
+           !s_enrollment_stored.load(std::memory_order_relaxed) &&
+           commit_wait_ms < 10000 && s_enrollment_ws &&
+           esp_websocket_client_is_connected(s_enrollment_ws)) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        commit_wait_ms += 10;
+    }
+    const bool sent = frames_sent &&
+        s_enrollment_stored.load(std::memory_order_relaxed);
     if (!sent) {
+        if (frames_sent)
+            ESP_LOGW(TAG,
+                     "Enrollment server commit timeout for %s (acked=%u/%u)",
+                     capture_id,
+                     static_cast<unsigned>(s_enrollment_acked_bytes.load(
+                         std::memory_order_relaxed)),
+                     static_cast<unsigned>(completed_bytes));
         ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
         enrollment_send_error(capture_id, "upload_failed");
         // A half-open socket can still report connected and receive a capture
@@ -883,6 +886,12 @@ void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
                 static_cast<uint32_t>(received_bytes->valuedouble),
                 std::memory_order_relaxed);
         }
+    } else if (cJSON_IsString(type) && type->valuestring &&
+               strcmp(type->valuestring, "stored") == 0) {
+        cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
+        if (cJSON_IsString(capture_id) && capture_id->valuestring &&
+            strcmp(capture_id->valuestring, s_enrollment_capture_id) == 0)
+            s_enrollment_stored.store(true, std::memory_order_relaxed);
     } else if (cJSON_IsString(type) && type->valuestring &&
                strcmp(type->valuestring, "wake_config") == 0) {
         cJSON *cutoff = cJSON_GetObjectItemCaseSensitive(

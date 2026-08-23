@@ -46,5 +46,8 @@ assert "Restarting stalled enrollment transport" in upload_task
 assert "esp_websocket_client_stop(s_enrollment_ws)" in upload_task
 assert "esp_websocket_client_start(s_enrollment_ws)" in upload_task
 assert "CHUNK_BYTES = 4096" in source
+assert "s_enrollment_stored" in upload_task
+assert "Enrollment server commit timeout" in upload_task
+assert "ACK timeout" not in source
 
 print("Kizz production/enrollment transport separation passed")
