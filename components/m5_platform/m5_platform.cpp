@@ -361,6 +361,11 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
             int no_delay = 1;
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay,
                        sizeof(no_delay));
+            struct linger reset_on_close = {};
+            reset_on_close.l_onoff = 1;
+            reset_on_close.l_linger = 0;
+            setsockopt(fd, SOL_SOCKET, SO_LINGER, &reset_on_close,
+                       sizeof(reset_on_close));
             bool request_sent =
                 connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
             if (!request_sent) {
