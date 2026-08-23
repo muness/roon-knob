@@ -118,6 +118,7 @@ char s_enrollment_capture_id[97] = {};
 char s_enrollment_upload_url[257] = {};
 char s_enrollment_event[513] = {};
 size_t s_enrollment_event_length = 0;
+TaskHandle_t s_enrollment_upload_task = nullptr;
 std::atomic_uint32_t s_voice_audio_epoch{0};
 std::atomic_int64_t s_command_end_silence_us{3000000};
 std::atomic_int64_t s_command_max_utterance_us{12000000};
@@ -361,7 +362,7 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
         header_length < static_cast<int>(sizeof(header)) &&
         send_all(header, static_cast<size_t>(header_length));
     size_t written = 0;
-    constexpr size_t chunk_bytes = 4096;
+    constexpr size_t chunk_bytes = 1024;
     // The capture lives in PSRAM. Stage network writes through internal RAM:
     // lwIP can accept the header from the task stack but stalls when handed
     // the external-RAM capture buffer directly on this ESP32-S3 target.
@@ -441,7 +442,8 @@ bool enrollment_start_capture(const char *capture_id, const char *upload_url,
     if (!enrollment_valid_token(capture_id) || duration_ms < 500 ||
         duration_ms > 5000 || !upload_url ||
         strncmp(upload_url, "http://", 7) != 0 || strlen(upload_url) > 256 ||
-        !s_enrollment_lock || !s_enrollment_buffer) return false;
+        !s_enrollment_lock || !s_enrollment_buffer ||
+        !s_enrollment_upload_task) return false;
     if (!s_voice_microphone_active || s_voice_waiting_for_response) {
         enrollment_send_error(capture_id, "microphone_unavailable");
         return false;
@@ -471,42 +473,45 @@ bool enrollment_start_capture(const char *capture_id, const char *upload_url,
 }
 
 void enrollment_upload_task(void *) {
-    vTaskDelay(pdMS_TO_TICKS(150));
-    const size_t completed_samples = s_enrollment_samples;
-    char capture_id[sizeof(s_enrollment_capture_id)] = {};
-    strlcpy(capture_id, s_enrollment_capture_id, sizeof(capture_id));
-    char upload_url[sizeof(s_enrollment_upload_url)] = {};
-    strlcpy(upload_url, s_enrollment_upload_url, sizeof(upload_url));
-    const bool detected = s_enrollment_detected;
-    s_enrollment_suppress_wake_until_us = esp_timer_get_time() + 1000000;
-    s_voice_wake_pending = false;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(150));
+        const size_t completed_samples = s_enrollment_samples;
+        char capture_id[sizeof(s_enrollment_capture_id)] = {};
+        strlcpy(capture_id, s_enrollment_capture_id, sizeof(capture_id));
+        char upload_url[sizeof(s_enrollment_upload_url)] = {};
+        strlcpy(upload_url, s_enrollment_upload_url, sizeof(upload_url));
+        const bool detected = s_enrollment_detected;
+        s_enrollment_suppress_wake_until_us = esp_timer_get_time() + 1000000;
+        s_voice_wake_pending = false;
 
-    const size_t completed_bytes = completed_samples * sizeof(int16_t);
-    const bool sent = enrollment_upload_audio_http(
-        upload_url, capture_id, detected, s_enrollment_buffer,
-        completed_bytes);
-    if (!sent) {
-        ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
-        enrollment_send_error(capture_id, "upload_failed");
-    } else {
-        ESP_LOGI(TAG, "Enrollment capture %s stored (provisional detected=%s)",
-                 capture_id, detected ? "true" : "false");
-    }
+        const size_t completed_bytes = completed_samples * sizeof(int16_t);
+        const bool sent = enrollment_upload_audio_http(
+            upload_url, capture_id, detected, s_enrollment_buffer,
+            completed_bytes);
+        if (!sent) {
+            ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
+            enrollment_send_error(capture_id, "upload_failed");
+        } else {
+            ESP_LOGI(TAG,
+                     "Enrollment capture %s stored (provisional detected=%s)",
+                     capture_id, detected ? "true" : "false");
+        }
 
-    if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-        s_enrollment_sending = false;
-        s_enrollment_samples = 0;
-        s_enrollment_capture_id[0] = '\0';
-        s_enrollment_upload_url[0] = '\0';
-        xSemaphoreGive(s_enrollment_lock);
-    }
+        if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+            s_enrollment_sending = false;
+            s_enrollment_samples = 0;
+            s_enrollment_capture_id[0] = '\0';
+            s_enrollment_upload_url[0] = '\0';
+            xSemaphoreGive(s_enrollment_lock);
+        }
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
-    // A provisional detection pauses the model even though enrollment
-    // deliberately suppresses the production turn. Restore the independent
-    // detector after every directed capture, including failed uploads.
-    kizz_wake_word_resume();
+        // A provisional detection pauses the model even though enrollment
+        // deliberately suppresses the production turn. Restore the independent
+        // detector after every directed capture, including failed uploads.
+        kizz_wake_word_resume();
 #endif
-    vTaskDelete(nullptr);
+    }
 }
 
 void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
@@ -528,17 +533,7 @@ void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
     s_enrollment_active = false;
     s_enrollment_sending = true;
     xSemaphoreGive(s_enrollment_lock);
-    if (xTaskCreatePinnedToCore(enrollment_upload_task, "kizz_enroll_tx", 4096,
-                                nullptr, 4, nullptr, 0) != pdPASS) {
-        ESP_LOGE(TAG, "Enrollment upload task could not start");
-        if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-            s_enrollment_sending = false;
-            s_enrollment_samples = 0;
-            s_enrollment_capture_id[0] = '\0';
-            s_enrollment_upload_url[0] = '\0';
-            xSemaphoreGive(s_enrollment_lock);
-        }
-    }
+    xTaskNotifyGive(s_enrollment_upload_task);
 }
 
 void voice_recover_listener() {
@@ -1073,6 +1068,12 @@ void start_voice_transport() {
             ENROLLMENT_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
         if (!s_enrollment_lock || !s_enrollment_buffer) {
             ESP_LOGE(TAG, "Enrollment buffer allocation failed; production voice remains enabled");
+        } else if (xTaskCreatePinnedToCore(
+                       enrollment_upload_task, "kizz_enroll_tx", 4096,
+                       nullptr, 4, &s_enrollment_upload_task, 0) != pdPASS) {
+            s_enrollment_upload_task = nullptr;
+            ESP_LOGE(TAG,
+                     "Enrollment upload worker allocation failed; production voice remains enabled");
         } else {
             esp_websocket_client_config_t enrollment_cfg = {};
             enrollment_cfg.uri = enrollment_uri;
