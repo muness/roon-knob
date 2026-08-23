@@ -51,6 +51,7 @@ assert "esp_websocket_client_start(s_enrollment_ws)" not in upload_task
 http_upload = function_body("bool enrollment_upload_audio_http", "bool enrollment_valid_token")
 assert "getaddrinfo" in http_upload
 assert "SO_SNDTIMEO" in http_upload
+assert "TCP_NODELAY" in http_upload
 assert "send_all" in http_upload
 assert "X-Device-ID: %s" in http_upload
 assert "X-Detected: %s" in http_upload

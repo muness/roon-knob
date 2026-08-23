@@ -358,6 +358,9 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
             timeout.tv_sec = 3;
             setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+            int no_delay = 1;
+            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay,
+                       sizeof(no_delay));
             bool request_sent =
                 connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
             if (!request_sent) {
