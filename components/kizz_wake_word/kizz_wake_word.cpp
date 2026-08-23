@@ -251,10 +251,12 @@ void detection_task(void *) {
 
 extern "C" bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb) {
     if (s_wake_word) return true;
-    // Keep roughly one second of 16 kHz mono PCM so short ESP-SR scheduling
+    // Keep roughly half a second of 16 kHz mono PCM so short ESP-SR scheduling
     // bursts do not erase the wake phrase before microWakeWord can consume it.
+    // This FreeRTOS stream buffer uses internal RAM; 32 KiB is not contiguous
+    // after ESP-SR initializes on CoreS3, while 16 KiB is hardware-proven.
     s_microphone = new (std::nothrow)
-        esphome::microphone::ExternalAudioMicrophone(32768);
+        esphome::microphone::ExternalAudioMicrophone(16384);
     if (!s_microphone || !s_microphone->is_ready()) {
         ESP_LOGE(TAG, "Kizz wake runtime allocation failed");
         delete s_microphone;
