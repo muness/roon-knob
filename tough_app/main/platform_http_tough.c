@@ -19,6 +19,18 @@
 
 static const char *TAG = "platform_http";
 
+static void *http_response_calloc(size_t count, size_t size) {
+    void *ptr = heap_caps_calloc(count, size,
+                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return ptr ? ptr : heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
+}
+
+static void *http_response_realloc(void *ptr, size_t size) {
+    void *resized = heap_caps_realloc(ptr, size,
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return resized ? resized : heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
+}
+
 static void get_knob_id(char *out, size_t len) {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -118,7 +130,7 @@ static int http_perform(const char *url, const char *body,
     if (buf_size > max_response_bytes + 1) {
         buf_size = max_response_bytes + 1;
     }
-    char *buffer = heap_caps_calloc(1, buf_size, MALLOC_CAP_8BIT);
+    char *buffer = http_response_calloc(1, buf_size);
     if (!buffer) {
         ESP_LOGE(TAG, "Failed to allocate %zu-byte response buffer",
                  buf_size);
@@ -150,7 +162,7 @@ static int http_perform(const char *url, const char *body,
             if (new_size > max_response_bytes + 1) {
                 new_size = max_response_bytes + 1;
             }
-            char *new_buf = heap_caps_realloc(buffer, new_size, MALLOC_CAP_8BIT);
+            char *new_buf = http_response_realloc(buffer, new_size);
             if (!new_buf) {
                 ESP_LOGE(TAG, "Failed to grow response buffer to %zu",
                          new_size);

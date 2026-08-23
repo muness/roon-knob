@@ -7,6 +7,13 @@ CONFIG_SPIRAM_MODE_QUAD=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_USE_MALLOC=y
+# ESP-IDF recommends static TX buffers when PSRAM is enabled. Kizz otherwise
+# allocates radio buffers while enrollment and now-playing traffic overlap,
+# which can starve the Wi-Fi transmit path under its full voice workload.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
+# Two buffers reserve enough radio progress for the sequential enrollment
+# upload without consuming the internal DMA heap needed by M5Unified's mic.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2
 CONFIG_LWIP_LOCAL_HOSTNAME="hiphi-kizz-beta"
 # Voice, enrollment, now-playing, DNS, and reconnect overlap can exceed IDF's
 # default budget of ten. Keep headroom so one stalled LAN connection cannot

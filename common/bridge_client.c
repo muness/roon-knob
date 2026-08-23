@@ -51,8 +51,8 @@ static void check_charging_state_change(bool current_external_power);
 static void *bridge_external_alloc(size_t size) {
 #ifdef ESP_PLATFORM
     // PSRAM is optional across targets (the original AtomS3 has none).
-    // MALLOC_CAP_8BIT permits internal RAM and PSRAM-backed heaps alike.
-    return heap_caps_malloc(size, MALLOC_CAP_8BIT);
+    void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return ptr ? ptr : heap_caps_malloc(size, MALLOC_CAP_8BIT);
 #else
     return malloc(size);
 #endif

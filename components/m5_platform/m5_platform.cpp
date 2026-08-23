@@ -341,7 +341,10 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
 
     size_t written = 0;
     int status = 0;
-    constexpr size_t chunk_bytes = 2048;
+    // Keep this below the smallest internal block observed under the complete
+    // StackChan workload. Static radio buffers make progress independently;
+    // this block only prevents handing PSRAM directly to lwIP.
+    constexpr size_t chunk_bytes = 1024;
     // The capture lives in PSRAM. Stage network writes through internal RAM:
     // the Wi-Fi/lwIP path must not be handed the external-RAM buffer directly.
     auto *chunk = static_cast<uint8_t *>(heap_caps_malloc(
