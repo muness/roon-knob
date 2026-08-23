@@ -47,6 +47,7 @@ assert "esp_websocket_client_stop(s_enrollment_ws)" in upload_task
 assert "esp_websocket_client_start(s_enrollment_ws)" in upload_task
 assert "esp_websocket_client_send_bin(" in source
 assert "pdMS_TO_TICKS(10000)" in source
+assert "wake_dropped_since_log" in source
 assert "s_enrollment_stored" in upload_task
 assert "Enrollment server commit timeout" in upload_task
 assert "ACK timeout" not in source

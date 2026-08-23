@@ -502,6 +502,8 @@ void voice_feed_task(void *) {
         ESP_LOGE(TAG, "Kizz AFE input allocation failed");
         vTaskDelete(nullptr);
     }
+    uint32_t wake_dropped_since_log = 0;
+    int64_t wake_drop_log_at = 0;
     for (;;) {
         bool captured = false;
         if (!s_voice_waiting_for_response && s_voice_audio_lock &&
@@ -531,9 +533,19 @@ void voice_feed_task(void *) {
             const size_t wake_samples =
                 kizz_wake_word_feed(pcm, static_cast<size_t>(chunk));
             if (wake_samples != static_cast<size_t>(chunk) &&
-                strcmp(kizz_wake_word_runtime_state(), "paused") != 0)
-                ESP_LOGW(TAG, "Kizz wake input dropped %u samples",
-                         static_cast<unsigned>(chunk - wake_samples));
+                strcmp(kizz_wake_word_runtime_state(), "paused") != 0) {
+                wake_dropped_since_log +=
+                    static_cast<uint32_t>(chunk - wake_samples);
+                if (now - wake_drop_log_at >= 2000000) {
+                    ESP_LOGW(TAG,
+                             "Kizz wake input dropped %u samples in 2s "
+                             "(state=%s)",
+                             static_cast<unsigned>(wake_dropped_since_log),
+                             kizz_wake_word_runtime_state());
+                    wake_dropped_since_log = 0;
+                    wake_drop_log_at = now;
+                }
+            }
 #endif
             enrollment_capture_audio(pcm, static_cast<size_t>(chunk));
             s_voice_afe->feed(s_voice_afe_data, pcm);

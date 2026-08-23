@@ -248,8 +248,10 @@ void detection_task(void *) {
 
 extern "C" bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb) {
     if (s_wake_word) return true;
+    // Keep roughly one second of 16 kHz mono PCM so short ESP-SR scheduling
+    // bursts do not erase the wake phrase before microWakeWord can consume it.
     s_microphone = new (std::nothrow)
-        esphome::microphone::ExternalAudioMicrophone(8192);
+        esphome::microphone::ExternalAudioMicrophone(32768);
     if (!s_microphone || !s_microphone->is_ready()) {
         ESP_LOGE(TAG, "Kizz wake runtime allocation failed");
         delete s_microphone;
@@ -267,7 +269,10 @@ extern "C" bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb) {
         s_detected_cb = nullptr;
         return false;
     }
-    if (xTaskCreatePinnedToCore(detection_task, "kizz_mww", 6144, nullptr, 5,
+    // Wake inference must outrank the continuous AFE fetch task on core 1.
+    // Equal priority caused sustained input overflow while the UI still said
+    // ARMED, which presented as intermittent real-world recall.
+    if (xTaskCreatePinnedToCore(detection_task, "kizz_mww", 6144, nullptr, 6,
                                 nullptr, 1) != pdPASS) {
         ESP_LOGE(TAG, "Kizz wake task creation failed");
         s_wake_word->stop();
