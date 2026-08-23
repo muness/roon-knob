@@ -49,9 +49,11 @@ assert "enrollment_upload_audio_http(" in upload_task
 assert "esp_websocket_client_stop(s_enrollment_ws)" not in upload_task
 assert "esp_websocket_client_start(s_enrollment_ws)" not in upload_task
 http_upload = function_body("bool enrollment_upload_audio_http", "bool enrollment_valid_token")
-assert "esp_http_client_write" in http_upload
-assert '"X-Device-ID"' in http_upload
-assert '"X-Detected"' in http_upload
+assert "getaddrinfo" in http_upload
+assert "SO_SNDTIMEO" in http_upload
+assert "send_all" in http_upload
+assert "X-Device-ID: %s" in http_upload
+assert "X-Detected: %s" in http_upload
 start_capture = function_body("bool enrollment_start_capture", "void enrollment_upload_task")
 assert 'strncmp(upload_url, "http://", 7)' in start_capture
 assert "wake_dropped_since_log" in source

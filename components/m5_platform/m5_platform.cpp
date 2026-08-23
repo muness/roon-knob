@@ -6,7 +6,6 @@
 /* Voice networking is deliberately separate from audio ownership: M5Unified
  * requires the StackChan microphone and speaker to take turns. */
 #include "esp_websocket_client.h"
-#include "esp_http_client.h"
 #include "cJSON.h"
 #include "esp_afe_config.h"
 #include "esp_afe_sr_iface.h"
@@ -34,6 +33,8 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <lwip/netdb.h>
+#include <lwip/sockets.h>
 
 static const char *TAG = "m5_platform";
 static m5_platform_board_t s_board = M5_PLATFORM_BOARD_UNKNOWN;
@@ -281,44 +282,83 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
                                   size_t bytes) {
     if (!url || !capture_id || !pcm || !bytes) return false;
 
-    esp_http_client_config_t config = {};
-    config.url = url;
-    config.method = HTTP_METHOD_POST;
-    // Fail promptly if the LAN endpoint is unavailable. Enrollment is
-    // independent of production voice and must never pin a scarce socket for
-    // an entire voice-response timeout.
-    config.timeout_ms = 5000;
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return false;
-
-    esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
-    esp_http_client_set_header(client, "Connection", "close");
-    esp_http_client_set_header(client, "X-Device-ID",
-                               CONFIG_M5_PLATFORM_DEVICE_ID);
-    esp_http_client_set_header(client, "X-Detected",
-                               detected ? "true" : "false");
-    esp_http_client_set_header(client, "X-Capture-ID", capture_id);
-
-    bool sent = esp_http_client_open(client, static_cast<int>(bytes)) == ESP_OK;
-    size_t written = 0;
-    while (sent && written < bytes) {
-        const int result = esp_http_client_write(
-            client, reinterpret_cast<const char *>(pcm) + written,
-            static_cast<int>(bytes - written));
-        if (result <= 0) {
-            sent = false;
-            break;
-        }
-        written += static_cast<size_t>(result);
+    // esp_http_client's nonblocking connect poll can time out even after the
+    // trainer has accepted the TCP handshake on this ESP32-S3 build. The
+    // blocking BSD socket API is the supported lwIP primitive underneath it
+    // and avoids leaving an established but headerless connection behind.
+    constexpr const char *prefix = "http://";
+    const char *authority = url + strlen(prefix);
+    const char *path = strchr(authority, '/');
+    if (!path || path == authority) return false;
+    const size_t authority_len = static_cast<size_t>(path - authority);
+    if (authority_len >= 128) return false;
+    char host_port[128] = {};
+    memcpy(host_port, authority, authority_len);
+    char *colon = strrchr(host_port, ':');
+    const char *port = "80";
+    if (colon) {
+        *colon = '\0';
+        port = colon + 1;
     }
-    const int64_t headers = sent ? esp_http_client_fetch_headers(client) : -1;
-    const int status = sent ? esp_http_client_get_status_code(client) : 0;
-    sent = sent && headers >= 0 && status >= 200 && status < 300;
+    if (!host_port[0] || !port[0]) return false;
+
+    addrinfo hints = {};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo *addresses = nullptr;
+    if (getaddrinfo(host_port, port, &hints, &addresses) != 0 || !addresses)
+        return false;
+    int fd = socket(addresses->ai_family, addresses->ai_socktype,
+                    addresses->ai_protocol);
+    if (fd < 0) {
+        freeaddrinfo(addresses);
+        return false;
+    }
+    timeval timeout = {};
+    timeout.tv_sec = 5;
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    bool sent = connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
+    freeaddrinfo(addresses);
+
+    char header[768] = {};
+    const int header_length = snprintf(
+        header, sizeof(header),
+        "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/octet-stream\r\n"
+        "Content-Length: %u\r\nConnection: close\r\nX-Device-ID: %s\r\n"
+        "X-Detected: %s\r\nX-Capture-ID: %s\r\n\r\n",
+        path, host_port, static_cast<unsigned>(bytes),
+        CONFIG_M5_PLATFORM_DEVICE_ID, detected ? "true" : "false", capture_id);
+    auto send_all = [fd](const char *data, size_t length) {
+        size_t offset = 0;
+        while (offset < length) {
+            const int result = send(fd, data + offset, length - offset, 0);
+            if (result <= 0) return false;
+            offset += static_cast<size_t>(result);
+        }
+        return true;
+    };
+    sent = sent && header_length > 0 &&
+        header_length < static_cast<int>(sizeof(header)) &&
+        send_all(header, static_cast<size_t>(header_length));
+    size_t written = 0;
+    constexpr size_t chunk_bytes = 4096;
+    while (sent && written < bytes) {
+        const size_t length = std::min(chunk_bytes, bytes - written);
+        sent = send_all(reinterpret_cast<const char *>(pcm) + written, length);
+        if (sent) written += length;
+        vTaskDelay(1);
+    }
+    char response[64] = {};
+    const int received = sent ? recv(fd, response, sizeof(response) - 1, 0) : -1;
+    int status = 0;
+    if (received > 0) sscanf(response, "HTTP/%*s %d", &status);
+    shutdown(fd, SHUT_RDWR);
+    close(fd);
+    sent = sent && status >= 200 && status < 300;
     ESP_LOGI(TAG, "Enrollment HTTP upload %s status=%d bytes=%u/%u",
              capture_id, status, static_cast<unsigned>(written),
              static_cast<unsigned>(bytes));
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
     return sent;
 }
 
