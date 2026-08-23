@@ -6,6 +6,7 @@
 /* Voice networking is deliberately separate from audio ownership: M5Unified
  * requires the StackChan microphone and speaker to take turns. */
 #include "esp_websocket_client.h"
+#include "esp_http_client.h"
 #include "cJSON.h"
 #include "esp_afe_config.h"
 #include "esp_afe_sr_iface.h"
@@ -107,14 +108,13 @@ std::atomic_bool s_enrollment_active{false};
 std::atomic_bool s_enrollment_detected{false};
 std::atomic_int64_t s_enrollment_suppress_wake_until_us{0};
 std::atomic_bool s_enrollment_sending{false};
-std::atomic_uint32_t s_enrollment_acked_bytes{0};
-std::atomic_bool s_enrollment_stored{false};
 constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
 constexpr int64_t VOICE_RESPONSE_TIMEOUT_US = 45000000;
 int16_t *s_enrollment_buffer = nullptr;
 size_t s_enrollment_samples = 0;
 size_t s_enrollment_target_samples = 0;
 char s_enrollment_capture_id[97] = {};
+char s_enrollment_upload_url[257] = {};
 char s_enrollment_event[513] = {};
 size_t s_enrollment_event_length = 0;
 std::atomic_uint32_t s_voice_audio_epoch{0};
@@ -276,18 +276,47 @@ bool enrollment_send_text(const char *message) {
         s_enrollment_ws, message, length, pdMS_TO_TICKS(1000)) == length;
 }
 
-bool enrollment_send_audio_sample(const int16_t *pcm, size_t bytes) {
-    if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws) ||
-        !pcm || !bytes) return false;
-    // esp_websocket_client_send_bin() handles payloads larger than its internal
-    // TX buffer and holds the client lock across the complete fragmented
-    // message. Splitting the sample across separate API calls let the receive
-    // task take the lock between fragments and repeatedly stalled physical
-    // Kizz uploads after 4-8 KiB.
-    return esp_websocket_client_send_bin(
-        s_enrollment_ws, reinterpret_cast<const char *>(pcm),
-        static_cast<int>(bytes), pdMS_TO_TICKS(10000)) ==
-        static_cast<int>(bytes);
+bool enrollment_upload_audio_http(const char *url, const char *capture_id,
+                                  bool detected, const int16_t *pcm,
+                                  size_t bytes) {
+    if (!url || !capture_id || !pcm || !bytes) return false;
+
+    esp_http_client_config_t config = {};
+    config.url = url;
+    config.method = HTTP_METHOD_POST;
+    config.timeout_ms = 20000;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return false;
+
+    esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
+    esp_http_client_set_header(client, "Connection", "close");
+    esp_http_client_set_header(client, "X-Device-ID",
+                               CONFIG_M5_PLATFORM_DEVICE_ID);
+    esp_http_client_set_header(client, "X-Detected",
+                               detected ? "true" : "false");
+    esp_http_client_set_header(client, "X-Capture-ID", capture_id);
+
+    bool sent = esp_http_client_open(client, static_cast<int>(bytes)) == ESP_OK;
+    size_t written = 0;
+    while (sent && written < bytes) {
+        const int result = esp_http_client_write(
+            client, reinterpret_cast<const char *>(pcm) + written,
+            static_cast<int>(bytes - written));
+        if (result <= 0) {
+            sent = false;
+            break;
+        }
+        written += static_cast<size_t>(result);
+    }
+    const int64_t headers = sent ? esp_http_client_fetch_headers(client) : -1;
+    const int status = sent ? esp_http_client_get_status_code(client) : 0;
+    sent = sent && headers >= 0 && status >= 200 && status < 300;
+    ESP_LOGI(TAG, "Enrollment HTTP upload %s status=%d bytes=%u/%u",
+             capture_id, status, static_cast<unsigned>(written),
+             static_cast<unsigned>(bytes));
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return sent;
 }
 
 bool enrollment_valid_token(const char *value) {
@@ -337,9 +366,12 @@ void enrollment_send_error(const char *capture_id, const char *reason) {
     (void)enrollment_send_text(message);
 }
 
-bool enrollment_start_capture(const char *capture_id, int duration_ms) {
+bool enrollment_start_capture(const char *capture_id, const char *upload_url,
+                              int duration_ms) {
     if (!enrollment_valid_token(capture_id) || duration_ms < 500 ||
-        duration_ms > 5000 || !s_enrollment_lock || !s_enrollment_buffer) return false;
+        duration_ms > 5000 || !upload_url ||
+        strncmp(upload_url, "http://", 7) != 0 || strlen(upload_url) > 256 ||
+        !s_enrollment_lock || !s_enrollment_buffer) return false;
     if (!s_voice_microphone_active || s_voice_waiting_for_response) {
         enrollment_send_error(capture_id, "microphone_unavailable");
         return false;
@@ -353,6 +385,8 @@ bool enrollment_start_capture(const char *capture_id, int duration_ms) {
     }
     strlcpy(s_enrollment_capture_id, capture_id,
             sizeof(s_enrollment_capture_id));
+    strlcpy(s_enrollment_upload_url, upload_url,
+            sizeof(s_enrollment_upload_url));
     s_enrollment_samples = 0;
     s_enrollment_target_samples =
         static_cast<size_t>(duration_ms) * 16000 / 1000;
@@ -371,57 +405,21 @@ void enrollment_upload_task(void *) {
     const size_t completed_samples = s_enrollment_samples;
     char capture_id[sizeof(s_enrollment_capture_id)] = {};
     strlcpy(capture_id, s_enrollment_capture_id, sizeof(capture_id));
+    char upload_url[sizeof(s_enrollment_upload_url)] = {};
+    strlcpy(upload_url, s_enrollment_upload_url, sizeof(upload_url));
     const bool detected = s_enrollment_detected;
-    s_enrollment_acked_bytes.store(0, std::memory_order_relaxed);
-    s_enrollment_stored.store(false, std::memory_order_relaxed);
     s_enrollment_suppress_wake_until_us = esp_timer_get_time() + 1000000;
     s_voice_wake_pending = false;
 
-    char header[192] = {};
-    snprintf(header, sizeof(header),
-             "{\"type\":\"training_sample\",\"capture_id\":\"%s\",\"bytes\":%u,\"detected\":%s}",
-             capture_id,
-             static_cast<unsigned>(completed_samples * sizeof(int16_t)),
-             detected ? "true" : "false");
     const size_t completed_bytes = completed_samples * sizeof(int16_t);
-    char end[160] = {};
-    snprintf(end, sizeof(end),
-             "{\"type\":\"training_sample_end\",\"capture_id\":\"%s\"}",
-             capture_id);
-    const bool frames_sent = enrollment_send_text(header) &&
-        enrollment_send_audio_sample(s_enrollment_buffer, completed_bytes) &&
-        enrollment_send_text(end);
-    int commit_wait_ms = 0;
-    while (frames_sent &&
-           !s_enrollment_stored.load(std::memory_order_relaxed) &&
-           commit_wait_ms < 10000 && s_enrollment_ws &&
-           esp_websocket_client_is_connected(s_enrollment_ws)) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        commit_wait_ms += 10;
-    }
-    const bool sent = frames_sent &&
-        s_enrollment_stored.load(std::memory_order_relaxed);
+    const bool sent = enrollment_upload_audio_http(
+        upload_url, capture_id, detected, s_enrollment_buffer,
+        completed_bytes);
     if (!sent) {
-        if (frames_sent)
-            ESP_LOGW(TAG,
-                     "Enrollment server commit timeout for %s (acked=%u/%u)",
-                     capture_id,
-                     static_cast<unsigned>(s_enrollment_acked_bytes.load(
-                         std::memory_order_relaxed)),
-                     static_cast<unsigned>(completed_bytes));
         ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
         enrollment_send_error(capture_id, "upload_failed");
-        // A half-open socket can still report connected and receive a capture
-        // request while every outbound frame fails. Force this independent
-        // client through a fresh handshake; production voice is untouched.
-        if (s_enrollment_ws) {
-            ESP_LOGW(TAG, "Restarting stalled enrollment transport");
-            esp_websocket_client_stop(s_enrollment_ws);
-            vTaskDelay(pdMS_TO_TICKS(250));
-            esp_websocket_client_start(s_enrollment_ws);
-        }
     } else {
-        ESP_LOGI(TAG, "Enrollment capture %s sent (provisional detected=%s)",
+        ESP_LOGI(TAG, "Enrollment capture %s stored (provisional detected=%s)",
                  capture_id, detected ? "true" : "false");
     }
 
@@ -429,6 +427,7 @@ void enrollment_upload_task(void *) {
         s_enrollment_sending = false;
         s_enrollment_samples = 0;
         s_enrollment_capture_id[0] = '\0';
+        s_enrollment_upload_url[0] = '\0';
         xSemaphoreGive(s_enrollment_lock);
     }
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
@@ -466,6 +465,7 @@ void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
             s_enrollment_sending = false;
             s_enrollment_samples = 0;
             s_enrollment_capture_id[0] = '\0';
+            s_enrollment_upload_url[0] = '\0';
             xSemaphoreGive(s_enrollment_lock);
         }
     }
@@ -861,31 +861,14 @@ void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
         strcmp(type->valuestring, "training_capture") == 0) {
         cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
         cJSON *duration_ms = cJSON_GetObjectItemCaseSensitive(root, "duration_ms");
+        cJSON *upload_url = cJSON_GetObjectItemCaseSensitive(root, "upload_url");
         if (!cJSON_IsString(capture_id) || !capture_id->valuestring ||
+            !cJSON_IsString(upload_url) || !upload_url->valuestring ||
             !cJSON_IsNumber(duration_ms) ||
             !enrollment_start_capture(capture_id->valuestring,
+                                      upload_url->valuestring,
                                       duration_ms->valueint))
             ESP_LOGW(TAG, "Rejected malformed or unavailable enrollment capture");
-    } else if (cJSON_IsString(type) && type->valuestring &&
-               strcmp(type->valuestring, "training_chunk") == 0) {
-        cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
-        cJSON *received_bytes = cJSON_GetObjectItemCaseSensitive(
-            root, "received_bytes");
-        if (cJSON_IsString(capture_id) && capture_id->valuestring &&
-            strcmp(capture_id->valuestring, s_enrollment_capture_id) == 0 &&
-            cJSON_IsNumber(received_bytes) && received_bytes->valuedouble >= 0 &&
-            received_bytes->valuedouble <=
-                static_cast<double>(ENROLLMENT_MAX_SAMPLES * sizeof(int16_t))) {
-            s_enrollment_acked_bytes.store(
-                static_cast<uint32_t>(received_bytes->valuedouble),
-                std::memory_order_relaxed);
-        }
-    } else if (cJSON_IsString(type) && type->valuestring &&
-               strcmp(type->valuestring, "stored") == 0) {
-        cJSON *capture_id = cJSON_GetObjectItemCaseSensitive(root, "capture_id");
-        if (cJSON_IsString(capture_id) && capture_id->valuestring &&
-            strcmp(capture_id->valuestring, s_enrollment_capture_id) == 0)
-            s_enrollment_stored.store(true, std::memory_order_relaxed);
     } else if (cJSON_IsString(type) && type->valuestring &&
                strcmp(type->valuestring, "wake_config") == 0) {
         cJSON *cutoff = cJSON_GetObjectItemCaseSensitive(
