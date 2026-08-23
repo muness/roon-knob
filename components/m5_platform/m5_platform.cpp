@@ -288,7 +288,7 @@ bool enrollment_send_audio_chunks(const int16_t *pcm, size_t bytes) {
     // reducing round trips enough that enrollment does not monopolize the
     // detector for tens of seconds per sample.
     constexpr size_t CHUNK_BYTES = 4096;
-    constexpr int ACK_TIMEOUT_MS = 3000;
+    constexpr int ACK_TIMEOUT_MS = 8000;
     const auto *audio = reinterpret_cast<const uint8_t *>(pcm);
     for (size_t offset = 0; offset < bytes; offset += CHUNK_BYTES) {
         const size_t chunk = std::min(CHUNK_BYTES, bytes - offset);
@@ -423,9 +423,13 @@ void enrollment_upload_task(void *) {
     const bool sent = enrollment_send_text(header) &&
         enrollment_send_audio_chunks(s_enrollment_buffer, completed_bytes) &&
         enrollment_send_text(end);
-    if (!sent) ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
-    else ESP_LOGI(TAG, "Enrollment capture %s sent (provisional detected=%s)",
-                  capture_id, detected ? "true" : "false");
+    if (!sent) {
+        ESP_LOGW(TAG, "Enrollment capture %s could not be sent", capture_id);
+        enrollment_send_error(capture_id, "upload_failed");
+    } else {
+        ESP_LOGI(TAG, "Enrollment capture %s sent (provisional detected=%s)",
+                 capture_id, detected ? "true" : "false");
+    }
 
     if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
         s_enrollment_sending = false;

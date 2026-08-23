@@ -41,6 +41,7 @@ assert "VOICE_RESPONSE_TIMEOUT_US" in fetch_task
 assert "Voice response timed out" in fetch_task
 upload_task = function_body("void enrollment_upload_task", "void enrollment_capture_audio")
 assert "kizz_wake_word_resume()" in upload_task
+assert 'enrollment_send_error(capture_id, "upload_failed")' in upload_task
 assert "CHUNK_BYTES = 4096" in source
 
 print("Kizz production/enrollment transport separation passed")
