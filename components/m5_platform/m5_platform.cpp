@@ -32,6 +32,7 @@
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/idf_additions.h>
 #include <freertos/semphr.h>
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
@@ -1068,9 +1069,10 @@ void start_voice_transport() {
             ENROLLMENT_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
         if (!s_enrollment_lock || !s_enrollment_buffer) {
             ESP_LOGE(TAG, "Enrollment buffer allocation failed; production voice remains enabled");
-        } else if (xTaskCreatePinnedToCore(
+        } else if (xTaskCreatePinnedToCoreWithCaps(
                        enrollment_upload_task, "kizz_enroll_tx", 4096,
-                       nullptr, 4, &s_enrollment_upload_task, 0) != pdPASS) {
+                       nullptr, 4, &s_enrollment_upload_task, 0,
+                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
             s_enrollment_upload_task = nullptr;
             ESP_LOGE(TAG,
                      "Enrollment upload worker allocation failed; production voice remains enabled");
