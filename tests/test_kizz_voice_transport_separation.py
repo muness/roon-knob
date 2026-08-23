@@ -15,7 +15,7 @@ def function_body(signature: str, next_signature: str) -> str:
 assert '"wake_sample"' not in source
 assert "voice_send_staged_wake_sample" not in source
 assert "CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI" in source
-assert "enrollment_send_audio_chunks" in source
+assert "enrollment_send_audio_sample" in source
 assert "voice_telemetry" in source
 
 # Recovery must not reset the AFE from the WebSocket callback while the fetch
@@ -45,10 +45,8 @@ assert 'enrollment_send_error(capture_id, "upload_failed")' in upload_task
 assert "Restarting stalled enrollment transport" in upload_task
 assert "esp_websocket_client_stop(s_enrollment_ws)" in upload_task
 assert "esp_websocket_client_start(s_enrollment_ws)" in upload_task
-assert "CHUNK_BYTES = 4096" in source
-assert "esp_websocket_client_send_bin_partial" in source
-assert "esp_websocket_client_send_cont_msg" in source
-assert "esp_websocket_client_send_fin" in source
+assert "esp_websocket_client_send_bin(" in source
+assert "pdMS_TO_TICKS(10000)" in source
 assert "s_enrollment_stored" in upload_task
 assert "Enrollment server commit timeout" in upload_task
 assert "ACK timeout" not in source
