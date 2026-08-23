@@ -1136,11 +1136,25 @@ void start_voice_transport() {
             }
         }
     }
-    xTaskCreatePinnedToCore(voice_feed_task, "kizz_afe_feed", 6144,
-                            nullptr, 5, nullptr, 0);
-    if (s_voice_transport_configured)
-        xTaskCreatePinnedToCore(voice_fetch_task, "kizz_afe_fetch", 6144,
-                                nullptr, 5, nullptr, 1);
+    const BaseType_t feed_task_created = xTaskCreatePinnedToCoreWithCaps(
+        voice_feed_task, "kizz_afe_feed", 6144, nullptr, 5, nullptr, 0,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (feed_task_created != pdPASS) {
+        ESP_LOGE(TAG, "Kizz AFE feed task allocation failed");
+        s_voice_listener_enabled = false;
+        kizz_wake_word_pause();
+        return;
+    }
+    if (s_voice_transport_configured &&
+        xTaskCreatePinnedToCoreWithCaps(
+            voice_fetch_task, "kizz_afe_fetch", 6144, nullptr, 5, nullptr, 1,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGE(TAG, "Kizz AFE fetch task allocation failed");
+        s_voice_listener_enabled = false;
+        kizz_wake_word_pause();
+        return;
+    }
+    ESP_LOGI(TAG, "Kizz AFE voice workers started with PSRAM stacks");
 }
 
 void stackchan_voice_note(uint8_t index) {

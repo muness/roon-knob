@@ -1060,12 +1060,21 @@ bool captive_portal_start_sta(void) {
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.max_uri_handlers = 10;
+#if HIPHI_M5_TARGET_ID == 4
+  /* Kizz also runs the AFE, wake model, and two WebSocket clients. Its
+   * STA handlers keep large response bodies on the heap, so a 6 KiB server stack
+   * is sufficient and preserves internal RAM for Wi-Fi DMA and sockets. */
+  config.stack_size = 6144;
+#else
   config.stack_size = 16384;
+#endif
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
 
-  if (httpd_start(&s_server, &config) != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start HTTP server");
+  esp_err_t start_err = httpd_start(&s_server, &config);
+  if (start_err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start HTTP server: %s (0x%x)",
+             esp_err_to_name(start_err), start_err);
     unlock_server_lifecycle();
     return false;
   }
