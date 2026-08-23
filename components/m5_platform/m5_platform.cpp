@@ -318,7 +318,12 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
     timeout.tv_sec = 5;
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    bool sent = connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
+    const int connect_result =
+        connect(fd, addresses->ai_addr, addresses->ai_addrlen);
+    bool sent = connect_result == 0;
+    if (!sent) {
+        ESP_LOGW(TAG, "Enrollment HTTP connect failed: errno=%d", errno);
+    }
     freeaddrinfo(addresses);
 
     char header[768] = {};
@@ -331,10 +336,24 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
         CONFIG_M5_PLATFORM_DEVICE_ID, detected ? "true" : "false", capture_id);
     auto send_all = [fd](const char *data, size_t length) {
         size_t offset = 0;
+        const int64_t deadline = esp_timer_get_time() + 5000000;
         while (offset < length) {
             const int result = send(fd, data + offset, length - offset, 0);
-            if (result <= 0) return false;
-            offset += static_cast<size_t>(result);
+            if (result > 0) {
+                offset += static_cast<size_t>(result);
+                continue;
+            }
+            if (result < 0 && errno == EINTR) continue;
+            if (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) &&
+                esp_timer_get_time() < deadline) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+            ESP_LOGW(TAG,
+                     "Enrollment HTTP send failed: errno=%d offset=%u/%u",
+                     errno, static_cast<unsigned>(offset),
+                     static_cast<unsigned>(length));
+            return false;
         }
         return true;
     };
