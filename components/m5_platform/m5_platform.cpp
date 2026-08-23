@@ -3,6 +3,7 @@
 #include "m5_stackchan_voice.h"
 #include <M5Unified.h>
 #include <atomic>
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
 /* Voice networking is deliberately separate from audio ownership: M5Unified
  * requires the StackChan microphone and speaker to take turns. */
 #include "esp_websocket_client.h"
@@ -11,7 +12,6 @@
 #include "esp_afe_sr_iface.h"
 #include "esp_afe_sr_models.h"
 #include "model_path.h"
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
 #include "kizz_wake_word.h"
 #endif
 #if CONFIG_M5_PLATFORM_EXPECT_DIAL
@@ -28,15 +28,17 @@
 #include <cstring>
 #include <esp_attr.h>
 #include <esp_log.h>
-#include <nvs.h>
 #include <esp_random.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/idf_additions.h>
 #include <freertos/semphr.h>
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#include <nvs.h>
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
+#endif
 
 static const char *TAG = "m5_platform";
 static m5_platform_board_t s_board = M5_PLATFORM_BOARD_UNKNOWN;
@@ -80,6 +82,7 @@ struct StackChanMotionState {
     int64_t deadline = 0;
 } s_stackchan_motion;
 
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
 struct StackChanVoiceState {
     const m5_stackchan_voice_phrase_t *phrase = nullptr;
     uint8_t note = 0;
@@ -1072,7 +1075,6 @@ void start_voice_transport() {
         s_voice_listener_enabled = false;
         return;
     }
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (!kizz_wake_word_start([]() {
             if (s_enrollment_active || s_enrollment_sending)
                 s_enrollment_detected = true;
@@ -1085,7 +1087,6 @@ void start_voice_transport() {
         s_voice_listener_enabled = false;
         return;
     }
-#endif
 
     if (s_voice_transport_configured) {
         esp_websocket_client_config_t voice_cfg = {};
@@ -1157,6 +1158,7 @@ void start_voice_transport() {
     }
     ESP_LOGI(TAG, "Kizz AFE voice workers started with PSRAM stacks");
 }
+#endif
 #endif
 
 void stackchan_voice_note(uint8_t index) {
@@ -1557,30 +1559,36 @@ extern "C" const char *m5_platform_voice_state(void) {
 extern "C" void m5_platform_voice_copy_transcript(char *out, size_t len) {
     if (!out || !len) return;
     out[0] = '\0';
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (s_voice_text_lock &&
         xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         snprintf(out, len, "%s", s_voice_transcript);
         xSemaphoreGive(s_voice_text_lock);
     }
+#endif
 }
 
 extern "C" void m5_platform_voice_copy_response(char *out, size_t len) {
     if (!out || !len) return;
     out[0] = '\0';
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (s_voice_text_lock &&
         xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         snprintf(out, len, "%s", s_voice_response);
         xSemaphoreGive(s_voice_text_lock);
     }
+#endif
 }
 
 extern "C" void m5_platform_voice_clear_conversation(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (s_voice_text_lock &&
         xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         s_voice_transcript[0] = '\0';
         s_voice_response[0] = '\0';
         xSemaphoreGive(s_voice_text_lock);
     }
+#endif
 }
 
 extern "C" float m5_platform_voice_wake_probability(void) {
