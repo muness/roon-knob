@@ -26,6 +26,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <esp_attr.h>
 #include <esp_log.h>
 #include <nvs.h>
 #include <esp_random.h>
@@ -120,6 +121,10 @@ char s_enrollment_upload_url[257] = {};
 char s_enrollment_event[513] = {};
 size_t s_enrollment_event_length = 0;
 TaskHandle_t s_enrollment_upload_task = nullptr;
+// The enrollment worker stack intentionally lives in PSRAM. lwIP cannot
+// reliably transmit or receive through pointers into that stack on Kizz, so
+// keep its small HTTP header/response scratch area in internal DRAM.
+DRAM_ATTR static char s_enrollment_http_io[768] = {};
 std::atomic_uint32_t s_voice_audio_epoch{0};
 std::atomic_int64_t s_command_end_silence_us{3000000};
 std::atomic_int64_t s_command_max_utterance_us{12000000};
@@ -341,6 +346,14 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
     // the Wi-Fi/lwIP path must not be handed the external-RAM buffer directly.
     auto *chunk = static_cast<uint8_t *>(heap_caps_malloc(
         chunk_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    if (!chunk) {
+        ESP_LOGW(TAG,
+                 "Enrollment HTTP staging allocation failed: free=%u largest=%u",
+                 static_cast<unsigned>(heap_caps_get_free_size(
+                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(
+                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    }
     bool sent = chunk != nullptr;
     while (sent && written < bytes) {
         const size_t length = std::min(chunk_bytes, bytes - written);
@@ -372,9 +385,9 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
                 ESP_LOGW(TAG, "Enrollment HTTP connect failed: errno=%d", errno);
             }
 
-            char header[768] = {};
+            memset(s_enrollment_http_io, 0, sizeof(s_enrollment_http_io));
             const int header_length = snprintf(
-                header, sizeof(header),
+                s_enrollment_http_io, sizeof(s_enrollment_http_io),
                 "POST %s HTTP/1.1\r\nHost: %s\r\n"
                 "Content-Type: application/octet-stream\r\n"
                 "Content-Length: %u\r\nConnection: close\r\n"
@@ -387,14 +400,17 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
                 static_cast<unsigned>(written),
                 static_cast<unsigned>(bytes));
             request_sent = request_sent && header_length > 0 &&
-                header_length < static_cast<int>(sizeof(header)) &&
-                send_all(fd, header, static_cast<size_t>(header_length)) &&
+                header_length < static_cast<int>(sizeof(s_enrollment_http_io)) &&
+                send_all(fd, s_enrollment_http_io,
+                         static_cast<size_t>(header_length)) &&
                 send_all(fd, reinterpret_cast<const char *>(chunk), length);
-            char response[96] = {};
+            memset(s_enrollment_http_io, 0, sizeof(s_enrollment_http_io));
             const int received = request_sent
-                ? recv(fd, response, sizeof(response) - 1, 0) : -1;
+                ? recv(fd, s_enrollment_http_io,
+                       sizeof(s_enrollment_http_io) - 1, 0) : -1;
             status = 0;
-            if (received > 0) sscanf(response, "HTTP/%*s %d", &status);
+            if (received > 0)
+                sscanf(s_enrollment_http_io, "HTTP/%*s %d", &status);
             shutdown(fd, SHUT_RDWR);
             close(fd);
             segment_sent = request_sent && status >= 200 && status < 300;

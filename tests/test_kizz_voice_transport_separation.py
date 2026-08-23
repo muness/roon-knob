@@ -54,6 +54,9 @@ assert "SO_SNDTIMEO" in http_upload
 assert "TCP_NODELAY" in http_upload
 assert "SO_LINGER" in http_upload
 assert "send_all" in http_upload
+assert "DRAM_ATTR static char s_enrollment_http_io" in source
+assert "send_all(fd, s_enrollment_http_io" in http_upload
+assert "recv(fd, s_enrollment_http_io" in http_upload
 assert "X-Device-ID: %s" in http_upload
 assert "X-Detected: %s" in http_upload
 assert "X-Audio-Offset: %u" in http_upload
