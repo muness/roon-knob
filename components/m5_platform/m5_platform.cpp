@@ -343,12 +343,20 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
         send_all(header, static_cast<size_t>(header_length));
     size_t written = 0;
     constexpr size_t chunk_bytes = 4096;
+    // The capture lives in PSRAM. Stage network writes through internal RAM:
+    // lwIP can accept the header from the task stack but stalls when handed
+    // the external-RAM capture buffer directly on this ESP32-S3 target.
+    auto *chunk = static_cast<uint8_t *>(heap_caps_malloc(
+        chunk_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    sent = sent && chunk;
     while (sent && written < bytes) {
         const size_t length = std::min(chunk_bytes, bytes - written);
-        sent = send_all(reinterpret_cast<const char *>(pcm) + written, length);
+        memcpy(chunk, reinterpret_cast<const uint8_t *>(pcm) + written, length);
+        sent = send_all(reinterpret_cast<const char *>(chunk), length);
         if (sent) written += length;
         vTaskDelay(1);
     }
+    heap_caps_free(chunk);
     char response[64] = {};
     const int received = sent ? recv(fd, response, sizeof(response) - 1, 0) : -1;
     int status = 0;
