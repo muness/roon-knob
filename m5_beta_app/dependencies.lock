@@ -302,7 +302,7 @@ dependencies:
       require: private
       version: '>=5.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 2.5.1
   espressif/esp-tflite-micro:
@@ -736,11 +736,12 @@ dependencies:
     version: 9420f9a5101ac2fd4bfd1d7d07cb8e052cd589c3
 direct_dependencies:
 - espressif/arduino-esp32
+- espressif/esp-sr
 - espressif/esp_websocket_client
 - espressif/mdns
 - idf
 - m5stack/m5unified
 - micro_wake_word
-manifest_hash: 4e3ee27719b4014e2f8eb92c16eac99487689e3c6c32790f21cd1a5e557e3269
+manifest_hash: 24f020992380862d61f902ce8a78028aa2ae58dfe62e986c22a54814bdadee2b
 target: esp32s3
 version: 2.0.0

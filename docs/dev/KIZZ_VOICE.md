@@ -1,19 +1,16 @@
 # Kizz voice: wake word, transcription, and action
 
-Kizz is a hands-free music controller. A person says a wake phrase, then a
+Kizz is a music controller with voice support. A person says a wake phrase, then a
 music request such as “play Mulatu Astatke in the kitchen.” Kizz recognizes the
 wake phrase locally, listens for the request, sends one bounded audio turn to a
 LAN voice gateway, shows what it heard, and lets the gateway ask the existing
 music-control MCP tools to carry out the request.
 
-This document explains the implementation and its current evidence. It is not a
-claim that the voice system is qualified. The separate
-[HiPhi Kizz training recipe](https://github.com/open-horizon-labs/microWakeWord/tree/codex/issue-231-kizz/recipes/kizz)
-explains how we build and evaluate the on-device wake-word model.
+This document explains the implementation and its current evidence. The separate [HiPhi Kizz training recipe](https://github.com/open-horizon-labs/microWakeWord/tree/codex/issue-231-kizz/recipes/kizz) explains how we build and evaluate the on-device wake-word model.
 
 ## The path a voice request takes
 
-```text
+```t
 person speaks
     -> Kizz microphone and M5Unified audio frontend
     -> local microWakeWord model recognizes “HiPhi Kizz”
@@ -48,11 +45,26 @@ physical test can distinguish poor recall from a paused or faulted detector.
 The current model and configuration can also be changed at runtime by a
 `wake_config` message; reflashing is not required for a threshold experiment.
 
-The current Kizz model is a control, not a release candidate. Its provenance is
-stored beside the model in
-[`hiphi_kizz.provenance.json`](../../components/kizz_wake_word/models/hiphi_kizz.provenance.json).
 The training recipe is the source of truth for its corpus, split rules,
 augmentation, and physical tests.
+
+### Wake evidence and configurable verification
+
+The default verification mode is `shadow_all`: v19 remains the production wake
+decision, while a cheap acoustic sanity score is calculated after capture and
+the configured B/A verifier slots are recorded as unavailable until their
+artifacts exist. The enrollment service accepts these runtime settings:
+`off`, `c_only`, `b_only`, `c_then_b`, `b_then_a_uncertain`,
+`c_then_b_then_a`, or `shadow_all`, plus the C RMS/clipping thresholds and
+`capture_all_wakes`.
+
+When `capture_all_wakes` is enabled, each provisional wake accepted by the
+single enrollment upload worker is sent to the independent enrollment
+WebSocket as `wake_observation`; a wake arriving while that worker is busy is
+not preserved in this first slice. Command-leading
+wakes are stored under `observations/wakes/`; no-command wakes remain in
+`observations/false-wakes/`. Neither path changes `device-corpus.json`.
+Promotion into a hard negative is a separate human-reviewed operation.
 
 ### Listening and command capture
 

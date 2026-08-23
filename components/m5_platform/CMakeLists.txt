@@ -7,7 +7,7 @@ if(m5_platform_target STREQUAL "dial" OR
 endif()
 if(m5_platform_target STREQUAL "stackchan")
     list(APPEND m5_platform_requires
-        esp_websocket_client json esp-sr nvs_flash lwip kizz_wake_word)
+        esp_websocket_client json espressif__esp-sr nvs_flash lwip kizz_wake_word)
 endif()
 
 idf_component_register(
@@ -16,6 +16,7 @@ idf_component_register(
     # current and future adaptive-UI renderers consume the same vocabulary.
     INCLUDE_DIRS "include" "."
     REQUIRES ${m5_platform_requires}
+    PRIV_REQUIRES espressif__esp_websocket_client json espressif__esp-sr nvs_flash lwip kizz_wake_word
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
