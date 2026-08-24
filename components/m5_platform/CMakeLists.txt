@@ -16,7 +16,6 @@ idf_component_register(
     # current and future adaptive-UI renderers consume the same vocabulary.
     INCLUDE_DIRS "include" "."
     REQUIRES ${m5_platform_requires}
-    PRIV_REQUIRES espressif__esp_websocket_client json espressif__esp-sr nvs_flash lwip kizz_wake_word
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
