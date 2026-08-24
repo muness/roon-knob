@@ -1,0 +1,11 @@
+{
+  "name": "HiPhi Dial Alpha (PR #239 Preview)",
+  "version": "pr-239",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_dial_bootloader-ee77734c0b484db7b8a71dd366549b98fcc737ae-32688723779-1.bin", "offset": 0},
+    {"path": "hiphi_dial_partition-table-ee77734c0b484db7b8a71dd366549b98fcc737ae-32688723779-1.bin", "offset": 32768},
+    {"path": "hiphi_dial_ota_data_initial-ee77734c0b484db7b8a71dd366549b98fcc737ae-32688723779-1.bin", "offset": 53248},
+    {"path": "hiphi_dial-ee77734c0b484db7b8a71dd366549b98fcc737ae-32688723779-1.bin", "offset": 65536}
+  ]}]
+}
