@@ -467,81 +467,94 @@ void false_wake_discard_capture() {
 void false_wake_upload_task(void *) {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        size_t samples = 0;
-        size_t preroll_samples = 0;
-        uint64_t energy = 0;
-        size_t peak = 0;
-        size_t clipped = 0;
-        size_t metric_samples = 0;
-        if (s_enrollment_lock &&
-            xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-            samples = s_false_wake_samples;
-            preroll_samples = s_false_wake_preroll_samples;
-            energy = s_false_wake_energy;
-            peak = s_false_wake_peak;
-            clipped = s_false_wake_clipped;
-            metric_samples = s_false_wake_metric_samples;
-            xSemaphoreGive(s_enrollment_lock);
-        }
-        const size_t bytes = samples * sizeof(int16_t);
-        const double rms = metric_samples
-            ? std::sqrt(static_cast<double>(energy) /
-                        static_cast<double>(metric_samples)) / 32768.0
-            : 0.0;
-        const double rms_dbfs = 20.0 * std::log10(std::max(rms, 0.000001));
-        const double clipped_percent = metric_samples
-            ? 100.0 * static_cast<double>(clipped) /
-              static_cast<double>(metric_samples)
-            : 0.0;
-        const bool c_pass = rms_dbfs >=
-                static_cast<double>(s_voice_c_min_rms_dbfs_x10.load()) / 10.0 &&
-            clipped_percent <= static_cast<double>(s_voice_c_max_clip_percent.load());
-        float cutoff = 0.0f;
-        size_t window = 0;
-        kizz_wake_word_get_config(&cutoff, &window);
         char observation_id[80] = {};
         snprintf(observation_id, sizeof(observation_id), "wake-%08x-%u",
                  static_cast<unsigned>(esp_random()),
                  static_cast<unsigned>(s_false_wake_turn_id));
-        char header[768] = {};
-        snprintf(header, sizeof(header),
-                 "{\"type\":\"wake_observation\","
-                 "\"observation_id\":\"%s\",\"bytes\":%u,"
-                 "\"wake_probability\":%.5f,\"wake_cutoff\":%.5f,"
-                 "\"sliding_window\":%u,\"outcome\":\"%s\","
-                 "\"verification_mode\":\"%s\",\"c_rms_dbfs\":%.2f,"
-                 "\"c_peak\":%u,\"c_clipped_percent\":%.3f,"
-                 "\"c_pass\":%s,\"wake_to_timeout_ms\":6000,"
-                 "\"pre_wake_ms\":%u,\"pre_wake_samples\":%u,"
-                 "\"post_wake_samples\":%u}",
-                 observation_id, static_cast<unsigned>(bytes),
-                 static_cast<double>(s_false_wake_probability),
-                 static_cast<double>(cutoff), static_cast<unsigned>(window),
-                 s_false_wake_outcome, s_voice_verification_mode, rms_dbfs,
-                 static_cast<unsigned>(peak), clipped_percent,
-                 c_pass ? "true" : "false", 1000,
-                 static_cast<unsigned>(preroll_samples),
-                 static_cast<unsigned>(samples - preroll_samples));
-        bool sent = bytes > 0 && enrollment_send_text(header);
-        for (size_t offset = 0; sent && offset < bytes;) {
-            const size_t chunk = std::min(VOICE_TX_CHUNK_BYTES, bytes - offset);
-            memcpy(s_enrollment_tx_chunk,
-                   reinterpret_cast<const uint8_t *>(s_false_wake_buffer) + offset,
-                   chunk);
-            sent = enrollment_send_audio(s_enrollment_tx_chunk, chunk);
-            offset += chunk;
+        for (;;) {
+            size_t samples = 0;
+            size_t preroll_samples = 0;
+            uint64_t energy = 0;
+            size_t peak = 0;
+            size_t clipped = 0;
+            size_t metric_samples = 0;
+            if (s_enrollment_lock &&
+                xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+                samples = s_false_wake_samples;
+                preroll_samples = s_false_wake_preroll_samples;
+                energy = s_false_wake_energy;
+                peak = s_false_wake_peak;
+                clipped = s_false_wake_clipped;
+                metric_samples = s_false_wake_metric_samples;
+                xSemaphoreGive(s_enrollment_lock);
+            }
+            const size_t bytes = samples * sizeof(int16_t);
+            if (!bytes) {
+                s_false_wake_sending = false;
+                break;
+            }
+            const double rms = metric_samples
+                ? std::sqrt(static_cast<double>(energy) /
+                            static_cast<double>(metric_samples)) / 32768.0
+                : 0.0;
+            const double rms_dbfs = 20.0 * std::log10(std::max(rms, 0.000001));
+            const double clipped_percent = metric_samples
+                ? 100.0 * static_cast<double>(clipped) /
+                  static_cast<double>(metric_samples)
+                : 0.0;
+            const bool c_pass = rms_dbfs >=
+                    static_cast<double>(s_voice_c_min_rms_dbfs_x10.load()) / 10.0 &&
+                clipped_percent <= static_cast<double>(s_voice_c_max_clip_percent.load());
+            float cutoff = 0.0f;
+            size_t window = 0;
+            kizz_wake_word_get_config(&cutoff, &window);
+            char header[768] = {};
+            snprintf(header, sizeof(header),
+                     "{\"type\":\"wake_observation\","
+                     "\"observation_id\":\"%s\",\"bytes\":%u,"
+                     "\"wake_probability\":%.5f,\"wake_cutoff\":%.5f,"
+                     "\"sliding_window\":%u,\"outcome\":\"%s\","
+                     "\"verification_mode\":\"%s\",\"c_rms_dbfs\":%.2f,"
+                     "\"c_peak\":%u,\"c_clipped_percent\":%.3f,"
+                     "\"c_pass\":%s,\"wake_to_timeout_ms\":6000,"
+                     "\"pre_wake_ms\":%u,\"pre_wake_samples\":%u,"
+                     "\"post_wake_samples\":%u}",
+                     observation_id, static_cast<unsigned>(bytes),
+                     static_cast<double>(s_false_wake_probability),
+                     static_cast<double>(cutoff), static_cast<unsigned>(window),
+                     s_false_wake_outcome, s_voice_verification_mode, rms_dbfs,
+                     static_cast<unsigned>(peak), clipped_percent,
+                     c_pass ? "true" : "false", 1000,
+                     static_cast<unsigned>(preroll_samples),
+                     static_cast<unsigned>(samples - preroll_samples));
+            bool sent = enrollment_send_text(header);
+            for (size_t offset = 0; sent && offset < bytes;) {
+                const size_t chunk = std::min(VOICE_TX_CHUNK_BYTES, bytes - offset);
+                memcpy(s_enrollment_tx_chunk,
+                       reinterpret_cast<const uint8_t *>(s_false_wake_buffer) + offset,
+                       chunk);
+                sent = enrollment_send_audio(s_enrollment_tx_chunk, chunk);
+                offset += chunk;
+            }
+            char end[160] = {};
+            snprintf(end, sizeof(end),
+                     "{\"type\":\"wake_observation_end\","
+                     "\"observation_id\":\"%s\"}", observation_id);
+            sent = sent && enrollment_send_text(end);
+            if (sent) {
+                ESP_LOGI(TAG, "False-wake observation %s quarantined (%u bytes)",
+                         observation_id, static_cast<unsigned>(bytes));
+                s_false_wake_samples = 0;
+                s_false_wake_preroll_samples = 0;
+                s_false_wake_metric_samples = 0;
+                s_false_wake_sending = false;
+                break;
+            }
+            ESP_LOGW(TAG,
+                     "False-wake observation %s upload failed; retaining %u bytes and retrying",
+                     observation_id, static_cast<unsigned>(bytes));
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
-        char end[160] = {};
-        snprintf(end, sizeof(end),
-                 "{\"type\":\"wake_observation_end\","
-                 "\"observation_id\":\"%s\"}", observation_id);
-        sent = sent && enrollment_send_text(end);
-        ESP_LOGI(TAG, "False-wake observation %s %s (%u bytes)", observation_id,
-                 sent ? "quarantined" : "not sent", static_cast<unsigned>(bytes));
-        s_false_wake_samples = 0;
-        s_false_wake_preroll_samples = 0;
-        s_false_wake_metric_samples = 0;
-        s_false_wake_sending = false;
     }
 }
 
@@ -1226,6 +1239,8 @@ void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         ESP_LOGI(TAG, "Independent enrollment service connected");
         enrollment_send_hello();
+        if (s_false_wake_sending && s_false_wake_upload_task)
+            xTaskNotifyGive(s_false_wake_upload_task);
         return;
     }
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED ||
