@@ -53,12 +53,18 @@ std::atomic<WakeRuntimeState> s_runtime_state{WakeRuntimeState::STARTING};
 std::atomic<WakeRuntimeTarget> s_runtime_target{WakeRuntimeTarget::ARMED};
 std::atomic<uint32_t> s_transition_count{0};
 std::atomic<uint16_t> s_probability_milli{0};
+std::atomic<uint16_t> s_detection_probability_milli{0};
 std::atomic<int64_t> s_probability_peak_at_us{0};
 int64_t s_probability_log_at_us = 0;
 std::atomic_bool s_reconfigure_requested{false};
 std::atomic<uint16_t> s_probability_cutoff_milli{
     static_cast<uint16_t>(KIZZ_DEFAULT_PROBABILITY_CUTOFF * 1000)};
 std::atomic<size_t> s_sliding_window{KIZZ_DEFAULT_SLIDING_WINDOW};
+
+uint16_t probability_to_milli(float probability) {
+    return static_cast<uint16_t>(
+        std::max(0.0f, std::min(1.0f, probability)) * 1000.0f + 0.5f);
+}
 
 const char *runtime_state_name(WakeRuntimeState state) {
     switch (state) {
@@ -118,6 +124,11 @@ bool create_wake_word_model() {
         kizz_model_start, cutoff, window, "HiPhi Kizz",
         KIZZ_TENSOR_ARENA_BYTES);
     s_wake_word->add_detection_callback([](std::string) {
+        // MicroWakeWord invokes this callback from loop() before the loop's
+        // later telemetry update. Preserve the detector value at this exact
+        // point so evidence metadata cannot report a stale recent peak.
+        s_detection_probability_milli = probability_to_milli(
+            s_wake_word ? s_wake_word->get_wake_word_probability() : 0.0f);
         // Detection deliberately disarms the runtime until command capture has
         // finished. This also prevents an idle detector from immediately
         // restarting in the gap before the voice task observes the callback.
@@ -224,8 +235,7 @@ void detection_task(void *) {
         }
         s_wake_word->loop();
         const float probability = s_wake_word->get_wake_word_probability();
-        const uint16_t probability_milli = static_cast<uint16_t>(
-            std::max(0.0f, std::min(1.0f, probability)) * 1000.0f + 0.5f);
+        const uint16_t probability_milli = probability_to_milli(probability);
         const int64_t now = esp_timer_get_time();
         const uint16_t recent_peak = s_probability_milli.load();
         if (probability_milli >= recent_peak ||
@@ -322,6 +332,10 @@ extern "C" uint32_t kizz_wake_word_transition_count(void) {
 
 extern "C" float kizz_wake_word_probability(void) {
     return s_probability_milli.load() / 1000.0f;
+}
+
+extern "C" float kizz_wake_word_detection_probability(void) {
+    return s_detection_probability_milli.load() / 1000.0f;
 }
 
 extern "C" bool kizz_wake_word_configure(float probability_cutoff,

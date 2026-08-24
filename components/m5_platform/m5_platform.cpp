@@ -100,6 +100,7 @@ SemaphoreHandle_t s_voice_text_lock = nullptr;
 SemaphoreHandle_t s_enrollment_lock = nullptr;
 bool s_voice_network_ready = false;
 bool s_voice_transport_configured = false;
+bool s_enrollment_transport_configured = false;
 std::atomic_bool s_voice_listener_enabled{false};
 std::atomic_bool s_voice_microphone_active{false};
 std::atomic_bool s_voice_waiting_for_response{false};
@@ -117,9 +118,23 @@ std::atomic_int64_t s_enrollment_suppress_wake_until_us{0};
 std::atomic_bool s_enrollment_sending{false};
 std::atomic_bool s_false_wake_active{false};
 std::atomic_bool s_false_wake_sending{false};
+std::atomic_uint32_t s_false_wake_dropped_busy{0};
 constexpr size_t ENROLLMENT_MAX_SAMPLES = 16000 * 5;
-constexpr size_t FALSE_WAKE_PREROLL_SAMPLES = 16000;
-constexpr size_t FALSE_WAKE_MAX_SAMPLES = 16000 * 7;
+constexpr size_t FALSE_WAKE_SAMPLE_RATE_HZ = 16000;
+constexpr size_t FALSE_WAKE_PREROLL_SECONDS = 3;
+constexpr size_t FALSE_WAKE_CAPTURE_SECONDS = 9;
+constexpr size_t FALSE_WAKE_PREROLL_SAMPLES =
+    FALSE_WAKE_SAMPLE_RATE_HZ * FALSE_WAKE_PREROLL_SECONDS;
+constexpr size_t FALSE_WAKE_MAX_SAMPLES =
+    FALSE_WAKE_SAMPLE_RATE_HZ * FALSE_WAKE_CAPTURE_SECONDS;
+constexpr size_t FALSE_WAKE_MAX_BYTES =
+    FALSE_WAKE_MAX_SAMPLES * sizeof(int16_t);
+constexpr unsigned FALSE_WAKE_PREROLL_MS = static_cast<unsigned>(
+    FALSE_WAKE_PREROLL_SAMPLES * 1000 / FALSE_WAKE_SAMPLE_RATE_HZ);
+static_assert(FALSE_WAKE_MAX_BYTES == 288000,
+              "false-wake capture must remain within the enrollment limit");
+static_assert(FALSE_WAKE_PREROLL_MS == 3000,
+              "false-wake pre-roll metadata must describe three seconds");
 constexpr size_t VOICE_COMMAND_MAX_BYTES = 16000 * 2 * 21;
 constexpr size_t VOICE_TX_CHUNK_BYTES = 4096;
 constexpr int64_t VOICE_RESPONSE_TIMEOUT_US = 45000000;
@@ -148,6 +163,8 @@ uint64_t s_false_wake_energy = 0;
 size_t s_false_wake_peak = 0;
 size_t s_false_wake_clipped = 0;
 size_t s_false_wake_metric_samples = 0;
+int64_t s_false_wake_started_at_us = 0;
+uint32_t s_false_wake_finish_ms = 0;
 char s_voice_verification_mode[32] = "shadow_all";
 std::atomic_int s_voice_c_min_rms_dbfs_x10{-600};
 std::atomic_uint s_voice_c_max_clip_percent{25};
@@ -370,13 +387,20 @@ bool enrollment_send_audio(const void *pcm, size_t bytes) {
         static_cast<int>(bytes), pdMS_TO_TICKS(5000)) == static_cast<int>(bytes);
 }
 
-void false_wake_start_capture() {
-    if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws) ||
-        s_enrollment_active || s_enrollment_sending || s_false_wake_sending ||
-        !s_false_wake_buffer || !s_false_wake_upload_task) return;
+bool false_wake_start_capture() {
+    if (!s_enrollment_transport_configured || !s_enrollment_ws ||
+        !s_false_wake_buffer || !s_false_wake_upload_task) return false;
+    if (s_enrollment_active || s_enrollment_sending || s_false_wake_active ||
+        s_false_wake_sending) {
+        const uint32_t dropped = s_false_wake_dropped_busy.fetch_add(1) + 1;
+        ESP_LOGW(TAG,
+                 "False-wake capture dropped while evidence transport busy (total=%u)",
+                 static_cast<unsigned>(dropped));
+        return false;
+    }
     if (xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE)
-        return;
-    s_false_wake_probability = kizz_wake_word_probability();
+        return false;
+    s_false_wake_probability = kizz_wake_word_detection_probability();
     s_false_wake_samples = 0;
     s_false_wake_preroll_samples = std::min(
         s_false_wake_preroll_count, FALSE_WAKE_PREROLL_SAMPLES);
@@ -394,14 +418,18 @@ void false_wake_start_capture() {
         }
         s_false_wake_samples = s_false_wake_preroll_samples;
     }
-    snprintf(s_false_wake_outcome, sizeof(s_false_wake_outcome), "no_command");
+    snprintf(s_false_wake_outcome, sizeof(s_false_wake_outcome), "%s",
+             s_voice_transport_configured ? "no_command" : "unclassified");
     s_false_wake_energy = 0;
     s_false_wake_peak = 0;
     s_false_wake_clipped = 0;
     s_false_wake_metric_samples = 0;
+    s_false_wake_started_at_us = esp_timer_get_time();
+    s_false_wake_finish_ms = 0;
     ++s_false_wake_turn_id;
     s_false_wake_active = true;
     xSemaphoreGive(s_enrollment_lock);
+    return true;
 }
 
 void false_wake_capture_audio(const int16_t *pcm, size_t samples) {
@@ -435,6 +463,20 @@ void false_wake_capture_audio(const int16_t *pcm, size_t samples) {
         }
         s_false_wake_metric_samples += copied;
     }
+    if (s_false_wake_active &&
+        s_false_wake_samples >= FALSE_WAKE_MAX_SAMPLES) {
+        s_false_wake_finish_ms = static_cast<uint32_t>(std::max<int64_t>(
+            0, (esp_timer_get_time() - s_false_wake_started_at_us) / 1000));
+        s_false_wake_active = false;
+        if (s_false_wake_samples && !s_false_wake_sending &&
+            s_false_wake_upload_task) {
+            s_false_wake_sending = true;
+            xTaskNotifyGive(s_false_wake_upload_task);
+        }
+        // Production voice owns re-arming through its turn lifecycle. In an
+        // enrollment-only build this bounded capture is the lifecycle owner.
+        if (!s_voice_transport_configured) kizz_wake_word_resume();
+    }
     xSemaphoreGive(s_enrollment_lock);
 }
 
@@ -444,6 +486,9 @@ void false_wake_finish_capture(const char *outcome) {
         return;
     if (outcome && outcome[0])
         snprintf(s_false_wake_outcome, sizeof(s_false_wake_outcome), "%s", outcome);
+    if (s_false_wake_active && s_false_wake_started_at_us > 0)
+        s_false_wake_finish_ms = static_cast<uint32_t>(std::max<int64_t>(
+            0, (esp_timer_get_time() - s_false_wake_started_at_us) / 1000));
     s_false_wake_active = false;
     if (s_false_wake_samples && !s_false_wake_sending &&
         s_false_wake_upload_task) {
@@ -478,6 +523,7 @@ void false_wake_upload_task(void *) {
             size_t peak = 0;
             size_t clipped = 0;
             size_t metric_samples = 0;
+            uint32_t finish_ms = 0;
             if (s_enrollment_lock &&
                 xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
                 samples = s_false_wake_samples;
@@ -486,6 +532,7 @@ void false_wake_upload_task(void *) {
                 peak = s_false_wake_peak;
                 clipped = s_false_wake_clipped;
                 metric_samples = s_false_wake_metric_samples;
+                finish_ms = s_false_wake_finish_ms;
                 xSemaphoreGive(s_enrollment_lock);
             }
             const size_t bytes = samples * sizeof(int16_t);
@@ -517,6 +564,7 @@ void false_wake_upload_task(void *) {
                      "\"verification_mode\":\"%s\",\"c_rms_dbfs\":%.2f,"
                      "\"c_peak\":%u,\"c_clipped_percent\":%.3f,"
                      "\"c_pass\":%s,\"wake_to_timeout_ms\":6000,"
+                     "\"wake_to_finish_ms\":%u,\"dropped_busy_total\":%u,"
                      "\"pre_wake_ms\":%u,\"pre_wake_samples\":%u,"
                      "\"post_wake_samples\":%u}",
                      observation_id, static_cast<unsigned>(bytes),
@@ -524,7 +572,9 @@ void false_wake_upload_task(void *) {
                      static_cast<double>(cutoff), static_cast<unsigned>(window),
                      s_false_wake_outcome, s_voice_verification_mode, rms_dbfs,
                      static_cast<unsigned>(peak), clipped_percent,
-                     c_pass ? "true" : "false", 1000,
+                     c_pass ? "true" : "false", static_cast<unsigned>(finish_ms),
+                     static_cast<unsigned>(s_false_wake_dropped_busy.load()),
+                     FALSE_WAKE_PREROLL_MS,
                      static_cast<unsigned>(preroll_samples),
                      static_cast<unsigned>(samples - preroll_samples));
             bool sent = enrollment_send_text(header);
@@ -1355,7 +1405,8 @@ void start_voice_transport() {
     constexpr const char *voice_uri = CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI;
     constexpr const char *enrollment_uri = CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI;
     s_voice_transport_configured = voice_uri[0] != '\0';
-    if (!s_voice_transport_configured && !enrollment_uri[0]) {
+    s_enrollment_transport_configured = enrollment_uri[0] != '\0';
+    if (!s_voice_transport_configured && !s_enrollment_transport_configured) {
         ESP_LOGI(TAG, "Neither production voice nor enrollment is configured");
         return;
     }
@@ -1416,10 +1467,13 @@ void start_voice_transport() {
             if (s_enrollment_active || s_enrollment_sending)
                 s_enrollment_detected = true;
             else if (esp_timer_get_time() >=
-                         s_enrollment_suppress_wake_until_us.load() &&
-                     s_voice_transport_configured) {
-                false_wake_start_capture();
-                s_voice_wake_pending = true;
+                     s_enrollment_suppress_wake_until_us.load()) {
+                const bool evidence_started = s_enrollment_transport_configured &&
+                    false_wake_start_capture();
+                if (s_voice_transport_configured)
+                    s_voice_wake_pending = true;
+                else if (!evidence_started)
+                    kizz_wake_word_resume();
             }
         })) {
         ESP_LOGE(TAG, "Kizz custom wake model initialization failed");
