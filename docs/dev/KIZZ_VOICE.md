@@ -105,6 +105,12 @@ thinking response, transcript bubble, response bubble, and error state. If the
 gateway disconnects or a response times out, Kizz returns the microphone to the
 listener rather than leaving wake-word detection paused.
 
+Voice lifecycle feedback is intentionally quiet: listening, thinking, success,
+and clarify states do not play a sound. An empty or false-wake turn is a quiet
+visual recovery, not an error performance. StackChan sways use a smaller motion
+envelope and lower speed; expressive sound cues remain for explicit physical
+controls and attention-worthy connectivity events.
+
 The exact voice WebSocket URI is a StackChan-only firmware setting,
 `M5_PLATFORM_STACKCHAN_VOICE_WS_URI`. It can point at any LAN host. The training
 enrollment URI is a separate setting and is never derived from the production

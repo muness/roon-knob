@@ -2239,10 +2239,9 @@ extern "C" void touch_ui_set_zone_name(const char *v){
         /* Startup can publish the configured label, clear it while resolving,
          * then publish it again. A room response is only truthful after the
          * first playback snapshot has established a stable session. */
-        const bool changed=s.zone_seen&&s.playback_seen&&s.online&&zone[0];
         copy_text(s.zone,sizeof(s.zone),zone);s.dirty=true;
         if(zone[0])s.zone_seen=true;
-        if(changed)flash_action("NEW ROOM");
+        // Room changes are ambient state; do not announce them acoustically.
     }
 }
 extern "C" void touch_ui_set_network_status(const char *v){if(std::strcmp(s.network,v?v:"")!=0){copy_text(s.network,sizeof(s.network),v);s.dirty=true;}}
@@ -2317,8 +2316,6 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
         s.track_reveal_started=esp_timer_get_time();
         s.track_reveal_until=s.track_reveal_started+7000000;
 #endif
-        m5_platform_stackchan_sound_trigger(
-            M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK);
         const bool dance_started = s.body_enabled &&
             m5_platform_stackchan_expression_trigger(
                 M5_PLATFORM_STACKCHAN_DANCE);

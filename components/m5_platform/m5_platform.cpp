@@ -1714,7 +1714,8 @@ void stackchan_begin_listening_pose() {
     // Breazeal, "Proto-conversations with an anthropomorphic robot" (RO-MAN
     // 2000), section 3: Kismet leaned toward the speaker while holding eye
     // contact. Kizz has two axes, so a centered forward lean carries it.
-    stackchan_pose(0, 160, 220);
+    // Listening is an attentive lean, not a snap toward the speaker.
+    stackchan_pose(0, 120, 140);
     s_stackchan_motion.phase = StackChanMotionPhase::attention_hold;
     ESP_LOGI(TAG, "Kizz listening posture: forward and centered");
 #endif
@@ -1726,9 +1727,9 @@ void stackchan_end_listening_pose() {
         return;
     // Kismet leaned back and shifted gaze before taking its turn. The face
     // supplies the gaze cue; the official BSP returns the body to neutral.
-    M5StackChan.Motion.goHome(220);
+    M5StackChan.Motion.goHome(140);
     s_stackchan_motion.phase = StackChanMotionPhase::attention_returning;
-    s_stackchan_motion.deadline = esp_timer_get_time() + 650000;
+    s_stackchan_motion.deadline = esp_timer_get_time() + 900000;
 #endif
 }
 
@@ -1736,7 +1737,10 @@ void stackchan_dance_pose(size_t index) {
     const auto &pose =
         M5_STACKCHAN_DANCES[s_stackchan_motion.dance_variant][index];
     s_stackchan_motion.face_cue = pose.face;
-    stackchan_pose(pose.yaw_angle, pose.pitch_angle, pose.speed);
+    // Keep the choreography readable but remove the abrupt, attention-seeking
+    // jumps. A smaller envelope and a capped speed make this a slow sway.
+    stackchan_pose((pose.yaw_angle * 2) / 3, (pose.pitch_angle * 2) / 3,
+                   std::min<uint16_t>(pose.speed, 170));
 }
 
 int64_t stackchan_dance_deadline(size_t index) {
@@ -1967,21 +1971,22 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
         s_voice_listening_visual = false;
         s_voice_resume_after_sound = false;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_CURIOUS;
-        m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_MORE);
+        // Thinking is ambient state, not a request for attention.
     } else if (strcmp(state, "success") == 0) {
         s_voice_listening_visual = false;
-        s_voice_resume_after_sound = true;
+        s_voice_resume_after_sound = false;
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_PROUD;
-        if (!m5_platform_stackchan_sound_trigger(
-                M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK))
-            voice_rearm_listener_preserve_face();
+        // Successful voice actions are acknowledged visually. Sound is
+        // reserved for explicit controls or a genuine attention request.
+        voice_rearm_listener_preserve_face();
         m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_DANCE);
     } else if (strcmp(state, "clarify") == 0) {
         s_voice_listening_visual = false;
-        s_voice_resume_after_sound = true;
-        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_WORRIED;
-        if (!m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LOST))
-            voice_rearm_listener_preserve_face();
+        s_voice_resume_after_sound = false;
+        s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_HUSH;
+        // A false wake or an empty turn must disappear quietly. In particular,
+        // do not punish the room with the LOST cue after six seconds of silence.
+        voice_rearm_listener_preserve_face();
     } else {
         s_voice_listening_visual = false;
         s_voice_waiting_for_response = false;
@@ -2313,13 +2318,13 @@ extern "C" bool m5_platform_stackchan_expression_trigger(
     } else if (expression == M5_PLATFORM_STACKCHAN_SAD) {
         /* A slow look away with the head lowered: readable body language
          * without turning a connection problem into a theatrical routine. */
-        stackchan_pose(-90, 0, 240);
+        stackchan_pose(-55, 0, 150);
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_SAD;
-        s_stackchan_motion.deadline = esp_timer_get_time() + 650000;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 900000;
     } else {
-        stackchan_pose(-120, 100, 340);
+        stackchan_pose(-70, 60, 180);
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_BEAM_LEFT;
-        s_stackchan_motion.deadline = esp_timer_get_time() + 560000;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 800000;
     }
     s_stackchan_motion.phase = StackChanMotionPhase::first_pose;
     return true;
@@ -2346,13 +2351,13 @@ extern "C" void m5_platform_stackchan_expression_process(void) {
             stackchan_dance_pose(1);
             s_stackchan_motion.deadline = stackchan_dance_deadline(1);
         } else if (s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_SAD) {
-            stackchan_pose(40, 0, 220);
+            stackchan_pose(25, 0, 150);
             s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_SAD;
-            s_stackchan_motion.deadline = esp_timer_get_time() + 620000;
+            s_stackchan_motion.deadline = esp_timer_get_time() + 900000;
         } else {
-            stackchan_pose(120, 100, 340);
+            stackchan_pose(70, 60, 180);
             s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_BEAM_RIGHT;
-            s_stackchan_motion.deadline = esp_timer_get_time() + 560000;
+            s_stackchan_motion.deadline = esp_timer_get_time() + 800000;
         }
         s_stackchan_motion.phase = StackChanMotionPhase::second_pose;
         return;
@@ -2380,11 +2385,11 @@ extern "C" void m5_platform_stackchan_expression_process(void) {
     if (s_stackchan_motion.phase == StackChanMotionPhase::fourth_pose) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
         M5StackChan.Motion.goHome(
-            s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE ? 260 : 280);
+            s_stackchan_motion.pending == M5_PLATFORM_STACKCHAN_DANCE ? 170 : 160);
 #endif
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_SETTLE;
         s_stackchan_motion.phase = StackChanMotionPhase::returning;
-        s_stackchan_motion.deadline = esp_timer_get_time() + 900000;
+        s_stackchan_motion.deadline = esp_timer_get_time() + 1200000;
         return;
     }
 
