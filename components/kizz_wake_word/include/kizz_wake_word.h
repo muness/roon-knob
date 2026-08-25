@@ -20,6 +20,10 @@ float kizz_wake_word_probability(void);
 // Probability captured at the exact detector callback that caused the wake.
 // Unlike kizz_wake_word_probability(), this is not the later telemetry peak.
 float kizz_wake_word_detection_probability(void);
+// Score a frozen 16 kHz mono clip with the sequential verifier. The broad
+// detector must be paused; its arena is released before this model is loaded.
+bool kizz_wake_word_verify_clip(const int16_t *samples, size_t sample_count,
+                                float *probability);
 bool kizz_wake_word_configure(float probability_cutoff,
                               size_t sliding_window);
 void kizz_wake_word_get_config(float *probability_cutoff,

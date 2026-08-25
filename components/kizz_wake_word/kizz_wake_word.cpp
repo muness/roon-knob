@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <cstring>
 #include <new>
 
 #include "esp_log.h"
@@ -20,6 +22,7 @@ constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.70f;
 // cutoff and caused a false reject even from a fresh boot.
 constexpr size_t KIZZ_DEFAULT_SLIDING_WINDOW = 1;
 constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 65536;
+constexpr size_t KIZZ_FEATURE_STEP_SAMPLES = 160;
 constexpr char KIZZ_NVS_NAMESPACE[] = "kizz_wake";
 constexpr char KIZZ_NVS_CUTOFF_KEY[] = "cutoff_milli";
 constexpr char KIZZ_NVS_WINDOW_KEY[] = "window";
@@ -30,10 +33,118 @@ constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 3;
 
 extern const uint8_t kizz_model_start[]
     asm("_binary_hiphi_kizz_tflite_start");
+extern const uint8_t kizz_ordered_model_start[]
+    asm("_binary_hiphi_kizz_ordered_tflite_start");
+extern const uint8_t kizz_verifier_model_start[]
+    asm("_binary_hiphi_kizz_verifier_tflite_start");
+
+class KizzMicroWakeWord final
+    : public esphome::micro_wake_word::MicroWakeWord {
+ public:
+    bool evaluate_clip(const uint8_t *model_start, const int16_t *samples,
+                       size_t sample_count, float *probability) {
+        using namespace esphome::micro_wake_word;
+        if (!model_start || !samples || !sample_count || !probability ||
+            this->state_ != State::IDLE) {
+            return false;
+        }
+
+        // The broad detector has already stopped and released its arena before
+        // its callback runs. Recreate the identical integer frontend and load
+        // the verifier only for this frozen clip, so the two models never hold
+        // tensor arenas simultaneously.
+        FrontendConfig config = {};
+        config.window.size_ms = FEATURE_DURATION_MS;
+        config.window.step_size_ms = 10;
+        config.filterbank.num_channels = PREPROCESSOR_FEATURE_SIZE;
+        config.filterbank.lower_band_limit = 125.0;
+        config.filterbank.upper_band_limit = 7500.0;
+        config.noise_reduction.smoothing_bits = 10;
+        config.noise_reduction.even_smoothing = 0.025;
+        config.noise_reduction.odd_smoothing = 0.06;
+        config.noise_reduction.min_signal_remaining = 0.05;
+        config.pcan_gain_control.enable_pcan = 1;
+        config.pcan_gain_control.strength = 0.95;
+        config.pcan_gain_control.offset = 80.0;
+        config.pcan_gain_control.gain_bits = 21;
+        config.log_scale.enable_log = 1;
+        config.log_scale.scale_shift = 6;
+
+        FrontendState frontend = {};
+        if (!FrontendPopulateState(&config, &frontend,
+                                   AUDIO_SAMPLE_FREQUENCY)) {
+            FrontendFreeStateContents(&frontend);
+            return false;
+        }
+
+        WakeWordModel verifier(model_start, 1.0f, 1, "HiPhi Kizz verifier",
+                               KIZZ_TENSOR_ARENA_BYTES);
+        if (!verifier.load_model(this->streaming_op_resolver_)) {
+            FrontendFreeStateContents(&frontend);
+            return false;
+        }
+
+        int16_t padded[KIZZ_FEATURE_STEP_SAMPLES] = {};
+        int8_t features[PREPROCESSOR_FEATURE_SIZE] = {};
+        bool produced_features = false;
+        float peak_probability = 0.0f;
+        for (size_t offset = 0; offset < sample_count;
+             offset += KIZZ_FEATURE_STEP_SAMPLES) {
+            const size_t remaining = sample_count - offset;
+            const size_t count = std::min(remaining,
+                                          KIZZ_FEATURE_STEP_SAMPLES);
+            const int16_t *window = samples + offset;
+            if (count != KIZZ_FEATURE_STEP_SAMPLES) {
+                memset(padded, 0, sizeof(padded));
+                memcpy(padded, window, count * sizeof(int16_t));
+                window = padded;
+            }
+            size_t samples_read = 0;
+            const FrontendOutput output = FrontendProcessSamples(
+                &frontend, window, KIZZ_FEATURE_STEP_SAMPLES, &samples_read);
+            if (samples_read != KIZZ_FEATURE_STEP_SAMPLES) {
+                verifier.unload_model();
+                FrontendFreeStateContents(&frontend);
+                return false;
+            }
+            // A 30 ms frontend window needs the first three 10 ms slices
+            // before it can emit features. This is normal warm-up, not an
+            // evaluation failure.
+            if (output.size == 0) continue;
+            if (output.size != PREPROCESSOR_FEATURE_SIZE) {
+                verifier.unload_model();
+                FrontendFreeStateContents(&frontend);
+                return false;
+            }
+            produced_features = true;
+            for (size_t feature = 0; feature < output.size; ++feature) {
+                constexpr int32_t value_scale = 256;
+                constexpr int32_t value_div = 666;
+                int32_t value =
+                    ((output.values[feature] * value_scale) +
+                     (value_div / 2)) /
+                    value_div;
+                features[feature] = static_cast<int8_t>(
+                    std::clamp<int32_t>(value - 128, -128, 127));
+            }
+            if (!verifier.perform_streaming_inference(features)) {
+                verifier.unload_model();
+                FrontendFreeStateContents(&frontend);
+                return false;
+            }
+            peak_probability = std::max(
+                peak_probability, verifier.current_probability());
+        }
+        *probability = produced_features ? peak_probability : 0.0f;
+        verifier.unload_model();
+        FrontendFreeStateContents(&frontend);
+        return produced_features;
+    }
+};
 
 const char *TAG = "kizz_wake_word";
 esphome::microphone::ExternalAudioMicrophone *s_microphone = nullptr;
-esphome::micro_wake_word::MicroWakeWord *s_wake_word = nullptr;
+KizzMicroWakeWord *s_wake_word = nullptr;
 kizz_wake_word_detected_cb_t s_detected_cb = nullptr;
 enum class WakeRuntimeState : uint8_t {
     PAUSED,
@@ -113,15 +224,15 @@ void transition_to(WakeRuntimeState next, const char *reason) {
 }
 
 bool create_wake_word_model() {
-    s_wake_word = new (std::nothrow) esphome::micro_wake_word::MicroWakeWord();
+    s_wake_word = new (std::nothrow) KizzMicroWakeWord();
     if (!s_wake_word) return false;
 
     const float cutoff = s_probability_cutoff_milli.load() / 1000.0f;
     const size_t window = s_sliding_window.load();
     s_wake_word->set_microphone(s_microphone);
     s_wake_word->set_features_step_size(10);
-    s_wake_word->add_wake_word_model(
-        kizz_model_start, cutoff, window, "HiPhi Kizz",
+    s_wake_word->add_ordered_state_model(
+        kizz_ordered_model_start, cutoff, window, "HiPhi Kizz",
         KIZZ_TENSOR_ARENA_BYTES);
     s_wake_word->add_detection_callback([](std::string) {
         // MicroWakeWord invokes this callback from loop() before the loop's
@@ -149,7 +260,7 @@ bool create_wake_word_model() {
         s_wake_word = nullptr;
         return false;
     }
-    ESP_LOGI(TAG, "HiPhi Kizz broad model ready: cutoff=%.2f window=%u",
+    ESP_LOGI(TAG, "HiPhi Kizz ordered-state model ready: cutoff=%.2f window=%u",
              static_cast<double>(cutoff), static_cast<unsigned>(window));
     return true;
 }
@@ -336,6 +447,13 @@ extern "C" float kizz_wake_word_probability(void) {
 
 extern "C" float kizz_wake_word_detection_probability(void) {
     return s_detection_probability_milli.load() / 1000.0f;
+}
+
+extern "C" bool kizz_wake_word_verify_clip(const int16_t *samples,
+                                             size_t sample_count,
+                                             float *probability) {
+    return s_wake_word && s_wake_word->evaluate_clip(
+        kizz_verifier_model_start, samples, sample_count, probability);
 }
 
 extern "C" bool kizz_wake_word_configure(float probability_cutoff,

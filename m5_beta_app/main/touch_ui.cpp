@@ -2302,6 +2302,13 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
         s.track_seen=true;
     }
     s.playback_seen=true;
+    /* A transient bridge timeout can leave the key intact while the first
+     * artwork worker never obtains pixels. The presentation layer correctly
+     * deduplicates the unchanged key, so retry from the next healthy metadata
+     * update until the image is actually resident. The atomic loading guard
+     * keeps this bounded to one worker at a time. */
+    if (s.artwork_key[0] && !s.artwork_pixels)
+        start_stackchan_artwork_fetch();
     if(playback_changed&&!changed)flash_action(p?"PLAY":"PAUSE");
     if (changed && p && s.online) {
 #if HIPHI_M5_TARGET_ID == 4

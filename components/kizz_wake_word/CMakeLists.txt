@@ -5,5 +5,7 @@ idf_component_register(
 )
 
 target_add_binary_data(${COMPONENT_LIB} "models/hiphi_kizz.tflite" BINARY)
+target_add_binary_data(${COMPONENT_LIB} "models/hiphi_kizz_ordered.tflite" BINARY)
+target_add_binary_data(${COMPONENT_LIB} "models/hiphi_kizz_verifier.tflite" BINARY)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)

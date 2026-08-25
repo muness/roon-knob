@@ -136,11 +136,19 @@ static_assert(FALSE_WAKE_MAX_BYTES == 288000,
 static_assert(FALSE_WAKE_PREROLL_MS == 3000,
               "false-wake pre-roll metadata must describe three seconds");
 constexpr size_t VOICE_COMMAND_MAX_BYTES = 16000 * 2 * 21;
+// The sequential verifier can take roughly 1.7 seconds on StackChan. Keep a
+// bounded raw-audio handoff so speech that starts immediately after the wake
+// is not lost while the verifier is running. This is copied from the existing
+// three-second pre-roll ring, before AFE backpressure can discard frames.
+constexpr size_t VOICE_WAKE_HANDOFF_MS = 2000;
+constexpr size_t VOICE_WAKE_HANDOFF_SAMPLES =
+    FALSE_WAKE_SAMPLE_RATE_HZ * VOICE_WAKE_HANDOFF_MS / 1000;
 constexpr size_t VOICE_TX_CHUNK_BYTES = 4096;
 constexpr int64_t VOICE_RESPONSE_TIMEOUT_US = 45000000;
 int16_t *s_enrollment_buffer = nullptr;
 int16_t *s_false_wake_preroll_buffer = nullptr;
 int16_t *s_false_wake_buffer = nullptr;
+int16_t *s_voice_verifier_buffer = nullptr;
 uint8_t *s_voice_command_buffer = nullptr;
 size_t s_voice_command_bytes = 0;
 DRAM_ATTR static uint8_t s_voice_tx_chunk[VOICE_TX_CHUNK_BYTES] = {};
@@ -165,7 +173,18 @@ size_t s_false_wake_clipped = 0;
 size_t s_false_wake_metric_samples = 0;
 int64_t s_false_wake_started_at_us = 0;
 uint32_t s_false_wake_finish_ms = 0;
-char s_voice_verification_mode[32] = "shadow_all";
+char s_voice_verification_mode[32] = "c_then_b";
+constexpr unsigned KIZZ_VERIFIER_DEFAULT_CUTOFF_Q = 167;
+std::atomic_uint s_voice_verifier_cutoff_q{
+    KIZZ_VERIFIER_DEFAULT_CUTOFF_Q};
+float s_latest_verifier_score = 0.0f;
+bool s_latest_verifier_available = false;
+bool s_latest_verifier_pass = false;
+uint32_t s_latest_verifier_latency_ms = 0;
+float s_false_wake_verifier_score = 0.0f;
+bool s_false_wake_verifier_available = false;
+bool s_false_wake_verifier_pass = false;
+uint32_t s_false_wake_verifier_latency_ms = 0;
 std::atomic_int s_voice_c_min_rms_dbfs_x10{-600};
 std::atomic_uint s_voice_c_max_clip_percent{25};
 std::atomic_bool s_voice_capture_all_wakes{true};
@@ -220,17 +239,32 @@ bool valid_verification_mode(const char *mode) {
                     !strcmp(mode, "shadow_all"));
 }
 
+bool verification_mode_runs_c(const char *mode) {
+    return mode && (!strcmp(mode, "c_only") || !strcmp(mode, "c_then_b") ||
+                    !strcmp(mode, "c_then_b_then_a") ||
+                    !strcmp(mode, "shadow_all"));
+}
+
+bool verification_mode_enforces_c(const char *mode) {
+    return mode && (!strcmp(mode, "c_only") || !strcmp(mode, "c_then_b") ||
+                    !strcmp(mode, "c_then_b_then_a"));
+}
+
 bool voice_set_verification_config(const char *mode, int c_min_rms_dbfs_x10,
                                    unsigned c_max_clip_percent,
-                                   bool capture_all_wakes) {
+                                   bool capture_all_wakes,
+                                   float verifier_cutoff) {
     if (!valid_verification_mode(mode) || c_min_rms_dbfs_x10 < -800 ||
-        c_min_rms_dbfs_x10 > -100 || c_max_clip_percent > 100)
+        c_min_rms_dbfs_x10 > -100 || c_max_clip_percent > 100 ||
+        verifier_cutoff < 0.10f || verifier_cutoff > 0.99f)
         return false;
     snprintf(s_voice_verification_mode, sizeof(s_voice_verification_mode),
              "%s", mode);
     s_voice_c_min_rms_dbfs_x10 = c_min_rms_dbfs_x10;
     s_voice_c_max_clip_percent = c_max_clip_percent;
     s_voice_capture_all_wakes = capture_all_wakes;
+    s_voice_verifier_cutoff_q = static_cast<unsigned>(
+        std::lround(static_cast<double>(verifier_cutoff) * 255.0));
     return true;
 }
 
@@ -326,6 +360,19 @@ bool voice_send_start() {
     cJSON *root = cJSON_CreateObject();
     if (!root) return false;
     cJSON_AddStringToObject(root, "type", "start");
+    cJSON_AddStringToObject(root, "verification_mode",
+                           s_voice_verification_mode);
+    cJSON_AddStringToObject(root, "wake_model", "v19");
+    cJSON_AddStringToObject(root, "verifier_model", "v34-step300");
+    cJSON_AddNumberToObject(root, "verifier_score",
+                            s_latest_verifier_score);
+    cJSON_AddNumberToObject(
+        root, "verifier_cutoff",
+        static_cast<double>(s_voice_verifier_cutoff_q.load()) / 255.0);
+    cJSON_AddBoolToObject(root, "verifier_available",
+                          s_latest_verifier_available);
+    cJSON_AddBoolToObject(root, "verifier_pass",
+                          s_latest_verifier_pass);
     if (zone_id[0]) {
         cJSON *context = cJSON_AddObjectToObject(root, "context");
         if (context) cJSON_AddStringToObject(context, "zone_id", zone_id);
@@ -371,6 +418,43 @@ size_t voice_flush_buffered_audio() {
     return sent;
 }
 
+size_t voice_seed_recent_wake_audio() {
+    if (!s_enrollment_lock || !s_false_wake_preroll_buffer ||
+        !s_voice_command_buffer ||
+        xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+        return 0;
+
+    const size_t samples = std::min(
+        s_false_wake_preroll_count, VOICE_WAKE_HANDOFF_SAMPLES);
+    const size_t available_bytes = VOICE_COMMAND_MAX_BYTES -
+        s_voice_command_bytes;
+    const size_t bytes = std::min(
+        samples * sizeof(int16_t), available_bytes);
+    const size_t copied_samples = bytes / sizeof(int16_t);
+    if (!copied_samples) {
+        xSemaphoreGive(s_enrollment_lock);
+        return 0;
+    }
+
+    const size_t start =
+        (s_false_wake_preroll_write_index + FALSE_WAKE_PREROLL_SAMPLES -
+         copied_samples) % FALSE_WAKE_PREROLL_SAMPLES;
+    const size_t first = std::min(
+        copied_samples, FALSE_WAKE_PREROLL_SAMPLES - start);
+    memcpy(s_voice_command_buffer + s_voice_command_bytes,
+           s_false_wake_preroll_buffer + start,
+           first * sizeof(int16_t));
+    if (first < copied_samples) {
+        memcpy(s_voice_command_buffer + s_voice_command_bytes +
+                   first * sizeof(int16_t),
+               s_false_wake_preroll_buffer,
+               (copied_samples - first) * sizeof(int16_t));
+    }
+    s_voice_command_bytes += bytes;
+    xSemaphoreGive(s_enrollment_lock);
+    return bytes;
+}
+
 bool enrollment_send_text(const char *message) {
     if (!s_enrollment_ws || !esp_websocket_client_is_connected(s_enrollment_ws))
         return false;
@@ -387,7 +471,33 @@ bool enrollment_send_audio(const void *pcm, size_t bytes) {
         static_cast<int>(bytes), pdMS_TO_TICKS(5000)) == static_cast<int>(bytes);
 }
 
-bool false_wake_start_capture() {
+size_t wake_verifier_snapshot() {
+    if (!s_enrollment_lock || !s_false_wake_preroll_buffer ||
+        !s_voice_verifier_buffer ||
+        xSemaphoreTake(s_enrollment_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+        return 0;
+    const size_t samples = std::min(
+        s_false_wake_preroll_count, FALSE_WAKE_PREROLL_SAMPLES);
+    if (samples) {
+        const size_t start =
+            (s_false_wake_preroll_write_index + FALSE_WAKE_PREROLL_SAMPLES -
+             samples) % FALSE_WAKE_PREROLL_SAMPLES;
+        const size_t first = std::min(
+            samples, FALSE_WAKE_PREROLL_SAMPLES - start);
+        memcpy(s_voice_verifier_buffer, s_false_wake_preroll_buffer + start,
+               first * sizeof(int16_t));
+        if (first < samples) {
+            memcpy(s_voice_verifier_buffer + first,
+                   s_false_wake_preroll_buffer,
+                   (samples - first) * sizeof(int16_t));
+        }
+    }
+    xSemaphoreGive(s_enrollment_lock);
+    return samples;
+}
+
+bool false_wake_start_capture(const int16_t *preroll,
+                              size_t preroll_samples) {
     if (!s_enrollment_transport_configured || !s_enrollment_ws ||
         !s_false_wake_buffer || !s_false_wake_upload_task) return false;
     if (s_enrollment_active || s_enrollment_sending || s_false_wake_active ||
@@ -403,21 +513,16 @@ bool false_wake_start_capture() {
     s_false_wake_probability = kizz_wake_word_detection_probability();
     s_false_wake_samples = 0;
     s_false_wake_preroll_samples = std::min(
-        s_false_wake_preroll_count, FALSE_WAKE_PREROLL_SAMPLES);
-    if (s_false_wake_preroll_buffer && s_false_wake_preroll_samples) {
-        const size_t start =
-            (s_false_wake_preroll_write_index + FALSE_WAKE_PREROLL_SAMPLES -
-             s_false_wake_preroll_samples) % FALSE_WAKE_PREROLL_SAMPLES;
-        const size_t first = std::min(
-            s_false_wake_preroll_samples, FALSE_WAKE_PREROLL_SAMPLES - start);
-        memcpy(s_false_wake_buffer, s_false_wake_preroll_buffer + start,
-               first * sizeof(int16_t));
-        if (first < s_false_wake_preroll_samples) {
-            memcpy(s_false_wake_buffer + first, s_false_wake_preroll_buffer,
-                   (s_false_wake_preroll_samples - first) * sizeof(int16_t));
-        }
+        preroll_samples, FALSE_WAKE_PREROLL_SAMPLES);
+    if (preroll && s_false_wake_preroll_samples) {
+        memcpy(s_false_wake_buffer, preroll,
+               s_false_wake_preroll_samples * sizeof(int16_t));
         s_false_wake_samples = s_false_wake_preroll_samples;
     }
+    s_false_wake_verifier_score = s_latest_verifier_score;
+    s_false_wake_verifier_available = s_latest_verifier_available;
+    s_false_wake_verifier_pass = s_latest_verifier_pass;
+    s_false_wake_verifier_latency_ms = s_latest_verifier_latency_ms;
     snprintf(s_false_wake_outcome, sizeof(s_false_wake_outcome), "%s",
              s_voice_transport_configured ? "no_command" : "unclassified");
     s_false_wake_energy = 0;
@@ -540,6 +645,15 @@ void false_wake_upload_task(void *) {
                 s_false_wake_sending = false;
                 break;
             }
+            /* Keep quarantined evidence in PSRAM while the optional sidecar is
+             * offline. The websocket connect callback wakes this task when
+             * the service returns; polling every second only burns CPU and
+             * floods the device log. */
+            if (!s_enrollment_ws ||
+                !esp_websocket_client_is_connected(s_enrollment_ws)) {
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(30000));
+                continue;
+            }
             const double rms = metric_samples
                 ? std::sqrt(static_cast<double>(energy) /
                             static_cast<double>(metric_samples)) / 32768.0
@@ -555,7 +669,9 @@ void false_wake_upload_task(void *) {
             float cutoff = 0.0f;
             size_t window = 0;
             kizz_wake_word_get_config(&cutoff, &window);
-            char header[768] = {};
+            char header[1024] = {};
+            const unsigned verifier_cutoff_q =
+                s_voice_verifier_cutoff_q.load();
             snprintf(header, sizeof(header),
                      "{\"type\":\"wake_observation\","
                      "\"observation_id\":\"%s\",\"bytes\":%u,"
@@ -563,7 +679,11 @@ void false_wake_upload_task(void *) {
                      "\"sliding_window\":%u,\"outcome\":\"%s\","
                      "\"verification_mode\":\"%s\",\"c_rms_dbfs\":%.2f,"
                      "\"c_peak\":%u,\"c_clipped_percent\":%.3f,"
-                     "\"c_pass\":%s,\"wake_to_timeout_ms\":6000,"
+                     "\"c_pass\":%s,\"verifier_model\":\"v34-step300\","
+                     "\"verifier_score\":%.5f,\"verifier_cutoff\":%.5f,"
+                     "\"verifier_available\":%s,\"verifier_pass\":%s,"
+                     "\"verifier_latency_ms\":%u,"
+                     "\"wake_to_timeout_ms\":6000,"
                      "\"wake_to_finish_ms\":%u,\"dropped_busy_total\":%u,"
                      "\"pre_wake_ms\":%u,\"pre_wake_samples\":%u,"
                      "\"post_wake_samples\":%u}",
@@ -572,7 +692,13 @@ void false_wake_upload_task(void *) {
                      static_cast<double>(cutoff), static_cast<unsigned>(window),
                      s_false_wake_outcome, s_voice_verification_mode, rms_dbfs,
                      static_cast<unsigned>(peak), clipped_percent,
-                     c_pass ? "true" : "false", static_cast<unsigned>(finish_ms),
+                     c_pass ? "true" : "false",
+                     static_cast<double>(s_false_wake_verifier_score),
+                     static_cast<double>(verifier_cutoff_q) / 255.0,
+                     s_false_wake_verifier_available ? "true" : "false",
+                     s_false_wake_verifier_pass ? "true" : "false",
+                     static_cast<unsigned>(s_false_wake_verifier_latency_ms),
+                     static_cast<unsigned>(finish_ms),
                      static_cast<unsigned>(s_false_wake_dropped_busy.load()),
                      FALSE_WAKE_PREROLL_MS,
                      static_cast<unsigned>(preroll_samples),
@@ -603,7 +729,7 @@ void false_wake_upload_task(void *) {
             ESP_LOGW(TAG,
                      "False-wake observation %s upload failed; retaining %u bytes and retrying",
                      observation_id, static_cast<unsigned>(bytes));
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(30000));
         }
     }
 }
@@ -993,6 +1119,7 @@ void voice_fetch_task(void *) {
     int64_t utterance_opened_at = 0;
     int64_t last_command_speech_at = 0;
     size_t command_audio_bytes = 0;
+    size_t handoff_audio_bytes = 0;
     uint32_t speech_frames = 0;
     uint32_t silence_frames = 0;
     uint32_t turn_id = 0;
@@ -1007,6 +1134,7 @@ void voice_fetch_task(void *) {
             utterance_opened_at = 0;
             last_command_speech_at = 0;
             command_audio_bytes = 0;
+            handoff_audio_bytes = 0;
             s_voice_command_bytes = 0;
             speech_frames = 0;
             silence_frames = 0;
@@ -1057,6 +1185,7 @@ void voice_fetch_task(void *) {
             last_command_speech_at = 0;
             command_audio_bytes = 0;
             s_voice_command_bytes = 0;
+            handoff_audio_bytes = voice_seed_recent_wake_audio();
             speech_frames = 0;
             silence_frames = 0;
             ++turn_id;
@@ -1086,6 +1215,8 @@ void voice_fetch_task(void *) {
                 utterance_opened_at = now;
                 last_command_speech_at = now;
                 ++speech_frames;
+                command_audio_bytes += handoff_audio_bytes;
+                handoff_audio_bytes = 0;
                 ESP_LOGI(TAG, "Kizz command armed during continuous speech");
                 if (result->vad_cache_size > 0)
                     command_audio_bytes += voice_buffer_audio(
@@ -1170,6 +1301,8 @@ void voice_fetch_task(void *) {
                     false_wake_discard_capture();
                 utterance_open = true;
                 utterance_opened_at = now;
+                command_audio_bytes += handoff_audio_bytes;
+                handoff_audio_bytes = 0;
                 if (result->vad_cache_size > 0)
                     command_audio_bytes += voice_buffer_audio(
                         result->vad_cache,
@@ -1352,17 +1485,24 @@ void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
             root, "c_max_clip_percent");
         cJSON *capture_all_wakes = cJSON_GetObjectItemCaseSensitive(
             root, "capture_all_wakes");
+        cJSON *verifier_cutoff = cJSON_GetObjectItemCaseSensitive(
+            root, "verifier_cutoff");
         const bool verification_present = verification_mode || c_min_rms_dbfs ||
-            c_max_clip_percent || capture_all_wakes;
+            c_max_clip_percent || capture_all_wakes || verifier_cutoff;
+        const float requested_verifier_cutoff = cJSON_IsNumber(verifier_cutoff)
+            ? static_cast<float>(verifier_cutoff->valuedouble)
+            : static_cast<float>(s_voice_verifier_cutoff_q.load()) / 255.0f;
         const bool verification_valid = !verification_present ||
             (cJSON_IsString(verification_mode) && verification_mode->valuestring &&
              cJSON_IsNumber(c_min_rms_dbfs) && cJSON_IsNumber(c_max_clip_percent) &&
              cJSON_IsBool(capture_all_wakes) &&
+             (!verifier_cutoff || cJSON_IsNumber(verifier_cutoff)) &&
              voice_set_verification_config(
                  verification_mode->valuestring,
                  static_cast<int>(std::lround(c_min_rms_dbfs->valuedouble * 10.0)),
                  static_cast<unsigned>(c_max_clip_percent->valueint),
-                 cJSON_IsTrue(capture_all_wakes)));
+                 cJSON_IsTrue(capture_all_wakes),
+                 requested_verifier_cutoff));
         if (!cJSON_IsNumber(cutoff) || !cJSON_IsNumber(window) ||
             !cJSON_IsNumber(end_silence) || !cJSON_IsNumber(max_utterance) ||
             !verification_valid ||
@@ -1386,14 +1526,16 @@ void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
                      "\"end_silence_ms\":%d,\"max_utterance_ms\":%d,"
                      "\"diagnostics_enabled\":%s,\"verification_mode\":\"%s\","
                      "\"c_min_rms_dbfs\":%.1f,\"c_max_clip_percent\":%u,"
-                     "\"capture_all_wakes\":%s}",
+                     "\"capture_all_wakes\":%s,\"verifier_cutoff\":%.5f}",
                      cutoff->valuedouble, window->valueint,
                      end_silence->valueint, max_utterance->valueint,
                      s_voice_diagnostics_enabled ? "true" : "false",
                      s_voice_verification_mode,
                      static_cast<double>(s_voice_c_min_rms_dbfs_x10.load()) / 10.0,
                      static_cast<unsigned>(s_voice_c_max_clip_percent.load()),
-                     s_voice_capture_all_wakes ? "true" : "false");
+                     s_voice_capture_all_wakes ? "true" : "false",
+                     static_cast<double>(s_voice_verifier_cutoff_q.load()) /
+                         255.0);
             enrollment_send_text(response);
         }
     }
@@ -1463,17 +1605,76 @@ void start_voice_transport() {
         s_voice_listener_enabled = false;
         return;
     }
+    // The trigger ring and frozen verifier snapshot belong to production wake
+    // verification. They are allocated independently of the enrollment
+    // transport; the latter only owns evidence upload and its larger buffer.
+    s_enrollment_lock = xSemaphoreCreateMutex();
+    s_false_wake_preroll_buffer = static_cast<int16_t *>(heap_caps_calloc(
+        FALSE_WAKE_PREROLL_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+    s_voice_verifier_buffer = static_cast<int16_t *>(heap_caps_calloc(
+        FALSE_WAKE_PREROLL_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
+    if (!s_enrollment_lock || !s_false_wake_preroll_buffer ||
+        !s_voice_verifier_buffer) {
+        ESP_LOGE(TAG,
+                 "Kizz verifier pre-roll allocation failed; verifier will fail open");
+    }
+
     if (!kizz_wake_word_start([]() {
             if (s_enrollment_active || s_enrollment_sending)
                 s_enrollment_detected = true;
             else if (esp_timer_get_time() >=
                      s_enrollment_suppress_wake_until_us.load()) {
+                const size_t verifier_samples = wake_verifier_snapshot();
+                s_latest_verifier_score = 0.0f;
+                s_latest_verifier_available = false;
+                s_latest_verifier_pass = false;
+                s_latest_verifier_latency_ms = 0;
+                const bool run_c = verification_mode_runs_c(
+                    s_voice_verification_mode);
+                if (run_c && verifier_samples) {
+                    const int64_t started = esp_timer_get_time();
+                    s_latest_verifier_available = kizz_wake_word_verify_clip(
+                        s_voice_verifier_buffer, verifier_samples,
+                        &s_latest_verifier_score);
+                    s_latest_verifier_latency_ms = static_cast<uint32_t>(
+                        std::max<int64_t>(
+                            0, (esp_timer_get_time() - started) / 1000));
+                    const unsigned score_q = static_cast<unsigned>(std::lround(
+                        static_cast<double>(s_latest_verifier_score) * 255.0));
+                    s_latest_verifier_pass = s_latest_verifier_available &&
+                        score_q >= s_voice_verifier_cutoff_q.load();
+                    ESP_LOGI(TAG,
+                             "Kizz sequential verifier: score=%u/255 cutoff=%u/255 "
+                             "pass=%s latency=%ums mode=%s",
+                             score_q,
+                             static_cast<unsigned>(
+                                 s_voice_verifier_cutoff_q.load()),
+                             s_latest_verifier_pass ? "true" : "false",
+                             static_cast<unsigned>(
+                                 s_latest_verifier_latency_ms),
+                             s_voice_verification_mode);
+                } else if (run_c) {
+                    ESP_LOGW(TAG,
+                             "Kizz sequential verifier unavailable; failing open");
+                }
                 const bool evidence_started = s_enrollment_transport_configured &&
-                    false_wake_start_capture();
-                if (s_voice_transport_configured)
-                    s_voice_wake_pending = true;
-                else if (!evidence_started)
+                    false_wake_start_capture(s_voice_verifier_buffer,
+                                             verifier_samples);
+                const bool c_rejected = run_c &&
+                    verification_mode_enforces_c(s_voice_verification_mode) &&
+                    s_latest_verifier_available &&
+                    !s_latest_verifier_pass;
+                if (c_rejected) {
+                    ESP_LOGI(TAG,
+                             "Kizz provisional wake rejected by sequential verifier");
+                    if (evidence_started)
+                        false_wake_finish_capture("verifier_rejected");
                     kizz_wake_word_resume();
+                } else if (s_voice_transport_configured) {
+                    s_voice_wake_pending = true;
+                } else if (!evidence_started) {
+                    kizz_wake_word_resume();
+                }
             }
         })) {
         ESP_LOGE(TAG, "Kizz custom wake model initialization failed");
@@ -1499,11 +1700,8 @@ void start_voice_transport() {
         esp_websocket_client_start(s_voice_ws);
     }
     if (enrollment_uri[0]) {
-        s_enrollment_lock = xSemaphoreCreateMutex();
         s_enrollment_buffer = static_cast<int16_t *>(heap_caps_calloc(
             ENROLLMENT_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
-        s_false_wake_preroll_buffer = static_cast<int16_t *>(heap_caps_calloc(
-            FALSE_WAKE_PREROLL_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
         s_false_wake_buffer = static_cast<int16_t *>(heap_caps_calloc(
             FALSE_WAKE_MAX_SAMPLES, sizeof(int16_t), MALLOC_CAP_SPIRAM));
         if (!s_enrollment_lock || !s_enrollment_buffer ||
@@ -1528,7 +1726,12 @@ void start_voice_transport() {
             enrollment_cfg.uri = enrollment_uri;
             enrollment_cfg.buffer_size = 2048;
             enrollment_cfg.network_timeout_ms = 10000;
-            enrollment_cfg.reconnect_timeout_ms = 1000;
+            // Enrollment is an optional evidence sidecar. Do not let an
+            // offline sidecar spin a connection attempt every second and
+            // flood the production device log or compete with the UI/voice
+            // network path. A capture will still upload when the service
+            // returns, while production voice remains independent.
+            enrollment_cfg.reconnect_timeout_ms = 30000;
             enrollment_cfg.enable_close_reconnect = true;
             s_enrollment_ws = esp_websocket_client_init(&enrollment_cfg);
             if (!s_enrollment_ws) {
