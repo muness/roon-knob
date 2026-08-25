@@ -19,7 +19,7 @@ def test_false_wake_buffer_contract_is_three_seconds_and_288000_bytes():
 
 
 def test_metadata_uses_derived_preroll_and_exact_detection_score():
-    capture = PLATFORM[PLATFORM.index("bool false_wake_start_capture()") :]
+    capture = PLATFORM[PLATFORM.index("bool false_wake_start_capture(") :]
     assert "kizz_wake_word_detection_probability()" in capture
     assert "s_false_wake_probability = kizz_wake_word_probability()" not in capture
     assert '\\"pre_wake_ms\\":%u' in capture
@@ -31,7 +31,7 @@ def test_metadata_uses_derived_preroll_and_exact_detection_score():
 
 def test_capture_gate_is_enrollment_specific_and_busy_loss_is_measured():
     assert "bool s_enrollment_transport_configured = false" in PLATFORM
-    start_at = PLATFORM.index("bool false_wake_start_capture()")
+    start_at = PLATFORM.index("bool false_wake_start_capture(")
     start = PLATFORM[
         start_at : PLATFORM.index("void false_wake_capture_audio", start_at)
     ]
@@ -68,11 +68,21 @@ def test_detection_probability_is_a_callback_time_atomic_api():
     assert "kizz_wake_word_detection_probability" in HEADER
 
 
+def test_ordered_model_is_the_only_runtime_wake_decision():
+    assert "add_ordered_state_model(" in WAKE
+    assert "kizz_wake_word_verify_clip" not in WAKE
+    assert "kizz_wake_word_verify_clip" not in HEADER
+    assert "kizz_wake_word_verify_clip" not in PLATFORM
+    assert "sequential verifier" not in PLATFORM.lower()
+    assert 'wake_model", "hiphi_kizz_ordered' in PLATFORM
+
+
 if __name__ == "__main__":
     for test in (
         test_false_wake_buffer_contract_is_three_seconds_and_288000_bytes,
         test_metadata_uses_derived_preroll_and_exact_detection_score,
         test_detection_probability_is_a_callback_time_atomic_api,
+        test_ordered_model_is_the_only_runtime_wake_decision,
         test_capture_gate_is_enrollment_specific_and_busy_loss_is_measured,
         test_enrollment_only_full_buffer_capture_rearms_the_detector,
     ):

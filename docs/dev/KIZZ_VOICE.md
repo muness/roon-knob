@@ -48,17 +48,19 @@ The current model and configuration can also be changed at runtime by a
 The training recipe is the source of truth for its corpus, split rules,
 augmentation, and physical tests.
 
-### Wake evidence and configurable verification
+### Wake evidence and configurable capture diagnostics
 
-The default verification mode is `shadow_all`: v19 remains the production wake
-decision, while a cheap acoustic sanity score is calculated after capture and
-the configured B/A verifier slots are recorded as unavailable until their
-artifacts exist. The enrollment service accepts these runtime settings:
-`off`, `c_only`, `b_only`, `c_then_b`, `b_then_a_uncertain`,
-`c_then_b_then_a`, or `shadow_all`, plus the C RMS/clipping thresholds and
-`capture_all_wakes`.
+The production decision is made directly by the ordered-state `HiPhi Kizz`
+model. There is no second runtime verifier and no post-detection score gate:
+once the ordered model fires, the device transitions to Listening immediately.
+The firmware retains a bounded PSRAM evidence snapshot only so the resulting
+audio can be quarantined and reviewed; evidence capture cannot reject a wake.
 
-When `capture_all_wakes` is enabled, each provisional wake accepted by the
+The enrollment service accepts the capture diagnostics `c_min_rms_dbfs`,
+`c_max_clip_percent`, and `capture_all_wakes`. These fields describe and select
+quarantined evidence; they do not alter the production wake decision.
+
+When `capture_all_wakes` is enabled, each wake accepted by the
 single enrollment upload worker is sent to the independent enrollment
 WebSocket as `wake_observation`; a wake arriving while that worker is busy is
 not preserved in this first slice. Command-leading
