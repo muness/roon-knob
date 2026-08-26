@@ -1,0 +1,103 @@
+{
+  "artifact_metadata": {
+    "path": "/private/tmp/kizz-training/kizz-control-c1/phoneme-student-v11-multichannel-checkpoint-sweep-v1/step-0500/firmware-artifact.json",
+    "sha256": "66c1766e7887b02675e3620feda8fa44a29586ae572347330ed522ce1be262e7"
+  },
+  "contract_header": {
+    "filename": "kizz_control_model_contract.h",
+    "sha256": "dd97604b08cc13100dfdf62594422fbd04ebded93efe19ad4b97a704b1b66395"
+  },
+  "decoder": {
+    "algorithm": "forward_sum_ctc",
+    "beta": 0.0,
+    "contract_sha256": "a277b32a2411775d9c2c8a2a7dea0bf6ce26c52ab6f8bafe958ec059fd967d5e",
+    "raw_score_threshold": -2.1612006732086204,
+    "window_lengths": [
+      19,
+      23,
+      27,
+      32,
+      39,
+      47,
+      54
+    ]
+  },
+  "deployment_status": "experimental_hardware_evaluation",
+  "distillation_metadata_sha256": "4b1e7a5a08ddd7dbf51bfd63b658fb2c906e5691889229ff7beed690c21b31b4",
+  "model": {
+    "bytes": 83696,
+    "filename": "hiphi_kizz_ordered.tflite",
+    "sha256": "1753026675313fb0e77d2a93c002c1942e0069d8ce6459437ba8584666f1c140"
+  },
+  "qualification_summary": {
+    "continuous_negative": {
+      "exposure_hours": 100.00008883680567,
+      "false_accepts": 6,
+      "faph": 0.05999994669796395,
+      "faph_upper_95": 0.11842385132023624,
+      "qualified": false
+    },
+    "counts": {
+      "aligned_test": 26,
+      "aligned_test_accepted": 11,
+      "false_wake_accepted": 0,
+      "false_wake_anchors": 62,
+      "target_channel_accepted": 11,
+      "target_channel_positives": 24
+    },
+    "failure_reasons": [
+      "aligned_test_recall_below_minimum",
+      "target_channel_recall_below_minimum",
+      "continuous_negative_gate_failed"
+    ],
+    "qualified": false,
+    "threshold": {
+      "false_accepts": 0,
+      "false_accepts_at_recall_floor": 0,
+      "faph": 0.0,
+      "faph_at_recall_floor": 0.0,
+      "negative_ceiling": -2.161200673208621,
+      "negative_exposure_seconds": 2824.36,
+      "qualified": true,
+      "recall": 0.7169811320754716,
+      "recall_floor": 0.7,
+      "selection": "validation_only",
+      "threshold": -2.161199212450943,
+      "threshold_at_recall_floor": -2.161199212450943,
+      "true_positives": 38,
+      "zero_false_accept_recall": 0.7169811320754716,
+      "zero_false_accept_threshold": -2.1612006732086204
+    }
+  },
+  "schema_version": 1,
+  "student_qualification": {
+    "path": "/private/tmp/kizz-training/kizz-control-c1/phoneme-student-v11-multichannel-checkpoint-sweep-v1/step-0500/qualification-100h.json",
+    "sha256": "c791c7e0e187d0bbaad615b271f1d3d78ff4ce81a2a2af2aa8991e5f415bb255"
+  },
+  "tensor_contract": {
+    "input": {
+      "dtype": "int8",
+      "quantization": [
+        0.10196078568696976,
+        -128.0
+      ],
+      "shape": [
+        1,
+        3,
+        40
+      ]
+    },
+    "output": {
+      "dtype": "uint8",
+      "quantization": [
+        0.07251258194446564,
+        142.0
+      ],
+      "shape": [
+        1,
+        1,
+        20
+      ]
+    }
+  }
+}

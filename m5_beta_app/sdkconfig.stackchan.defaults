@@ -30,8 +30,18 @@ CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI="ws://192.168.1.101:8088/voice/v1"
 CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI="ws://192.168.1.101:8091/v1/device"
 CONFIG_M5_PLATFORM_DEVICE_ID="kizz-1"
 CONFIG_M5_PLATFORM_DEVICE_PROFILE="m5stack_stackchan_k151_cores3_room_scale_v2"
+# The compact phoneme model and deterministic CTC decoder run continuously
+# while voice is armed. 160 MHz cannot drain M5Unified's 16 kHz microphone
+# stream in real time; use the ESP32-S3's supported maximum and let DFS/light
+# sleep drop frequency whenever the audio path is idle.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Keep the previously hardware-proven VAD-only AFE footprint. ESP-SR's newer
+# defaults select vadnet1_medium plus the HiStackChan WakeNet asset, which
+# consumes enough internal RAM before M5Unified starts I2S to starve its DMA
+# descriptors. WakeNet remains disabled in code; Mycroft is only the compact
+# model-partition selection accompanying the WebRTC VAD configuration.
+CONFIG_SR_VADN_WEBRTC=y
+CONFIG_SR_WN_WN9_MYCROFT_TTS=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.stackchan.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.stackchan.csv"
-CONFIG_SR_VADN_VADNET1_MEDIUM=y
-CONFIG_SR_WN_WN9L_HISTACKCHAN_TTS3=y

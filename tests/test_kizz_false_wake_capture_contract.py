@@ -5,6 +5,10 @@ ROOT = Path(__file__).parents[1]
 PLATFORM = (ROOT / "components/m5_platform/m5_platform.cpp").read_text()
 WAKE = (ROOT / "components/kizz_wake_word/kizz_wake_word.cpp").read_text()
 HEADER = (ROOT / "components/kizz_wake_word/include/kizz_wake_word.h").read_text()
+WAKE_MANIFEST = (ROOT / "components/kizz_wake_word/idf_component.yml").read_text()
+APP_MANIFEST = (ROOT / "m5_beta_app/main/idf_component.yml").read_text()
+STACKCHAN_DEFAULTS = (ROOT / "m5_beta_app/sdkconfig.stackchan.defaults").read_text()
+FORWARD_SUM_RUNTIME = "13581e0aacc2e73b3aa384b43463c953517cfe07"
 
 
 def test_false_wake_buffer_contract_is_three_seconds_and_288000_bytes():
@@ -68,13 +72,46 @@ def test_detection_probability_is_a_callback_time_atomic_api():
     assert "kizz_wake_word_detection_probability" in HEADER
 
 
+def test_wake_pcm_comes_from_the_stackchan_m5unified_microphone():
+    capture = PLATFORM[PLATFORM.index("void voice_feed_task") :]
+    record_at = capture.index("M5.Mic.record(")
+    feed_at = capture.index("kizz_wake_word_feed(")
+    assert record_at < feed_at
+    assert "ExternalAudioMicrophone" in WAKE
+    assert "s_microphone->feed(samples, sample_count)" in WAKE
+
+
 def test_ordered_model_is_the_only_runtime_wake_decision():
     assert "add_ordered_state_model(" in WAKE
+    assert "kizz_control_deployment::kRawScoreThreshold" in WAKE
+    assert "a future" in WAKE
+    assert "adjustable operating point must carry its own evaluation evidence" in WAKE
+    assert "kizz_control_deployment::kDeploymentQualified" in WAKE
     assert "kizz_wake_word_verify_clip" not in WAKE
     assert "kizz_wake_word_verify_clip" not in HEADER
     assert "kizz_wake_word_verify_clip" not in PLATFORM
     assert "sequential verifier" not in PLATFORM.lower()
-    assert 'wake_model", "hiphi_kizz_ordered' in PLATFORM
+    assert 'wake_model", "kizz_control_compact_ctc_v1' in PLATFORM
+
+
+def test_external_forward_sum_runtime_cannot_be_shadowed_by_local_component():
+    assert FORWARD_SUM_RUNTIME in WAKE_MANIFEST
+    assert FORWARD_SUM_RUNTIME in APP_MANIFEST
+    assert not (ROOT / "components/micro_wake_word/CMakeLists.txt").exists()
+
+
+def test_ordered_decoder_holds_full_cpu_only_while_wake_detection_is_armed():
+    assert "ESP_PM_CPU_FREQ_MAX" in WAKE
+    assert "needs_full_cpu = target == WakeRuntimeTarget::ARMED" in WAKE
+    assert "esp_pm_lock_acquire(cpu_frequency_lock)" in WAKE
+    assert "esp_pm_lock_release(cpu_frequency_lock)" in WAKE
+    assert "set_retain_resources_on_stop(true)" in WAKE
+
+
+def test_stackchan_profile_pins_hardware_proven_audio_resource_choices():
+    assert "CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y" in STACKCHAN_DEFAULTS
+    assert "CONFIG_SR_VADN_WEBRTC=y" in STACKCHAN_DEFAULTS
+    assert "CONFIG_SR_WN_WN9_MYCROFT_TTS=y" in STACKCHAN_DEFAULTS
 
 
 if __name__ == "__main__":
@@ -82,7 +119,11 @@ if __name__ == "__main__":
         test_false_wake_buffer_contract_is_three_seconds_and_288000_bytes,
         test_metadata_uses_derived_preroll_and_exact_detection_score,
         test_detection_probability_is_a_callback_time_atomic_api,
+        test_wake_pcm_comes_from_the_stackchan_m5unified_microphone,
         test_ordered_model_is_the_only_runtime_wake_decision,
+        test_external_forward_sum_runtime_cannot_be_shadowed_by_local_component,
+        test_ordered_decoder_holds_full_cpu_only_while_wake_detection_is_armed,
+        test_stackchan_profile_pins_hardware_proven_audio_resource_choices,
         test_capture_gate_is_enrollment_specific_and_busy_loss_is_measured,
         test_enrollment_only_full_buffer_capture_rearms_the_detector,
     ):

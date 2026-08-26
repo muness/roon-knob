@@ -40,8 +40,33 @@ assert "pdMS_TO_TICKS(5000)" in send_text
 start_transport = function_body("void start_voice_transport()", "void stackchan_voice_note")
 assert start_transport.count("enable_close_reconnect = true") == 2
 fetch_task = function_body("void voice_fetch_task", "void voice_ws_event")
-assert "VOICE_RESPONSE_TIMEOUT_US" in fetch_task
 assert "Voice response timed out" in fetch_task
+# A streaming STT/Codex result may beat the device's local VAD commit. The
+# terminal marker and one ordered handoff prevent that late commit from putting
+# the device back into a permanent response-wait state with an empty AFE.
+response_wait = function_body("bool voice_begin_response_wait", "void voice_feed_task")
+assert "VOICE_RESPONSE_TIMEOUT_US" in response_wait
+assert "s_voice_waiting_for_response = true" in response_wait
+assert "compare_exchange_strong" in response_wait
+assert "VoiceTurnPhase::COMMITTING" in response_wait
+assert "VoiceTurnPhase::TERMINAL" in response_wait
+assert "voice_take_microphone()" in response_wait
+assert "voice_take_speaker()" in response_wait
+assert "s_voice_turn_phase.store(VoiceTurnPhase::CAPTURING" in fetch_task
+assert fetch_task.count("skipped redundant") == 2
+feedback = function_body(
+    'extern "C" void m5_platform_voice_feedback',
+    'extern "C" bool m5_platform_voice_is_listening',
+)
+assert "s_voice_turn_phase.exchange(" in feedback
+assert "VoiceTurnPhase::TERMINAL" in feedback
+# If a terminal result arrives while the fetch task is blocked sending audio,
+# the callback must not restart feed() ahead of fetch(). Defer the physical
+# microphone handoff to the fetch task after the blocking send returns.
+assert "s_voice_rearm_pending.store(true" in feedback
+assert "s_voice_rearm_pending.exchange(false" in fetch_task
+flush_audio = function_body("size_t voice_flush_buffered_audio", "size_t voice_seed_recent_wake_audio")
+assert "VoiceTurnPhase::TERMINAL" in flush_audio
 upload_task = function_body("void enrollment_upload_task", "void enrollment_capture_audio")
 assert "kizz_wake_word_resume()" in upload_task
 assert 'enrollment_send_error(capture_id, "upload_failed")' in upload_task
@@ -52,21 +77,25 @@ http_upload = function_body("bool enrollment_upload_audio_http", "bool enrollmen
 assert "getaddrinfo" in http_upload
 assert "SO_SNDTIMEO" in http_upload
 assert "TCP_NODELAY" in http_upload
-assert "SO_LINGER" in http_upload
+# The current uploader uses one ordinary HTTP connection per capture.
+# Abortive close belonged to the retired one-socket-per-chunk path and can
+# reset a completed response before lwIP has drained it.
+assert "SO_LINGER" not in http_upload
 assert "send_all" in http_upload
 assert "DRAM_ATTR static char s_enrollment_http_io" in source
+assert "DRAM_ATTR static uint8_t s_enrollment_http_chunk[4096]" in source
 assert "send_all(fd, s_enrollment_http_io" in http_upload
 assert "recv(fd, s_enrollment_http_io" in http_upload
 assert "X-Device-ID: %s" in http_upload
 assert "X-Detected: %s" in http_upload
-assert "X-Audio-Offset: %u" in http_upload
+assert "X-Audio-Offset: 0" in http_upload
 assert "X-Audio-Total: %u" in http_upload
 start_capture = function_body("bool enrollment_start_capture", "void enrollment_upload_task")
 assert 'strncmp(upload_url, "http://", 7)' in start_capture
 assert "!s_enrollment_upload_task" in start_capture
 assert "xTaskCreatePinnedToCoreWithCaps" in start_transport
 assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in start_transport
-assert "constexpr size_t chunk_bytes = 1024" in http_upload
+assert "constexpr size_t chunk_bytes = sizeof(s_enrollment_http_chunk)" in http_upload
 assert "wake_dropped_since_log" in source
 assert 'strcmp(type->valuestring, "training_chunk")' not in source
 assert 'strcmp(type->valuestring, "stored")' not in source

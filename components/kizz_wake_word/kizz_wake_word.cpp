@@ -2,6 +2,7 @@
 
 #include "esphome/components/micro_wake_word/micro_wake_word.h"
 #include "esphome/components/microphone/external_audio_microphone.h"
+#include "kizz_control_model_contract.h"
 
 #include <algorithm>
 #include <atomic>
@@ -10,25 +11,26 @@
 #include <new>
 
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_timer.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 namespace {
-constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.70f;
-// This model emits a short, high-confidence pulse for a natural Kizz utterance.
-// Averaging five inference outputs diluted a measured 0.831 pulse below the
-// cutoff and caused a false reject even from a fresh boot.
+constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF =
+    kizz_control_deployment::kDisplayProbabilityCutoff;
+// The sequence decoder owns its temporal windows. This compatibility field is
+// fixed at one because no probability averaging follows the decoder.
 constexpr size_t KIZZ_DEFAULT_SLIDING_WINDOW = 1;
 constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 65536;
 constexpr char KIZZ_NVS_NAMESPACE[] = "kizz_wake";
 constexpr char KIZZ_NVS_CUTOFF_KEY[] = "cutoff_milli";
 constexpr char KIZZ_NVS_WINDOW_KEY[] = "window";
 constexpr char KIZZ_NVS_VERSION_KEY[] = "config_v";
-// Version 3 resets devices that retained the earlier specialist-model .80
-// operating point. The ordered-state model is qualified at .70.
-constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 3;
+// Version 6 resets the former Mycroft operating point to the packaged Kizz
+// Control student contract used by this exact firmware artifact.
+constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 6;
 
 extern const uint8_t kizz_ordered_model_start[]
     asm("_binary_hiphi_kizz_ordered_tflite_start");
@@ -123,24 +125,26 @@ bool create_wake_word_model() {
     if (!s_wake_word) return false;
 
     const float cutoff = s_probability_cutoff_milli.load() / 1000.0f;
-    const size_t window = s_sliding_window.load();
     s_wake_word->set_microphone(s_microphone);
     s_wake_word->set_features_step_size(10);
+    // StackChan repeatedly hands its one I2S controller between the official
+    // microphone and speaker. Keep the frontend and TFLM allocations resident
+    // across those pauses; rebuilding them on every UI sound fragmented internal
+    // RAM and could eventually starve the Wi-Fi PHY.
+    s_wake_word->set_retain_resources_on_stop(true);
     s_wake_word->add_ordered_state_model(
-        kizz_ordered_model_start, cutoff, window, "HiPhi Kizz",
+        kizz_ordered_model_start,
+        kizz_control_deployment::kRawScoreThreshold,
+        kizz_control_deployment::kCollisionBeta,
+        cutoff,
+        "Kizz Control",
         KIZZ_TENSOR_ARENA_BYTES);
     s_wake_word->add_detection_callback([](std::string) {
-        // MicroWakeWord invokes this callback from loop() before the loop's
-        // later telemetry update. Preserve the detector value at this exact
-        // point so evidence metadata cannot report a stale recent peak.
         s_detection_probability_milli = probability_to_milli(
             s_wake_word ? s_wake_word->get_wake_word_probability() : 0.0f);
-        // Detection deliberately disarms the runtime until command capture has
-        // finished. This also prevents an idle detector from immediately
-        // restarting in the gap before the voice task observes the callback.
         s_runtime_target = WakeRuntimeTarget::PAUSED;
         transition_to(WakeRuntimeState::PAUSED, "wake detected");
-        ESP_LOGI(TAG, "HiPhi Kizz detected locally");
+        ESP_LOGI(TAG, "Kizz Control detected locally");
         if (s_detected_cb) s_detected_cb();
     });
     s_wake_word->setup();
@@ -155,8 +159,16 @@ bool create_wake_word_model() {
         s_wake_word = nullptr;
         return false;
     }
-    ESP_LOGI(TAG, "HiPhi Kizz ordered-state model ready: cutoff=%.2f window=%u",
-             static_cast<double>(cutoff), static_cast<unsigned>(window));
+    ESP_LOGI(TAG,
+             "Kizz Control student ready: status=%s raw_threshold=%.6f "
+             "beta=%.6f display_cutoff=%.2f model_sha256=%s",
+             kizz_control_deployment::kDeploymentQualified
+                 ? "qualified"
+                 : "experimental_hardware_evaluation",
+             static_cast<double>(kizz_control_deployment::kRawScoreThreshold),
+             static_cast<double>(kizz_control_deployment::kCollisionBeta),
+             static_cast<double>(cutoff),
+             kizz_control_deployment::kModelSha256);
     return true;
 }
 
@@ -187,7 +199,8 @@ void load_persisted_config() {
     uint16_t cutoff_milli = 0;
     uint8_t window = 0;
     if (nvs_get_u16(handle, KIZZ_NVS_CUTOFF_KEY, &cutoff_milli) == ESP_OK &&
-        cutoff_milli >= 100 && cutoff_milli <= 990) {
+        cutoff_milli == static_cast<uint16_t>(
+            KIZZ_DEFAULT_PROBABILITY_CUTOFF * 1000)) {
         s_probability_cutoff_milli = cutoff_milli;
     }
     if (nvs_get_u8(handle, KIZZ_NVS_WINDOW_KEY, &window) == ESP_OK &&
@@ -198,16 +211,29 @@ void load_persisted_config() {
 }
 
 void detection_task(void *) {
+    esp_pm_lock_handle_t cpu_frequency_lock = nullptr;
+    bool cpu_frequency_lock_held = false;
+    const esp_err_t lock_create_result = esp_pm_lock_create(
+        ESP_PM_CPU_FREQ_MAX, 0, "kizz_mww", &cpu_frequency_lock);
+    if (lock_create_result == ESP_OK) {
+        ESP_LOGI(TAG,
+                 "Kizz wake CPU-frequency lock ready (held only while armed)");
+    } else {
+        ESP_LOGW(TAG, "Kizz wake CPU-frequency lock unavailable: %s",
+                 esp_err_to_name(lock_create_result));
+    }
     for (;;) {
         if (s_reconfigure_requested.exchange(false)) {
             const float cutoff =
                 s_probability_cutoff_milli.load() / 1000.0f;
-            const size_t window = s_sliding_window.load();
-            s_wake_word->set_wake_word_model_parameters(cutoff, window);
+            s_wake_word->set_ordered_state_model_threshold(
+                kizz_control_deployment::kRawScoreThreshold, cutoff);
             ESP_LOGI(TAG,
-                     "HiPhi Kizz model updated in place: cutoff=%.2f window=%u",
+                     "Kizz Control display mapping updated: cutoff=%.2f "
+                     "(packaged raw threshold remains %.6f)",
                      static_cast<double>(cutoff),
-                     static_cast<unsigned>(window));
+                     static_cast<double>(
+                         kizz_control_deployment::kRawScoreThreshold));
         }
         if (!s_wake_word) {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -215,6 +241,26 @@ void detection_task(void *) {
         }
         const WakeRuntimeTarget target = s_runtime_target.load();
         const WakeRuntimeState state = s_runtime_state.load();
+        const bool needs_full_cpu = target == WakeRuntimeTarget::ARMED;
+        if (cpu_frequency_lock && needs_full_cpu &&
+            !cpu_frequency_lock_held) {
+            const esp_err_t result = esp_pm_lock_acquire(cpu_frequency_lock);
+            if (result == ESP_OK) {
+                cpu_frequency_lock_held = true;
+            } else {
+                ESP_LOGE(TAG, "Kizz wake CPU-frequency lock acquire failed: %s",
+                         esp_err_to_name(result));
+            }
+        } else if (cpu_frequency_lock && !needs_full_cpu &&
+                   cpu_frequency_lock_held) {
+            const esp_err_t result = esp_pm_lock_release(cpu_frequency_lock);
+            if (result == ESP_OK) {
+                cpu_frequency_lock_held = false;
+            } else {
+                ESP_LOGE(TAG, "Kizz wake CPU-frequency lock release failed: %s",
+                         esp_err_to_name(result));
+            }
+        }
         const auto engine_state = s_wake_word->get_state();
 
         if (state == WakeRuntimeState::STARTING &&
@@ -251,15 +297,17 @@ void detection_task(void *) {
         }
         if (now - s_probability_log_at_us >= 500000) {
             s_probability_log_at_us = now;
-            ESP_LOGI(TAG, "Wake probability: current=%.3f peak=%.3f cutoff=%.3f state=%s",
+            ESP_LOGI(TAG,
+                     "Kizz Control score: current=%.3f peak=%.3f "
+                     "cutoff=%.3f raw=%.6f state=%s",
                      static_cast<double>(probability),
                      static_cast<double>(s_probability_milli.load() / 1000.0f),
                      static_cast<double>(s_probability_cutoff_milli.load() / 1000.0f),
+                     static_cast<double>(s_wake_word->get_ordered_state_score()),
                      kizz_wake_word_runtime_state());
         }
-        // One RTOS tick is intentional. At the configured tick rate,
-        // pdMS_TO_TICKS(1) rounds to zero and a higher-priority detector would
-        // starve the AFE task instead of yielding between inference passes.
+        // At 1 kHz this yields without sleeping long enough to starve the
+        // official M5Unified microphone capture task on the same core.
         vTaskDelay(1);
     }
 }
@@ -267,14 +315,12 @@ void detection_task(void *) {
 
 extern "C" bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb) {
     if (s_wake_word) return true;
-    // Keep roughly half a second of 16 kHz mono PCM so short ESP-SR scheduling
-    // bursts do not erase the wake phrase before microWakeWord can consume it.
-    // This FreeRTOS stream buffer uses internal RAM; 32 KiB is not contiguous
-    // after ESP-SR initializes on CoreS3, while 16 KiB is hardware-proven.
+    // This adapter is fed exclusively by M5.Mic.record() in m5_platform.cpp;
+    // it does not open or own a second physical microphone.
     s_microphone = new (std::nothrow)
         esphome::microphone::ExternalAudioMicrophone(16384);
     if (!s_microphone || !s_microphone->is_ready()) {
-        ESP_LOGE(TAG, "Kizz wake runtime allocation failed");
+        ESP_LOGE(TAG, "Kizz StackChan microphone adapter allocation failed");
         delete s_microphone;
         s_microphone = nullptr;
         return false;
@@ -284,18 +330,15 @@ extern "C" bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb) {
     s_runtime_state = WakeRuntimeState::STARTING;
     load_persisted_config();
     if (!create_wake_word_model()) {
-        ESP_LOGE(TAG, "Kizz wake model failed to start");
+        ESP_LOGE(TAG, "Kizz Control student failed to start");
         delete s_microphone;
         s_microphone = nullptr;
         s_detected_cb = nullptr;
         return false;
     }
-    // Wake inference must outrank the continuous AFE fetch task on core 1.
-    // Equal priority caused sustained input overflow while the UI still said
-    // ARMED, which presented as intermittent real-world recall.
     if (xTaskCreatePinnedToCore(detection_task, "kizz_mww", 6144, nullptr, 6,
                                 nullptr, 1) != pdPASS) {
-        ESP_LOGE(TAG, "Kizz wake task creation failed");
+        ESP_LOGE(TAG, "Kizz Control wake task creation failed");
         s_wake_word->stop();
         delete s_wake_word;
         delete s_microphone;
@@ -346,11 +389,17 @@ extern "C" float kizz_wake_word_detection_probability(void) {
 
 extern "C" bool kizz_wake_word_configure(float probability_cutoff,
                                            size_t sliding_window) {
-    if (probability_cutoff < 0.10f || probability_cutoff > 0.99f ||
-        sliding_window < 1 || sliding_window > 20) return false;
-
+    if (!std::isfinite(probability_cutoff) || probability_cutoff < 0.0f ||
+        probability_cutoff > 1.0f) return false;
     const uint16_t cutoff_milli =
         static_cast<uint16_t>(probability_cutoff * 1000.0f + 0.5f);
+    // This student was evaluated only at the generated raw-score threshold.
+    // Keep the legacy protocol shape but reject sensitivity drift; a future
+    // adjustable operating point must carry its own evaluation evidence.
+    if (cutoff_milli != static_cast<uint16_t>(
+            KIZZ_DEFAULT_PROBABILITY_CUTOFF * 1000) ||
+        sliding_window != KIZZ_DEFAULT_SLIDING_WINDOW) return false;
+
     nvs_handle_t handle;
     if (nvs_open(KIZZ_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK)
         return false;

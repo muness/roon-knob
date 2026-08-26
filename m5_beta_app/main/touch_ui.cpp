@@ -985,10 +985,9 @@ void flash_action(const char *notice = nullptr) {
             m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PLAY);
         else if (std::strcmp(notice, "PAUSE") == 0)
             m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PAUSE);
-        else if (std::strcmp(notice, "CONNECTED") == 0)
-            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_CONNECTED);
-        else if (std::strcmp(notice, "NEW ROOM") == 0)
-            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_NEW_ROOM);
+        // Connectivity and room changes are ambient state, not requests for
+        // attention. Keep their visual flash without stealing the shared I2S
+        // controller from the always-on microphone for a chirp.
     }
 #endif
     s.dirty = true;
@@ -2227,8 +2226,8 @@ extern "C" void touch_ui_set_status(bool v){
         s.online=v;if(v)s.ever_online=true;s.dirty=true;
         if (lost && s.body_enabled)
             m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_SAD);
-        if (lost)
-            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LOST);
+        // A transient transport loss is visible status, not an attention cue.
+        // In particular, do not create an audio-handoff/reconnect feedback loop.
         if (found) flash_action("CONNECTED");
     }
 }

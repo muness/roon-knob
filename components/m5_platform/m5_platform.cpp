@@ -92,6 +92,13 @@ struct StackChanVoiceState {
     bool enabled = true;
 } s_stackchan_voice;
 
+enum class VoiceTurnPhase : uint8_t {
+    IDLE,
+    CAPTURING,
+    COMMITTING,
+    TERMINAL,
+};
+
 constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
 esp_websocket_client_handle_t s_voice_ws = nullptr;
 esp_websocket_client_handle_t s_enrollment_ws = nullptr;
@@ -105,6 +112,8 @@ std::atomic_bool s_voice_listener_enabled{false};
 std::atomic_bool s_voice_microphone_active{false};
 std::atomic_bool s_voice_waiting_for_response{false};
 std::atomic_int64_t s_voice_response_deadline_us{0};
+std::atomic<VoiceTurnPhase> s_voice_turn_phase{VoiceTurnPhase::IDLE};
+std::atomic<bool> s_voice_rearm_pending{false};
 std::atomic_bool s_voice_resume_after_sound{false};
 std::atomic_bool s_voice_listening_visual{false};
 char s_voice_transcript[161] = {};
@@ -179,6 +188,12 @@ std::atomic_bool s_voice_capture_all_wakes{true};
 // reliably transmit or receive through pointers into that stack on Kizz, so
 // keep its small HTTP header/response scratch area in internal DRAM.
 DRAM_ATTR static char s_enrollment_http_io[768] = {};
+// Reserve upload staging at link time. After long-lived TLS reconnect churn,
+// the ESP32-S3 can retain plenty of aggregate internal RAM while no contiguous
+// block remains; a directed capture must not become unuploadable merely because
+// heap layout changed. The capture itself remains in PSRAM and is streamed
+// through this DMA/network-safe internal buffer.
+DRAM_ATTR static uint8_t s_enrollment_http_chunk[4096] = {};
 DRAM_ATTR static uint8_t s_enrollment_tx_chunk[VOICE_TX_CHUNK_BYTES] = {};
 std::atomic_uint32_t s_voice_audio_epoch{0};
 std::atomic_int64_t s_command_end_silence_us{3000000};
@@ -310,7 +325,7 @@ bool voice_send_start() {
     cJSON *root = cJSON_CreateObject();
     if (!root) return false;
     cJSON_AddStringToObject(root, "type", "start");
-    cJSON_AddStringToObject(root, "wake_model", "hiphi_kizz_ordered");
+    cJSON_AddStringToObject(root, "wake_model", "kizz_control_compact_ctc_v1");
     if (zone_id[0]) {
         cJSON *context = cJSON_AddObjectToObject(root, "context");
         if (context) cJSON_AddStringToObject(context, "zone_id", zone_id);
@@ -344,6 +359,8 @@ size_t voice_buffer_audio(const void *pcm, size_t bytes) {
 size_t voice_flush_buffered_audio() {
     size_t sent = 0;
     while (sent < s_voice_command_bytes) {
+        if (s_voice_turn_phase.load(std::memory_order_acquire) ==
+            VoiceTurnPhase::TERMINAL) break;
         const size_t chunk = std::min(VOICE_TX_CHUNK_BYTES,
                                       s_voice_command_bytes - sent);
         /* ESP-IDF's network stack cannot reliably transmit directly from
@@ -611,7 +628,7 @@ void false_wake_upload_task(void *) {
                      "\"sliding_window\":%u,\"outcome\":\"%s\","
                      "\"c_rms_dbfs\":%.2f,"
                      "\"c_peak\":%u,\"c_clipped_percent\":%.3f,"
-                     "\"c_pass\":%s,\"wake_model\":\"hiphi_kizz_ordered\","
+                     "\"c_pass\":%s,\"wake_model\":\"kizz_control_compact_ctc_v1\","
                      "\"wake_to_timeout_ms\":6000,"
                      "\"wake_to_finish_ms\":%u,\"dropped_busy_total\":%u,"
                      "\"pre_wake_ms\":%u,\"pre_wake_samples\":%u,"
@@ -715,89 +732,72 @@ bool enrollment_upload_audio_http(const char *url, const char *capture_id,
 
     size_t written = 0;
     int status = 0;
-    // Keep this below the smallest internal block observed under the complete
-    // StackChan workload. Static radio buffers make progress independently;
-    // this block only prevents handing PSRAM directly to lwIP.
-    constexpr size_t chunk_bytes = 1024;
-    // The capture lives in PSRAM. Stage network writes through internal RAM:
-    // the Wi-Fi/lwIP path must not be handed the external-RAM buffer directly.
-    auto *chunk = static_cast<uint8_t *>(heap_caps_malloc(
-        chunk_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    if (!chunk) {
-        ESP_LOGW(TAG,
-                 "Enrollment HTTP staging allocation failed: free=%u largest=%u",
-                 static_cast<unsigned>(heap_caps_get_free_size(
-                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
-                 static_cast<unsigned>(heap_caps_get_largest_free_block(
-                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
-    }
-    bool sent = chunk != nullptr;
-    while (sent && written < bytes) {
-        const size_t length = std::min(chunk_bytes, bytes - written);
-        memcpy(chunk, reinterpret_cast<const uint8_t *>(pcm) + written, length);
-        bool segment_sent = false;
-        for (int attempt = 0; attempt < 3 && !segment_sent; ++attempt) {
-            int fd = socket(addresses->ai_family, addresses->ai_socktype,
-                            addresses->ai_protocol);
-            if (fd < 0) {
-                ESP_LOGW(TAG, "Enrollment HTTP socket failed: errno=%d", errno);
-                vTaskDelay(pdMS_TO_TICKS(100));
-                continue;
-            }
-            timeval timeout = {};
-            timeout.tv_sec = 3;
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-            int no_delay = 1;
-            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay,
-                       sizeof(no_delay));
-            struct linger reset_on_close = {};
-            reset_on_close.l_onoff = 1;
-            reset_on_close.l_linger = 0;
-            setsockopt(fd, SOL_SOCKET, SO_LINGER, &reset_on_close,
-                       sizeof(reset_on_close));
-            bool request_sent =
-                connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
-            if (!request_sent) {
-                ESP_LOGW(TAG, "Enrollment HTTP connect failed: errno=%d", errno);
-            }
-
-            memset(s_enrollment_http_io, 0, sizeof(s_enrollment_http_io));
-            const int header_length = snprintf(
-                s_enrollment_http_io, sizeof(s_enrollment_http_io),
-                "POST %s HTTP/1.1\r\nHost: %s\r\n"
-                "Content-Type: application/octet-stream\r\n"
-                "Content-Length: %u\r\nConnection: close\r\n"
-                "X-Device-ID: %s\r\nX-Detected: %s\r\n"
-                "X-Capture-ID: %s\r\nX-Audio-Offset: %u\r\n"
-                "X-Audio-Total: %u\r\n\r\n",
-                path, host_port, static_cast<unsigned>(length),
-                CONFIG_M5_PLATFORM_DEVICE_ID,
-                detected ? "true" : "false", capture_id,
-                static_cast<unsigned>(written),
-                static_cast<unsigned>(bytes));
-            request_sent = request_sent && header_length > 0 &&
-                header_length < static_cast<int>(sizeof(s_enrollment_http_io)) &&
-                send_all(fd, s_enrollment_http_io,
-                         static_cast<size_t>(header_length)) &&
-                send_all(fd, reinterpret_cast<const char *>(chunk), length);
-            memset(s_enrollment_http_io, 0, sizeof(s_enrollment_http_io));
-            const int received = request_sent
-                ? recv(fd, s_enrollment_http_io,
-                       sizeof(s_enrollment_http_io) - 1, 0) : -1;
-            status = 0;
-            if (received > 0)
-                sscanf(s_enrollment_http_io, "HTTP/%*s %d", &status);
-            shutdown(fd, SHUT_RDWR);
-            close(fd);
-            segment_sent = request_sent && status >= 200 && status < 300;
-            if (!segment_sent) vTaskDelay(pdMS_TO_TICKS(100));
+    constexpr size_t chunk_bytes = sizeof(s_enrollment_http_chunk);
+    // Keep exactly one TCP connection for the capture. The PCM remains in
+    // PSRAM and is copied through a bounded internal-RAM staging buffer, but
+    // opening one socket per staging chunk exhausts lwIP while artwork and
+    // bridge traffic are active. A single normal HTTP request preserves the
+    // same memory bound without multiplying sockets.
+    bool sent = false;
+    for (int attempt = 0; attempt < 3 && !sent; ++attempt) {
+        written = 0;
+        int fd = socket(addresses->ai_family, addresses->ai_socktype,
+                        addresses->ai_protocol);
+        if (fd < 0) {
+            ESP_LOGW(TAG, "Enrollment HTTP socket failed: errno=%d", errno);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
         }
-        sent = segment_sent;
-        if (segment_sent) written += length;
-        vTaskDelay(pdMS_TO_TICKS(10));
+        timeval timeout = {};
+        timeout.tv_sec = 3;
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        int no_delay = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay));
+        bool request_sent =
+            connect(fd, addresses->ai_addr, addresses->ai_addrlen) == 0;
+        if (!request_sent)
+            ESP_LOGW(TAG, "Enrollment HTTP connect failed: errno=%d", errno);
+
+        memset(s_enrollment_http_io, 0, sizeof(s_enrollment_http_io));
+        const int header_length = snprintf(
+            s_enrollment_http_io, sizeof(s_enrollment_http_io),
+            "POST %s HTTP/1.1\r\nHost: %s\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Length: %u\r\nConnection: close\r\n"
+            "X-Device-ID: %s\r\nX-Detected: %s\r\n"
+            "X-Capture-ID: %s\r\nX-Audio-Offset: 0\r\n"
+            "X-Audio-Total: %u\r\n\r\n",
+            path, host_port, static_cast<unsigned>(bytes),
+            CONFIG_M5_PLATFORM_DEVICE_ID,
+            detected ? "true" : "false", capture_id,
+            static_cast<unsigned>(bytes));
+        request_sent = request_sent && header_length > 0 &&
+            header_length < static_cast<int>(sizeof(s_enrollment_http_io)) &&
+            send_all(fd, s_enrollment_http_io,
+                     static_cast<size_t>(header_length));
+        while (request_sent && written < bytes) {
+            const size_t length = std::min(chunk_bytes, bytes - written);
+            memcpy(s_enrollment_http_chunk,
+                   reinterpret_cast<const uint8_t *>(pcm) + written, length);
+            request_sent = send_all(
+                fd, reinterpret_cast<const char *>(s_enrollment_http_chunk),
+                length);
+            if (request_sent) written += length;
+        }
+        memset(s_enrollment_http_io, 0, sizeof(s_enrollment_http_io));
+        const int received = request_sent
+            ? recv(fd, s_enrollment_http_io,
+                   sizeof(s_enrollment_http_io) - 1, 0) : -1;
+        status = 0;
+        if (received > 0)
+            sscanf(s_enrollment_http_io, "HTTP/%*s %d", &status);
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+        sent = request_sent && written == bytes &&
+            status >= 200 && status < 300;
+        if (!sent) vTaskDelay(pdMS_TO_TICKS(100));
     }
-    heap_caps_free(chunk);
     freeaddrinfo(addresses);
     ESP_LOGI(TAG, "Enrollment HTTP upload %s status=%d bytes=%u/%u",
              capture_id, status, static_cast<unsigned>(written),
@@ -952,6 +952,7 @@ void enrollment_capture_audio(const int16_t *pcm, size_t samples) {
 }
 
 void voice_recover_listener() {
+    s_voice_rearm_pending.store(false, std::memory_order_release);
     s_voice_waiting_for_response = false;
     s_voice_response_deadline_us = 0;
     if (s_voice_audio_lock &&
@@ -963,6 +964,7 @@ void voice_recover_listener() {
 }
 
 void voice_rearm_listener_preserve_face() {
+    s_voice_rearm_pending.store(false, std::memory_order_release);
     s_voice_waiting_for_response = false;
     s_voice_response_deadline_us = 0;
     s_voice_resume_after_sound = false;
@@ -971,6 +973,50 @@ void voice_rearm_listener_preserve_face() {
         voice_take_microphone();
         xSemaphoreGive(s_voice_audio_lock);
     }
+}
+
+bool voice_begin_response_wait() {
+    /* A streaming STT winner can finish the Codex turn before local VAD gets
+     * its first non-speech frame. Publish the waiting state before taking the
+     * shared I2S lock, then re-check the terminal marker under that lock. This
+     * makes both orderings converge on microphone ownership instead of letting
+     * a late local commit overwrite an already-completed server response. */
+    VoiceTurnPhase expected = VoiceTurnPhase::CAPTURING;
+    if (!s_voice_turn_phase.compare_exchange_strong(
+            expected, VoiceTurnPhase::COMMITTING,
+            std::memory_order_acq_rel)) {
+        if (expected == VoiceTurnPhase::TERMINAL) {
+            s_voice_waiting_for_response = false;
+            s_voice_response_deadline_us = 0;
+            ESP_LOGI(TAG,
+                     "Kizz local endpoint skipped after completed server turn");
+            return false;
+        }
+        ESP_LOGW(TAG, "Kizz local endpoint ignored in turn phase %u",
+                 static_cast<unsigned>(expected));
+        return false;
+    }
+    s_voice_waiting_for_response = true;
+    s_voice_response_deadline_us =
+        esp_timer_get_time() + VOICE_RESPONSE_TIMEOUT_US;
+    if (!s_voice_audio_lock ||
+        xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGW(TAG, "Kizz response handoff could not acquire audio lock");
+        return true;
+    }
+    if (s_voice_turn_phase.load(std::memory_order_acquire) ==
+        VoiceTurnPhase::TERMINAL) {
+        s_voice_waiting_for_response = false;
+        s_voice_response_deadline_us = 0;
+        voice_take_microphone();
+        ESP_LOGI(TAG,
+                 "Kizz late local endpoint preserved completed-turn microphone ownership");
+    } else {
+        voice_take_speaker();
+    }
+    xSemaphoreGive(s_voice_audio_lock);
+    return s_voice_turn_phase.load(std::memory_order_acquire) !=
+        VoiceTurnPhase::TERMINAL;
 }
 
 void voice_feed_task(void *) {
@@ -1049,6 +1095,14 @@ void voice_fetch_task(void *) {
     uint32_t turn_id = 0;
     uint32_t audio_epoch = s_voice_audio_epoch;
     for (;;) {
+        /* A terminal server result can arrive while this task is blocked in a
+         * websocket send. Let the callback mark the turn terminal immediately,
+         * but perform the speaker -> microphone handoff here after that send
+         * returns. Otherwise feed() resumes before fetch() can drain the AFE. */
+        if (s_voice_rearm_pending.exchange(false,
+                                           std::memory_order_acq_rel)) {
+            voice_rearm_listener_preserve_face();
+        }
         if (audio_epoch != s_voice_audio_epoch) {
             audio_epoch = s_voice_audio_epoch;
             wake_detected = false;
@@ -1114,6 +1168,8 @@ void voice_fetch_task(void *) {
             silence_frames = 0;
             ++turn_id;
             s_voice_remote_endpoint_pending = false;
+            s_voice_turn_phase.store(VoiceTurnPhase::CAPTURING,
+                                     std::memory_order_release);
             m5_platform_voice_feedback("listening");
             if (!voice_send_start()) {
                 ESP_LOGW(TAG, "Kizz voice turn could not start; returning to listening");
@@ -1162,12 +1218,9 @@ void voice_fetch_task(void *) {
                 (maximum_reached ? "max_duration" : "vad_silence");
             const int64_t trailing_silence_us = std::max<int64_t>(
                 0, now - last_command_speech_at);
-            if (s_voice_audio_lock &&
-                xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
-                voice_take_speaker();
-                xSemaphoreGive(s_voice_audio_lock);
-            }
-            const size_t sent_audio_bytes = voice_flush_buffered_audio();
+            const bool commit_started = voice_begin_response_wait();
+            const size_t sent_audio_bytes = commit_started
+                ? voice_flush_buffered_audio() : 0;
             ESP_LOGI(TAG,
                      "Kizz utterance committed: reason=%s wake_to_commit=%lldms "
                      "command=%lldms silence=%lldms captured=%u sent=%u vad=%u/%u",
@@ -1205,14 +1258,17 @@ void voice_fetch_task(void *) {
             utterance_open = false;
             utterance_opened_at = 0;
             last_command_speech_at = 0;
-            s_voice_waiting_for_response = true;
-            s_voice_response_deadline_us =
-                esp_timer_get_time() + VOICE_RESPONSE_TIMEOUT_US;
-            if (sent_audio_bytes != command_audio_bytes)
+            const bool terminal_received =
+                s_voice_turn_phase.load(std::memory_order_acquire) ==
+                VoiceTurnPhase::TERMINAL;
+            if (!terminal_received && sent_audio_bytes != command_audio_bytes)
                 ESP_LOGW(TAG, "Kizz command audio transport incomplete: captured=%u sent=%u",
                          static_cast<unsigned>(command_audio_bytes),
                          static_cast<unsigned>(sent_audio_bytes));
-            if (!voice_send_text("{\"type\":\"commit\"}")) {
+            if (terminal_received) {
+                ESP_LOGI(TAG,
+                         "Kizz skipped redundant device commit after server terminal result");
+            } else if (!voice_send_text("{\"type\":\"commit\"}")) {
                 ESP_LOGW(TAG, "Kizz voice commit failed; returning to listening");
                 voice_recover_listener();
             }
@@ -1258,15 +1314,14 @@ void voice_fetch_task(void *) {
             (void)enrollment_send_text(telemetry);
             wake_detected = false;
             command_armed = false;
-            s_voice_waiting_for_response = true;
-            s_voice_response_deadline_us =
-                esp_timer_get_time() + VOICE_RESPONSE_TIMEOUT_US;
-            if (s_voice_audio_lock &&
-                xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
-                voice_take_speaker();
-                xSemaphoreGive(s_voice_audio_lock);
-            }
-            if (!voice_send_text("{\"type\":\"commit\"}")) {
+            const bool commit_started = voice_begin_response_wait();
+            const bool terminal_received =
+                s_voice_turn_phase.load(std::memory_order_acquire) ==
+                VoiceTurnPhase::TERMINAL;
+            if (!commit_started || terminal_received) {
+                ESP_LOGI(TAG,
+                         "Kizz skipped redundant empty commit after server terminal result");
+            } else if (!voice_send_text("{\"type\":\"commit\"}")) {
                 ESP_LOGW(TAG, "Kizz empty voice commit failed; returning to listening");
                 voice_recover_listener();
             }
@@ -1440,7 +1495,7 @@ void enrollment_ws_event(void *, esp_event_base_t, int32_t event_id,
                      "{\"type\":\"wake_config_applied\","
                      "\"probability_cutoff\":%.3f,\"sliding_window\":%d,"
                      "\"end_silence_ms\":%d,\"max_utterance_ms\":%d,"
-                     "\"diagnostics_enabled\":%s,\"wake_model\":\"hiphi_kizz_ordered\","
+                     "\"diagnostics_enabled\":%s,\"wake_model\":\"kizz_control_compact_ctc_v1\","
                      "\"c_min_rms_dbfs\":%.1f,\"c_max_clip_percent\":%u,"
                      "\"capture_all_wakes\":%s}",
                      cutoff->valuedouble, window->valueint,
@@ -1959,6 +2014,13 @@ extern "C" void m5_platform_voice_network_ready(void) {
 extern "C" void m5_platform_voice_feedback(const char *state) {
 #if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
     if (!state || !s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
+    bool defer_terminal_rearm = false;
+    if (strcmp(state, "success") == 0 || strcmp(state, "clarify") == 0 ||
+        strcmp(state, "error") == 0) {
+        const VoiceTurnPhase prior = s_voice_turn_phase.exchange(
+            VoiceTurnPhase::TERMINAL, std::memory_order_acq_rel);
+        defer_terminal_rearm = prior == VoiceTurnPhase::COMMITTING;
+    }
     if (strcmp(state, "listening") != 0) stackchan_end_listening_pose();
     if (strcmp(state, "listening") == 0) {
         m5_platform_voice_clear_conversation();
@@ -1978,7 +2040,14 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_PROUD;
         // Successful voice actions are acknowledged visually. Sound is
         // reserved for explicit controls or a genuine attention request.
-        voice_rearm_listener_preserve_face();
+        if (defer_terminal_rearm) {
+            s_voice_waiting_for_response = false;
+            s_voice_response_deadline_us = 0;
+            s_voice_resume_after_sound = false;
+            s_voice_rearm_pending.store(true, std::memory_order_release);
+        } else {
+            voice_rearm_listener_preserve_face();
+        }
         m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_DANCE);
     } else if (strcmp(state, "clarify") == 0) {
         s_voice_listening_visual = false;
@@ -1986,7 +2055,14 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
         s_stackchan_motion.face_cue = M5_PLATFORM_STACKCHAN_FACE_HUSH;
         // A false wake or an empty turn must disappear quietly. In particular,
         // do not punish the room with the LOST cue after six seconds of silence.
-        voice_rearm_listener_preserve_face();
+        if (defer_terminal_rearm) {
+            s_voice_waiting_for_response = false;
+            s_voice_response_deadline_us = 0;
+            s_voice_resume_after_sound = false;
+            s_voice_rearm_pending.store(true, std::memory_order_release);
+        } else {
+            voice_rearm_listener_preserve_face();
+        }
     } else {
         s_voice_listening_visual = false;
         s_voice_waiting_for_response = false;
