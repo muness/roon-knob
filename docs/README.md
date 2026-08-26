@@ -26,6 +26,7 @@ Developer reference for building and extending the firmware.
 
 - [DEVELOPMENT.md](dev/DEVELOPMENT.md) - Build setup, PC simulator, bridge development
 - [IMPLEMENTATION_NOTES.md](dev/IMPLEMENTATION_NOTES.md) - Architecture overview, input/display systems
+- [KIZZ_VOICE.md](dev/KIZZ_VOICE.md) - Kizz wake word, transcription, action path, and observed STT evidence
 - [KCONFIG.md](dev/KCONFIG.md) - ESP-IDF configuration options
 - [NVS_STORAGE.md](dev/NVS_STORAGE.md) - Non-volatile storage (config persistence)
 - [BOOT_SEQUENCE.md](dev/BOOT_SEQUENCE.md) - System initialization flow

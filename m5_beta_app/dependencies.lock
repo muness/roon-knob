@@ -222,7 +222,7 @@ dependencies:
       type: service
     version: 0.6.0
   espressif/esp-dl:
-    component_hash: 0d5dd7fadd04854a82e1404f871e16980002a46dfe9796e52626d3c8d6566ad2
+    component_hash: f67408f364f2faa1178a5f0eb2f0fcdf504b68902fa4f3bcd6fa9f797e1ed623
     dependencies:
     - name: espressif/dl_fft
       registry_url: https://components.espressif.com
@@ -248,7 +248,7 @@ dependencies:
     - esp32s2
     - esp32s3
     - esp32s31
-    version: 3.3.9
+    version: 3.3.10
   espressif/esp-dsp:
     component_hash: 12e44db246517a627bc0fe2b255b8335410c0215c98bfba2df5a8e3edea839ef
     dependencies:
@@ -302,7 +302,7 @@ dependencies:
       require: private
       version: '>=5.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 2.5.1
   espressif/esp-tflite-micro:
@@ -705,12 +705,12 @@ dependencies:
       type: service
     version: 1.22.3
   m5stack/m5gfx:
-    component_hash: b07a5242ed42389520da0ef969e38d85168398ac21bdc80ea621ca887b09f904
+    component_hash: a0d59be99d469d0144bacf0ddf420cdd2a3328f6c392f074b590b56c20b84763
     dependencies: []
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.2.27
+    version: 0.2.28
   m5stack/m5unified:
     component_hash: 85ab29e360fde0623ce30c8b8323d9f2c00acfffade19b104d6b7741b592e9ef
     dependencies:
@@ -723,7 +723,7 @@ dependencies:
       type: service
     version: 0.2.19
   micro_wake_word:
-    component_hash: 899e841f71c36ea27a2c72121cf534e36a7ed261233dcb60549315c76f282153
+    component_hash: e6f6423df47402e5389fdcbcfe379f81a419ccf8d3170713f796d6be21deb8b9
     dependencies:
     - name: espressif/esp-tflite-micro
       version: '*'
@@ -733,14 +733,15 @@ dependencies:
       git: https://github.com/open-horizon-labs/micro_wake_word_standalone.git
       path: .
       type: git
-    version: 9420f9a5101ac2fd4bfd1d7d07cb8e052cd589c3
+    version: 13581e0aacc2e73b3aa384b43463c953517cfe07
 direct_dependencies:
 - espressif/arduino-esp32
+- espressif/esp-sr
 - espressif/esp_websocket_client
 - espressif/mdns
 - idf
 - m5stack/m5unified
 - micro_wake_word
-manifest_hash: 4e3ee27719b4014e2f8eb92c16eac99487689e3c6c32790f21cd1a5e557e3269
+manifest_hash: 5ad73d6439c5d1da6973ae2f40763f2c0272e7cb777cce1c5696bf61e3eda409
 target: esp32s3
 version: 2.0.0

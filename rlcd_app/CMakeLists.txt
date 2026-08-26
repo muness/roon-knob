@@ -16,6 +16,6 @@ list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 # M5Unified is a Tough-only display dependency.  Keep the shared component
 # directory available for common code without making RLCD resolve the
 # unrelated M5 component (and its managed dependencies).
-set(EXCLUDE_COMPONENTS m5_platform)
+set(EXCLUDE_COMPONENTS m5_platform kizz_wake_word)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(hiphi_rlcd_42)

@@ -1,4 +1,4 @@
-set(m5_platform_requires m5stack__m5unified esp_websocket_client json esp-sr nvs_flash)
+set(m5_platform_requires m5stack__m5unified)
 idf_build_get_property(m5_platform_target HIPHI_M5_TARGET)
 if(m5_platform_target STREQUAL "dial" OR
    m5_platform_target STREQUAL "stackchan" OR
@@ -6,7 +6,8 @@ if(m5_platform_target STREQUAL "dial" OR
     list(APPEND m5_platform_requires m5_official)
 endif()
 if(m5_platform_target STREQUAL "stackchan")
-    list(APPEND m5_platform_requires kizz_wake_word)
+    list(APPEND m5_platform_requires
+        esp_websocket_client json espressif__esp-sr nvs_flash lwip kizz_wake_word)
 endif()
 
 idf_component_register(

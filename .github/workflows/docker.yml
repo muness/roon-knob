@@ -1503,6 +1503,7 @@ jobs:
 
           for asset in $(find pr-preview -maxdepth 1 -type f -printf '%f\n'); do
             curl --fail --silent --show-error --location \
+              --retry 36 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
               "${PREVIEW_BASE}/${asset}" --output "deployed-preview/${asset}"
             cmp "pr-preview/${asset}" "deployed-preview/${asset}"
           done

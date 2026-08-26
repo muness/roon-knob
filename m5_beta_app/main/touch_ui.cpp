@@ -985,10 +985,9 @@ void flash_action(const char *notice = nullptr) {
             m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PLAY);
         else if (std::strcmp(notice, "PAUSE") == 0)
             m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_PAUSE);
-        else if (std::strcmp(notice, "CONNECTED") == 0)
-            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_CONNECTED);
-        else if (std::strcmp(notice, "NEW ROOM") == 0)
-            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_NEW_ROOM);
+        // Connectivity and room changes are ambient state, not requests for
+        // attention. Keep their visual flash without stealing the shared I2S
+        // controller from the always-on microphone for a chirp.
     }
 #endif
     s.dirty = true;
@@ -2227,8 +2226,8 @@ extern "C" void touch_ui_set_status(bool v){
         s.online=v;if(v)s.ever_online=true;s.dirty=true;
         if (lost && s.body_enabled)
             m5_platform_stackchan_expression_trigger(M5_PLATFORM_STACKCHAN_SAD);
-        if (lost)
-            m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_LOST);
+        // A transient transport loss is visible status, not an attention cue.
+        // In particular, do not create an audio-handoff/reconnect feedback loop.
         if (found) flash_action("CONNECTED");
     }
 }
@@ -2239,10 +2238,9 @@ extern "C" void touch_ui_set_zone_name(const char *v){
         /* Startup can publish the configured label, clear it while resolving,
          * then publish it again. A room response is only truthful after the
          * first playback snapshot has established a stable session. */
-        const bool changed=s.zone_seen&&s.playback_seen&&s.online&&zone[0];
         copy_text(s.zone,sizeof(s.zone),zone);s.dirty=true;
         if(zone[0])s.zone_seen=true;
-        if(changed)flash_action("NEW ROOM");
+        // Room changes are ambient state; do not announce them acoustically.
     }
 }
 extern "C" void touch_ui_set_network_status(const char *v){if(std::strcmp(s.network,v?v:"")!=0){copy_text(s.network,sizeof(s.network),v);s.dirty=true;}}
@@ -2302,6 +2300,13 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
         s.track_seen=true;
     }
     s.playback_seen=true;
+    /* A transient bridge timeout can leave the key intact while the first
+     * artwork worker never obtains pixels. The presentation layer correctly
+     * deduplicates the unchanged key, so retry from the next healthy metadata
+     * update until the image is actually resident. The atomic loading guard
+     * keeps this bounded to one worker at a time. */
+    if (s.artwork_key[0] && !s.artwork_pixels)
+        start_stackchan_artwork_fetch();
     if(playback_changed&&!changed)flash_action(p?"PLAY":"PAUSE");
     if (changed && p && s.online) {
 #if HIPHI_M5_TARGET_ID == 4
@@ -2310,8 +2315,6 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
         s.track_reveal_started=esp_timer_get_time();
         s.track_reveal_until=s.track_reveal_started+7000000;
 #endif
-        m5_platform_stackchan_sound_trigger(
-            M5_PLATFORM_STACKCHAN_SOUND_NEW_TRACK);
         const bool dance_started = s.body_enabled &&
             m5_platform_stackchan_expression_trigger(
                 M5_PLATFORM_STACKCHAN_DANCE);

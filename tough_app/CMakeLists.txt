@@ -17,6 +17,8 @@ endif()
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
 
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
+# Kizz's managed wake-word dependency must not enter sibling target graphs.
+set(EXCLUDE_COMPONENTS kizz_wake_word)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(HIPHI_M5_TARGET ${HIPHI_M5_TARGET})

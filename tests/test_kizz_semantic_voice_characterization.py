@@ -3,6 +3,10 @@ from pathlib import Path
 
 SOURCE = Path(__file__).parents[1] / "m5_beta_app/main/touch_ui.cpp"
 source = SOURCE.read_text()
+wake_source = (
+    Path(__file__).parents[1]
+    / "components/kizz_wake_word/kizz_wake_word.cpp"
+).read_text()
 
 apply_start = source.index('extern "C" void touch_ui_apply_semantic_family')
 apply_end = source.index('extern "C" bool touch_ui_semantic_apply', apply_start)
@@ -38,4 +42,12 @@ process_end = source.index("void process_input", process_start)
 assert "kizz_semantic_hit_test" in source[process_start:process_end]
 
 assert "if (!kizz_semantic_apply_changed()) return true;" in source
+
+# ARMED must mean the detector is scheduled ahead of the always-on AFE fetch
+# and can absorb short processing bursts without dropping a wake phrase.
+assert "ExternalAudioMicrophone(16384)" in wake_source
+assert 'detection_task, "kizz_mww", 6144, nullptr, 6' in wake_source
+assert "vTaskDelay(1);" in wake_source
+assert "vTaskDelay(pdMS_TO_TICKS(1));" not in wake_source
+
 print("Kizz semantic voice lifecycle characterization passed")

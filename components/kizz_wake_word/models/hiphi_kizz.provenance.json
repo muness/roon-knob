@@ -2,12 +2,12 @@
   "schema_version": 2,
   "artifact": {
     "file": "hiphi_kizz.tflite",
-    "role": "device_adapted_model",
-    "sha256": "4e69c38ad5967bf7bf39e83da1f3d411615f9bfae63aee988d585755fa51016d"
+    "role": "multicondition_device_adapt_checkpoint_100",
+    "sha256": "76250d0cef49f893df4724ea6cce0e87b8a8d0d63cf10fbe23c0e624298871ff"
   },
   "framework": {
     "repository": "open-horizon-labs/microWakeWord",
-    "commit": "d8a42ec689ba864b793eacb6c4ba3d175e5f7fc2",
+    "commit": "16628e90338a197b8a53ddce3af4af6ff24079ad",
     "architecture": {
       "type": "mixednet",
       "stride": 3,
@@ -22,44 +22,78 @@
   "device_corpus": {
     "corpus_id": "hiphi-device-v1",
     "device_profile": "m5stack_stackchan_k151_cores3_room_scale_v2",
-    "manifest_sha256": "4dcca5d6ed68ecdb623fa516cf49fca452281ea69fd214b6be923f25533cd6e6",
-    "training_positives": 9,
-    "held_out_positives": 1,
-    "retained_hard_negatives": 8,
+    "manifest_sha256": "dbe2f1a08212ae7eb57728beeebd36cdcac0e264455c9b08bac97803b554c810",
+    "training_positives": 77,
+    "training_hard_negatives": 56,
+    "training_ambient_negatives": 2,
+    "held_out_positives": 14,
+    "held_out_hard_negatives": 10,
     "audio_committed_to_git": false
   },
+  "training": {
+    "recipe": "v19-multicondition-device-adapt",
+    "training_config_sha256": "f82fe69bcb0444b9aed5805fcea1eb3ba4c7e16cd3215112e1d956972d069336",
+    "sampling_ledger_sha256": "ae839a3230ab0f72cbf90927306e6e316ea8528bac72c552fc509ce4414bcef8",
+    "initial_artifact_sha256": "b8d5bf399e7466f2ae19cf0dd2ff97b2e92f0c3745bae28cd546e44a6c0910e5",
+    "selected_checkpoint": 100,
+    "selected_weights_sha256": "a7b134dd3eb54d80f4c8141566e3b5d5bb14e556f095f11d64383b22c410f091",
+    "scheduled_steps": 400,
+    "learning_rates": [0.000005, 0.000001],
+    "batch_size": 64,
+    "realized_sampling_shares": {
+      "piper_positive": 0.15625,
+      "designed_positive": 0.25,
+      "device_positive": 0.140625,
+      "piper_negative": 0.15625,
+      "designed_negative": 0.09375,
+      "targeted_negative": 0.203125
+    }
+  },
   "operating_point": {
-    "probability_cutoff": 0.8,
+    "probability_cutoff": 0.7,
     "sliding_window": 1
   },
   "selection": {
-    "device_adapted_positive_accepts": 9,
-    "device_adapted_positive_attempts": 10,
-    "device_adapted_hard_negative_accepts": 0,
-    "device_adapted_hard_negative_attempts": 8,
-    "device_adapted_hard_negative_maximum_probability": 0.737,
-    "broad_positive_accepts": 8,
-    "broad_positive_attempts": 10,
-    "broad_hard_negative_accepts": 0,
-    "broad_hard_negative_attempts": 8,
-    "broad_hard_negative_maximum_probability": 0.757,
-    "decision": "deploy the device-adapted model as the single on-device detector"
+    "speaker_replay": {
+      "previous_model": {
+        "positive_accepts": 6,
+        "positive_attempts": 8,
+        "confusable_accepts": 4,
+        "confusable_attempts": 8
+      },
+      "checkpoint_100": {
+        "expanded_positive_accepts": 8,
+        "expanded_positive_attempts": 8,
+        "expanded_confusable_accepts": 3,
+        "expanded_confusable_attempts": 8,
+        "repeat_positive_accepts": 4,
+        "repeat_positive_attempts": 4,
+        "repeat_confusable_accepts": 3,
+        "repeat_confusable_attempts": 4
+      },
+      "rejected_checkpoint_200": {
+        "positive_accepts": 5,
+        "positive_attempts": 8,
+        "confusable_accepts": 1,
+        "confusable_attempts": 8
+      },
+      "rejected_checkpoint_400": {
+        "diverse_positive_accepts": 1,
+        "diverse_positive_attempts": 4,
+        "confusable_accepts": 0,
+        "confusable_attempts": 6
+      }
+    },
+    "decision": "promote checkpoint 100 for speaker-replay recall; confusable false accepts and live-human qualification remain open"
   },
   "physical_runtime": {
     "device": "Kizz/StackChan K151 with CoreS3",
     "cpu_frequency_mhz": 160,
-    "idle_observation_seconds": 30,
-    "idle_dropped_audio_frames": 0,
-    "replayed_human_positive_accepts": 4,
-    "replayed_human_positive_attempts": 5,
-    "replayed_hard_negative_accepts": 0,
-    "replayed_hard_negative_attempts": 3,
-    "known_false_reject": "muness-natural-20260821-a",
+    "speaker_replay_setup": "MacBook speaker adjacent to Kizz at output volume 50",
+    "failure_then_valid_turn_recovered": true,
+    "websocket_resets": 0,
+    "device_reboots": 0,
+    "qualification_status": "speaker replay improved; live-human, distance, and ambient qualification remain open",
     "live_human_qualified": false
-  },
-  "rejected_candidate": {
-    "design": "sequential maximum-probability ensemble of broad and device-adapted models",
-    "reason": "continuous microphone-buffer loss at both 160 MHz and 240 MHz",
-    "physical_ensemble_qualified": false
   }
 }

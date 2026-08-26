@@ -15,6 +15,9 @@
 #include "platform/platform_power.h"
 #include "power_debug_web.h"
 #include "os_mutex.h"
+#if HIPHI_M5_TARGET_ID == 4
+#include "kizz_wake_word.h"
+#endif
 
 #include <esp_err.h>
 #include <esp_heap_caps.h>
@@ -984,6 +987,55 @@ static esp_err_t sta_restart_handler(httpd_req_t *req) {
   return ESP_OK;  // unreachable
 }
 
+#if HIPHI_M5_TARGET_ID == 4
+static esp_err_t sta_wake_config_get_handler(httpd_req_t *req) {
+  float cutoff = 0.0f;
+  size_t window = 0;
+  kizz_wake_word_get_config(&cutoff, &window);
+  char body[96];
+  snprintf(body, sizeof(body),
+           "{\"probability_cutoff\":%.3f,\"sliding_window\":%u}",
+           (double)cutoff, (unsigned)window);
+  httpd_resp_set_type(req, "application/json");
+  return httpd_resp_sendstr(req, body);
+}
+
+static esp_err_t sta_wake_config_post_handler(httpd_req_t *req) {
+  char body[160] = {0};
+  int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+    return ESP_FAIL;
+  }
+  body[received] = '\0';
+
+  char cutoff_text[16] = {0};
+  char window_text[8] = {0};
+  if (!get_form_field(body, "probability_cutoff", cutoff_text,
+                      sizeof(cutoff_text)) ||
+      !get_form_field(body, "sliding_window", window_text,
+                      sizeof(window_text))) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                        "probability_cutoff and sliding_window are required");
+    return ESP_FAIL;
+  }
+  char *cutoff_end = NULL;
+  char *window_end = NULL;
+  float cutoff = strtof(cutoff_text, &cutoff_end);
+  unsigned long window = strtoul(window_text, &window_end, 10);
+  if (!cutoff_end || *cutoff_end != '\0' || !window_end ||
+      *window_end != '\0' ||
+      !kizz_wake_word_configure(cutoff, (size_t)window)) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                        "cutoff must be 0.10-0.99; window must be 1-20");
+    return ESP_FAIL;
+  }
+  ESP_LOGI(TAG, "Wake calibration updated: cutoff=%.3f window=%lu",
+           (double)cutoff, window);
+  return sta_wake_config_get_handler(req);
+}
+#endif
+
 // ── STA-mode root redirect ──────────────────────────────────────────────────
 
 static esp_err_t sta_root_handler(httpd_req_t *req) {
@@ -1007,13 +1059,22 @@ bool captive_portal_start_sta(void) {
   }
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 8;
+  config.max_uri_handlers = 10;
+#if HIPHI_M5_TARGET_ID == 4
+  /* Kizz also runs the AFE, wake model, and two WebSocket clients. Its
+   * STA handlers keep large response bodies on the heap, so a 6 KiB server stack
+   * is sufficient and preserves internal RAM for Wi-Fi DMA and sockets. */
+  config.stack_size = 6144;
+#else
   config.stack_size = 16384;
+#endif
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
 
-  if (httpd_start(&s_server, &config) != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start HTTP server");
+  esp_err_t start_err = httpd_start(&s_server, &config);
+  if (start_err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start HTTP server: %s (0x%x)",
+             esp_err_to_name(start_err), start_err);
     unlock_server_lifecycle();
     return false;
   }
@@ -1035,6 +1096,14 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t restart = {.uri = "/api/restart", .method = HTTP_POST, .handler = sta_restart_handler};
   if (!register_uri_handler(&restart)) goto fail;
+
+#if HIPHI_M5_TARGET_ID == 4
+  httpd_uri_t wake_config_get = {.uri = "/api/wake-config", .method = HTTP_GET, .handler = sta_wake_config_get_handler};
+  if (!register_uri_handler(&wake_config_get)) goto fail;
+
+  httpd_uri_t wake_config_post = {.uri = "/api/wake-config", .method = HTTP_POST, .handler = sta_wake_config_post_handler};
+  if (!register_uri_handler(&wake_config_post)) goto fail;
+#endif
 
   if (!power_debug_web_register(s_server)) goto fail;
 
