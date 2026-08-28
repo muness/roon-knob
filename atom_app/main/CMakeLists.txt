@@ -22,6 +22,7 @@ set(SRC_FILES
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
+    "../../common/wifi_portal_form.c"
     "../../common/power_debug_web.c"
     "../../common/m5_terminal_power.c"
     "../../common/platform/platform_log.c"

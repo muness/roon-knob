@@ -208,6 +208,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "frame_display_preferences_set_show_ip(show_ip)",
     ),
     "frame_app/main/eink_ui.c": (
+        '"controller_utf8.h"',
+        "controller_utf8_decode_next(&cursor)",
         "ART_CROP_LIMIT_PERCENT 10",
         "ART_CACHE_SIZE ((ART_W * ART_H) / 2)",
         '"eink_acep6", "smart"',
@@ -280,6 +282,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         '"../../frame_app/main/captive_portal.c"',
         '"../../common/power_debug_web.c"',
         '"../../common/wifi_portal_form.c"',
+        '"../../common/controller_text_ascii.c"',
         "PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS=0",
     ),
     "idf_app/main/CMakeLists.txt": (
@@ -289,15 +292,20 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "frame_app/main/CMakeLists.txt": (
         '"../../common/power_debug_web.c"',
         '"../../common/wifi_portal_form.c"',
+        '"../../common/controller_utf8.c"',
         '"frame_display_preferences.c"',
     ),
     "tough_app/main/CMakeLists.txt": (
         '"../../common/power_debug_web.c"',
         '"../../common/wifi_portal_form.c"',
     ),
-    "atom_app/main/CMakeLists.txt": ('"../../common/power_debug_web.c"',),
+    "atom_app/main/CMakeLists.txt": (
+        '"../../common/power_debug_web.c"',
+        '"../../common/wifi_portal_form.c"',
+    ),
     "m5_beta_app/main/CMakeLists.txt": (
         '"../../common/power_debug_web.c"',
+        '"../../common/wifi_portal_form.c"',
     ),
     ".github/RELEASE_TEMPLATE.md": (
         "All nine physical controllers now scan for nearby 2.4 GHz",

@@ -5,6 +5,7 @@
 #include "eink_display.h"
 #include "eink_font.h"
 #include "bridge_client.h"
+#include "controller_utf8.h"
 #include "platform/platform_http.h"
 #include "platform/platform_time.h"
 #include "platform/platform_log.h"
@@ -137,23 +138,33 @@ static void draw_hline(uint16_t x, uint16_t y, uint16_t w, uint8_t color) {
 // Truncate string to fit width, adding "..." if needed
 static void truncate_to_fit(const char *src, char *dst, size_t dst_len,
                             int max_width, const eink_font_t *font) {
-    int len = strlen(src);
     int w = eink_font_string_width(src, font);
-    if (w <= max_width) {
-        snprintf(dst, dst_len, "%s", src);
+    const size_t source_bytes = strlen(src);
+    if (w <= max_width && source_bytes < dst_len) {
+        memcpy(dst, src, source_bytes + 1);
         return;
     }
     // Find max chars that fit with "..." suffix
     int ellipsis_w = eink_font_string_width("...", font);
     int fit_w = max_width - ellipsis_w;
-    int chars = 0;
-    for (int i = 0; i < len && i < (int)dst_len - 4; i++) {
-        if ((i + 1) * font->width > fit_w) break;
-        chars = i + 1;
+    size_t bytes = 0;
+    int used_width = 0;
+    const char *cursor = src;
+    while (*cursor && bytes < dst_len - 4) {
+        const char *codepoint_start = cursor;
+        const uint32_t codepoint = controller_utf8_decode_next(&cursor);
+        const size_t codepoint_bytes = (size_t)(cursor - codepoint_start);
+        const int codepoint_width = eink_font_codepoint_width(codepoint, font);
+        if (used_width + codepoint_width > fit_w ||
+            bytes + codepoint_bytes >= dst_len - 3) {
+            break;
+        }
+        bytes += codepoint_bytes;
+        used_width += codepoint_width;
     }
-    memcpy(dst, src, chars);
-    dst[chars] = '\0';
-    strncat(dst, "...", dst_len - chars - 1);
+    memcpy(dst, src, bytes);
+    dst[bytes] = '\0';
+    strncat(dst, "...", dst_len - bytes - 1);
 }
 
 // ── Status icon drawing ─────────────────────────────────────────────────────

@@ -25,6 +25,8 @@ set(SRC_FILES
     "../../common/controller_input_mailbox.c"
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
+    "../../common/controller_text_ascii.c"
+    "../../common/controller_utf8.c"
     "../../common/wifi_portal_form.c"
     "../../common/wifi_manager.c"
     "../../common/power_debug_web.c"

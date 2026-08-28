@@ -194,11 +194,18 @@ jobs:
             -o /tmp/test-rlcd-st7305-window
           /tmp/test-rlcd-st7305-window
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
-            -Irlcd_app/main \
+            -Icommon -Irlcd_app/main \
             rlcd_app/tests/rlcd_text_test.c \
             rlcd_app/main/rlcd_text.c \
+            common/controller_text_ascii.c common/controller_utf8.c \
             -o /tmp/test-rlcd-text
           /tmp/test-rlcd-text
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon -Iframe_app/main \
+            frame_app/tests/eink_font_utf8_test.c \
+            frame_app/main/eink_font.c common/controller_utf8.c \
+            -o /tmp/test-eink-font-utf8
+          /tmp/test-eink-font-utf8
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Icommon \
             rlcd_app/tests/rlcd_input_profile_test.c \
