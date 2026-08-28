@@ -39,7 +39,7 @@ REQUIRED = {
         "otherwise-unused auxiliary ESP32 once",
     ),
     ".github/workflows/docker.yml": (
-        "build-knob-aux, build-ble-off",
+        "build-m5-betas, build-knob-aux]",
         "Download Waveshare Dial auxiliary parking firmware",
         "manifest-knob-aux-${PREVIEW_ID}.json",
         "Flash HiPhi Dial + one-time auxiliary power step",

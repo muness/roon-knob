@@ -954,49 +954,10 @@ jobs:
             hiphi_knob_aux_park_merged.bin
           retention-days: 30
 
-  build-ble-off:
-    name: build-without-ble-hid-boundary
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Restore BLE-off compiler cache
-        uses: actions/cache@v5
-        with:
-          path: .ci/ccache-ble-off
-          key: ${{ runner.os }}-esp-idf-v5.5.5-ble-off-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-ble-off-ccache-
-
-      - name: Build ESP32-S3 capability-disabled fixture
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.5.5
-          target: esp32s3
-          path: tests/fixtures/rk_ble_hid_off
-          extra_docker_args: >-
-            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-ble-off
-            -e CCACHE_MAXSIZE=500M
-            -e CCACHE_COMPRESS=1
-          command: >-
-            set -e;
-            ccache --zero-stats;
-            idf.py build;
-            ! grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
-            ! grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
-            grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
-            ! grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
-            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host_stub/librk_ble_hid_host_stub[.]a[(]rk_ble_hid_host_stub[.]c[.]obj[)][[:space:]]*$" build/rk_ble_hid_off.map;
-            ! grep -F "rk_ble_hid_host.c.obj" build/rk_ble_hid_off.map;
-            ! grep -E "nimble_hidh.c.obj|esp_hidh.c.obj" build/compile_commands.json;
-            ccache --show-stats
-
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -1234,7 +1195,7 @@ jobs:
     concurrency:
       group: firmware-pages
       cancel-in-progress: false
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux, build-ble-off]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
