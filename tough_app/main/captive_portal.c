@@ -9,6 +9,7 @@
 #include "controller_config.h"
 #include "touch_ui.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 #include "bridge_client.h"
 #include "platform/platform_display.h"
 #include "platform/platform_identity.h"
@@ -332,42 +333,20 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   }
   const rk_cfg_t *cfg = &snapshot.value;
 
-  rk_wifi_network_t *scan = heap_caps_calloc(
-      RK_WIFI_SCAN_MAX_NETWORKS, sizeof(*scan), MALLOC_CAP_8BIT);
   char *scan_options = heap_caps_calloc(1, 3072, MALLOC_CAP_8BIT);
   char *wifi_html = heap_caps_calloc(1, 1024, MALLOC_CAP_8BIT);
-  if (!scan || !scan_options || !wifi_html) {
-    free(scan);
+  if (!scan_options || !wifi_html) {
     free(scan_options);
     free(wifi_html);
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
-  rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-  /* Every setup page promises a network dropdown. Start the non-blocking scan
-   * on the first visit instead of relying on a board-specific display to do
-   * it as a side effect. */
-  if (scan_state == RK_WIFI_SCAN_IDLE || scan_state == RK_WIFI_SCAN_FAILED) {
-    (void)wifi_mgr_scan_start();
-    scan_state = wifi_mgr_scan_state();
-  }
-  size_t scan_count = scan_state == RK_WIFI_SCAN_READY
-                          ? wifi_mgr_scan_results_copy(scan, RK_WIFI_SCAN_MAX_NETWORKS)
-                          : 0;
-  int scan_pos = 0;
-  for (size_t i = 0; i < scan_count && scan_pos < 3071; ++i) {
-    char escaped[128];
-    html_escape(scan[i].ssid, escaped, sizeof(escaped));
-    scan_pos += snprintf(scan_options + scan_pos, 3072 - scan_pos,
-                         "<option value='%s'>%s (%d dBm)</option>",
-                         escaped, escaped, (int)scan[i].rssi);
-  }
+  rk_wifi_portal_scan_t portal_scan = {0};
+  rk_wifi_portal_scan_prepare(&portal_scan, false);
+  rk_wifi_portal_render_options(&portal_scan, scan_options, 3072);
   const char *scan_placeholder =
-      scan_state == RK_WIFI_SCAN_RUNNING ? "Scanning for nearby networks..." :
-      scan_state == RK_WIFI_SCAN_FAILED ? "Scan failed - reload to retry" :
-      scan_count == 0 ? "No nearby networks found" :
-      "Choose a nearby network";
-  const char *scan_refresh = scan_state == RK_WIFI_SCAN_RUNNING
+      rk_wifi_portal_scan_placeholder(&portal_scan);
+  const char *scan_refresh = rk_wifi_portal_scan_should_refresh(&portal_scan)
       ? "setTimeout(function(){location.reload();},1200);" : "";
 
   int pos = 0;
@@ -391,7 +370,6 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   // PSRAM on targets that actually provide it).
   char *html = heap_caps_malloc(html_size, MALLOC_CAP_8BIT);
   if (!html) {
-    free(scan);
     free(scan_options);
     free(wifi_html);
     httpd_resp_set_type(req, "text/html");
@@ -436,10 +414,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "%s%s%s"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
-    "<label>WiFi Network (SSID)</label>"
-    "<select id='ssid_scan' name='ssid'><option value=''>%s</option>%s</select>"
-    "<label>Or enter a hidden network</label>"
-    "<input id='ssid_manual' type='text' name='ssid_manual' maxlength='32' placeholder='Hidden WiFi name'>"
+    RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<input type='submit' value='Connect'>"
@@ -449,9 +424,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
-    "</div><script>document.getElementById('ssid_scan').addEventListener('change',function(){"
-    "if(this.value)document.getElementById('ssid_manual').value=this.value;});%s"
-    "</script></body></html>",
+    "</div><script>%s</script></body></html>",
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
     cfg->wifi_count > 0 ? "</div>" : "",
@@ -462,7 +435,6 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
   free(html);
-  free(scan);
   free(scan_options);
   free(wifi_html);
   return ESP_OK;
@@ -478,13 +450,15 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   }
   buf[received] = '\0';
 
+  char selected_ssid[33] = {0};
+  char manual_ssid[33] = {0};
   char ssid[33] = {0};
   char pass[65] = {0};
 
-  if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || ssid[0] == '\0') {
-    (void)get_form_field(buf, "ssid_manual", ssid, sizeof(ssid));
-  }
-  if (ssid[0] == '\0') {
+  (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+  (void)get_form_field(buf, "ssid_manual", manual_ssid, sizeof(manual_ssid));
+  if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                   ssid, sizeof(ssid))) {
     ESP_LOGE(TAG, "Missing SSID");
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
     return ESP_FAIL;

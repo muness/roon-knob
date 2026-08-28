@@ -22,6 +22,7 @@ void eink_ui_set_network_status(const char *status);
 // Queue target-local status changes from WiFi/HTTP callbacks onto the UI loop.
 void eink_ui_post_zone_name(const char *name);
 void eink_ui_post_network_status(const char *status);
+void eink_ui_post_show_ip(bool show);
 
 // New album artwork available — triggers download + dither + display
 void eink_ui_set_artwork(const char *image_key);

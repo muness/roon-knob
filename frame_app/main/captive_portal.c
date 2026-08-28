@@ -2,7 +2,9 @@
 #include "dns_server.h"
 #include "controller_config.h"
 #include "eink_ui.h"
+#include "frame_display_preferences.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 #include "power_debug_web.h"
 
 #ifndef PLATFORM_PORTAL_PRODUCT_NAME
@@ -440,31 +442,22 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
       httpd_query_key_value(query, "scan", scan_value,
                             sizeof(scan_value)) == ESP_OK &&
       (scan_value[0] == '1' || strcmp(scan_value, "again") == 0);
-  const bool scan_again_requested = strcmp(scan_value, "again") == 0;
-  rk_wifi_network_t *networks = heap_caps_calloc(
-      RK_WIFI_SCAN_MAX_NETWORKS, sizeof(*networks), MALLOC_CAP_8BIT);
+  const bool scan_again_requested = scan_requested &&
+                                    strcmp(scan_value, "again") == 0;
   char *escaped_bridge_base = heap_caps_calloc(
       1, sizeof(cfg->bridge_base) * 6, MALLOC_CAP_8BIT);
   char *wifi_html = heap_caps_calloc(1, 1024, MALLOC_CAP_8BIT);
-  char *scan_html = heap_caps_calloc(1, 3072, MALLOC_CAP_8BIT);
-  if (!networks || !escaped_bridge_base || !wifi_html || !scan_html) {
-    free(networks);
+  char *scan_options = heap_caps_calloc(1, 4096, MALLOC_CAP_8BIT);
+  if (!escaped_bridge_base || !wifi_html || !scan_options) {
     free(escaped_bridge_base);
     free(wifi_html);
-    free(scan_html);
+    free(scan_options);
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
-  rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-  if (scan_requested && (scan_again_requested ||
-                         scan_state == RK_WIFI_SCAN_IDLE ||
-                         scan_state == RK_WIFI_SCAN_FAILED)) {
-    (void)wifi_mgr_scan_start();
-    scan_state = wifi_mgr_scan_state();
-  }
-  size_t network_count = scan_state == RK_WIFI_SCAN_READY
-                             ? wifi_mgr_scan_results_copy(networks, RK_WIFI_SCAN_MAX_NETWORKS)
-                             : 0;
+  rk_wifi_portal_scan_t scan = {0};
+  rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
+  rk_wifi_portal_render_options(&scan, scan_options, 4096);
 
   if (cfg->bridge_base[0] && is_safe_url(cfg->bridge_base)) {
     html_escape(cfg->bridge_base, escaped_bridge_base,
@@ -484,35 +477,6 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         "</form></div>",
         escaped, i);
     if (pos >= 1024) pos = 1023;
-  }
-
-  if (scan_requested) {
-    int scan_pos = snprintf(scan_html, 3072,
-        "<h2>Nearby 2.4 GHz networks</h2><div class='section'>");
-    if (scan_state == RK_WIFI_SCAN_RUNNING) {
-      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-          "<p>Scanning nearby networks&hellip; refresh this page in a moment.</p>");
-    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
-      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-          "<p>Scan failed. You can still type an SSID manually.</p>");
-    } else {
-      for (size_t i = 0; i < network_count && scan_pos < 3072; ++i) {
-        char escaped[sizeof(networks[i].ssid) * 6] = "";
-        html_escape(networks[i].ssid, escaped, sizeof(escaped));
-        scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-            "<button type='button' class='wifi-choice' data-ssid='%s' "
-            "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
-            "%s <small>%d dBm</small></button>",
-            escaped, escaped, networks[i].rssi);
-      }
-      if (network_count == 0 && scan_pos < 3072) {
-        scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-            "<p>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
-      }
-    }
-    if (scan_pos < 3072) {
-      snprintf(scan_html + scan_pos, 3072 - scan_pos, "</div>");
-    }
   }
 
   httpd_resp_set_type(req, "text/html");
@@ -549,9 +513,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
     "margin-top:20px;font-size:13px;}"
     ".note a{color:#4fc3f7;}"
-    ".wifi-choice{display:block;width:100%;text-align:left;background:#0f0f1a;"
-    "color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
-    ".wifi-choice small{color:#aaa;float:right;}"
+    RK_WIFI_PORTAL_SELECT_CSS_LITERAL
     "</style>");
   SEND_SETUP_CHUNK(FAVICON_LINK);
   SEND_SETUP_CHUNK(
@@ -565,17 +527,15 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   if (cfg->wifi_count > 0) {
     SEND_SETUP_CHUNK("</div>");
   }
-  SEND_SETUP_CHUNK(scan_html);
-  SEND_SETUP_CHUNK("<p><a href='/?scan=");
-  SEND_SETUP_CHUNK(scan_state == RK_WIFI_SCAN_READY ? "again" : "1");
-  SEND_SETUP_CHUNK("'>");
-  SEND_SETUP_CHUNK(scan_state == RK_WIFI_SCAN_READY ? "Scan again" : "Scan");
   SEND_SETUP_CHUNK(
-    " nearby 2.4 GHz networks</a> or type an SSID below.</p>"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
-    "<label>WiFi Network (SSID)</label>"
-    "<input id='ssid' type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    RK_WIFI_PORTAL_SELECT_OPEN);
+  SEND_SETUP_CHUNK(rk_wifi_portal_scan_placeholder(&scan));
+  SEND_SETUP_CHUNK("</option>");
+  SEND_SETUP_CHUNK(scan_options);
+  SEND_SETUP_CHUNK(
+    RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<h2>Unified Hi-Fi Control</h2>"
@@ -593,7 +553,11 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
-    "</div></body></html>");
+    "</div>");
+  if (rk_wifi_portal_scan_should_refresh(&scan)) {
+    SEND_SETUP_CHUNK(RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT);
+  }
+  SEND_SETUP_CHUNK("</body></html>");
   if (send_result == ESP_OK) {
     send_result = httpd_resp_send_chunk(req, NULL, 0);
   }
@@ -601,10 +565,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 
   ESP_LOGI(TAG, "Portal stack headroom after render: %u bytes",
            (unsigned)uxTaskGetStackHighWaterMark(NULL));
-  free(networks);
   free(escaped_bridge_base);
   free(wifi_html);
-  free(scan_html);
+  free(scan_options);
   return send_result;
 }
 
@@ -618,11 +581,16 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   }
   buf[received] = '\0';
 
+  char selected_ssid[33] = {0};
+  char manual_ssid[33] = {0};
   char ssid[33] = {0};
   char pass[65] = {0};
   char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
 
-  if (!get_form_field(buf, "ssid", ssid, sizeof(ssid))) {
+  (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+  (void)get_form_field(buf, "ssid_manual", manual_ssid, sizeof(manual_ssid));
+  if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                   ssid, sizeof(ssid))) {
     ESP_LOGE(TAG, "Missing SSID");
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
     return ESP_FAIL;
@@ -886,10 +854,13 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<form method='POST' action='/api/display'>"
       "<label>Album art timeout (seconds)</label>"
       "<input type='number' name='art_mode_timeout_sec' min='0' max='86400' value='%lu'>"
+      "<label><input type='checkbox' name='show_ip' value='1' %s> "
+      "Show IP address on the Frame</label>"
       "<button type='submit' class='btn'>Save display setting</button>"
       "</form></div></body></html>",
       STA_CSS, FAVICON_LINK, escaped_bridge_base,
-      (unsigned long)art_mode_timeout);
+      (unsigned long)art_mode_timeout,
+      frame_display_preferences_show_ip() ? "checked" : "");
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
   httpd_resp_set_type(req, "text/html");
@@ -955,6 +926,10 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
                         "Album art timeout must be 0-86400 seconds");
     return ESP_FAIL;
   }
+  char show_ip_text[8] = {0};
+  const bool show_ip = get_form_field(body, "show_ip", show_ip_text,
+                                      sizeof(show_ip_text)) &&
+                       strcmp(show_ip_text, "1") == 0;
 
   controller_remote_preferences_t preferences = {0};
   preferences.present = CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_ENABLED |
@@ -968,6 +943,12 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
                         "Could not save display settings");
     return ESP_FAIL;
   }
+  if (!frame_display_preferences_set_show_ip(show_ip)) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Display timeout saved, but IP visibility was not");
+    return ESP_FAIL;
+  }
+  eink_ui_post_show_ip(show_ip);
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/settings");
   httpd_resp_send(req, NULL, 0);
@@ -985,33 +966,21 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
   }
   char query[32] = {0};
   char scan_value[8] = {0};
-  bool scan_requested =
-      httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
-      httpd_query_key_value(query, "scan", scan_value,
-                            sizeof(scan_value)) == ESP_OK &&
-      (scan_value[0] == '1' || strcmp(scan_value, "again") == 0);
+  (void)httpd_req_get_url_query_str(req, query, sizeof(query));
+  (void)httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value));
   const bool scan_again_requested = strcmp(scan_value, "again") == 0;
-  rk_wifi_network_t *networks = heap_caps_calloc(
-      RK_WIFI_SCAN_MAX_NETWORKS, sizeof(*networks), MALLOC_CAP_8BIT);
   char *saved_html = heap_caps_calloc(1, 1024, MALLOC_CAP_8BIT);
-  char *scan_html = heap_caps_calloc(1, 3072, MALLOC_CAP_8BIT);
-  if (!networks || !saved_html || !scan_html) {
-    free(networks);
+  char *scan_options = heap_caps_calloc(1, 4096, MALLOC_CAP_8BIT);
+  if (!saved_html || !scan_options) {
     free(saved_html);
-    free(scan_html);
+    free(scan_options);
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
-  rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-  if (scan_requested && (scan_again_requested ||
-                         scan_state == RK_WIFI_SCAN_IDLE ||
-                         scan_state == RK_WIFI_SCAN_FAILED)) {
-    (void)wifi_mgr_scan_start();
-    scan_state = wifi_mgr_scan_state();
-  }
-  size_t network_count = scan_state == RK_WIFI_SCAN_READY
-                             ? wifi_mgr_scan_results_copy(networks, RK_WIFI_SCAN_MAX_NETWORKS)
-                             : 0;
+  rk_wifi_portal_scan_t scan = {0};
+  rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
+  rk_wifi_portal_render_options(&scan, scan_options, 4096);
 
   int saved_pos = 0;
   for (int i = 0; i < snapshot.value.wifi_count && i < RK_MAX_WIFI; ++i) {
@@ -1025,68 +994,40 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
       break;
     }
   }
-  if (scan_requested) {
-    int scan_pos = snprintf(scan_html, 3072,
-                            "<h2>Nearby 2.4 GHz networks</h2>");
-    if (scan_state == RK_WIFI_SCAN_RUNNING) {
-      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-                           "<p class='status'>Scanning nearby networks&hellip; refresh this page in a moment.</p>");
-    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
-      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-                           "<p class='status'>Scan failed. You can still type an SSID manually.</p>");
-    } else {
-      for (size_t i = 0; i < network_count && scan_pos < 3072; ++i) {
-        char escaped[sizeof(networks[i].ssid) * 6] = "";
-        html_escape(networks[i].ssid, escaped, sizeof(escaped));
-        scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
-            "<button type='button' class='wifi-choice' data-ssid='%s' "
-            "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
-            "%s <small>%d dBm</small></button>", escaped, escaped, networks[i].rssi);
-      }
-      if (network_count == 0 && scan_pos < 3072) {
-        snprintf(scan_html + scan_pos, 3072 - scan_pos,
-                 "<p class='status'>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
-      }
-    }
-  }
-
   const size_t html_size = 12288;
   char *html = heap_caps_malloc(html_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
-    free(networks);
     free(saved_html);
-    free(scan_html);
+    free(scan_options);
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
   int length = snprintf(html, html_size,
       "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
       "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Wi-Fi</title><style>%s"
-      ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;color:#eee;"
-      "border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
-      ".wifi-choice small{color:#aaa;float:right;}</style>%s</head><body>"
+      RK_WIFI_PORTAL_SELECT_CSS_FORMAT "</style>%s</head><body>"
       "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
       "<a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Saved Wi-Fi networks</h2>%s</div>"
       "<div class='card'><h2>Add a Wi-Fi network</h2>"
-      "<p class='status'><a href='/wifi?scan=%s'>%s nearby 2.4 GHz networks</a> or type a hidden network below.</p>"
-      "%s<form method='POST' action='/api/wifi'>"
-      "<label>Wi-Fi network (SSID)</label><input id='ssid' type='text' name='ssid' required maxlength='32'>"
-      "<label>Password</label><input type='text' name='pass' maxlength='64'>"
-      "<button type='submit' class='btn'>Save network</button></form></div></body></html>",
+      "<form method='POST' action='/api/wifi'>"
+      RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
+      "<label>Password</label><input type='password' name='pass' maxlength='64'>"
+      "<button type='submit' class='btn'>Save network</button></form>"
+      "<p class='status'><a href='/wifi?scan=again'>Scan again</a></p></div>"
+      "%s</body></html>",
       STA_CSS, FAVICON_LINK, saved_html[0] ? saved_html : "<p class='status'>None saved.</p>",
-      scan_state == RK_WIFI_SCAN_READY ? "again" : "1",
-      scan_state == RK_WIFI_SCAN_READY ? "Scan again" : "Scan",
-      scan_html);
+      rk_wifi_portal_scan_placeholder(&scan), scan_options,
+      rk_wifi_portal_scan_should_refresh(&scan)
+          ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, length);
   free(html);
-  free(networks);
   free(saved_html);
-  free(scan_html);
+  free(scan_options);
   return ESP_OK;
 }
 
@@ -1098,9 +1039,15 @@ static esp_err_t sta_wifi_add_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   body[received] = '\0';
+  char selected_ssid[33] = {0};
+  char manual_ssid[33] = {0};
   char ssid[33] = {0};
   char pass[65] = {0};
-  if (!get_form_field(body, "ssid", ssid, sizeof(ssid))) {
+  (void)get_form_field(body, "ssid", selected_ssid, sizeof(selected_ssid));
+  (void)get_form_field(body, "ssid_manual", manual_ssid,
+                       sizeof(manual_ssid));
+  if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                   ssid, sizeof(ssid))) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
     return ESP_FAIL;
   }
@@ -1570,7 +1517,8 @@ bool captive_portal_start_sta(void) {
   }
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 16;
+  /* Fourteen Frame routes plus the three shared power-debug routes. */
+  config.max_uri_handlers = 20;
   config.stack_size = PORTAL_HTTPD_STACK_SIZE;
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);

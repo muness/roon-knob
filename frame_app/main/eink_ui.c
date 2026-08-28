@@ -6,6 +6,8 @@
 #include "eink_dither.h"
 #include "eink_font.h"
 #include "bridge_client.h"
+#include "frame_display_preferences.h"
+#include "wifi_manager.h"
 #include "platform/platform_http.h"
 #include "platform/platform_time.h"
 #include "platform/platform_log.h"
@@ -30,6 +32,11 @@ static const char *TAG = "eink_ui";
 #define ART_X            0   // Flush left
 #define ART_Y            0   // Flush to top
 #define TEXT_Y         (EINK_HEIGHT - TEXT_BAR_H)       // Text bar at bottom
+/* UHC currently resizes exactly to requested dimensions. Request a square
+ * source, preserving normal album-art geometry, then center-crop vertically
+ * to the Frame's wide artwork viewport. Never request a stretched rectangle. */
+#define ART_SOURCE_SIZE ART_W
+#define ART_CROP_TOP    ((ART_SOURCE_SIZE - ART_H) / 2)
 
 // Debounce: wait 3s after last state change before rendering
 #define RENDER_DEBOUNCE_MS 3000
@@ -50,6 +57,7 @@ static struct {
     bool online;
     bool ble_connected;
     bool power_state_known;
+    bool show_ip;
 
     // Dirty flags
     bool dirty;             // Any state changed — needs re-render
@@ -79,28 +87,11 @@ static void blit_art_cache(void) {
 
 // ── Artwork download + dither ───────────────────────────────────────────────
 
-// Unpack 4-bit packed eink_acep6 data into the art cache (not framebuffer).
-// Each byte = 2 pixels: high nibble = left pixel, low nibble = right pixel.
-// Values are panel hardware color indices (0=Black,1=White,2=Yellow,3=Red,5=Blue,6=Green).
-// Caller (render_full_screen) blits cache to framebuffer after clearing.
-static void cache_packed_artwork(const uint8_t *packed, int len) {
-    if (!s_art_cache) {
-        s_art_cache = heap_caps_malloc(ART_W * ART_H, MALLOC_CAP_SPIRAM);
-    }
-    if (!s_art_cache) return;
-
-    int pixel = 0;
-    for (int i = 0; i < len; i++) {
-        if (pixel + 1 >= ART_W * ART_H) break;
-        s_art_cache[pixel++] = (packed[i] >> 4) & 0x0F;
-        s_art_cache[pixel++] = packed[i] & 0x0F;
-    }
-}
-
-// Fallback: decode RGB565, dither on-device, write to framebuffer + cache.
+// Decode RGB565, dither on-device, and write to the persistent artwork cache.
 static void decode_rgb565_artwork(const uint8_t *img_data, size_t img_len) {
     int pixel_count = ART_W * ART_H;
-    int expected_rgb565 = pixel_count * 2;
+    int source_pixel_count = ART_SOURCE_SIZE * ART_SOURCE_SIZE;
+    int expected_rgb565 = source_pixel_count * 2;
 
     uint8_t *rgb888 = heap_caps_malloc(pixel_count * 3, MALLOC_CAP_SPIRAM);
     if (!rgb888) {
@@ -109,11 +100,15 @@ static void decode_rgb565_artwork(const uint8_t *img_data, size_t img_len) {
     }
 
     if ((int)img_len == expected_rgb565) {
-        eink_rgb565_to_rgb888(img_data, rgb888, ART_W, ART_H);
+        const size_t crop_offset =
+            (size_t)ART_CROP_TOP * ART_SOURCE_SIZE * 2;
+        eink_rgb565_to_rgb888(img_data + crop_offset, rgb888, ART_W, ART_H);
     } else {
-        int expected_rgb888 = pixel_count * 3;
+        int expected_rgb888 = source_pixel_count * 3;
         if ((int)img_len >= expected_rgb888) {
-            memcpy(rgb888, img_data, expected_rgb888);
+            const size_t crop_offset =
+                (size_t)ART_CROP_TOP * ART_SOURCE_SIZE * 3;
+            memcpy(rgb888, img_data + crop_offset, pixel_count * 3);
         } else {
             ESP_LOGW(TAG, "Unexpected image size: %d (expected %d or %d)",
                      (int)img_len, expected_rgb565, expected_rgb888);
@@ -129,7 +124,8 @@ static void decode_rgb565_artwork(const uint8_t *img_data, size_t img_len) {
         return;
     }
 
-    ESP_LOGI(TAG, "Dithering %dx%d artwork (on-device fallback)...", ART_W, ART_H);
+    ESP_LOGI(TAG, "Center-cropping %dx%d source to %dx%d and dithering...",
+             ART_SOURCE_SIZE, ART_SOURCE_SIZE, ART_W, ART_H);
     eink_dither_rgb888(rgb888, dithered, ART_W, ART_H);
     heap_caps_free(rgb888);
 
@@ -156,34 +152,10 @@ static void render_artwork(void) {
     char url[256];
     char *img_data = NULL;
     size_t img_len = 0;
-    int expected_packed = (ART_W * ART_H + 1) / 2;
-
-    // Try pre-processed eink_acep6 format first (4-bit packed, no dithering needed)
+    // The deployed UHC endpoint supports RGB565. Unknown formats return the
+    // original JPEG, so probing first wastes a full image download.
     const char *art_url = bridge_client_get_artwork_url_for_format(
-        url, sizeof(url), ART_W, ART_H, 0, "eink_acep6");
-    if (art_url && art_url[0]) {
-        ESP_LOGI(TAG, "Downloading artwork: %s", art_url);
-        if (platform_http_get_image(art_url, &img_data, &img_len) == 0 &&
-            img_data && (int)img_len == expected_packed) {
-            ESP_LOGI(TAG, "Blitting pre-processed %dx%d artwork (%d bytes)",
-                     ART_W, ART_H, (int)img_len);
-            cache_packed_artwork((const uint8_t *)img_data, (int)img_len);
-            platform_http_free(img_data);
-            ESP_LOGI(TAG, "Artwork rendered to framebuffer");
-            return;
-        }
-        // Wrong size or failed — bridge doesn't support eink_acep6 yet
-        if (img_data) {
-            ESP_LOGI(TAG, "Bridge returned %d bytes (expected %d packed), retrying as rgb565",
-                     (int)img_len, expected_packed);
-            platform_http_free(img_data);
-            img_data = NULL;
-        }
-    }
-
-    // Fallback: request RGB565 and dither on device
-    art_url = bridge_client_get_artwork_url_for_format(
-        url, sizeof(url), ART_W, ART_H, 0, "rgb565");
+        url, sizeof(url), ART_SOURCE_SIZE, ART_SOURCE_SIZE, 0, "rgb565");
     if (!art_url || !art_url[0]) {
         ESP_LOGW(TAG, "No artwork URL available");
         return;
@@ -326,11 +298,18 @@ static void render_full_screen(void) {
         } else {
             snprintf(text, sizeof(text), "No track");
         }
-        // Truncate to fit (leave 40px right margin for status icons)
-        int max_text_w = EINK_WIDTH - 50;
+        char ip[16] = {0};
+        const bool draw_ip = s_ui.show_ip && wifi_mgr_get_ip(ip, sizeof(ip));
+        const int ip_width = draw_ip ? (int)strlen(ip) * eink_font_16.width : 0;
+        // Leave room for the optional address and the status icons.
+        int max_text_w = EINK_WIDTH - 50 - (draw_ip ? ip_width + 12 : 0);
         char trunc[300];
         truncate_to_fit(text, trunc, sizeof(trunc), max_text_w, &eink_font_16);
         eink_font_draw_string(5, TEXT_Y + 7, trunc, &eink_font_16, EINK_BLACK, 0xFF);
+        if (draw_ip) {
+            eink_font_draw_string(EINK_WIDTH - 34 - ip_width, TEXT_Y + 7, ip,
+                                  &eink_font_16, EINK_BLACK, 0xFF);
+        }
     }
 
     // Status icons (bottom-right) — piggyback on now-playing refreshes only
@@ -355,6 +334,7 @@ static void render_full_screen(void) {
 
 void eink_ui_init(void) {
     memset(&s_ui, 0, sizeof(s_ui));
+    s_ui.show_ip = frame_display_preferences_show_ip();
     s_ui.volume = -999.0f;  // Sentinel: no volume yet
 
     // Don't render at boot — wait for artwork to arrive.
@@ -424,6 +404,25 @@ void eink_ui_post_network_status(const char *status) {
     char *copy = strdup(status ? status : "");
     if (!copy) return;
     if (!platform_task_post_to_ui(set_network_status_on_ui, copy)) {
+        free(copy);
+    }
+}
+
+static void set_show_ip_on_ui(void *arg) {
+    bool *show = arg;
+    if (show) {
+        s_ui.show_ip = *show;
+        s_ui.dirty = true;
+        s_ui.last_change = platform_millis();
+    }
+    free(show);
+}
+
+void eink_ui_post_show_ip(bool show) {
+    bool *copy = malloc(sizeof(*copy));
+    if (!copy) return;
+    *copy = show;
+    if (!platform_task_post_to_ui(set_show_ip_on_ui, copy)) {
         free(copy);
     }
 }

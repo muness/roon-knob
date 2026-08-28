@@ -9,6 +9,7 @@
 #include "eink_display.h"
 #include "eink_ui.h"
 #include "frame_power_manager.h"
+#include "frame_display_preferences.h"
 #include "pmic_axp2101.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
@@ -86,6 +87,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     post_runtime_network_status("WiFi: Connected");
     bridge_client_set_device_ip(ip_opt);
     bridge_client_set_network_ready(true);
+    eink_ui_post_show_ip(frame_display_preferences_show_ip());
     s_mdns_init_pending = true;
     s_ble_init_pending = true;
     atomic_store_explicit(&s_sta_server_pending, true, memory_order_release);
@@ -197,6 +199,7 @@ void app_main(void) {
     err = nvs_flash_init();
   }
   ESP_ERROR_CHECK(err);
+  frame_display_preferences_init();
 
   // Initialize PMIC first — enables ALDO power rails needed by e-ink panel
   ESP_LOGI(TAG, "Initializing PMIC...");

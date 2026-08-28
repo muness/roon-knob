@@ -344,6 +344,7 @@ static size_t decompress_gzip(char **data, size_t compressed_size) {
 }
 
 int platform_http_get_image(const char *url, char **out, size_t *out_len) {
+    const size_t max_image_size = 2 * 1024 * 1024;
     esp_http_client_config_t config = {.url = url, .method = HTTP_METHOD_GET, .timeout_ms = 5000};
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) return -1;
@@ -374,7 +375,17 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     esp_http_client_get_header(client, "Content-Encoding", &content_encoding);
     bool is_gzipped = (content_encoding && strcmp(content_encoding, "gzip") == 0);
 
-    size_t buffer_size = (content_length > 0) ? content_length : 65536;
+    if (content_length > 0 && (size_t)content_length > max_image_size) {
+        ESP_LOGE(TAG, "Image too large: %d bytes", content_length);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+    size_t buffer_size = (content_length > 0)
+        ? (size_t)content_length + 4096 : 65536;
+    if (buffer_size > max_image_size) {
+        buffer_size = max_image_size;
+    }
     char *buffer = malloc(buffer_size);
     if (!buffer) {
         esp_http_client_close(client);
@@ -387,14 +398,17 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
 
     while (read_attempts < 1000) {
         if (total_read + 4096 > (int)buffer_size) {
-            buffer_size *= 2;
-            if (buffer_size > 1024 * 1024) {
+            size_t next_size = buffer_size * 2;
+            if (next_size > max_image_size) {
+                next_size = max_image_size;
+            }
+            if (next_size <= buffer_size) {
                 free(buffer);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
                 return -1;
             }
-            char *new_buffer = realloc(buffer, buffer_size);
+            char *new_buffer = realloc(buffer, next_size);
             if (!new_buffer) {
                 free(buffer);
                 esp_http_client_close(client);
@@ -402,6 +416,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
                 return -1;
             }
             buffer = new_buffer;
+            buffer_size = next_size;
         }
 
         int read_len = esp_http_client_read(client, buffer + total_read, 4096);

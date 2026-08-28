@@ -40,6 +40,7 @@ set(SRC_FILES
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
+    "../../common/wifi_portal_form.c"
     "../../common/power_debug_web.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"

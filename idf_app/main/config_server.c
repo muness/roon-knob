@@ -9,6 +9,7 @@
 #include "bridge_client.h"
 #include "rk_ble_hid_host.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -49,7 +50,7 @@ static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
 
 // HTML page for config
 // Format args: current_bridge, status_class, status_text, wifi_html,
-// scan_html, bridge_value
+// scan_placeholder, scan_options, bridge_value, scan_refresh_script
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
@@ -76,8 +77,7 @@ static const char *HTML_CONFIG =
     ".hint{font-size:12px;color:#666;margin-top:4px;}"
     ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
     ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
-    ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;cursor:pointer;}"
-    ".wifi-choice small{color:#aaa;float:right;}"
+    RK_WIFI_PORTAL_SELECT_CSS_FORMAT
     ".section{max-width:400px;}"
     "a{color:#4fc3f7;}"
     ".device{background:#0f0f1a;padding:10px;border-radius:5px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;}"
@@ -97,9 +97,7 @@ static const char *HTML_CONFIG =
         "<p class='hint'>Saved-network changes take effect after restart.</p>"
     "<form method='POST' action='/wifi-add'>"
     "<h2>Add WiFi Network</h2>"
-    "%s"
-    "<label>SSID</label>"
-    "<input id='ssid' type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
+    RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
         "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
         "<p class='hint'>Up to two networks. Remove one before replacing it.</p>"
@@ -112,7 +110,7 @@ static const char *HTML_CONFIG =
     "<p class='hint'>Leave empty for mDNS auto-discovery. Check the HiPhi Dial display for connection progress.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form></body></html>";
+    "</form>%s</body></html>";
 
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
@@ -331,64 +329,25 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
         httpd_query_key_value(query, "scan", scan_value,
                               sizeof(scan_value)) == ESP_OK &&
         strcmp(scan_value, "again") == 0;
-    rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-    if (scan_again_requested || scan_state == RK_WIFI_SCAN_IDLE) {
-        (void)wifi_mgr_scan_start();
-        scan_state = wifi_mgr_scan_state();
-    }
-    rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
-    const size_t network_count =
-        scan_state == RK_WIFI_SCAN_READY
-            ? wifi_mgr_scan_results_copy(networks,
-                                         RK_WIFI_SCAN_MAX_NETWORKS)
-            : 0;
-    char scan_html[3072] = {0};
-    int scan_pos = snprintf(scan_html, sizeof(scan_html),
-                            "<p><strong>Nearby 2.4 GHz networks</strong></p>");
-    if (scan_state == RK_WIFI_SCAN_RUNNING) {
-        snprintf(scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
-                 "<p class='hint'>Scanning&hellip; this list will refresh "
-                 "automatically.</p><script>setTimeout(function(){location.href='/'},1200)</script>");
-    } else if (scan_state == RK_WIFI_SCAN_FAILED) {
-        snprintf(scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
-                 "<p class='hint'>Scan failed. Enter an SSID manually or "
-                 "<a href='/?scan=again'>try again</a>.</p>");
-    } else {
-        for (size_t i = 0;
-             i < network_count && scan_pos < (int)sizeof(scan_html);
-             ++i) {
-            char escaped[sizeof(networks[i].ssid) * 6] = {0};
-            html_escape(networks[i].ssid, escaped, sizeof(escaped));
-            scan_pos += snprintf(
-                scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
-                "<button type='button' class='wifi-choice' data-ssid='%s' "
-                "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
-                "%s <small>%d dBm</small></button>",
-                escaped, escaped, networks[i].rssi);
-        }
-        if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
-            scan_pos += snprintf(
-                scan_html + scan_pos, sizeof(scan_html) - (size_t)scan_pos,
-                "<p class='hint'>No visible networks found. Enter a hidden "
-                "SSID manually.</p>");
-        }
-        if (scan_pos < (int)sizeof(scan_html)) {
-            snprintf(scan_html + scan_pos,
-                     sizeof(scan_html) - (size_t)scan_pos,
-                     "<p><a href='/?scan=again'>Scan again</a></p>");
-        }
-    }
+    rk_wifi_portal_scan_t scan = {0};
+    rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
+    char scan_options[4096] = {0};
+    rk_wifi_portal_render_options(&scan, scan_options, sizeof(scan_options));
 
     // Build HTML with current values, saved networks, and bridge status.
-    char *html = heap_caps_malloc(8192,
+    const size_t html_size = 12288;
+    char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 8192, HTML_CONFIG, current, status_class, status_text,
-             wifi_html, scan_html, cfg->bridge_base);
+    snprintf(html, html_size, HTML_CONFIG, current, status_class, status_text,
+             wifi_html, rk_wifi_portal_scan_placeholder(&scan), scan_options,
+             cfg->bridge_base,
+             rk_wifi_portal_scan_should_refresh(&scan)
+                 ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
@@ -482,9 +441,15 @@ static esp_err_t wifi_add_handler(httpd_req_t *req) {
     }
     buf[received] = '\0';
 
+    char selected_ssid[33] = {0};
+    char manual_ssid[33] = {0};
     char ssid[33] = {0};
     char pass[65] = {0};
-    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || !ssid[0]) {
+    (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+    (void)get_form_field(buf, "ssid_manual", manual_ssid,
+                         sizeof(manual_ssid));
+    if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                     ssid, sizeof(ssid))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
     }

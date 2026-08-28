@@ -1,6 +1,7 @@
 #include "captive_portal.h"
 #include "dns_server.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
 #include "ui.h"
@@ -130,18 +131,14 @@ static const char *HTML_FORM =
     ".wifi-entry{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #333;}"
     ".wifi-entry:last-child{border-bottom:0;}"
     ".btn-rm{background:#c62828;color:#fff;border:0;border-radius:5px;padding:7px 10px;cursor:pointer;}"
-    ".scan{max-width:340px;margin:0 0 16px;}"
-    ".scan p{margin:8px 0;}"
-    ".wifi-choice{display:block;width:100%;text-align:left;background:#0f0f1a;color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;cursor:pointer;}"
-    ".wifi-choice small{color:#aaa;float:right;}"
-    ".scan a{color:#4fc3f7;}"
+    RK_WIFI_PORTAL_SELECT_CSS_LITERAL
     "</style></head><body>"
     "<h1>HiPhi Dial</h1>"
     "<p>WiFi Setup</p>"
-    "<!--WIFI_SCAN-->"
     "<form method='GET' action='/configure'>"
-    "<label>WiFi Network (SSID)</label>"
-    "<input id='ssid' type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    RK_WIFI_PORTAL_SELECT_OPEN
+    "<!--WIFI_OPTIONS-->"
+    RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<input type='submit' value='Connect'>"
@@ -281,69 +278,31 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         httpd_query_key_value(query, "scan", scan_value,
                               sizeof(scan_value)) == ESP_OK &&
         strcmp(scan_value, "again") == 0;
-    rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
-    if (scan_again_requested || scan_state == RK_WIFI_SCAN_IDLE) {
-        (void)wifi_mgr_scan_start();
-        scan_state = wifi_mgr_scan_state();
-    }
-    rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
-    const size_t network_count =
-        scan_state == RK_WIFI_SCAN_READY
-            ? wifi_mgr_scan_results_copy(networks,
-                                         RK_WIFI_SCAN_MAX_NETWORKS)
-            : 0;
+    rk_wifi_portal_scan_t scan = {0};
+    rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
+    char options[4096] = {0};
+    rk_wifi_portal_render_options(&scan, options, sizeof(options));
 
     httpd_resp_set_type(req, "text/html");
-    static const char scan_marker[] = "<!--WIFI_SCAN-->";
-    const char *scan_at = strstr(HTML_FORM, scan_marker);
+    static const char options_marker[] = "<!--WIFI_OPTIONS-->";
+    const char *options_at = strstr(HTML_FORM, options_marker);
     const char *closing = strstr(HTML_FORM, "</body></html>");
-    const char *prefix_end = scan_at ? scan_at : closing;
+    const char *prefix_end = options_at ? options_at : closing;
     if (!prefix_end) {
         prefix_end = HTML_FORM + strlen(HTML_FORM);
     }
     httpd_resp_send_chunk(req, HTML_FORM,
                           (size_t)(prefix_end - HTML_FORM));
 
-    if (scan_at) {
-        httpd_resp_sendstr_chunk(
-            req, "<div class='scan'><strong>Nearby 2.4 GHz networks</strong>");
-        if (scan_state == RK_WIFI_SCAN_RUNNING) {
-            httpd_resp_sendstr_chunk(
-                req,
-                "<p>Scanning&hellip; this list will refresh automatically.</p>"
-                "<script>setTimeout(function(){location.href='/'},1200)</script>");
-        } else if (scan_state == RK_WIFI_SCAN_FAILED) {
-            httpd_resp_sendstr_chunk(
-                req,
-                "<p>Scan failed. You can enter an SSID manually or "
-                "<a href='/?scan=again'>try again</a>.</p>");
-        } else {
-            for (size_t i = 0; i < network_count; ++i) {
-                char escaped[sizeof(networks[i].ssid) * 6] = {0};
-                char row[512];
-                html_escape(networks[i].ssid, escaped, sizeof(escaped));
-                snprintf(
-                    row, sizeof(row),
-                    "<button type='button' class='wifi-choice' data-ssid='%s' "
-                    "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
-                    "%s <small>%d dBm</small></button>",
-                    escaped, escaped, networks[i].rssi);
-                httpd_resp_sendstr_chunk(req, row);
-            }
-            if (network_count == 0) {
-                httpd_resp_sendstr_chunk(
-                    req,
-                    "<p>No visible networks found. You can enter a hidden "
-                    "SSID manually.</p>");
-            }
-            httpd_resp_sendstr_chunk(
-                req, "<p><a href='/?scan=again'>Scan again</a></p>");
-        }
-        httpd_resp_sendstr_chunk(req, "</div>");
+    if (options_at) {
+        httpd_resp_sendstr_chunk(req,
+                                 rk_wifi_portal_scan_placeholder(&scan));
+        httpd_resp_sendstr_chunk(req, "</option>");
+        httpd_resp_sendstr_chunk(req, options);
     }
 
-    const char *after_scan =
-        scan_at ? scan_at + strlen(scan_marker) : prefix_end;
+    const char *after_scan = options_at
+        ? options_at + strlen(options_marker) : prefix_end;
     const char *content_end = closing ? closing : HTML_FORM + strlen(HTML_FORM);
     if (after_scan < content_end) {
         httpd_resp_send_chunk(req, after_scan,
@@ -367,6 +326,10 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
             httpd_resp_sendstr_chunk(req, row);
         }
         httpd_resp_sendstr_chunk(req, "</div>");
+    }
+
+    if (rk_wifi_portal_scan_should_refresh(&scan)) {
+        httpd_resp_sendstr_chunk(req, RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT);
     }
 
     httpd_resp_sendstr_chunk(req, closing ? closing : "");
@@ -441,10 +404,15 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
     strncpy(buf, query, sizeof(buf) - 1);
     ESP_LOGI(TAG, "Received config: %s", buf);
 
+    char selected_ssid[33] = {0};
+    char manual_ssid[33] = {0};
     char ssid[33] = {0};
     char pass[65] = {0};
 
-    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid))) {
+    (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+    (void)get_form_field(buf, "ssid_manual", manual_ssid, sizeof(manual_ssid));
+    if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                     ssid, sizeof(ssid))) {
         ESP_LOGE(TAG, "Missing SSID");
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
