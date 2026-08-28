@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Flash HiPhi Alpha firmware</title>
-  <meta name="description" content="Flash HiPhi 2.7.0-alpha.4 firmware for supported controller hardware.">
+  <meta name="description" content="Flash HiPhi 2.7.0-alpha.5 firmware for supported controller hardware.">
   <link rel="icon" href="./assets/favicon.ico">
   <link rel="stylesheet" href="./assets/styles.css">
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
@@ -19,8 +19,8 @@
 
   <main class="flash-main" id="main"><div class="container">
     <a class="flash-breadcrumb" href="/">← Firmware center</a>
-    <div class="flash-intro"><div><p class="context-line">Alpha / v2.7.0-alpha.4</p><h1>Match the model before flashing.</h1></div><div class="channel-notice alpha"><strong>Some boards remain untested.</strong><p>Every file passed software checks. Check each model and the release notes for physical-hardware status. Alpha installs only over USB and never updates Stable devices automatically.</p></div></div>
-    <div class="unsupported" id="unsupported"><strong>This browser cannot flash over USB.</strong> Open this page in desktop Chrome or Edge.</div>
+    <div class="flash-intro"><div><p class="context-line">Alpha / v2.7.0-alpha.5</p><h1>Match the model before flashing.</h1></div><div class="channel-notice alpha"><strong>Some boards remain untested.</strong><p>Every file passed software checks. Check each model and the release notes for physical-hardware status. Alpha installs only over USB and never updates Stable devices automatically.</p></div></div>
+    <aside class="browser-requirement" data-browser-requirement aria-label="Browser requirements for USB flashing"><strong>Flash from a computer</strong><p>Use a current desktop version of Chrome, Edge, or Firefox with a data-capable USB cable. USB flashing does not work on iPhone, iPad, or Android.</p><p class="browser-status" data-browser-status>Choose the exact model below. The Flash button will open the USB installer on a supported computer.</p></aside>
 
     <div class="flash-list">
       <article class="flash-card" id="dial-card"><div><span class="version">Step 1 of 2 / Alpha / ESP32-S3</span><h2>Dial main controller</h2><p class="hardware">Waveshare ESP32-S3-Knob-Touch-LCD-1.8</p><p>The round touchscreen controller with rotary input, Wi-Fi playback control, and optional BLE media-remote support.</p><details><summary><strong>Battery and power work</strong></summary><ul><li>Wi-Fi modem sleep replaces the previous always-awake mode.</li><li>The main processor uses automatic Light-sleep and clock scaling while idle.</li><li>One cached 16-sample ADC reading supplies battery state for 15 seconds.</li><li>The shared power-debug view records RTC-retained entry and wake evidence.</li><li>Deep-sleep stops the panel, Wi-Fi, and BLE; turning the encoder wakes the controller.</li></ul></details><p class="risk">For the lowest idle draw, install the one-time parking image next. Current draw and battery-runtime gains have not been measured yet.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-s3.json"><button slot="activate">Flash Dial main controller</button></esp-web-install-button><a class="download-link" href="./hiphi_dial_merged.bin">Download firmware file</a></div></article>
@@ -44,7 +44,7 @@
       <article class="flash-card" id="stackchan-card"><div><span class="version">Alpha / ESP32-S3 / M5Stack K151</span><h2>Kizz Playback Companion</h2><p>Named for Kismet, Kizz is an animated playback companion with touch transport, room selection, and optional servo motion.</p><p class="risk">Motion starts enabled. Give Kizz room to move before powering on.</p></div><div class="flash-action"><esp-web-install-button manifest="manifest-stackchan.json"><button slot="activate">Flash Alpha Kizz</button></esp-web-install-button><a class="download-link" href="./hiphi_stackchan_merged.bin">Download firmware file</a></div></article>
     </div>
 
-    <div class="requirements"><h2>Alpha install rules</h2><ul><li>Verify the exact SKU before connecting.</li><li>Use desktop Chrome or Edge and a data cable.</li><li>Decline erase during updates to retain settings.</li><li>All controllers expose <code>/power-debug</code>; it records policy and sleep evidence, not amperage.</li></ul><p><a href="https://github.com/muness/roon-knob/releases/tag/v2.7.0-alpha.4">Release notes and SHA-256 checksums ↗</a></p></div>
+    <div class="requirements"><h2>Alpha install rules</h2><ul><li>Verify the exact SKU before connecting.</li><li>Use desktop Chrome, Edge, or Firefox and a data-capable USB cable.</li><li>Decline erase during updates to retain settings.</li><li>All controllers expose <code>/power-debug</code>; it records policy and sleep evidence, not amperage.</li></ul><p><a href="https://github.com/muness/roon-knob/releases/tag/v2.7.0-alpha.5">Release notes and SHA-256 checksums ↗</a></p></div>
   </div></main>
 
   <script>
@@ -59,7 +59,6 @@
       document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]}`;
     }
     document.querySelector(`[data-channel-link="${channel}"]`)?.setAttribute('aria-current', 'page');
-    if (!('serial' in navigator)) document.getElementById('unsupported').style.display = 'block';
   </script>
   <script src="./assets/site.js" defer></script>
 </body>

@@ -1,6 +1,6 @@
 {
   "name": "M5StickS3 Twist Remote (Alpha)",
-  "version": "2.7.0-alpha.4",
+  "version": "2.7.0-alpha.5",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",
