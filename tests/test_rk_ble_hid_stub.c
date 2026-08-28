@@ -15,6 +15,8 @@ int main(void) {
            RK_BLE_HID_HOST_ERR_NOT_SUPPORTED);
     assert(rk_ble_hid_host_set_enabled(true) ==
            RK_BLE_HID_HOST_ERR_NOT_SUPPORTED);
+    assert(rk_ble_hid_host_prepare_for_sleep() == RK_BLE_HID_HOST_OK);
+    assert(rk_ble_hid_host_cancel_sleep() == RK_BLE_HID_HOST_OK);
     assert(rk_ble_hid_host_scan_start() ==
            RK_BLE_HID_HOST_ERR_NOT_SUPPORTED);
     assert(rk_ble_hid_host_scan_results_copy(&device, 1, &generation) == 0);
@@ -26,6 +28,7 @@ int main(void) {
     assert(rk_ble_hid_host_status_copy(&status) == RK_BLE_HID_HOST_OK);
     assert(status.state == RK_BLE_HID_HOST_STATE_UNAVAILABLE);
     assert(status.last_error == RK_BLE_HID_HOST_ERROR_UNAVAILABLE);
+    assert(status.quiesced_for_sleep);
     assert(rk_ble_hid_host_status_copy(NULL) ==
            RK_BLE_HID_HOST_ERR_INVALID_ARGUMENT);
 

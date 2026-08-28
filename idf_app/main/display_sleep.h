@@ -2,6 +2,7 @@
 #define DISPLAY_SLEEP_H
 
 #include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "rk_cfg.h"
@@ -18,13 +19,45 @@ typedef enum {
     DISPLAY_STATE_SLEEP,     // Screen off
 } display_state_t;
 
+/** RTC-retained and current-boot evidence for power-policy testing. */
+typedef struct {
+    display_state_t display_state;
+    bool power_policy_known;
+    bool external_power;
+    bool wifi_modem_sleep_baseline;
+    bool cpu_scaling_policy_enabled;
+    bool deep_sleep_timer_active;
+    bool debug_sleep_override_armed;
+    uint32_t art_timeout_sec;
+    uint32_t dim_timeout_sec;
+    uint32_t panel_sleep_timeout_sec;
+    uint32_t deep_sleep_timeout_sec;
+    uint32_t art_transitions;
+    uint32_t dim_transitions;
+    uint32_t panel_sleep_transitions;
+    uint32_t runtime_wakes;
+    uint32_t debug_sleep_arms;
+    uint32_t deep_sleep_attempts;
+    uint32_t preflight_completions;
+    uint32_t deep_sleep_entries;
+    uint32_t encoder_wakes;
+    uint32_t last_preflight_flags;
+    uint32_t last_preflight_error;
+    int reset_reason;
+    int wakeup_cause;
+    uint64_t uptime_ms;
+} display_power_debug_snapshot_t;
+
 /**
  * @brief Initialize display sleep/dim functionality
  *
  * @param panel_handle LCD panel handle for power control
+ * @param panel_io_handle LCD command transport for explicit Sleep In/Out
  * @param lvgl_task_handle LVGL task handle for priority control (can be NULL)
  */
-void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_task_handle);
+void display_sleep_init(esp_lcd_panel_handle_t panel_handle,
+                        esp_lcd_panel_io_handle_t panel_io_handle,
+                        TaskHandle_t lvgl_task_handle);
 
 /**
  * @brief Enter art mode - hide controls, keep full brightness
@@ -90,6 +123,16 @@ bool display_is_encoder_suppressed(void);
  * @return true if this boot was triggered by deep sleep wakeup
  */
 bool display_woke_from_deep_sleep(void);
+
+/** Copy current and RTC-retained power-transition evidence. */
+void display_power_debug_snapshot(display_power_debug_snapshot_t *out);
+
+/**
+ * Arm a one-time Deep-sleep test even when the external-power policy disables
+ * normal Deep-sleep. The UI loop first turns the panel off, then starts the
+ * requested countdown. Activity cancels the normal timer as usual.
+ */
+bool display_power_debug_arm_deep_sleep(uint32_t delay_sec);
 
 /**
  * @brief Process pending display state changes

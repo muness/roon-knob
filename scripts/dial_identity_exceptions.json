@@ -110,7 +110,8 @@
       "retirement": "Remove only after dual advertise/query compatibility is deployed and old consumers have migrated.",
       "path_globs": [
         "idf_app/main/platform_mdns_idf.c",
-        "frame_app/main/platform_mdns_frame.c"
+        "frame_app/main/platform_mdns_frame.c",
+        "tough_app/main/platform_mdns_tough.c"
       ],
       "tokens": [
         "_roonknob"
@@ -121,14 +122,14 @@
       "id": "repository-and-hosted-flasher-endpoints",
       "category": "deferred-external-endpoint",
       "owner": "#164",
-      "retirement": "Change only when repository redirects, Pages CNAME, host checks, captive-portal links, and preview URLs move together.",
+      "retirement": "Remove the legacy-host allowance after the Cloudflare redirect to firmware.hiphi.audio is live; keep the repository-name allowance until a repository migration is approved.",
       "path_globs": [
         "**"
       ],
       "tokens": [
         "roon-knob"
       ],
-      "line_regex": "(?:github\\.com/(?:muness|open-horizon-labs)/roon-knob|muness/roon-knob|roon-knob\\.muness\\.com)"
+      "line_regex": "(?:github\\.com/(?:muness|open-horizon-labs)/roon-knob|muness/roon-knob)"
     },
     {
       "id": "current-repository-directory-example",
@@ -166,6 +167,16 @@
       "contains": "return \"hiphi-dial-setup\";"
     },
     {
+      "path": "idf_app/main/platform_http_idf.c",
+      "contains": "esp_http_client_set_header(client, \"X-Device-Type\", platform_device_slug());",
+      "min_count": 3
+    },
+    {
+      "path": "frame_app/main/platform_http_frame.c",
+      "contains": "esp_http_client_set_header(client, \"X-Device-Type\", platform_device_slug());",
+      "min_count": 3
+    },
+    {
       "path": "idf_app/main/platform_mdns_idf.c",
       "contains": "{\"product\", \"hiphi-dial\"}"
     },
@@ -179,7 +190,7 @@
     },
     {
       "path": "web/manifest-s3.json",
-      "contains": "\"name\": \"HiPhi Dial (Beta)\""
+      "contains": "\"name\": \"HiPhi Dial (Alpha)\""
     },
     {
       "path": "web/manifest-s3.json",
@@ -207,7 +218,7 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "needs: [test-shared, build-idf, build-frame, build-rlcd, build-ble-off]"
+      "contains": "needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux]"
     },
     {
       "path": ".github/workflows/docker.yml",
@@ -251,15 +262,15 @@
     },
     {
       "path": "README.md",
-      "contains": "click \"Flash HiPhi Dial\""
+      "contains": "click \"Flash Dial main controller\""
     },
     {
       "path": "docs/usage/FIRMWARE_FLASHING.md",
-      "contains": "Click **\"Update HiPhi Dial\"**"
+      "contains": "Click **\"Flash Dial main controller\"**"
     },
     {
       "path": "docs/usage/GETTING_STARTED.md",
-      "contains": "**Click \"Flash HiPhi Dial\"**"
+      "contains": "**Click \"Flash Dial main controller\"**"
     },
     {
       "path": "idf_app/main/platform_mdns_idf.c",
@@ -267,6 +278,10 @@
     },
     {
       "path": "frame_app/main/platform_mdns_frame.c",
+      "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
+    },
+    {
+      "path": "tough_app/main/platform_mdns_tough.c",
       "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
     },
     {

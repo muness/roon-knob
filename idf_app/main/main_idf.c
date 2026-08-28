@@ -22,8 +22,10 @@
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_sleep.h>
 #include <stdio.h>
 #include <nvs_flash.h>
+#include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <stdatomic.h>
@@ -35,6 +37,8 @@ static const char *TAG = "main";
 #define UI_LOOP_STACK_SIZE (16 * 1024)
 #define UI_LOOP_CORE 1
 #define LVGL_PSRAM_POOL_SIZE (72 * 1024)
+#define EXPERIMENT_ENCODER_GPIO_A GPIO_NUM_8
+#define EXPERIMENT_ENCODER_GPIO_B GPIO_NUM_7
 
 // UI task handle for display sleep management
 static TaskHandle_t g_ui_task_handle = NULL;
@@ -51,8 +55,41 @@ static bool s_ble_initialized = false;
 static void *s_lvgl_psram_pool_memory = NULL;
 static lv_mem_pool_t s_lvgl_psram_pool = NULL;
 
-static void log_memory(const char *stage) {
+static void resume_power_experiment_before_ui(void) {
+    platform_power_measurement_t measurement = {0};
+    (void)battery_get_measurement(&measurement);
+    uint32_t next_sleep_sec = 0;
+    if (!platform_power_experiment_note_early_boot(
+            &measurement, &next_sleep_sec)) {
+        return;
+    }
+
+    const gpio_config_t encoder_config = {
+        .pin_bit_mask = (1ULL << EXPERIMENT_ENCODER_GPIO_A) |
+                        (1ULL << EXPERIMENT_ENCODER_GPIO_B),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&encoder_config));
+    ESP_ERROR_CHECK(platform_power_prepare_for_deep_sleep()
+        ? ESP_OK : ESP_FAIL);
+    ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(
+        (1ULL << EXPERIMENT_ENCODER_GPIO_A) |
+            (1ULL << EXPERIMENT_ENCODER_GPIO_B),
+        ESP_EXT1_WAKEUP_ANY_LOW));
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(
+        (uint64_t)next_sleep_sec * 1000000ULL));
     ESP_LOGI(TAG,
+             "Power experiment checkpoint saved; returning directly to "
+             "Deep-sleep for %lu seconds without UI, Wi-Fi, or BLE",
+             (unsigned long)next_sleep_sec);
+    esp_deep_sleep_start();
+}
+
+static void log_memory(const char *stage) {
+    ESP_LOGD(TAG,
              "%s: internal free=%u largest=%u DMA free=%u largest=%u PSRAM free=%u largest=%u",
              stage,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -94,7 +131,7 @@ static bool add_lvgl_psram_pool(void) {
 static void log_lvgl_memory(const char *stage) {
     lv_mem_monitor_t monitor = {0};
     lv_mem_monitor(&monitor);
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "%s: LVGL total=%u free=%u largest=%u used=%u%% fragmented=%u%%",
              stage,
              (unsigned)monitor.total_size,
@@ -305,23 +342,21 @@ static void ui_loop_task(void *arg) {
             check_ota_status();
         }
 
-        // Keep early boot telemetry frequent enough to attribute BLE allocations,
-        // then reduce it to once per minute for normal operation.
+        // Retain health telemetry for debug builds without flooding normal
+        // firmware or waking UART output every few seconds.
         static uint32_t stack_check_counter = 0;
-        static uint8_t early_telemetry_samples = 0;
-        const uint32_t stack_check_interval =
-            early_telemetry_samples < 6 ? 500 : 6000;
-        if (++stack_check_counter >= stack_check_interval) {
+        if (++stack_check_counter >= 6000) {
             stack_check_counter = 0;
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             uint32_t free_bytes = hwm * sizeof(StackType_t);
             uint32_t used_bytes = UI_LOOP_STACK_SIZE - free_bytes;
-            ESP_LOGI(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
+            ESP_LOGD(TAG, "ui_loop stack usage: %u/%u bytes (peak usage, %u free)",
                      (unsigned int)used_bytes, UI_LOOP_STACK_SIZE, (unsigned int)free_bytes);
             log_lvgl_memory("UI loop watermark");
             log_memory("UI loop watermark");
-            if (early_telemetry_samples < 6) {
-                early_telemetry_samples++;
+            if (free_bytes < 2048) {
+                ESP_LOGW(TAG, "UI loop stack margin is low: %u bytes free",
+                         (unsigned int)free_bytes);
             }
         }
 
@@ -379,6 +414,13 @@ void app_main(void) {
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    /* A voltage-curve timer wake initializes only NVS and the ADC. Completed,
+     * manual, or unexpected wakes fall through to the normal application. */
+    if (!battery_init()) {
+        ESP_LOGW(TAG, "Early battery monitoring unavailable");
+    }
+    resume_power_experiment_before_ui();
 
     // Initialize display hardware (SPI, LCD panel) BEFORE lv_init
     ESP_LOGI(TAG, "Initializing display hardware...");

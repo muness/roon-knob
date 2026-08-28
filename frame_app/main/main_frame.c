@@ -8,6 +8,8 @@
 #include "captive_portal.h"
 #include "eink_display.h"
 #include "eink_ui.h"
+#include "frame_power_manager.h"
+#include "frame_display_preferences.h"
 #include "pmic_axp2101.h"
 #include "platform/platform_http.h"
 #include "platform/platform_input.h"
@@ -85,6 +87,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     post_runtime_network_status("WiFi: Connected");
     bridge_client_set_device_ip(ip_opt);
     bridge_client_set_network_ready(true);
+    eink_ui_post_device_ip(ip_opt);
+    eink_ui_post_show_ip(frame_display_preferences_show_ip());
     s_mdns_init_pending = true;
     s_ble_init_pending = true;
     atomic_store_explicit(&s_sta_server_pending, true, memory_order_release);
@@ -102,6 +106,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     snprintf(msg, sizeof(msg), "WiFi: %s (%d/%d)", error, attempt, max);
     post_runtime_network_status(msg);
     bridge_client_set_network_ready(false);
+    eink_ui_post_device_ip(NULL);
     break;
   }
 
@@ -110,6 +115,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     eink_ui_post_network_status("WiFi Setup: Connect to\nhiphi-frame-setup");
     eink_ui_post_zone_name("WiFi Setup");
     bridge_client_set_network_ready(false);
+    eink_ui_post_device_ip(NULL);
     /* The provisioning adapter has stopped the shared STA server before the
      * AP portal started. Discard any stale deferred STA-start request. */
     atomic_store_explicit(&s_sta_server_pending, false, memory_order_release);
@@ -174,7 +180,11 @@ static void ui_loop_task(void *arg) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(50));
+    frame_power_manager_poll(
+        s_mdns_init_pending || s_ble_init_pending ||
+        atomic_load_explicit(&s_sta_server_pending, memory_order_acquire));
+
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -192,6 +202,7 @@ void app_main(void) {
     err = nvs_flash_init();
   }
   ESP_ERROR_CHECK(err);
+  frame_display_preferences_init();
 
   // Initialize PMIC first — enables ALDO power rails needed by e-ink panel
   ESP_LOGI(TAG, "Initializing PMIC...");
@@ -216,6 +227,7 @@ void app_main(void) {
 
   // Initialize button input
   platform_input_init();
+  frame_power_manager_init();
 
   // Create UI loop task (processes input + e-ink refreshes)
   ESP_LOGI(TAG, "Creating UI loop task");

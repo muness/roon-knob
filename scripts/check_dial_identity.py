@@ -37,7 +37,12 @@ def repository_files() -> list[Path]:
     for relative in result.stdout.splitlines():
         if not relative or relative in SELF_PATHS:
             continue
-        if any(part in {".git", ".ci", "build", "managed_components"} for part in Path(relative).parts):
+        if any(
+            part in {".git", ".ci", "managed_components"}
+            or part == "build"
+            or part.startswith("build-")
+            for part in Path(relative).parts
+        ):
             continue
         path = ROOT / relative
         if path.is_file():

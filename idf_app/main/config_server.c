@@ -4,10 +4,12 @@
 #include "config_server.h"
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
+#include "power_debug_web.h"
 #include "platform/platform_mdns.h"
 #include "bridge_client.h"
 #include "rk_ble_hid_host.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +49,8 @@ static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
 }
 
 // HTML page for config
-// Format args: current_bridge, status_class, status_text, wifi_html, bridge_value
+// Format args: current_bridge, status_class, status_text, wifi_html,
+// scan_placeholder, scan_options, bridge_value, scan_refresh_script
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
@@ -74,6 +77,7 @@ static const char *HTML_CONFIG =
     ".hint{font-size:12px;color:#666;margin-top:4px;}"
     ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
     ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
+    RK_WIFI_PORTAL_SELECT_CSS_FORMAT
     ".section{max-width:400px;}"
     "a{color:#4fc3f7;}"
     ".device{background:#0f0f1a;padding:10px;border-radius:5px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;}"
@@ -81,6 +85,7 @@ static const char *HTML_CONFIG =
     "<h1>HiPhi Dial</h1>"
     "<p class='info'>Configure your HiPhi Dial settings</p>"
     "<p><a href='/ble'>BLE Media Remote settings</a></p>"
+    "<p><a href='/power-debug'>Power debug evidence</a></p>"
     "<div class='current'>"
     "<strong>Current Unified Hi-Fi Control:</strong> %s"
     "</div>"
@@ -92,8 +97,7 @@ static const char *HTML_CONFIG =
         "<p class='hint'>Saved-network changes take effect after restart.</p>"
     "<form method='POST' action='/wifi-add'>"
     "<h2>Add WiFi Network</h2>"
-    "<label>SSID</label>"
-    "<input type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
+    RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
         "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
         "<p class='hint'>Up to two networks. Remove one before replacing it.</p>"
@@ -106,7 +110,7 @@ static const char *HTML_CONFIG =
     "<p class='hint'>Leave empty for mDNS auto-discovery. Check the HiPhi Dial display for connection progress.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form></body></html>";
+    "</form>%s</body></html>";
 
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
@@ -318,16 +322,32 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
                  "<div class='wifi-entry'><em>No saved networks</em></div>");
     }
 
+    char query[32] = {0};
+    char scan_value[8] = {0};
+    const bool scan_again_requested =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value)) == ESP_OK &&
+        strcmp(scan_value, "again") == 0;
+    rk_wifi_portal_scan_t scan = {0};
+    rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
+    char scan_options[4096] = {0};
+    rk_wifi_portal_render_options(&scan, scan_options, sizeof(scan_options));
+
     // Build HTML with current values, saved networks, and bridge status.
-    char *html = heap_caps_malloc(4096,
+    const size_t html_size = 12288;
+    char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 4096, HTML_CONFIG, current, status_class, status_text,
-             wifi_html, cfg->bridge_base);
+    snprintf(html, html_size, HTML_CONFIG, current, status_class, status_text,
+             wifi_html, rk_wifi_portal_scan_placeholder(&scan), scan_options,
+             cfg->bridge_base,
+             rk_wifi_portal_scan_should_refresh(&scan)
+                 ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
@@ -421,9 +441,15 @@ static esp_err_t wifi_add_handler(httpd_req_t *req) {
     }
     buf[received] = '\0';
 
+    char selected_ssid[33] = {0};
+    char manual_ssid[33] = {0};
     char ssid[33] = {0};
     char pass[65] = {0};
-    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || !ssid[0]) {
+    (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+    (void)get_form_field(buf, "ssid_manual", manual_ssid,
+                         sizeof(manual_ssid));
+    if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                     ssid, sizeof(ssid))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
     }
@@ -920,6 +946,10 @@ void config_server_start(void) {
         .handler = ble_forget_handler,
     };
     httpd_register_uri_handler(s_server, &ble_forget);
+
+    if (!power_debug_web_register(s_server)) {
+        ESP_LOGE(TAG, "Shared power-debug routes unavailable");
+    }
 
     ESP_LOGI(TAG, "Config server started");
     http_server_lifecycle_unlock();

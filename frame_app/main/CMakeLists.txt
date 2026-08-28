@@ -1,7 +1,9 @@
 set(SRC_FILES
     "main_frame.c"
+    "frame_power_manager.c"
+    "frame_power_policy.c"
+    "frame_display_preferences.c"
     "eink_display.c"
-    "eink_dither.c"
     "eink_ui.c"
     "eink_font.c"
     "controller_input_profile_frame.c"
@@ -29,8 +31,12 @@ set(SRC_FILES
     "../../common/controller_input_mailbox.c"
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
+    "../../common/controller_utf8.c"
     "../../common/wifi_manager.c"
+    "../../common/wifi_portal_form.c"
+    "../../common/power_debug_web.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_power.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
 )

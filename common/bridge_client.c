@@ -6,6 +6,7 @@
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
+#include "platform/platform_power.h"
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "os_mutex.h"
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdint.h>
 #include <stdatomic.h>
 #include <cJSON.h>
@@ -32,7 +34,7 @@ static bool fetch_knob_config(void);
 static void apply_knob_config(const rk_cfg_t *cfg);
 static void check_config_sha(const char *new_sha);
 static void check_zones_sha(const char *new_sha);
-static void check_charging_state_change(void);
+static void check_charging_state_change(bool current_external_power);
 
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
@@ -48,7 +50,9 @@ static void check_charging_state_change(void);
  * radio controller and display DMA. free() is valid for ESP heap-cap blocks. */
 static void *bridge_external_alloc(size_t size) {
 #ifdef ESP_PLATFORM
-    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // PSRAM is optional across targets (the original AtomS3 has none).
+    void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return ptr ? ptr : heap_caps_malloc(size, MALLOC_CAP_8BIT);
 #else
     return malloc(size);
 #endif
@@ -165,6 +169,10 @@ static int s_bridge_fail_count = 0;
 static int s_mdns_fail_count = 0;
 static char s_device_ip[16] = {0};  // Device IP for recovery messages
 
+void bridge_client_request_poll(void) {
+    s_trigger_poll = true;
+}
+
 /* The network worker has a PSRAM stack, so it must never enter NVS/flash
  * persistence. A single static mailbox moves discovered-endpoint commits onto
  * the internal UI stack without creating another heap allocation. */
@@ -272,7 +280,10 @@ static bool bridge_endpoint_snapshot(char *bridge_base, size_t bridge_len,
     rk_strlcpy(bridge_base, cfg.bridge_base, bridge_len);
     rk_strlcpy(zone_id, cfg.zone_id, zone_len);
     lock_state();
-    if (s_state.runtime_zone_pinned) {
+    /* Once zones have been resolved, runtime selection is authoritative for
+     * every endpoint. Using persisted cfg.zone_id here lets artwork and
+     * now-playing race a zone change and refer to different zones. */
+    if (s_state.zone_resolved && s_state.runtime_zone_id[0]) {
         rk_strlcpy(zone_id, s_state.runtime_zone_id, zone_len);
     }
     unlock_state();
@@ -283,13 +294,14 @@ static bool bridge_endpoint_snapshot(char *bridge_base, size_t bridge_len,
     return true;
 }
 
-static bool fetch_now_playing(struct now_playing_state *state);
+static bool fetch_now_playing(struct now_playing_state *state,
+                              const platform_power_snapshot_t *power);
 static bool refresh_zone_label(bool prefer_zone_id);
 static void parse_zones_from_response(const char *resp);
 static const char *extract_json_string(const char *start, const char *key, char *out, size_t len);
 static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
-static void wait_for_poll_interval(void);
+static void wait_for_poll_interval(const platform_power_snapshot_t *power);
 static void bridge_poll_thread(void *arg);
 static bool host_is_valid(const char *url);
 static void maybe_update_bridge_base(void);
@@ -474,6 +486,18 @@ static void default_now_playing(struct now_playing_state *state) {
     state->zones_sha[0] = '\0';
 }
 
+static bool json_bool_field(const char *json, const char *field,
+                            bool fallback) {
+    const char *p = json ? strstr(json, field) : NULL;
+    if (!p) return fallback;
+    p = strchr(p, ':');
+    if (!p) return fallback;
+    do { ++p; } while (*p && isspace((unsigned char)*p));
+    if (strncmp(p, "true", 4) == 0) return true;
+    if (strncmp(p, "false", 5) == 0) return false;
+    return fallback;
+}
+
 static void post_ui_update(const struct now_playing_state *state) {
     if (!state) {
         return;
@@ -566,7 +590,7 @@ static void post_ui_zone_name(const char *name) {
     post_ui_zone_name_copy(copy);
 }
 
-static void wait_for_poll_interval(void) {
+static void wait_for_poll_interval(const platform_power_snapshot_t *power) {
     // Use longer delay when display is sleeping, on battery, or bridge unreachable
     uint32_t delay_ms;
     if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
@@ -581,7 +605,7 @@ static void wait_for_poll_interval(void) {
         } else {
             delay_ms = POLL_DELAY_SLEEPING_MS;  // Default 30s when playing
         }
-    } else if (platform_battery_is_charging()) {
+    } else if (power && power->external_power) {
         delay_ms = POLL_DELAY_AWAKE_CHARGING_MS;  // Fast polling when plugged in
     } else {
         delay_ms = POLL_DELAY_AWAKE_BATTERY_MS;   // Slower on battery to save power
@@ -665,8 +689,9 @@ static void maybe_update_bridge_base(void) {
     }
 }
 
-static bool fetch_now_playing(struct now_playing_state *state) {
-    if (!state) {
+static bool fetch_now_playing(struct now_playing_state *state,
+                              const platform_power_snapshot_t *power) {
+    if (!state || !power) {
         return false;
     }
     char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
@@ -682,8 +707,8 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     }
 
     // Get battery status for reporting to bridge
-    int battery_level = platform_battery_get_level();
-    bool battery_charging = platform_battery_is_charging();
+    const int battery_level = power->battery_level;
+    const bool battery_charging = power->external_power;
 
     // Get knob ID for config_sha lookup
     char knob_id[16];
@@ -702,15 +727,20 @@ static bool fetch_now_playing(struct now_playing_state *state) {
         snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_charging=%d&knob_id=%s",
                  bridge_base, zone_id, battery_charging ? 1 : 0, knob_id);
     }
+    LOGD("now_playing request zone=%s url=%s", zone_id, url);
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_get(url, &resp, &resp_len);
+    LOGD("now_playing response ret=%d bytes=%u", ret, (unsigned)resp_len);
     if (ret != 0 || !resp) {
+        LOGW("now_playing request failed: ret=%d response=%s", ret,
+             resp ? "present" : "missing");
         platform_http_free(resp);
         return false;
     }
 
     if (strstr(resp, "\"error\"") || resp_len == 0) {
+        LOGW("now_playing response was empty or reported an error");
         platform_http_free(resp);
         return false;
     }
@@ -727,7 +757,9 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     if (line3) {
         extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
     }
-    state->is_playing = strstr(resp, "\"is_playing\":true") != NULL;
+    /* Preserve the last good value if a transient/partial response omits the
+     * field. Treating an incomplete payload as stopped makes the UI lie. */
+    state->is_playing = json_bool_field(resp, "\"is_playing\"", state->is_playing);
 
     const char *vol_key = strstr(resp, "\"volume\"");
     if (vol_key) {
@@ -784,9 +816,11 @@ static bool fetch_now_playing(struct now_playing_state *state) {
     const char *image_key = strstr(resp, "\"image_key\"");
     if (image_key) {
         extract_json_string(image_key, "\"image_key\"", state->image_key, sizeof(state->image_key));
-    } else {
-        state->image_key[0] = '\0';  // No artwork available
     }
+    LOGD("now_playing parsed playing=%s image_key=%s zone=%s",
+         state->is_playing ? "true" : "false", state->image_key, zone_id);
+    /* A partial response may omit artwork metadata. Keep the last good key;
+     * the bridge normally supplies a string (or an empty string) here. */
 
     // Parse config_sha for config change detection (silent - checked in poll loop)
     const char *config_sha_key = strstr(resp, "\"config_sha\"");
@@ -1030,10 +1064,16 @@ static void bridge_poll_thread(void *arg) {
     struct now_playing_state state;
     default_now_playing(&state);
     while (atomic_load_explicit(&s_running, memory_order_acquire)) {
+        platform_power_snapshot_t power = {
+            .battery_level = -1,
+            .external_power = true,
+        };
+        platform_power_snapshot(&power);
+
         // Skip HTTP requests if network is not ready yet (or in BLE mode)
         // In BLE mode, s_network_ready is false, so we just sleep without logging
         if (!atomic_load_explicit(&s_network_ready, memory_order_acquire)) {
-            wait_for_poll_interval();
+            wait_for_poll_interval(&power);
             continue;
         }
 
@@ -1051,7 +1091,7 @@ static void bridge_poll_thread(void *arg) {
         if (!s_state.zone_resolved) {
             refresh_zone_label(true);
         }
-        bool ok = fetch_now_playing(&state);
+        bool ok = fetch_now_playing(&state, &power);
         post_ui_status(ok);
 
         // Track play state for extended sleep polling
@@ -1066,7 +1106,7 @@ static void bridge_poll_thread(void *arg) {
         }
 
         // Always check charging state (works in AP mode too)
-        check_charging_state_change();
+        check_charging_state_change(power.external_power);
 
         // Handle bridge connection status (mirrors WiFi retry pattern)
         if (ok) {
@@ -1074,6 +1114,7 @@ static void bridge_poll_thread(void *arg) {
             post_ui_update(&state);
             if (!s_last_net_ok) {
                 // Just connected - clear status, restore zone name, mark verified
+                LOGI("Hi-Fi Control connection established");
                 reset_bridge_fail_count();
                 post_ui_message("Hi-Fi Control: Connected");
                 post_ui_network_status("");
@@ -1090,6 +1131,7 @@ static void bridge_poll_thread(void *arg) {
             }
         } else if (!ok && s_last_net_ok) {
             // Just lost connection to bridge - start retry tracking
+            LOGW("Hi-Fi Control connection lost; retrying");
             // line1=main content (bottom), line2=header (top)
             increment_bridge_fail_count();
             s_bridge_verified = false;
@@ -1178,7 +1220,7 @@ static void bridge_poll_thread(void *arg) {
             }
         }
         s_last_net_ok = ok;
-        wait_for_poll_interval();
+        wait_for_poll_interval(&power);
     }
 }
 
@@ -1214,6 +1256,22 @@ void bridge_client_start(void) {
 bool bridge_client_execute_command(const controller_command_t *command) {
     if (!command) {
         return false;
+    }
+
+    if (command->kind == CONTROLLER_COMMAND_PREVIOUS_ZONE ||
+        command->kind == CONTROLLER_COMMAND_NEXT_ZONE) {
+        bridge_zone_t zones[BRIDGE_CLIENT_MAX_ZONES];
+        const int count = bridge_client_get_zones(zones, BRIDGE_CLIENT_MAX_ZONES);
+        if (count < 2) return false;
+        char current[sizeof(zones[0].id)] = {};
+        (void)bridge_client_get_current_zone_id(current, sizeof(current));
+        int index = 0;
+        for (int i = 0; i < count; ++i) {
+            if (strcmp(zones[i].id, current) == 0) { index = i; break; }
+        }
+        const int delta = command->kind == CONTROLLER_COMMAND_NEXT_ZONE ? 1 : -1;
+        const int next = (index + delta + count) % count;
+        return bridge_client_set_zone(zones[next].id);
     }
 
     bridge_command_context_t context;
@@ -1327,12 +1385,22 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
                                                      int width, int height,
                                                      int clip_radius,
                                                      const char *format) {
-    if (!url_buf || buf_len < 256) {
+    return bridge_client_get_artwork_url_for_format_and_scale(
+        url_buf, buf_len, width, height, clip_radius, format, "fit", 0);
+}
+
+const char* bridge_client_get_artwork_url_for_format_and_scale(
+    char *url_buf, size_t buf_len, int width, int height, int clip_radius,
+    const char *format, const char *scale, int crop_limit_percent) {
+    if (!url_buf || buf_len == 0) {
         return NULL;
     }
 
     if (!format || !format[0]) {
         format = "rgb565";
+    }
+    if (!scale || !scale[0]) {
+        scale = "fit";
     }
 
     char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
@@ -1343,16 +1411,81 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
         return NULL;
     }
 
-    if (clip_radius > 0) {
-        snprintf(url_buf, buf_len,
-                 "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s&clip_radius=%d",
-                 bridge_base, zone_id, width, height, format, clip_radius);
+    int written = 0;
+    if (clip_radius > 0 && crop_limit_percent > 0) {
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&crop_limit=%d&width=%d&height=%d&format=%s&clip_radius=%d",
+                           bridge_base, zone_id, scale, crop_limit_percent,
+                           width, height, format, clip_radius);
+    } else if (clip_radius > 0) {
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&width=%d&height=%d&format=%s&clip_radius=%d",
+                           bridge_base, zone_id, scale, width, height, format,
+                           clip_radius);
+    } else if (crop_limit_percent > 0) {
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&crop_limit=%d&width=%d&height=%d&format=%s",
+                           bridge_base, zone_id, scale, crop_limit_percent,
+                           width, height, format);
     } else {
-        snprintf(url_buf, buf_len,
-                 "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s",
-                 bridge_base, zone_id, width, height, format);
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&width=%d&height=%d&format=%s",
+                           bridge_base, zone_id, scale, width, height, format);
+    }
+    if (written < 0 || (size_t)written >= buf_len) {
+        url_buf[0] = '\0';
+        LOGE("Artwork URL exceeds the caller buffer");
+        return NULL;
     }
     return url_buf;
+}
+
+int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
+                                char **out, size_t *out_len) {
+    if (!out || width <= 0 || height <= 0) return -1;
+    *out = NULL;
+    if (out_len) *out_len = 0;
+    char url[512];
+    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
+                                                   height, 0, format)) {
+        return -1;
+    }
+    uint32_t cache_key = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
+        cache_key ^= *p;
+        cache_key *= 16777619u;
+    }
+    size_t len = strlen(url);
+    if (len + 20 < sizeof(url)) {
+        snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
+                 (unsigned)cache_key);
+    }
+    return platform_http_get_image(url, out, out_len);
+}
+
+int bridge_client_stream_artwork(const char *image_key, int width, int height,
+                                 const char *format, size_t max_bytes,
+                                 platform_http_stream_callback_t callback,
+                                 void *ctx, size_t *out_len) {
+    if (width <= 0 || height <= 0 || max_bytes == 0 || !callback) return -1;
+
+    char url[512];
+    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
+                                                   height, 0, format)) {
+        return -1;
+    }
+
+    uint32_t cache_key = 2166136261u;
+    for (const unsigned char *p =
+             (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
+        cache_key ^= *p;
+        cache_key *= 16777619u;
+    }
+    size_t len = strlen(url);
+    if (len + 20 >= sizeof(url)) return -1;
+    snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
+             (unsigned)cache_key);
+    return platform_http_stream(url, max_bytes, callback, ctx, out_len);
 }
 
 bool bridge_client_is_ready_for_art_mode(void) {
@@ -1580,7 +1713,12 @@ static void apply_knob_config(const rk_cfg_t *cfg) {
     }
 
     // Get current charging state
-    bool is_charging = platform_battery_is_charging();
+    platform_power_snapshot_t power = {
+        .battery_level = -1,
+        .external_power = true,
+    };
+    platform_power_snapshot(&power);
+    bool is_charging = power.external_power;
     uint16_t rotation = rk_cfg_get_rotation(cfg, is_charging);
 
     LOGI("Config apply requested: name='%s' rotation=%d (charging=%s)",
@@ -1854,8 +1992,7 @@ static bool fetch_knob_config(void) {
 }
 
 // Check for charging state changes and reapply config if needed
-static void check_charging_state_change(void) {
-    bool current_charging = platform_battery_is_charging();
+static void check_charging_state_change(bool current_charging) {
     if (current_charging != s_last_charging_state) {
         LOGI("Charging state changed: %s -> %s",
              s_last_charging_state ? "charging" : "battery",

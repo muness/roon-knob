@@ -32,3 +32,5 @@ bool rlcd_ui_is_zone_picker_visible(void);
 void rlcd_ui_zone_picker_scroll(int delta);
 bool rlcd_ui_zone_picker_is_current_selection(void);
 void rlcd_ui_zone_picker_get_selected_id(char *out, size_t length);
+/** True only while a visible render or setup interaction must remain awake. */
+bool rlcd_ui_power_work_pending(void);

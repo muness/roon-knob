@@ -7,6 +7,9 @@
 
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,4 +102,41 @@ bool ble_hid_host_dial_start(void) {
         return false;
     }
     return true;
+}
+
+bool ble_hid_host_dial_prepare_for_sleep(uint32_t timeout_ms) {
+    rk_ble_hid_host_result_t result = rk_ble_hid_host_prepare_for_sleep();
+    if (result == RK_BLE_HID_HOST_ERR_INVALID_STATE) {
+        rk_ble_hid_host_status_t status = {0};
+        /* No status owner means BLE was never initialized and is already
+         * quiescent. An initialized ERROR state must fail awake. */
+        return rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK;
+    }
+    if (result == RK_BLE_HID_HOST_ERR_NOT_SUPPORTED) {
+        return true;
+    }
+    if (result != RK_BLE_HID_HOST_OK) {
+        ESP_LOGW(TAG, "BLE sleep quiesce rejected: %s",
+                 rk_ble_hid_host_result_name(result));
+        return false;
+    }
+
+    const int64_t deadline_us =
+        esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (true) {
+        rk_ble_hid_host_status_t status = {0};
+        if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
+            ESP_LOGW(TAG, "BLE status unavailable during sleep quiesce");
+            return false;
+        }
+        if (status.quiesced_for_sleep) {
+            return true;
+        }
+        if (status.state == RK_BLE_HID_HOST_STATE_ERROR ||
+            esp_timer_get_time() >= deadline_us) {
+            ESP_LOGW(TAG, "BLE did not quiesce before sleep");
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(25));
+    }
 }

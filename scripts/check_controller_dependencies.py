@@ -36,10 +36,10 @@ RAW_STORAGE_ALLOWED = {
     "frame_app/main/platform_storage_frame.c",
 }
 SRC_FILES_RE = re.compile(
-    r"set\s*\(\s*SRC_FILES(?P<body>.*?)\n\s*\)", re.DOTALL
+    r"set\s*\(\s*SRC_FILES(?P<body>.*?)\)", re.DOTALL
 )
 COMPONENT_REGISTER_RE = re.compile(
-    r"idf_component_register\s*\((?P<body>.*?)\n\s*\)", re.DOTALL
+    r"idf_component_register\s*\((?P<body>.*?)\)", re.DOTALL
 )
 SET_PROPERTY_RE = re.compile(
     r"set_property\s*\((?P<body>.*?)\)", re.DOTALL
@@ -63,6 +63,8 @@ SUPPORTED_CMAKE_COMMANDS = {
 SUPPORTED_SET_PROPERTIES = {
     "DIRECTORY PROPERTY CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON",
     "TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11",
+    "TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17",
+    "TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON",
 }
 
 
@@ -75,6 +77,18 @@ class Edge:
     @property
     def key(self) -> str:
         return f"{self.target}|{self.source}|{self.header}"
+
+
+@dataclass(frozen=True, order=True)
+class CompositionEdge:
+    target: str
+    kind: str
+    source: str
+    value: str
+
+    @property
+    def key(self) -> str:
+        return f"{self.target}|{self.kind}|{self.source}|{self.value}"
 
 
 def relative_path(path: Path, root: Path = ROOT) -> str:
@@ -167,13 +181,41 @@ def parse_cmake_sources(cmake_path: Path) -> list[Path]:
     return sources
 
 
+def parse_cmake_include_dirs(cmake_path: Path) -> list[Path]:
+    """Return literal INCLUDE_DIRS entries from the enforced CMake form."""
+    text = re.sub(r"#.*$", "", cmake_path.read_text(encoding="utf-8"), flags=re.MULTILINE)
+    registrations = list(COMPONENT_REGISTER_RE.finditer(text))
+    if len(registrations) != 1:
+        raise ValueError(f"{relative_path(cmake_path)}: expected one component registration")
+    body = registrations[0].group("body")
+    match = re.search(
+        r"\bINCLUDE_DIRS\b(?P<dirs>.*?)(?=\bREQUIRES\b|\bPRIV_REQUIRES\b|$)",
+        body,
+        re.DOTALL,
+    )
+    if not match:
+        return []
+    values = QUOTED_VALUE_RE.findall(match.group("dirs"))
+    unparsed = QUOTED_VALUE_RE.sub("", match.group("dirs")).strip()
+    if unparsed:
+        raise ValueError(
+            f"{relative_path(cmake_path)}: INCLUDE_DIRS entries must be literal quoted paths: {unparsed}"
+        )
+    return [(cmake_path.parent / value).resolve() for value in values]
+
+
 def project_file_index(root: Path = ROOT) -> dict[str, list[Path]]:
     index: dict[str, list[Path]] = {}
-    ignored_parts = {".git", "build", "managed_components"}
     for candidate in root.rglob("*"):
         if not candidate.is_file():
             continue
-        if ignored_parts.intersection(candidate.relative_to(root).parts):
+        parts = candidate.relative_to(root).parts
+        if any(
+            part in {".git", "managed_components"}
+            or part == "build"
+            or part.startswith("build-")
+            for part in parts
+        ):
             continue
         index.setdefault(candidate.name, []).append(candidate.resolve())
     return index
@@ -211,6 +253,8 @@ def collect_edges(
     observed: set[Edge] = set()
 
     for target_name, target in policy["targets"].items():
+        if target.get("edge_mode", "full") != "full":
+            continue
         cmake_path = root / target["cmake"]
         include_dirs = [(root / path).resolve() for path in target["include_dirs"]]
         pending = list(parse_cmake_sources(cmake_path))
@@ -264,6 +308,63 @@ def collect_edges(
     return observed
 
 
+def target_owner(path: str, policy: dict) -> str | None:
+    owners = [
+        target_name
+        for target_name, root in policy.get("target_roots", {}).items()
+        if path == root or path.startswith(root + "/")
+    ]
+    if len(owners) > 1:
+        raise ValueError(f"target roots overlap for {path}: {owners}")
+    return owners[0] if owners else None
+
+
+def composition_edges(policy: dict, root: Path = ROOT) -> set[CompositionEdge]:
+    """Collect target-to-target source, include-directory, and include edges."""
+    observed: set[CompositionEdge] = set()
+    index = project_file_index(root)
+    for target_name, target in policy.get("targets", {}).items():
+        if target.get("edge_mode", "full") != "composition":
+            continue
+        cmake_path = root / target["cmake"]
+        include_dirs = parse_cmake_include_dirs(cmake_path)
+        for directory in include_dirs:
+            relative = relative_path(directory, root)
+            owner = target_owner(relative, policy)
+            if owner and owner != target_name:
+                observed.add(CompositionEdge(target_name, "include_dir", "-", relative))
+
+        configured_sources = parse_cmake_sources(cmake_path)
+        configured_set = set(configured_sources)
+        pending = list(configured_sources)
+        visited: set[Path] = set()
+        while pending:
+            source = pending.pop()
+            if source in visited:
+                continue
+            visited.add(source)
+            source_relative = relative_path(source, root)
+            owner = target_owner(source_relative, policy)
+            if source in configured_set and owner and owner != target_name:
+                observed.add(CompositionEdge(target_name, "source", "-", source_relative))
+            if not source.is_file():
+                continue
+            text = normalize_preprocessor_text(source.read_text(encoding="utf-8"))
+            for include in INCLUDE_RE.findall(text):
+                resolved = resolve_header(include, source, include_dirs, index)
+                if resolved is None:
+                    continue
+                header_relative = relative_path(resolved, root)
+                header_owner = target_owner(header_relative, policy)
+                if header_owner and header_owner != target_name and owner != header_owner:
+                    observed.add(
+                        CompositionEdge(target_name, "include", source_relative, header_relative)
+                    )
+                if resolved.suffix in PROJECT_INCLUDE_SUFFIXES:
+                    pending.append(resolved)
+    return observed
+
+
 def edge_from_key(key: str) -> Edge:
     parts = key.split("|")
     if len(parts) != 3 or not all(parts):
@@ -313,6 +414,21 @@ def authorized_forbidden_edges(policy: dict) -> dict[Edge, dict]:
     return authorized
 
 
+def legacy_composition_edges(policy: dict) -> dict[CompositionEdge, dict]:
+    legacy: dict[CompositionEdge, dict] = {}
+    for item in policy.get("legacy_composition_edges", []):
+        required = ("target", "kind", "source", "value", "owner", "retirement_issue", "reason")
+        if any(not item.get(field) for field in required):
+            raise ValueError("legacy composition entries require target, kind, source, value, owner, retirement_issue, and reason")
+        if any("*" in item[field] for field in ("target", "kind", "source", "value")):
+            raise ValueError("legacy composition entries must be exact; wildcards are forbidden")
+        edge = CompositionEdge(item["target"], item["kind"], item["source"], item["value"])
+        if edge in legacy:
+            raise ValueError(f"duplicate legacy composition edge: {edge.key}")
+        legacy[edge] = item
+    return legacy
+
+
 def forbidden_rules_for(edge: Edge, policy: dict) -> list[str]:
     matches: list[str] = []
     for rule in policy["forbidden_rules"]:
@@ -357,6 +473,16 @@ def validate(policy: dict, observed: set[Edge]) -> list[str]:
             errors.append(
                 f"owned exception matches no forbidden rule: {edge.key}"
             )
+    return errors
+
+
+def validate_composition(policy: dict, observed: set[CompositionEdge]) -> list[str]:
+    legacy = legacy_composition_edges(policy)
+    errors: list[str] = []
+    for edge in sorted(observed - set(legacy)):
+        errors.append(f"unlisted target composition edge: {edge.key}")
+    for edge in sorted(set(legacy) - observed):
+        errors.append(f"stale legacy target composition edge: {edge.key}")
     return errors
 
 
@@ -449,6 +575,34 @@ def run_negative_fixture(policy: dict) -> None:
             raise AssertionError(
                 f"unsupported CMake source mutation was accepted: {fixture_path}"
             )
+
+    composition = composition_edges(policy)
+    composition_errors = validate_composition(policy, composition)
+    if composition_errors:
+        raise AssertionError("production composition baseline failed: " + "; ".join(composition_errors))
+
+    broad_policy = copy.deepcopy(policy)
+    broad_policy["legacy_composition_edges"].append(
+        {
+            "target": "atom",
+            "kind": "source",
+            "source": "*",
+            "value": "tough_app/main/*",
+            "owner": "test",
+            "retirement_issue": "#0",
+            "reason": "must be rejected as a wildcard",
+        }
+    )
+    try:
+        legacy_composition_edges(broad_policy)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("broad Atom/Tough composition allowlist was accepted")
+
+    new_edge = CompositionEdge("atom", "source", "-", "tough_app/main/new_target.c")
+    if not any("unlisted target composition edge" in error for error in validate_composition(policy, composition | {new_edge})):
+        raise AssertionError("a new target-specific edge did not fail beside legacy debt")
     print("controller dependency negative fixture passed")
 
 
@@ -474,12 +628,16 @@ def main() -> int:
             run_negative_fixture(policy)
             return 0
 
-        errors = validate(policy, observed) + raw_storage_api_errors()
+        errors = (
+            validate(policy, observed)
+            + validate_composition(policy, composition_edges(policy))
+            + raw_storage_api_errors()
+        )
         if errors:
             for error in errors:
                 print(error, file=sys.stderr)
             return 1
-        grandfathered = len(grandfathered_edges(policy))
+        grandfathered = len(grandfathered_edges(policy)) + len(legacy_composition_edges(policy))
         authorized = len(authorized_forbidden_edges(policy))
         allowed = len(policy["expected_edges"]) - grandfathered - authorized
         print(
