@@ -64,6 +64,7 @@ static esp_timer_handle_t s_lvgl_tick_timer = NULL;
 #define PIN_NUM_LCD_DATA3   ((gpio_num_t)18)
 #define PIN_NUM_LCD_RST     ((gpio_num_t)21)
 #define PIN_NUM_BK_LIGHT    ((gpio_num_t)47)
+#define PIN_NUM_TOUCH_RST   ((gpio_num_t)10)
 
 // LCD initialization commands for SH8601 (from reference example)
 static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
@@ -457,11 +458,20 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 bool platform_display_init(void) {
     ESP_LOGI(TAG, "Initializing display hardware");
 
-    /* Deep-sleep holds survive the reset boundary. Release the backlight pad
-     * before LEDC takes ownership, while it is still safely pulled off by the
-     * board's external gate resistor. */
+    /* Deep-sleep holds survive the reset boundary. Establish each awake level
+     * before releasing its hold so neither peripheral sees a power-on glitch. */
     gpio_deep_sleep_hold_dis();
     gpio_hold_dis(PIN_NUM_BK_LIGHT);
+    const gpio_config_t touch_reset_config = {
+        .pin_bit_mask = 1ULL << PIN_NUM_TOUCH_RST,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&touch_reset_config));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_NUM_TOUCH_RST, 1));
+    ESP_ERROR_CHECK(gpio_hold_dis(PIN_NUM_TOUCH_RST));
 
     // Initialize backlight with PWM at reduced brightness (50%)
     ledc_timer_config_t ledc_timer = {
@@ -625,7 +635,7 @@ void platform_display_init_sleep(TaskHandle_t lvgl_task_handle) {
         ESP_LOGW(TAG, "Cannot init display sleep - panel not initialized");
         return;
     }
-    display_sleep_init(s_panel_handle, lvgl_task_handle);
+    display_sleep_init(s_panel_handle, s_io_handle, lvgl_task_handle);
 }
 
 bool platform_display_is_sleeping(void) {
@@ -706,7 +716,8 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
         PLATFORM_POWER_CAP_SOC_DEEP_SLEEP |
         PLATFORM_POWER_CAP_RTC_EVIDENCE |
         PLATFORM_POWER_CAP_FORCED_TEST |
-        PLATFORM_POWER_CAP_AUXILIARY_SOC;
+        PLATFORM_POWER_CAP_AUXILIARY_SOC |
+        PLATFORM_POWER_CAP_VOLTAGE_EXPERIMENT;
     switch (dial.display_state) {
     case DISPLAY_STATE_ART_MODE:
         out->state = PLATFORM_POWER_STATE_ART;
@@ -759,6 +770,9 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
     case 6:
         out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WIFI;
         break;
+    case 7:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_DISPLAY;
+        break;
     default:
         out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_POLICY;
         break;
@@ -769,4 +783,8 @@ void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
 
 bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
     return display_power_debug_arm_deep_sleep(delay_sec);
+}
+
+bool platform_power_experiment_supported(void) {
+    return true;
 }

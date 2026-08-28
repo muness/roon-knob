@@ -27,6 +27,9 @@ processors. This alpha changes the power behavior of both:
   mode, dim, panel off, and finally ESP32-S3 Deep-sleep. BLE, Wi-Fi, the LCD,
   and the backlight shut down first. Turning the encoder wakes the Dial with a
   fresh boot and reconnect.
+- **Complete LCD/touch terminal shutdown:** Display Off alone left the LCD
+  controller running. The Dial now also sends the controller's Sleep In command
+  and holds the touch controller in reset before the ESP32-S3 enters Deep-sleep.
 - **No inherited timer wake:** before Deep-sleep, the shared power preflight
   disables automatic Light-sleep and clears its temporary timer wake source.
   A direct powered test exposed and removed the timer reboot that had prevented
@@ -53,12 +56,23 @@ The Dial still chooses between its battery and plugged-in policies using a
 voltage heuristic. A nearly full battery can temporarily receive the plugged-in
 policy and stay awake longer than expected.
 
-To test the sleep path while the Dial is plugged in, open `/power-debug` from
-its connected settings page and start the one-time 15-second test. After the
-encoder wakes it, the page reports whether shutdown preparation completed,
-whether Deep-sleep was requested, and what caused the wake. These counters are
-firmware evidence, not an ammeter; use an external meter to measure actual
-current and to confirm the auxiliary ESP32's contribution.
+The Dial's `/power-debug/sleep` endpoint now runs one persistent power
+experiment rather than the earlier one-shot sleep trigger. By default it wakes
+every 20 minutes through a minimal boot path, samples raw ADC and battery
+voltage, commits the bounded record to NVS, and immediately returns to
+Deep-sleep without starting the display, Wi-Fi, BLE, or application. Supply
+`interval_sec=0` when using an external current profiler: the same experiment
+records its entry and final wake but adds no periodic sampling wakes. Both modes
+take a maximum duration, have a unique experiment ID, export JSON or CSV, and
+can be cleared. The export reports if a deliberately denser or longer run has
+wrapped the 24-sample durable ring. Software checkpoints affect the discharge
+curve and are marked as observer effects; neither mode substitutes for an ammeter.
+
+The earlier v2.7.0-alpha.2 Dial image fully discharged one test unit overnight
+despite reporting a Deep-sleep entry. This build closes the LCD/touch shutdown
+gap and adds evidence that survives brownout, but battery runtime remains
+unproven until an exact image completes an overnight test and external-current
+measurement.
 
 The Dial works after installing the main firmware. For the lowest idle draw,
 also park the board's otherwise-unused auxiliary ESP32 once:
@@ -122,12 +136,23 @@ Every physical controller exposes `/power-debug` and
 shows the power source, active timeouts, display state, reset and wake cause,
 and the sleep or power-off capabilities that the exact target implements.
 
-All nine controllers provide the one-time 15-second powered terminal-power
-test. Dial, Frame, and RLCD retain evidence in RTC memory across processor
-Deep-sleep. Tough, AtomS3 JoyStick, M5Stack Dial v1.1, StickS3, StopWatch, and
-Kizz persist the completed shutdown marker in NVS so it survives full PMIC
-rail-off. The endpoint is passive: it does no background polling when nobody
-opens it.
+All nine controllers retain the terminal-power evidence described below. On
+the Waveshare Dial, `POST /power-debug/sleep` additionally starts the persistent
+software-voltage or external-profiler experiment described above; other exact
+targets report that early voltage sampling is unsupported until their qualified
+ADC or PMIC path is implemented. Every target writes a
+shared NVS lifecycle journal only at boot and terminal-sleep boundaries. Its
+bounded eight-event tail records the sequence, boot number, uptime, battery,
+preflight flags/error, reset cause, and wake cause for recent boot, attempt,
+error, preflight, and entry events. Summary counters and the previous-entry
+marker survive complete power loss. Dial, Frame, and RLCD additionally retain
+fast RTC evidence across processor Deep-sleep. The endpoint is passive: it does
+no background polling when nobody opens it.
+
+After the network clock synchronizes, each journal event also carries a UTC
+Unix timestamp and an ISO 8601 UTC rendering. Events written earlier in the
+same boot are backfilled from their monotonic uptime. Until synchronization,
+the endpoint reports the timestamp as unavailable instead of fabricating one.
 
 The M5-family targets now share one terminal preflight instead of jumping
 straight from a UI timeout into a board-specific power call. It removes the

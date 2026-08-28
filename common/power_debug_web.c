@@ -6,12 +6,19 @@
 
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
-#define POWER_DEBUG_BODY_SIZE 6144
+#define POWER_DEBUG_BODY_SIZE 12288
+#define POWER_DEBUG_TRACE_SIZE 3072
 #define POWER_DEBUG_TEST_DELAY_SEC 15
+#define POWER_EXPERIMENT_DEFAULT_INTERVAL_SEC 1200
+#define POWER_EXPERIMENT_DEFAULT_DURATION_SEC 21600
+#define POWER_EXPERIMENT_MAX_DURATION_SEC 604800
 
 static const char *state_name(platform_power_state_t state) {
     switch (state) {
@@ -76,6 +83,123 @@ static const char *preflight_error_name(uint32_t error) {
     }
 }
 
+static const char *trace_type_name(uint8_t type) {
+    switch ((platform_power_trace_type_t)type) {
+    case PLATFORM_POWER_TRACE_BOOT: return "boot";
+    case PLATFORM_POWER_TRACE_ATTEMPT: return "attempt";
+    case PLATFORM_POWER_TRACE_ERROR: return "error";
+    case PLATFORM_POWER_TRACE_PREFLIGHT: return "preflight";
+    case PLATFORM_POWER_TRACE_ENTRY: return "entry";
+    default: return "unknown";
+    }
+}
+
+static const char *experiment_state_name(
+    platform_power_experiment_state_t state) {
+    switch (state) {
+    case PLATFORM_POWER_EXPERIMENT_ARMED: return "armed";
+    case PLATFORM_POWER_EXPERIMENT_RUNNING: return "running";
+    case PLATFORM_POWER_EXPERIMENT_COMPLETE: return "complete";
+    case PLATFORM_POWER_EXPERIMENT_IDLE:
+    default: return "idle";
+    }
+}
+
+static const char *experiment_sampling_mode_name(
+    const platform_power_experiment_t *experiment) {
+    if (!experiment || experiment->state == PLATFORM_POWER_EXPERIMENT_IDLE) {
+        return "none";
+    }
+    return experiment->interval_sec > 0
+        ? "software-checkpoint" : "external-profiler";
+}
+
+static bool parse_u32(const char *value, uint32_t *out) {
+    if (!value || !value[0] || !out) return false;
+    errno = 0;
+    char *end = NULL;
+    const unsigned long parsed = strtoul(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' || parsed > UINT32_MAX) {
+        return false;
+    }
+    *out = (uint32_t)parsed;
+    return true;
+}
+
+static bool format_utc_timestamp(int64_t unix_time_ms, char *out,
+                                 size_t out_size) {
+    if (unix_time_ms <= 0 || !out || out_size == 0) return false;
+    const time_t seconds = (time_t)(unix_time_ms / 1000);
+    struct tm utc = {0};
+    if (!gmtime_r(&seconds, &utc)) return false;
+    const int millis = (int)(unix_time_ms % 1000);
+    return snprintf(out, out_size,
+                    "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                    utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
+                    utc.tm_hour, utc.tm_min, utc.tm_sec, millis) > 0;
+}
+
+static void append_text(char *buffer, size_t capacity, size_t *used,
+                        const char *format, ...) {
+    if (*used >= capacity) return;
+    va_list args;
+    va_start(args, format);
+    const int written = vsnprintf(
+        buffer + *used, capacity - *used, format, args);
+    va_end(args);
+    if (written < 0) return;
+    const size_t available = capacity - *used;
+    *used += (size_t)written >= available ? available - 1 : (size_t)written;
+}
+
+static void render_trace(const platform_power_diagnostics_t *power,
+                         bool json, char *buffer, size_t capacity) {
+    size_t used = 0;
+    append_text(buffer, capacity, &used,
+                json ? "[" : "<table><tr><th>#</th><th>Event</th><th>UTC / boot / uptime</th>"
+                                  "<th>Battery</th><th>Flags / error</th>"
+                                  "<th>Reset / wake</th></tr>");
+    for (uint8_t i = 0; i < power->trace_event_count; ++i) {
+        const platform_power_trace_event_t *event = &power->trace_events[i];
+        char timestamp[32] = {0};
+        const bool timestamp_valid = format_utc_timestamp(
+            event->unix_time_ms, timestamp, sizeof(timestamp));
+        if (json) {
+            append_text(
+                buffer, capacity, &used,
+                "%s{\"sequence\":%lu,\"type\":\"%s\",\"boot_id\":%lu,"
+                "\"uptime_ms\":%lu,\"unix_time_ms\":%lld,"
+                "\"timestamp_utc\":%s%s%s,\"battery_level\":%d,\"flags\":%lu,"
+                "\"error\":\"%s\",\"reset_reason\":\"%s\","
+                "\"wakeup_cause\":\"%s\"}",
+                i ? "," : "", (unsigned long)event->sequence,
+                trace_type_name(event->type), (unsigned long)event->boot_id,
+                (unsigned long)event->uptime_ms,
+                (long long)event->unix_time_ms,
+                timestamp_valid ? "\"" : "", timestamp_valid ? timestamp : "null",
+                timestamp_valid ? "\"" : "", event->battery_level,
+                (unsigned long)event->preflight_flags,
+                preflight_error_name(event->preflight_error),
+                reset_reason_name(event->reset_reason),
+                wakeup_cause_name(event->wakeup_cause));
+        } else {
+            append_text(
+                buffer, capacity, &used,
+                "<tr><td>%lu</td><td>%s</td><td>%s<br>%lu / %lums</td><td>%d</td>"
+                "<td><code>0x%02lx</code> / %s</td><td>%s / %s</td></tr>",
+                (unsigned long)event->sequence, trace_type_name(event->type),
+                timestamp_valid ? timestamp : "clock not synchronized",
+                (unsigned long)event->boot_id,
+                (unsigned long)event->uptime_ms, event->battery_level,
+                (unsigned long)event->preflight_flags,
+                preflight_error_name(event->preflight_error),
+                reset_reason_name(event->reset_reason),
+                wakeup_cause_name(event->wakeup_cause));
+        }
+    }
+    append_text(buffer, capacity, &used, json ? "]" : "</table>");
+}
+
 static esp_err_t power_debug_get_handler(httpd_req_t *req) {
     platform_power_diagnostics_t power = {0};
     platform_power_diagnostics_snapshot(&power);
@@ -89,23 +213,29 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
         strcmp(format, "json") == 0;
 
     char *body = malloc(POWER_DEBUG_BODY_SIZE);
-    if (!body) {
+    char *trace = malloc(POWER_DEBUG_TRACE_SIZE);
+    if (!body || !trace) {
+        free(body);
+        free(trace);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                             "Out of memory");
         return ESP_FAIL;
     }
+    render_trace(&power, wants_json, trace, POWER_DEBUG_TRACE_SIZE);
 
     const char *device = platform_device_slug();
     const bool evidence_supported =
         (power.capabilities & PLATFORM_POWER_CAP_DURABLE_EVIDENCE) != 0;
-    const bool test_supported =
-        (power.capabilities & PLATFORM_POWER_CAP_FORCED_TEST) != 0;
+    const bool experiment_supported =
+        (power.capabilities & PLATFORM_POWER_CAP_VOLTAGE_EXPERIMENT) != 0;
+    platform_power_experiment_t experiment = {0};
+    (void)platform_power_experiment_snapshot(&experiment);
 
     if (wants_json) {
         httpd_resp_set_type(req, "application/json");
         snprintf(
             body, POWER_DEBUG_BODY_SIZE,
-            "{\"schema_version\":1,\"device\":\"%s\","
+            "{\"schema_version\":3,\"device\":\"%s\","
             "\"measurement_scope\":\"firmware evidence; not an ammeter\","
             "\"uptime_ms\":%llu,\"state\":\"%s\",\"strategy\":\"%s\","
             "\"capabilities\":%lu,\"battery_level\":%d,"
@@ -121,8 +251,17 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "\"retained_evidence\":{\"supported\":%s,\"attempts\":%lu,"
             "\"preflight_completions\":%lu,\"entries\":%lu,\"hardware_wakes\":%lu,"
             "\"last_preflight_flags\":%lu,\"last_preflight_error\":\"%s\","
-            "\"reset_reason\":\"%s\",\"wakeup_cause\":\"%s\"},"
-            "\"powered_test_supported\":%s}",
+            "\"durable_boots\":%lu,\"brownout_boots\":%lu,"
+            "\"entry_pending\":%s,\"last_boot_followed_entry\":%s,"
+            "\"last_entry_battery_level\":%d,"
+            "\"reset_reason\":\"%s\",\"wakeup_cause\":\"%s\","
+            "\"events\":%s},"
+            "\"power_experiment_supported\":%s,"
+            "\"experiment\":{\"id\":\"%016llx\",\"state\":\"%s\","
+            "\"interval_sec\":%lu,\"maximum_duration_sec\":%lu,"
+            "\"elapsed_sec\":%lu,\"samples\":%lu,\"retained_samples\":%u,"
+            "\"samples_truncated\":%s,"
+            "\"intrusive_wakes\":%lu,\"observer_effect\":%s}}",
             device, (unsigned long long)power.uptime_ms,
             state_name(power.state), strategy_name(power.capabilities),
             (unsigned long)power.capabilities, power.power.battery_level,
@@ -150,9 +289,25 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (unsigned long)power.hardware_wakes,
             (unsigned long)power.last_preflight_flags,
             preflight_error_name(power.last_preflight_error),
+            (unsigned long)power.durable_boots,
+            (unsigned long)power.durable_brownouts,
+            power.terminal_entry_pending ? "true" : "false",
+            power.last_boot_followed_terminal_entry ? "true" : "false",
+            power.last_entry_battery_level,
             reset_reason_name(power.reset_reason),
             wakeup_cause_name(power.wakeup_cause),
-            test_supported ? "true" : "false");
+            trace,
+            experiment_supported ? "true" : "false",
+            (unsigned long long)experiment.experiment_id,
+            experiment_state_name(experiment.state),
+            (unsigned long)experiment.interval_sec,
+            (unsigned long)experiment.maximum_duration_sec,
+            (unsigned long)experiment.elapsed_sec,
+            (unsigned long)experiment.total_samples,
+            experiment.sample_count,
+            experiment.total_samples > experiment.sample_count ? "true" : "false",
+            (unsigned long)experiment.intrusive_wakes,
+            experiment.observer_effect ? "true" : "false");
     } else {
         httpd_resp_set_type(req, "text/html");
         snprintf(
@@ -183,7 +338,12 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "<tr><th>Hardware wakes</th><td>%lu</td></tr>"
             "<tr><th>Last preflight flags</th><td><code>0x%02lx</code></td></tr>"
             "<tr><th>Last preflight error</th><td>%s</td></tr>"
+            "<tr><th>Durable boots / brownouts</th><td>%lu / %lu</td></tr>"
+            "<tr><th>Pending entry</th><td>%s</td></tr>"
+            "<tr><th>Last boot followed an entry</th><td>%s</td></tr>"
+            "<tr><th>Entry battery</th><td>%d</td></tr>"
             "<tr><th>This boot</th><td>reset %s · wake %s · uptime %llums</td></tr></table>"
+            "<h2>Persistent event tail</h2>%s"
             "%s</body></html>",
             device, device,
             (power.capabilities & PLATFORM_POWER_CAP_AUXILIARY_SOC)
@@ -214,26 +374,200 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             (unsigned long)power.hardware_wakes,
             (unsigned long)power.last_preflight_flags,
             preflight_error_name(power.last_preflight_error),
+            (unsigned long)power.durable_boots,
+            (unsigned long)power.durable_brownouts,
+            power.terminal_entry_pending ? "yes" : "no",
+            power.last_boot_followed_terminal_entry ? "yes" : "no",
+            power.last_entry_battery_level,
             reset_reason_name(power.reset_reason),
             wakeup_cause_name(power.wakeup_cause),
             (unsigned long long)power.uptime_ms,
-            test_supported
-                ? "<h2>Powered test</h2><p>This bypasses the external-power timeout once. "
-                  "The target enters its implemented sleep path after 15 seconds. Wake it with "
-                  "its normal hardware control, then reload this page.</p><form method='POST' "
-                  "action='/power-debug/sleep'><button type='submit'>Arm one-time 15-second "
-                  "power-off test</button></form>"
-                : "<h2>Powered test</h2><p>Unsupported on this target: firmware will not "
-                  "claim a forced whole-device sleep path that has not been implemented.</p>");
+            trace,
+            experiment_supported
+                ? "<h2>Power experiment</h2><p>The software-only mode periodically wakes "
+                  "just far enough to persist raw battery samples, then returns to sleep "
+                  "without starting the display, Wi-Fi, BLE, or application. These wakes "
+                  "alter the measured drain. Set the interval to 0 when an external current "
+                  "profiler is recording.</p><p><a href='/power-debug/sleep'>View/export the "
+                  "experiment record</a></p><form method='POST' action='/power-debug/sleep'>"
+                  "<label>Sample interval seconds (0 = external profiler) "
+                  "<input name='interval_sec' value='1200'></label><br><label>Maximum duration "
+                  "seconds <input name='duration_sec' value='21600'></label><br>"
+                  "<button type='submit'>Arm experiment; sleep in 15 seconds</button></form>"
+                  "<form method='POST' action='/power-debug/sleep?action=clear'>"
+                  "<button type='submit'>Clear experiment record</button></form>"
+                : "<h2>Power experiment</h2><p>Unsupported on this exact target: it does "
+                  "not yet implement the early, radio/UI-free voltage-sampling path.</p>");
     }
 
+    httpd_resp_send(req, body, strlen(body));
+    free(body);
+    free(trace);
+    return ESP_OK;
+}
+
+static void render_experiment_json(const platform_power_experiment_t *experiment,
+                                   char *body, size_t capacity) {
+    size_t used = 0;
+    append_text(body, capacity, &used,
+                "{\"schema_version\":1,\"experiment_id\":\"%016llx\","
+                "\"state\":\"%s\",\"sampling_mode\":\"%s\","
+                "\"measurement_scope\":\"battery voltage evidence; not an ammeter\","
+                "\"interval_sec\":%lu,\"maximum_duration_sec\":%lu,"
+                "\"elapsed_sec\":%lu,\"total_samples\":%lu,"
+                "\"retained_samples\":%u,\"samples_truncated\":%s,"
+                "\"intrusive_wakes\":%lu,\"observer_effect\":%s,\"samples\":[",
+                (unsigned long long)experiment->experiment_id,
+                experiment_state_name(experiment->state),
+                experiment_sampling_mode_name(experiment),
+                (unsigned long)experiment->interval_sec,
+                (unsigned long)experiment->maximum_duration_sec,
+                (unsigned long)experiment->elapsed_sec,
+                (unsigned long)experiment->total_samples,
+                experiment->sample_count,
+                experiment->total_samples > experiment->sample_count ? "true" : "false",
+                (unsigned long)experiment->intrusive_wakes,
+                experiment->observer_effect ? "true" : "false");
+    for (uint8_t i = 0; i < experiment->sample_count; ++i) {
+        const platform_power_experiment_sample_t *sample = &experiment->samples[i];
+        char timestamp[32] = {0};
+        const bool timestamp_valid = format_utc_timestamp(
+            sample->unix_time_ms, timestamp, sizeof(timestamp));
+        append_text(body, capacity, &used,
+                    "%s{\"sequence\":%lu,\"elapsed_sec\":%lu,"
+                    "\"unix_time_ms\":%lld,\"timestamp_utc\":%s%s%s,"
+                    "\"raw_adc\":%ld,\"adc_mv\":%ld,\"battery_mv\":%ld,"
+                    "\"battery_level\":%d,\"reset_reason\":\"%s\","
+                    "\"wakeup_cause\":\"%s\"}",
+                    i ? "," : "", (unsigned long)sample->sequence,
+                    (unsigned long)sample->elapsed_sec,
+                    (long long)sample->unix_time_ms,
+                    timestamp_valid ? "\"" : "",
+                    timestamp_valid ? timestamp : "null",
+                    timestamp_valid ? "\"" : "",
+                    (long)sample->raw_adc, (long)sample->adc_mv,
+                    (long)sample->battery_mv, sample->battery_level,
+                    reset_reason_name(sample->reset_reason),
+                    wakeup_cause_name(sample->wakeup_cause));
+    }
+    append_text(body, capacity, &used, "]}");
+}
+
+static esp_err_t power_debug_sleep_get_handler(httpd_req_t *req) {
+    platform_power_experiment_t experiment = {0};
+    (void)platform_power_experiment_snapshot(&experiment);
+    char query[32] = {0};
+    char format[8] = {0};
+    const bool wants_csv =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "format", format, sizeof(format)) == ESP_OK &&
+        strcmp(format, "csv") == 0;
+    char *body = malloc(POWER_DEBUG_BODY_SIZE);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    if (wants_csv) {
+        size_t used = 0;
+        append_text(body, POWER_DEBUG_BODY_SIZE, &used,
+                    "experiment_id,sequence,elapsed_sec,unix_time_ms,raw_adc,adc_mv,"
+                    "battery_mv,battery_level,reset_reason,wakeup_cause\n");
+        for (uint8_t i = 0; i < experiment.sample_count; ++i) {
+            const platform_power_experiment_sample_t *sample = &experiment.samples[i];
+            append_text(body, POWER_DEBUG_BODY_SIZE, &used,
+                        "%016llx,%lu,%lu,%lld,%ld,%ld,%ld,%d,%s,%s\n",
+                        (unsigned long long)experiment.experiment_id,
+                        (unsigned long)sample->sequence,
+                        (unsigned long)sample->elapsed_sec,
+                        (long long)sample->unix_time_ms,
+                        (long)sample->raw_adc, (long)sample->adc_mv,
+                        (long)sample->battery_mv, sample->battery_level,
+                        reset_reason_name(sample->reset_reason),
+                        wakeup_cause_name(sample->wakeup_cause));
+        }
+        httpd_resp_set_type(req, "text/csv");
+    } else {
+        render_experiment_json(&experiment, body, POWER_DEBUG_BODY_SIZE);
+        httpd_resp_set_type(req, "application/json");
+    }
     httpd_resp_send(req, body, strlen(body));
     free(body);
     return ESP_OK;
 }
 
 static esp_err_t power_debug_sleep_handler(httpd_req_t *req) {
+    char params[128] = {0};
+    char value[24] = {0};
+    uint32_t interval_sec = POWER_EXPERIMENT_DEFAULT_INTERVAL_SEC;
+    uint32_t duration_sec = POWER_EXPERIMENT_DEFAULT_DURATION_SEC;
+    bool has_params =
+        httpd_req_get_url_query_str(req, params, sizeof(params)) == ESP_OK;
+    if (!has_params && req->content_len > 0) {
+        if (req->content_len >= sizeof(params)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "Request parameters are too long");
+            return ESP_FAIL;
+        }
+        size_t received = 0;
+        while (received < req->content_len) {
+            const int chunk = httpd_req_recv(
+                req, params + received, req->content_len - received);
+            if (chunk <= 0) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                    "Could not read request parameters");
+                return ESP_FAIL;
+            }
+            received += (size_t)chunk;
+        }
+        params[received] = '\0';
+        has_params = true;
+    }
+    if (has_params &&
+        httpd_query_key_value(params, "action", value, sizeof(value)) == ESP_OK &&
+        strcmp(value, "clear") == 0) {
+        if (!platform_power_experiment_clear()) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "Could not clear experiment");
+            return ESP_FAIL;
+        }
+        httpd_resp_sendstr(req, "Power experiment cleared");
+        return ESP_OK;
+    }
+    if (has_params &&
+        httpd_query_key_value(params, "interval_sec", value, sizeof(value)) == ESP_OK) {
+        if (!parse_u32(value, &interval_sec)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "interval_sec must be an unsigned integer");
+            return ESP_FAIL;
+        }
+    }
+    if (has_params &&
+        httpd_query_key_value(params, "duration_sec", value, sizeof(value)) == ESP_OK) {
+        if (!parse_u32(value, &duration_sec)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "duration_sec must be an unsigned integer");
+            return ESP_FAIL;
+        }
+    }
+    if ((interval_sec > 0 && interval_sec < 30) || interval_sec > 3600 ||
+        duration_sec == 0 || duration_sec > POWER_EXPERIMENT_MAX_DURATION_SEC ||
+        (interval_sec > 0 && duration_sec < interval_sec)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "interval_sec must be 0 or 30..3600; duration_sec must be "
+                            "at least one interval and no more than 604800");
+        return ESP_FAIL;
+    }
+    uint64_t experiment_id = 0;
+    if (!platform_power_experiment_arm(
+            interval_sec, duration_sec, &experiment_id)) {
+        httpd_resp_set_status(req, "501 Not Implemented");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_sendstr(req,
+                           "A persistent voltage experiment is unsupported on this target");
+        return ESP_FAIL;
+    }
     if (!platform_power_debug_arm_sleep(POWER_DEBUG_TEST_DELAY_SEC)) {
+        (void)platform_power_experiment_clear();
         httpd_resp_set_status(req, "501 Not Implemented");
         httpd_resp_set_type(req, "text/plain");
         httpd_resp_sendstr(req,
@@ -242,12 +576,16 @@ static esp_err_t power_debug_sleep_handler(httpd_req_t *req) {
     }
     httpd_resp_set_status(req, "202 Accepted");
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_sendstr(
-        req,
-        "<!DOCTYPE html><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Power test armed</title><h1>Power test armed</h1>"
-        "<p>The implemented power-off path starts in 15 seconds. Use the target's normal "
-        "hardware wake control, then reopen <a href='/power-debug'>power debug</a>.</p>");
+    char response[640];
+    snprintf(response, sizeof(response),
+             "<!DOCTYPE html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+             "<title>Power experiment armed</title><h1>Power experiment armed</h1>"
+             "<p>Experiment <code>%016llx</code> starts its power-off path in 15 seconds. "
+             "Results persist at <a href='/power-debug/sleep'>power experiment</a>. "
+             "Software checkpoints change the measured drain; interval 0 is reserved "
+             "for external-profiler runs.</p>",
+             (unsigned long long)experiment_id);
+    httpd_resp_sendstr(req, response);
     return ESP_OK;
 }
 
@@ -265,7 +603,15 @@ bool power_debug_web_register(httpd_handle_t server) {
         .method = HTTP_POST,
         .handler = power_debug_sleep_handler,
     };
+    const httpd_uri_t sleep_get = {
+        .uri = "/power-debug/sleep",
+        .method = HTTP_GET,
+        .handler = power_debug_sleep_get_handler,
+    };
     esp_err_t err = httpd_register_uri_handler(server, &get);
+    if (err == ESP_OK) {
+        err = httpd_register_uri_handler(server, &sleep_get);
+    }
     if (err == ESP_OK) {
         err = httpd_register_uri_handler(server, &sleep);
     }

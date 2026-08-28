@@ -75,10 +75,13 @@ void m5_terminal_power_note_runtime_wake(void) { ++s_runtime_wakes; }
 bool m5_terminal_power_off(void) {
     s_force_at_ms = 0;
     increment(KEY_ATTEMPTS);
+    platform_power_evidence_note_attempt();
     write_value(KEY_FLAGS, 0);
     write_value(KEY_ERROR, PLATFORM_POWER_PREFLIGHT_ERROR_NONE);
     if (!platform_power_prepare_for_deep_sleep()) {
         write_value(KEY_ERROR, PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
         ESP_LOGE(TAG, "Terminal preflight rejected; remaining awake");
         return false;
     }
@@ -91,6 +94,8 @@ bool m5_terminal_power_off(void) {
     write_value(KEY_FLAGS, flags);
     increment(KEY_PREFLIGHTS);
     increment(KEY_ENTRIES);
+    platform_power_evidence_note_preflight(flags);
+    platform_power_evidence_note_entry(m5_platform_battery_level());
     ESP_LOGI(TAG, "Terminal preflight complete flags=0x%02lx",
              (unsigned long)flags);
     m5_platform_power_off();

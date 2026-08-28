@@ -32,6 +32,10 @@ static const char *TAG = "display_sleep";
 // Encoder GPIOs for deep sleep wake (RTC-capable on ESP32-S3)
 #define ENCODER_GPIO_A      GPIO_NUM_8
 #define ENCODER_GPIO_B      GPIO_NUM_7
+#define TOUCH_RESET_GPIO    GPIO_NUM_10
+#define LCD_CMD_SLEEP_IN    0x10
+#define LCD_CMD_SLEEP_OUT   0x11
+#define LCD_SLEEP_SETTLE_MS 120
 
 // Deep sleep configuration
 #define DEFAULT_DEEP_SLEEP_TIMEOUT_MS (RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC * 1000)
@@ -56,6 +60,7 @@ enum {
     POWER_PREFLIGHT_ERROR_BLE = 4,
     POWER_PREFLIGHT_ERROR_BACKLIGHT = 5,
     POWER_PREFLIGHT_ERROR_WIFI = 6,
+    POWER_PREFLIGHT_ERROR_PANEL = 7,
 };
 
 typedef struct {
@@ -96,7 +101,9 @@ RTC_DATA_ATTR static power_debug_rtc_t s_power_debug_rtc = {
 
 // Global state
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
+static esp_lcd_panel_io_handle_t s_panel_io_handle = NULL;
 static TaskHandle_t s_lvgl_task_handle = NULL;
+static bool s_panel_sleep_commanded = false;
 static esp_timer_handle_t s_art_mode_timer = NULL;
 static esp_timer_handle_t s_dim_timer = NULL;
 static esp_timer_handle_t s_sleep_timer = NULL;
@@ -124,6 +131,9 @@ static uint32_t s_panel_sleep_transition_count = 0;
 static uint32_t s_runtime_wake_count = 0;
 static uint32_t s_debug_sleep_arm_count = 0;
 static bool s_debug_sleep_override_armed = false;
+
+static bool panel_enter_sleep_mode(void);
+static bool panel_exit_sleep_mode(void);
 
 static void power_debug_rtc_init(void) {
     if (s_power_debug_rtc.magic == POWER_DEBUG_RTC_MAGIC) {
@@ -250,8 +260,13 @@ void display_sleep(void) {
         // Turn off backlight
         display_set_backlight(0);
 
-        // Turn off display panel
-        esp_lcd_panel_disp_on_off(s_panel_handle, false);
+        // Display Off is not terminal sleep; also stop the panel controller.
+        if (!panel_enter_sleep_mode()) {
+            ESP_LOGE(TAG, "LCD Sleep In failed; display remains awake");
+            display_set_backlight(BACKLIGHT_NORMAL);
+            UNLOCK_DISPLAY_STATE();
+            return;
+        }
 
         // Lower LVGL task priority to save CPU cycles
         if (s_lvgl_task_handle != NULL) {
@@ -309,11 +324,13 @@ void display_wake(void) {
         }
 #endif
 
-        // Turn on display panel first
-        esp_lcd_panel_disp_on_off(s_panel_handle, true);
-
-        // Small delay to let panel stabilize
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // Exit panel-controller sleep before restoring pixels/backlight.
+        if (!panel_exit_sleep_mode()) {
+            UNLOCK_DISPLAY_STATE();
+            ESP_LOGE(TAG, "LCD Sleep Out failed; restarting display stack");
+            esp_restart();
+            return;
+        }
 
         // Restore LVGL task priority
         if (s_lvgl_task_handle != NULL) {
@@ -343,8 +360,12 @@ void display_wake(void) {
         if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
         if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
         if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
-        if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
-        s_debug_sleep_override_armed = false;
+        /* The explicit /power-debug/sleep request is a test/integration
+         * command, not an inactivity timeout. Ordinary input may wake the
+         * screen during its countdown but must not silently cancel it. */
+        if (s_deep_sleep_timer != NULL && !s_debug_sleep_override_armed) {
+            esp_timer_stop(s_deep_sleep_timer);
+        }
 
         // Start the first enabled timer in the chain
         if (art_timeout > 0 && s_art_mode_timer != NULL) {
@@ -389,9 +410,43 @@ static void deep_sleep_timer_callback(void *arg) {
 static void recover_from_partial_sleep_entry(const char *reason) {
     ESP_LOGE(TAG, "%s; rebooting into the normal fail-awake path", reason);
     gpio_hold_dis(PIN_NUM_BK_LIGHT);
+    gpio_hold_dis(TOUCH_RESET_GPIO);
     gpio_deep_sleep_hold_dis();
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_restart();
+}
+
+static bool panel_enter_sleep_mode(void) {
+    if (s_panel_sleep_commanded) return true;
+    if (!s_panel_handle || !s_panel_io_handle) return false;
+    if (esp_lcd_panel_disp_on_off(s_panel_handle, false) != ESP_OK) {
+        return false;
+    }
+    if (esp_lcd_panel_io_tx_param(
+            s_panel_io_handle, LCD_CMD_SLEEP_IN, NULL, 0) != ESP_OK) {
+        (void)esp_lcd_panel_disp_on_off(s_panel_handle, true);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(LCD_SLEEP_SETTLE_MS));
+    s_panel_sleep_commanded = true;
+    return true;
+}
+
+static bool panel_exit_sleep_mode(void) {
+    if (!s_panel_sleep_commanded) {
+        return s_panel_handle &&
+            esp_lcd_panel_disp_on_off(s_panel_handle, true) == ESP_OK;
+    }
+    if (esp_lcd_panel_io_tx_param(
+            s_panel_io_handle, LCD_CMD_SLEEP_OUT, NULL, 0) != ESP_OK) {
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(LCD_SLEEP_SETTLE_MS));
+    if (esp_lcd_panel_disp_on_off(s_panel_handle, true) != ESP_OK) {
+        return false;
+    }
+    s_panel_sleep_commanded = false;
+    return true;
 }
 
 // Enter deep sleep - device will reset on wake
@@ -399,6 +454,7 @@ static void enter_deep_sleep(void) {
     ESP_LOGI(TAG, "Preparing for deep sleep...");
     power_debug_rtc_init();
     s_power_debug_rtc.deep_sleep_attempts++;
+    platform_power_evidence_note_attempt();
     s_power_debug_rtc.last_preflight_flags = 0;
     s_power_debug_rtc.last_preflight_error = POWER_PREFLIGHT_ERROR_NONE;
 
@@ -419,6 +475,8 @@ static void enter_deep_sleep(void) {
     if (err != ESP_OK) {
         s_power_debug_rtc.last_preflight_error =
             POWER_PREFLIGHT_ERROR_ENCODER_CONFIG;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
         ESP_LOGE(TAG, "Encoder wake GPIO configuration failed: %s",
                  esp_err_to_name(err));
         return;
@@ -427,6 +485,8 @@ static void enter_deep_sleep(void) {
         gpio_get_level(ENCODER_GPIO_B) == 0) {
         s_power_debug_rtc.last_preflight_error =
             POWER_PREFLIGHT_ERROR_ENCODER_ACTIVE;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE);
         ESP_LOGW(TAG, "Encoder wake line is already active; staying awake");
         return;
     }
@@ -440,6 +500,8 @@ static void enter_deep_sleep(void) {
     if (!platform_power_prepare_for_deep_sleep()) {
         s_power_debug_rtc.last_preflight_error =
             POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
         ESP_LOGE(TAG, "Could not sanitize Deep-sleep wake sources; staying awake");
         return;
     }
@@ -451,6 +513,8 @@ static void enter_deep_sleep(void) {
     if (err != ESP_OK) {
         s_power_debug_rtc.last_preflight_error =
             POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
         ESP_LOGE(TAG, "Failed to configure wake sources: %s", esp_err_to_name(err));
         return;
     }
@@ -460,13 +524,22 @@ static void enter_deep_sleep(void) {
      * does not change the enabled preference, peer metadata, or bond store. */
     if (!ble_hid_host_dial_prepare_for_sleep(BLE_QUIESCE_TIMEOUT_MS)) {
         s_power_debug_rtc.last_preflight_error = POWER_PREFLIGHT_ERROR_BLE;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_BLE);
         recover_from_partial_sleep_entry("BLE did not quiesce for sleep");
     }
     s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_BLE_OFF;
 
-    // Turn off the panel before removing its backlight.
-    if (s_panel_handle != NULL) {
-        esp_lcd_panel_disp_on_off(s_panel_handle, false);
+    /* Display Off alone leaves the panel controller's oscillator and analog
+     * rails active. Require the standard Sleep In command before claiming the
+     * display is safe for terminal sleep. */
+    if (!panel_enter_sleep_mode()) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_PANEL;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_DISPLAY);
+        ESP_LOGE(TAG, "LCD Sleep In failed; staying awake");
+        return;
     }
     s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_PANEL_OFF;
 
@@ -480,22 +553,55 @@ static void enter_deep_sleep(void) {
     if (err != ESP_OK) {
         s_power_debug_rtc.last_preflight_error =
             POWER_PREFLIGHT_ERROR_BACKLIGHT;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS);
         ESP_LOGE(TAG, "Backlight hold failed: %s", esp_err_to_name(err));
         recover_from_partial_sleep_entry("Backlight could not be latched off");
     }
     gpio_deep_sleep_hold_en();
     s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_BACKLIGHT_OFF;
 
+    /* Touch is not a terminal wake source. Hold its active-low reset asserted
+     * so the always-powered CST816 cannot remain scanning all night. */
+    const gpio_config_t touch_reset_config = {
+        .pin_bit_mask = 1ULL << TOUCH_RESET_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&touch_reset_config) != ESP_OK ||
+        gpio_set_level(TOUCH_RESET_GPIO, 0) != ESP_OK ||
+        gpio_hold_en(TOUCH_RESET_GPIO) != ESP_OK) {
+        s_power_debug_rtc.last_preflight_error =
+            POWER_PREFLIGHT_ERROR_BACKLIGHT;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS);
+        recover_from_partial_sleep_entry(
+            "Touch reset could not be latched for sleep");
+    }
+    gpio_deep_sleep_hold_en();
+
     // Stop WiFi only after every recoverable preflight check has passed.
     err = esp_wifi_stop();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
         err != ESP_ERR_WIFI_NOT_INIT) {
         s_power_debug_rtc.last_preflight_error = POWER_PREFLIGHT_ERROR_WIFI;
+        platform_power_evidence_note_error(
+            PLATFORM_POWER_PREFLIGHT_ERROR_WIFI);
         ESP_LOGW(TAG, "WiFi stop failed: %s", esp_err_to_name(err));
         recover_from_partial_sleep_entry("WiFi did not stop for sleep");
     }
     s_power_debug_rtc.last_preflight_flags |= POWER_PREFLIGHT_WIFI_OFF;
     s_power_debug_rtc.preflight_completions++;
+    const uint32_t durable_flags =
+        PLATFORM_POWER_PREFLIGHT_WAKE_SOURCES_SANITIZED |
+        PLATFORM_POWER_PREFLIGHT_WAKE_ARMED |
+        PLATFORM_POWER_PREFLIGHT_BLE_OFF |
+        PLATFORM_POWER_PREFLIGHT_DISPLAY_SAFE |
+        PLATFORM_POWER_PREFLIGHT_OUTPUTS_SAFE |
+        PLATFORM_POWER_PREFLIGHT_WIFI_OFF;
+    platform_power_evidence_note_preflight(durable_flags);
 
     ESP_LOGI(TAG,
              "Deep-sleep preflight complete: BLE off, WiFi off, panel off, "
@@ -508,6 +614,24 @@ static void enter_deep_sleep(void) {
     // Enter deep sleep - this does NOT return
     // Device will reset and run app_main() on wake
     s_power_debug_rtc.deep_sleep_entries++;
+    platform_power_measurement_t measurement = {0};
+    (void)battery_get_measurement(&measurement);
+    uint32_t experiment_wake_sec = 0;
+    if (platform_power_experiment_note_entry(
+            &measurement, &experiment_wake_sec)) {
+        err = esp_sleep_enable_timer_wakeup(
+            (uint64_t)experiment_wake_sec * 1000000ULL);
+        if (err != ESP_OK) {
+            platform_power_evidence_note_error(
+                PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG);
+            recover_from_partial_sleep_entry(
+                "Experiment timer wake could not be armed");
+        }
+        ESP_LOGI(TAG, "Power experiment timer armed for %lu seconds",
+                 (unsigned long)experiment_wake_sec);
+    }
+    platform_power_evidence_note_entry(measurement.valid
+        ? measurement.battery_level : battery_get_percentage());
     esp_deep_sleep_start();
 }
 
@@ -552,19 +676,30 @@ void display_process_pending(void) {
     }
     if (s_pending_deep_sleep) {
         s_pending_deep_sleep = false;
+        if (s_debug_sleep_override_armed &&
+            display_get_state() != DISPLAY_STATE_SLEEP) {
+            display_sleep();
+        }
         // Check state under lock to avoid race with wake transitions
         bool should_sleep = false;
         LOCK_DISPLAY_STATE();
         should_sleep = (s_display_state == DISPLAY_STATE_SLEEP);
         UNLOCK_DISPLAY_STATE();
         if (should_sleep) {
+            s_debug_sleep_override_armed = false;
             enter_deep_sleep();
+        } else if (s_debug_sleep_override_armed) {
+            s_debug_sleep_override_armed = false;
+            ESP_LOGE(TAG,
+                     "Forced Deep-sleep could not establish display sleep");
         }
     }
 }
 
 // Initialize sleep timer
-void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_task_handle) {
+void display_sleep_init(esp_lcd_panel_handle_t panel_handle,
+                        esp_lcd_panel_io_handle_t panel_io_handle,
+                        TaskHandle_t lvgl_task_handle) {
     ESP_LOGI(TAG, "Initializing display sleep management");
 
     // Create mutex for thread safety
@@ -575,6 +710,7 @@ void display_sleep_init(esp_lcd_panel_handle_t panel_handle, TaskHandle_t lvgl_t
     }
 
     s_panel_handle = panel_handle;
+    s_panel_io_handle = panel_io_handle;
     s_lvgl_task_handle = lvgl_task_handle;
 
     // Create art mode timer
@@ -649,7 +785,9 @@ void display_activity_detected(void) {
     if (s_art_mode_timer != NULL) esp_timer_stop(s_art_mode_timer);
     if (s_dim_timer != NULL) esp_timer_stop(s_dim_timer);
     if (s_sleep_timer != NULL) esp_timer_stop(s_sleep_timer);
-    if (s_deep_sleep_timer != NULL) esp_timer_stop(s_deep_sleep_timer);
+    if (s_deep_sleep_timer != NULL && !s_debug_sleep_override_armed) {
+        esp_timer_stop(s_deep_sleep_timer);
+    }
 
     // From NORMAL state, start at beginning of timer chain
     if (art_timeout > 0 && s_art_mode_timer != NULL) {

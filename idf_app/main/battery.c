@@ -32,6 +32,8 @@ static SemaphoreHandle_t s_battery_mutex = NULL;
 static bool s_initialized = false;
 static bool s_cached_voltage_valid = false;
 static float s_cached_voltage = 0.0f;
+static int s_cached_raw_adc = -1;
+static int s_cached_adc_mv = -1;
 static uint64_t s_cached_voltage_at_ms = 0;
 
 // LiPo discharge curve lookup table (voltage -> percentage)
@@ -227,6 +229,8 @@ float battery_get_voltage(void) {
     float battery_voltage = adc_voltage * BATTERY_VOLTAGE_DIVIDER;
 
     s_cached_voltage = battery_voltage;
+    s_cached_raw_adc = raw_avg;
+    s_cached_adc_mv = voltage_mv;
     s_cached_voltage_at_ms = now_ms;
     s_cached_voltage_valid = true;
 
@@ -257,4 +261,26 @@ bool battery_is_charging(void) {
     // This is a simple check - could be improved with a dedicated GPIO
     float voltage = battery_get_voltage();
     return (voltage > 4.15f);
+}
+
+bool battery_get_measurement(platform_power_measurement_t *out) {
+    if (!out) return false;
+    *out = (platform_power_measurement_t){
+        .raw_adc = -1,
+        .adc_mv = -1,
+        .battery_mv = -1,
+        .battery_level = -1,
+    };
+    const float voltage = battery_get_voltage();
+    if (voltage < 0.1f || !s_battery_mutex ||
+        xSemaphoreTake(s_battery_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+    out->valid = s_cached_voltage_valid;
+    out->raw_adc = s_cached_raw_adc;
+    out->adc_mv = s_cached_adc_mv;
+    out->battery_mv = (int32_t)(s_cached_voltage * 1000.0f + 0.5f);
+    out->battery_level = (int16_t)voltage_to_percentage(s_cached_voltage);
+    xSemaphoreGive(s_battery_mutex);
+    return out->valid;
 }
