@@ -26,7 +26,17 @@ workflow = ".github/workflows/docker.yml"
 require(workflow, "cname: firmware.hiphi.audio")
 require(workflow, "destination_dir: flash/${{ steps.channel.outputs.name }}")
 require(workflow, 'DEPLOY_BASE="https://firmware.hiphi.audio/flash/${{ steps.channel.outputs.name }}"')
-for channel in ("alpha", "beta", "stable"):
+workflow_text = (ROOT / workflow).read_text(encoding="utf-8")
+if workflow_text.count("group: firmware-pages") != 2:
+    raise SystemExit(
+        f"{workflow}: PR and release Pages deployments must share one concurrency group"
+    )
+for channel, pattern in (
+    ("alpha", r"^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$"),
+    ("beta", r"^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$"),
+    ("stable", r"^v[0-9]+\.[0-9]+\.[0-9]+$"),
+):
+    require(workflow, pattern)
     require(workflow, f'echo "name={channel}" >> "$GITHUB_OUTPUT"')
 forbid(workflow, "roon-knob.muness.com")
 forbid(workflow, "destination_dir: beta")

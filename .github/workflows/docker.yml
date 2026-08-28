@@ -1146,6 +1146,9 @@ jobs:
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews
     runs-on: ubuntu-latest
+    concurrency:
+      group: firmware-pages
+      cancel-in-progress: false
     needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux, build-ble-off]
     if: github.event_name == 'pull_request'
     permissions:
@@ -1624,6 +1627,9 @@ jobs:
   deploy-pages:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
+    concurrency:
+      group: firmware-pages
+      cancel-in-progress: false
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -1679,24 +1685,28 @@ jobs:
       - name: Select firmware channel
         id: channel
         run: |
-          case "${GITHUB_REF_NAME}" in
-            *-alpha.*) echo "name=alpha" >> "$GITHUB_OUTPUT" ;;
-            *-beta.*) echo "name=beta" >> "$GITHUB_OUTPUT" ;;
-            v[0-9]*.[0-9]*.[0-9]*) echo "name=stable" >> "$GITHUB_OUTPUT" ;;
-            *) echo "Unsupported release tag: ${GITHUB_REF_NAME}" >&2; exit 1 ;;
-          esac
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+            echo "name=alpha" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            echo "name=beta" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "name=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported release tag: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
 
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
           VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            case "${GITHUB_REF_NAME}" in
-              *-alpha.*) CHANNEL_LABEL=" Alpha" ;;
-              *-beta.*) CHANNEL_LABEL=" Beta" ;;
-              *) CHANNEL_LABEL=" Pre-release" ;;
-            esac
-            CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+          CHANNEL="${{ steps.channel.outputs.name }}"
+          if [[ "${CHANNEL}" == "alpha" ]]; then
+            CHANNEL_LABEL=" Alpha"
+            CHANNEL_NOTICE='<div class="warning"><strong>Alpha firmware</strong><br>Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+          elif [[ "${CHANNEL}" == "beta" ]]; then
+            CHANNEL_LABEL=" Beta"
+            CHANNEL_NOTICE='<div class="warning"><strong>Beta firmware</strong><br>Beta builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
           else
             CHANNEL_LABEL=""
             CHANNEL_NOTICE=""
