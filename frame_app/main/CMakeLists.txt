@@ -4,7 +4,6 @@ set(SRC_FILES
     "frame_power_policy.c"
     "frame_display_preferences.c"
     "eink_display.c"
-    "eink_dither.c"
     "eink_ui.c"
     "eink_font.c"
     "controller_input_profile_frame.c"

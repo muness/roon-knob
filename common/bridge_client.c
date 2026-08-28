@@ -1385,12 +1385,22 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
                                                      int width, int height,
                                                      int clip_radius,
                                                      const char *format) {
-    if (!url_buf || buf_len < 256) {
+    return bridge_client_get_artwork_url_for_format_and_scale(
+        url_buf, buf_len, width, height, clip_radius, format, "fit", 0);
+}
+
+const char* bridge_client_get_artwork_url_for_format_and_scale(
+    char *url_buf, size_t buf_len, int width, int height, int clip_radius,
+    const char *format, const char *scale, int crop_limit_percent) {
+    if (!url_buf || buf_len == 0) {
         return NULL;
     }
 
     if (!format || !format[0]) {
         format = "rgb565";
+    }
+    if (!scale || !scale[0]) {
+        scale = "fit";
     }
 
     char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
@@ -1401,14 +1411,31 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
         return NULL;
     }
 
-    if (clip_radius > 0) {
-        snprintf(url_buf, buf_len,
-                 "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s&clip_radius=%d",
-                 bridge_base, zone_id, width, height, format, clip_radius);
+    int written = 0;
+    if (clip_radius > 0 && crop_limit_percent > 0) {
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&crop_limit=%d&width=%d&height=%d&format=%s&clip_radius=%d",
+                           bridge_base, zone_id, scale, crop_limit_percent,
+                           width, height, format, clip_radius);
+    } else if (clip_radius > 0) {
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&width=%d&height=%d&format=%s&clip_radius=%d",
+                           bridge_base, zone_id, scale, width, height, format,
+                           clip_radius);
+    } else if (crop_limit_percent > 0) {
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&crop_limit=%d&width=%d&height=%d&format=%s",
+                           bridge_base, zone_id, scale, crop_limit_percent,
+                           width, height, format);
     } else {
-        snprintf(url_buf, buf_len,
-                 "%s/now_playing/image?zone_id=%s&scale=fit&width=%d&height=%d&format=%s",
-                 bridge_base, zone_id, width, height, format);
+        written = snprintf(url_buf, buf_len,
+                           "%s/now_playing/image?zone_id=%s&scale=%s&width=%d&height=%d&format=%s",
+                           bridge_base, zone_id, scale, width, height, format);
+    }
+    if (written < 0 || (size_t)written >= buf_len) {
+        url_buf[0] = '\0';
+        LOGE("Artwork URL exceeds the caller buffer");
+        return NULL;
     }
     return url_buf;
 }

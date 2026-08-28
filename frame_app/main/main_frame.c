@@ -87,6 +87,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     post_runtime_network_status("WiFi: Connected");
     bridge_client_set_device_ip(ip_opt);
     bridge_client_set_network_ready(true);
+    eink_ui_post_device_ip(ip_opt);
     eink_ui_post_show_ip(frame_display_preferences_show_ip());
     s_mdns_init_pending = true;
     s_ble_init_pending = true;
@@ -105,6 +106,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     snprintf(msg, sizeof(msg), "WiFi: %s (%d/%d)", error, attempt, max);
     post_runtime_network_status(msg);
     bridge_client_set_network_ready(false);
+    eink_ui_post_device_ip(NULL);
     break;
   }
 
@@ -113,6 +115,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     eink_ui_post_network_status("WiFi Setup: Connect to\nhiphi-frame-setup");
     eink_ui_post_zone_name("WiFi Setup");
     bridge_client_set_network_ready(false);
+    eink_ui_post_device_ip(NULL);
     /* The provisioning adapter has stopped the shared STA server before the
      * AP portal started. Discard any stale deferred STA-start request. */
     atomic_store_explicit(&s_sta_server_pending, false, memory_order_release);

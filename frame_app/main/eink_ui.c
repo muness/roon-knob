@@ -3,11 +3,8 @@
 
 #include "eink_ui.h"
 #include "eink_display.h"
-#include "eink_dither.h"
 #include "eink_font.h"
 #include "bridge_client.h"
-#include "frame_display_preferences.h"
-#include "wifi_manager.h"
 #include "platform/platform_http.h"
 #include "platform/platform_time.h"
 #include "platform/platform_log.h"
@@ -32,16 +29,16 @@ static const char *TAG = "eink_ui";
 #define ART_X            0   // Flush left
 #define ART_Y            0   // Flush to top
 #define TEXT_Y         (EINK_HEIGHT - TEXT_BAR_H)       // Text bar at bottom
-/* UHC currently resizes exactly to requested dimensions. Request a square
- * source, preserving normal album-art geometry, then center-crop vertically
- * to the Frame's wide artwork viewport. Never request a stretched rectangle. */
-#define ART_SOURCE_SIZE ART_W
-#define ART_CROP_TOP    ((ART_SOURCE_SIZE - ART_H) / 2)
+/* UHC composes directly for this viewport: up to 10% crop, then a complete
+ * proportional fit on a quiet gallery mat. */
+#define ART_CROP_LIMIT_PERCENT 10
 
 // Debounce: wait 3s after last state change before rendering
 #define RENDER_DEBOUNCE_MS 3000
 // Minimum 180s between refreshes (Waveshare recommended minimum for panel longevity)
 #define RENDER_COOLDOWN_MS 180000
+#define ART_RETRY_INITIAL_MS 3000
+#define ART_RETRY_MAX_MS 60000
 
 static struct {
     char zone_name[64];
@@ -50,6 +47,7 @@ static struct {
     char album[128];
     char message[128];
     char network_status[128];
+    char device_ip[16];
     char image_key[128];
     float volume;
     float volume_step;
@@ -62,115 +60,70 @@ static struct {
     // Dirty flags
     bool dirty;             // Any state changed — needs re-render
     bool art_dirty;         // New artwork needs download
+    bool display_pref_dirty; // User-facing display preference changed
     uint64_t last_change;   // Timestamp of last state change (for debounce)
     uint64_t last_render;   // Timestamp of last completed render (for cooldown)
+    uint64_t art_retry_after; // Earliest retry after a failed artwork request
+    uint32_t art_retry_delay; // Exponential retry delay for the current key
     bool initial_draw_done; // First render after boot
 } s_ui;
 
 // ── Artwork cache (persists between renders to survive framebuffer clear) ──
 
-static uint8_t *s_art_cache = NULL;  // Cached e-ink color indices, ART_W*ART_H bytes
+#define ART_CACHE_SIZE ((ART_W * ART_H) / 2)
+static uint8_t *s_art_cache = NULL;  // Native 4bpp panel bytes
 
 static void blit_art_cache(void) {
     if (!s_art_cache) return;
-    for (int y = 0; y < ART_H; y++) {
-        for (int x = 0; x < ART_W; x++) {
-            uint8_t color = s_art_cache[y * ART_W + x];
-            uint16_t px = ART_X + x;
-            uint16_t py = ART_Y + y;
-            if (px < EINK_WIDTH && py < EINK_HEIGHT) {
-                eink_display_set_pixel(px, py, color);
-            }
-        }
-    }
+    uint8_t *framebuffer = eink_display_get_fb();
+    if (!framebuffer) return;
+    memcpy(framebuffer + (ART_Y * EINK_WIDTH + ART_X) / 2,
+           s_art_cache, ART_CACHE_SIZE);
 }
 
-// ── Artwork download + dither ───────────────────────────────────────────────
+// ── Packed artwork download ─────────────────────────────────────────────────
 
-// Decode RGB565, dither on-device, and write to the persistent artwork cache.
-static void decode_rgb565_artwork(const uint8_t *img_data, size_t img_len) {
-    int pixel_count = ART_W * ART_H;
-    int source_pixel_count = ART_SOURCE_SIZE * ART_SOURCE_SIZE;
-    int expected_rgb565 = source_pixel_count * 2;
-
-    uint8_t *rgb888 = heap_caps_malloc(pixel_count * 3, MALLOC_CAP_SPIRAM);
-    if (!rgb888) {
-        ESP_LOGE(TAG, "Failed to allocate RGB888 buffer");
-        return;
+static bool cache_packed_artwork(const uint8_t *img_data, size_t img_len) {
+    if (img_len != ART_CACHE_SIZE) {
+        ESP_LOGW(TAG, "Unexpected packed artwork size: %u (expected %u)",
+                 (unsigned)img_len, (unsigned)ART_CACHE_SIZE);
+        return false;
     }
-
-    if ((int)img_len == expected_rgb565) {
-        const size_t crop_offset =
-            (size_t)ART_CROP_TOP * ART_SOURCE_SIZE * 2;
-        eink_rgb565_to_rgb888(img_data + crop_offset, rgb888, ART_W, ART_H);
-    } else {
-        int expected_rgb888 = source_pixel_count * 3;
-        if ((int)img_len >= expected_rgb888) {
-            const size_t crop_offset =
-                (size_t)ART_CROP_TOP * ART_SOURCE_SIZE * 3;
-            memcpy(rgb888, img_data + crop_offset, pixel_count * 3);
-        } else {
-            ESP_LOGW(TAG, "Unexpected image size: %d (expected %d or %d)",
-                     (int)img_len, expected_rgb565, expected_rgb888);
-            heap_caps_free(rgb888);
-            return;
-        }
-    }
-
-    uint8_t *dithered = heap_caps_malloc(pixel_count * 3, MALLOC_CAP_SPIRAM);
-    if (!dithered) {
-        ESP_LOGE(TAG, "Failed to allocate dither buffer");
-        heap_caps_free(rgb888);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Center-cropping %dx%d source to %dx%d and dithering...",
-             ART_SOURCE_SIZE, ART_SOURCE_SIZE, ART_W, ART_H);
-    eink_dither_rgb888(rgb888, dithered, ART_W, ART_H);
-    heap_caps_free(rgb888);
-
     if (!s_art_cache) {
-        s_art_cache = heap_caps_malloc(ART_W * ART_H, MALLOC_CAP_SPIRAM);
+        s_art_cache = heap_caps_malloc(ART_CACHE_SIZE, MALLOC_CAP_SPIRAM);
     }
-
-    // Populate cache only — render_full_screen blits to framebuffer after clearing
-    for (int y = 0; y < ART_H; y++) {
-        for (int x = 0; x < ART_W; x++) {
-            int idx = (y * ART_W + x) * 3;
-            uint8_t color = eink_palette_to_panel(
-                eink_nearest_color(dithered[idx], dithered[idx + 1], dithered[idx + 2]));
-            if (s_art_cache) s_art_cache[y * ART_W + x] = color;
-        }
+    if (!s_art_cache) {
+        ESP_LOGE(TAG, "Failed to allocate packed artwork cache");
+        return false;
     }
-
-    heap_caps_free(dithered);
+    memcpy(s_art_cache, img_data, ART_CACHE_SIZE);
+    return true;
 }
 
-static void render_artwork(void) {
-    if (!s_ui.image_key[0]) return;
+static bool render_artwork(void) {
+    if (!s_ui.image_key[0]) return false;
 
-    char url[256];
+    char url[512];
     char *img_data = NULL;
     size_t img_len = 0;
-    // The deployed UHC endpoint supports RGB565. Unknown formats return the
-    // original JPEG, so probing first wastes a full image download.
-    const char *art_url = bridge_client_get_artwork_url_for_format(
-        url, sizeof(url), ART_SOURCE_SIZE, ART_SOURCE_SIZE, 0, "rgb565");
+    const char *art_url = bridge_client_get_artwork_url_for_format_and_scale(
+        url, sizeof(url), ART_W, ART_H, 0, "eink_acep6", "smart",
+        ART_CROP_LIMIT_PERCENT);
     if (!art_url || !art_url[0]) {
         ESP_LOGW(TAG, "No artwork URL available");
-        return;
+        return false;
     }
 
-    ESP_LOGI(TAG, "Downloading artwork (rgb565): %s", art_url);
+    ESP_LOGI(TAG, "Downloading packed Frame artwork (10%% crop budget): %s", art_url);
     if (platform_http_get_image(art_url, &img_data, &img_len) != 0 || !img_data) {
-        ESP_LOGE(TAG, "Artwork download failed");
+        ESP_LOGE(TAG, "Packed artwork download failed");
         platform_http_free(img_data);
-        return;
+        return false;
     }
-
-    decode_rgb565_artwork((const uint8_t *)img_data, img_len);
+    const bool cached = cache_packed_artwork((const uint8_t *)img_data, img_len);
     platform_http_free(img_data);
-    ESP_LOGI(TAG, "Artwork rendered to framebuffer");
+    if (cached) ESP_LOGI(TAG, "Packed artwork ready for panel");
+    return cached;
 }
 
 // ── Text rendering helpers ──────────────────────────────────────────────────
@@ -246,21 +199,23 @@ static void draw_bridge_icon(uint16_t x, uint16_t y, uint8_t color) {
 
 // ── Full screen render ──────────────────────────────────────────────────────
 
-static void render_full_screen(void) {
+static bool render_full_screen(void) {
     ESP_LOGI(TAG, "Rendering full screen...");
 
     // ── Artwork (centered, flush to top) ─────────────────────────────────
     if (s_ui.art_dirty && s_ui.image_key[0]) {
-        render_artwork();
-        // Only clear art_dirty if we have a valid cache (render succeeded)
-        if (s_art_cache) s_ui.art_dirty = false;
+        if (!render_artwork()) {
+            ESP_LOGW(TAG, "New artwork unavailable; preserving the current panel");
+            return false;
+        }
+        s_ui.art_dirty = false;
     }
 
     // If we have an image key but no cached artwork, skip the render entirely.
     // It's e-ink — whatever's on screen stays. Better than blanking it out.
     if (s_ui.image_key[0] && !s_art_cache) {
         ESP_LOGW(TAG, "No artwork cache available, skipping render to preserve display");
-        return;
+        return false;
     }
 
     // Clear framebuffer to white, then re-draw everything
@@ -298,16 +253,16 @@ static void render_full_screen(void) {
         } else {
             snprintf(text, sizeof(text), "No track");
         }
-        char ip[16] = {0};
-        const bool draw_ip = s_ui.show_ip && wifi_mgr_get_ip(ip, sizeof(ip));
-        const int ip_width = draw_ip ? (int)strlen(ip) * eink_font_16.width : 0;
+        const bool draw_ip = s_ui.show_ip && s_ui.device_ip[0];
+        const int ip_width = draw_ip ? (int)strlen(s_ui.device_ip) * eink_font_16.width : 0;
         // Leave room for the optional address and the status icons.
         int max_text_w = EINK_WIDTH - 50 - (draw_ip ? ip_width + 12 : 0);
         char trunc[300];
         truncate_to_fit(text, trunc, sizeof(trunc), max_text_w, &eink_font_16);
         eink_font_draw_string(5, TEXT_Y + 7, trunc, &eink_font_16, EINK_BLACK, 0xFF);
         if (draw_ip) {
-            eink_font_draw_string(EINK_WIDTH - 34 - ip_width, TEXT_Y + 7, ip,
+            eink_font_draw_string(EINK_WIDTH - 34 - ip_width, TEXT_Y + 7,
+                                  s_ui.device_ip,
                                   &eink_font_16, EINK_BLACK, 0xFF);
         }
     }
@@ -328,13 +283,13 @@ static void render_full_screen(void) {
     // Refresh the physical display
     eink_display_refresh();
     ESP_LOGI(TAG, "Full screen render complete");
+    return true;
 }
 
 // ── Public API (wrapped by controller_presentation_frame.c) ─────────────────
 
 void eink_ui_init(void) {
     memset(&s_ui, 0, sizeof(s_ui));
-    s_ui.show_ip = frame_display_preferences_show_ip();
     s_ui.volume = -999.0f;  // Sentinel: no volume yet
 
     // Don't render at boot — wait for artwork to arrive.
@@ -408,12 +363,29 @@ void eink_ui_post_network_status(const char *status) {
     }
 }
 
+static void set_device_ip_on_ui(void *arg) {
+    char *ip = arg;
+    snprintf(s_ui.device_ip, sizeof(s_ui.device_ip), "%s", ip ? ip : "");
+    free(ip);
+}
+
+void eink_ui_post_device_ip(const char *ip) {
+    char *copy = strdup(ip ? ip : "");
+    if (!copy) return;
+    if (!platform_task_post_to_ui(set_device_ip_on_ui, copy)) {
+        free(copy);
+    }
+}
+
 static void set_show_ip_on_ui(void *arg) {
     bool *show = arg;
     if (show) {
-        s_ui.show_ip = *show;
-        s_ui.dirty = true;
-        s_ui.last_change = platform_millis();
+        if (s_ui.show_ip != *show) {
+            s_ui.show_ip = *show;
+            s_ui.display_pref_dirty = true;
+            s_ui.dirty = true;
+            s_ui.last_change = platform_millis();
+        }
     }
     free(show);
 }
@@ -436,6 +408,8 @@ void eink_ui_set_artwork(const char *image_key) {
             s_ui.art_dirty = true;
             s_ui.dirty = true;
             s_ui.last_change = platform_millis();
+            s_ui.art_retry_after = 0;
+            s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
         } else {
             // Artwork cleared (nothing playing) — cancel any pending render.
             // It's e-ink: keep whatever's on the display rather than blanking it.
@@ -499,13 +473,28 @@ void eink_ui_process(void) {
     if (!s_ui.dirty) return;
 
     uint64_t now = platform_millis();
+    const bool artwork_changed = s_ui.art_dirty && s_ui.image_key[0];
+    const bool urgent_refresh = artwork_changed || s_ui.display_pref_dirty;
 
-    // Debounce: wait for state to settle before refreshing
-    if (now - s_ui.last_change < RENDER_DEBOUNCE_MS) return;
+    if (artwork_changed && now < s_ui.art_retry_after) return;
 
-    // Cooldown: don't refresh too often (e-ink full refresh takes ~15-25s)
-    // Skip cooldown for the very first render after boot
-    if (s_ui.initial_draw_done && now - s_ui.last_render < RENDER_COOLDOWN_MS) {
+    // A media snapshot applies metadata before its artwork key, so a new key
+    // is already coherent and can begin downloading on the next UI tick.
+    // Retain debounce only for non-art presentation changes.
+    if (!urgent_refresh && now - s_ui.last_change < RENDER_DEBOUNCE_MS) return;
+
+    /* A new image key is the user's strongest signal that the visible content
+     * is stale. Let it bypass the general three-minute panel cooldown. The IP
+     * visibility preference also bypasses it so a user action takes effect. */
+    if (artwork_changed && s_ui.initial_draw_done &&
+        now - s_ui.last_render < RENDER_COOLDOWN_MS) {
+        ESP_LOGI(TAG, "New artwork bypassing the general render cooldown");
+    }
+
+    // Cooldown: don't refresh non-art changes too often (full refresh is slow).
+    // Skip cooldown for the first render and for a genuinely changed image key.
+    if (!urgent_refresh && s_ui.initial_draw_done &&
+        now - s_ui.last_render < RENDER_COOLDOWN_MS) {
         // Log once when cooldown is first hit (not every 50ms loop)
         static uint64_t s_last_cooldown_log = 0;
         if (now - s_last_cooldown_log > 10000) {
@@ -517,10 +506,27 @@ void eink_ui_process(void) {
         return;
     }
 
-    s_ui.dirty = false;
-    s_ui.initial_draw_done = true;
-    render_full_screen();
-    s_ui.last_render = platform_millis();
+    if (render_full_screen()) {
+        s_ui.dirty = false;
+        s_ui.display_pref_dirty = false;
+        s_ui.art_retry_after = 0;
+        s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
+        s_ui.initial_draw_done = true;
+        s_ui.last_render = platform_millis();
+    } else {
+        // Keep the new key pending, but avoid hammering UHC on every UI tick.
+        if (s_ui.art_retry_delay == 0) {
+            s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
+        }
+        s_ui.art_retry_after = platform_millis() + s_ui.art_retry_delay;
+        ESP_LOGW(TAG, "Artwork retry scheduled in %u ms",
+                 (unsigned)s_ui.art_retry_delay);
+        if (s_ui.art_retry_delay < ART_RETRY_MAX_MS) {
+            uint32_t next_delay = s_ui.art_retry_delay * 2;
+            s_ui.art_retry_delay = next_delay > ART_RETRY_MAX_MS
+                                       ? ART_RETRY_MAX_MS : next_delay;
+        }
+    }
 }
 
 bool eink_ui_power_state_known(void) { return s_ui.power_state_known; }

@@ -22,6 +22,9 @@ const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_l
                                                      int width, int height,
                                                      int clip_radius,
                                                      const char *format);
+const char* bridge_client_get_artwork_url_for_format_and_scale(
+    char *url_buf, size_t buf_len, int width, int height, int clip_radius,
+    const char *format, const char *scale, int crop_limit_percent);
 int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
                                 char **out, size_t *out_len);
 int bridge_client_stream_artwork(const char *image_key, int width, int height,

@@ -262,15 +262,15 @@
     },
     {
       "path": "README.md",
-      "contains": "click \"Flash HiPhi Dial\""
+      "contains": "click \"Flash Dial main controller\""
     },
     {
       "path": "docs/usage/FIRMWARE_FLASHING.md",
-      "contains": "Click **\"Update HiPhi Dial\"**"
+      "contains": "Click **\"Flash Dial main controller\"**"
     },
     {
       "path": "docs/usage/GETTING_STARTED.md",
-      "contains": "**Click \"Flash HiPhi Dial\"**"
+      "contains": "**Click \"Flash Dial main controller\"**"
     },
     {
       "path": "idf_app/main/platform_mdns_idf.c",

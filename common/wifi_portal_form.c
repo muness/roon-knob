@@ -63,18 +63,22 @@ size_t rk_wifi_portal_render_options(const rk_wifi_portal_scan_t *scan,
     size_t used = 0;
     for (size_t i = 0; i < scan->count && used + 1 < capacity; ++i) {
         char escaped[sizeof(scan->networks[i].ssid) * 6] = {0};
+        char option[sizeof(escaped) * 2 + 64] = {0};
         html_escape(scan->networks[i].ssid, escaped, sizeof(escaped));
-        int written = snprintf(out + used, capacity - used,
+        int written = snprintf(option, sizeof(option),
                                "<option value='%s'>%s (%d dBm)</option>",
-                               escaped, escaped, (int)scan->networks[i].rssi);
+                               escaped, escaped,
+                               (int)scan->networks[i].rssi);
         if (written < 0) {
             break;
         }
-        if ((size_t)written >= capacity - used) {
-            used = capacity - 1;
+        if ((size_t)written >= sizeof(option) ||
+            (size_t)written >= capacity - used) {
             break;
         }
+        memcpy(out + used, option, (size_t)written);
         used += (size_t)written;
+        out[used] = '\0';
     }
     out[used] = '\0';
     return used;
