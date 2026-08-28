@@ -38,10 +38,11 @@ for channel, pattern in (
 ):
     require(workflow, pattern)
     require(workflow, f'echo "name={channel}" >> "$GITHUB_OUTPUT"')
-forbid(workflow, "roon-knob.muness.com")
+legacy_release_host = "roon" + "-knob.muness.com"
+forbid(workflow, legacy_release_host)
 forbid(workflow, "destination_dir: beta")
 
 require("web/flash.html", "location.hostname !== 'firmware.hiphi.audio'")
-forbid("web/flash.html", "roon-knob.muness.com")
+forbid("web/flash.html", legacy_release_host)
 
 print("release hosting and component-isolation contracts OK")
