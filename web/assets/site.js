@@ -1,6 +1,27 @@
 // Firmware-owned fork of https://github.com/open-horizon-labs/hiphi/blob/main/site.js
 // Keep this aligned with the HiPhi site when navigation behavior changes.
 (() => {
+  document.querySelectorAll('[data-browser-requirement]').forEach((notice) => {
+    const status = notice.querySelector('[data-browser-status]');
+    if (!status) return;
+
+    const userAgent = navigator.userAgent || '';
+    const isIos = /iPad|iPhone|iPod/.test(userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/.test(userAgent);
+
+    if (isIos) {
+      notice.dataset.browserState = 'unsupported';
+      status.textContent = 'This iPhone or iPad can browse releases, but it cannot flash over USB. Reopen this page on a computer to install.';
+    } else if (isAndroid) {
+      notice.dataset.browserState = 'unsupported';
+      status.textContent = 'Android USB flashing is not supported. Reopen this page on a computer to install.';
+    } else if ('serial' in navigator) {
+      notice.dataset.browserState = 'supported';
+      status.textContent = 'This browser supports the USB connection required by the flasher.';
+    }
+  });
+
   const header = document.querySelector('.site-header');
   const toggle = header?.querySelector('.nav-toggle');
   const nav = header?.querySelector('.site-nav');

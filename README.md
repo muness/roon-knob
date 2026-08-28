@@ -30,7 +30,7 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ### 1. Flash the Firmware (one-time)
 
-Use the [Stable Web Flasher](https://firmware.hiphi.audio/stable/) in Chrome or Edge—no tools to install. Just plug in the knob via USB-C and click "Flash Dial main controller".
+Use the [Stable Web Flasher](https://firmware.hiphi.audio/stable/) in a current desktop version of Chrome, Edge, or Firefox—no tools to install. iPhone, iPad, and Android cannot flash over USB. On a supported computer, plug in the knob via USB-C and click "Flash Dial main controller".
 
 > **Prefer command line?** See [Firmware Flashing](docs/usage/FIRMWARE_FLASHING.md) for esptool instructions.
 

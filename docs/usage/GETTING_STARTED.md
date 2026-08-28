@@ -27,7 +27,7 @@ HiPhi Dial has two parts that work together:
 
 - The Waveshare ESP32-S3 Knob
 - A USB-C cable (data-capable, not charge-only)
-- A computer with **Chrome or Edge** browser (for web flasher)
+- A computer with a current **Chrome, Edge, or Firefox** browser (for the web flasher; iPhone, iPad, and Android are not supported)
 
 ### Method 1: Web Flasher (Recommended)
 
@@ -35,7 +35,7 @@ The easiest way to flash—no software to install.
 
 1. **Turn on the knob** (power slider towards the USB-C port)
 2. **Connect via USB-C** to your computer
-3. **Open the [Stable Web Flasher](https://firmware.hiphi.audio/stable/)** in Chrome or Edge
+3. **Open the [Stable Web Flasher](https://firmware.hiphi.audio/stable/)** in desktop Chrome, Edge, or Firefox
 4. **Click "Flash Dial main controller"** and select the serial port when prompted
 5. **Wait ~30 seconds** for flashing to complete
 
@@ -51,7 +51,7 @@ The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
 | Problem | Solution |
 |---------|----------|
 | No serial port appears | Try a different USB cable (some only charge). |
-| "Browser not supported" | Use Chrome or Edge. Safari and Firefox don't support Web Serial. |
+| "Browser not supported" | Reopen the flasher in a current desktop version of Chrome, Edge, or Firefox. iPhone, iPad, and Android cannot flash over USB. |
 
 ---
 

@@ -67,6 +67,9 @@ for page in ("web/index.html", "web/flash.html"):
     require(page, 'href="./assets/favicon.ico"')
     require(page, 'href="./assets/styles.css"')
     require(page, 'src="./assets/site.js"')
+    require(page, "data-browser-requirement")
+    require(page, "desktop version of Chrome, Edge, or Firefox")
+    require(page, "iPhone, iPad, or Android")
 for asset in (
     "web/assets/favicon.ico",
     "web/assets/styles.css",
@@ -82,6 +85,9 @@ require("web/assets/styles.css", 'url("./fonts/atkinson-hyperlegible-next-latin.
 require("web/assets/styles.css", 'url("./fonts/familjen-grotesk-latin.woff2")')
 require("web/assets/styles.css", "Firmware-owned fork of https://github.com/open-horizon-labs/hiphi/blob/main/styles.css")
 require("web/assets/site.js", "Firmware-owned fork of https://github.com/open-horizon-labs/hiphi/blob/main/site.js")
+require("web/assets/site.js", "navigator.maxTouchPoints > 1")
+require("web/assets/site.js", "Android USB flashing is not supported")
+forbid("web/assets/styles.css", ".channel .button { position: absolute")
 forbid("web/assets/styles.css", "fonts.googleapis.com")
 require("web/index.html", 'href="./stable/"')
 require("web/index.html", 'href="./beta/"')
@@ -107,5 +113,14 @@ for path in (
     forbid(path, "firmware.hiphi.audio/flash/stable/")
     forbid(path, "firmware.hiphi.audio/flash/alpha/")
     forbid(path, "firmware.hiphi.audio/flash/beta/")
+
+for path in (
+    "README.md",
+    "docs/usage/FIRMWARE_FLASHING.md",
+    "docs/usage/GETTING_STARTED.md",
+):
+    require(path, "Chrome, Edge, or Firefox")
+    forbid(path, "Firefox are NOT supported")
+    forbid(path, "Firefox don't support Web Serial")
 
 print("release hosting and component-isolation contracts OK")
