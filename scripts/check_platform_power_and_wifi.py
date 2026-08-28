@@ -182,6 +182,11 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "Nearby 2.4 GHz networks",
         "wifi_mgr_scan_start()",
         "power_debug_web_register(s_server)",
+        "#define PORTAL_HTTPD_STACK_SIZE 16384",
+        "config.stack_size = PORTAL_HTTPD_STACK_SIZE;",
+        "httpd_resp_send_chunk(req, chunk, HTTPD_RESP_USE_STRLEN)",
+        "Portal stack headroom at request start",
+        "Portal stack headroom after render",
     ),
     "frame_app/main/frame_power_manager.c": (
         "RTC_DATA_ATTR static frame_power_debug_rtc_t",
@@ -288,6 +293,25 @@ def main() -> int:
         for needle in needles:
             if needle in text:
                 failures.append(f"{relative}: forbidden legacy path {needle!r}")
+
+    frame_portal = (ROOT / "frame_app/main/captive_portal.c").read_text(
+        encoding="utf-8"
+    )
+    root_handler = frame_portal.split(
+        "static esp_err_t root_get_handler(httpd_req_t *req) {", 1
+    )[-1].split(
+        "static esp_err_t configure_post_handler(httpd_req_t *req) {", 1
+    )[0]
+    for legacy_render in (
+        "snprintf(html, html_size,",
+        "heap_caps_malloc(html_size",
+        "httpd_resp_send(req, html, strlen(html))",
+    ):
+        if legacy_render in root_handler:
+            failures.append(
+                "frame_app/main/captive_portal.c: root setup page must stream "
+                f"instead of using legacy monolithic render {legacy_render!r}"
+            )
 
     if failures:
         print("Platform power/Wi-Fi contract check FAILED", file=sys.stderr)

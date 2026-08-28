@@ -28,6 +28,11 @@
 
 static const char *TAG = "captive_portal";
 
+// Page rendering reaches newlib's stack-heavy printf implementation while the
+// HTTP server still owns its request/response frames. Keep enough headroom for
+// the complete call chain; the default/legacy 8 KiB server stack is marginal.
+#define PORTAL_HTTPD_STACK_SIZE 16384
+
 static httpd_handle_t s_server = NULL;
 typedef enum {
   WEB_SERVER_NONE = 0,
@@ -122,6 +127,13 @@ static bool register_uri_handler(const httpd_uri_t *uri) {
     return false;
   }
   return true;
+}
+
+static esp_err_t send_html_chunk(httpd_req_t *req, const char *chunk) {
+  if (!chunk || chunk[0] == '\0') {
+    return ESP_OK;
+  }
+  return httpd_resp_send_chunk(req, chunk, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t send_unverified_settings(httpd_req_t *req) {
@@ -410,6 +422,8 @@ static esp_err_t wifi_remove_handler(httpd_req_t *req) {
 // Handler for GET / - serve the config form with saved networks
 static esp_err_t root_get_handler(httpd_req_t *req) {
   ESP_LOGI(TAG, "Serving config form");
+  ESP_LOGI(TAG, "Portal stack headroom at request start: %u bytes",
+           (unsigned)uxTaskGetStackHighWaterMark(NULL));
 
   controller_config_snapshot_t snapshot = {0};
   if (!controller_config_snapshot(&snapshot)) {
@@ -501,20 +515,16 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     }
   }
 
-  size_t html_size = 10240;  // Extra room for base64 favicon
-  char *html = heap_caps_malloc(html_size,
-                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!html) {
-    free(networks);
-    free(escaped_bridge_base);
-    free(wifi_html);
-    free(scan_html);
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><p>Out of memory</p>", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-  }
+  httpd_resp_set_type(req, "text/html");
+  esp_err_t send_result = ESP_OK;
+#define SEND_SETUP_CHUNK(chunk)                                                \
+  do {                                                                         \
+    if (send_result == ESP_OK) {                                                \
+      send_result = send_html_chunk(req, (chunk));                              \
+    }                                                                          \
+  } while (0)
 
-  snprintf(html, html_size,
+  SEND_SETUP_CHUNK(
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -526,9 +536,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "p{color:#888;margin-top:0;}"
     "form{background:#16213e;padding:20px;border-radius:10px;max-width:300px;}"
     "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=password]{width:100%%;padding:10px;border:1px solid "
+    "input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid "
     "#333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{width:100%%;padding:12px;margin-top:20px;background:#4fc3f7;"
+    "input[type=submit]{width:100%;padding:12px;margin-top:20px;background:#4fc3f7;"
     "color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
     "input[type=submit]:hover{background:#29b6f6;}"
     ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;"
@@ -539,16 +549,29 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
     "margin-top:20px;font-size:13px;}"
     ".note a{color:#4fc3f7;}"
-    ".wifi-choice{display:block;width:100%%;text-align:left;background:#0f0f1a;"
+    ".wifi-choice{display:block;width:100%;text-align:left;background:#0f0f1a;"
     "color:#eee;border:1px solid #333;border-radius:5px;padding:10px;margin:4px 0;}"
     ".wifi-choice small{color:#aaa;float:right;}"
-    "</style>"
-    "%s"
+    "</style>");
+  SEND_SETUP_CHUNK(FAVICON_LINK);
+  SEND_SETUP_CHUNK(
     "</head><body>"
     "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
-    "<p>WiFi Setup</p>"
-    "%s%s%s%s"
-    "<p><a href='/?scan=%s'>%s nearby 2.4 GHz networks</a> or type an SSID below.</p>"
+    "<p>WiFi Setup</p>");
+  if (cfg->wifi_count > 0) {
+    SEND_SETUP_CHUNK("<h2>Saved Networks</h2><div class='section'>");
+  }
+  SEND_SETUP_CHUNK(wifi_html);
+  if (cfg->wifi_count > 0) {
+    SEND_SETUP_CHUNK("</div>");
+  }
+  SEND_SETUP_CHUNK(scan_html);
+  SEND_SETUP_CHUNK("<p><a href='/?scan=");
+  SEND_SETUP_CHUNK(scan_state == RK_WIFI_SCAN_READY ? "again" : "1");
+  SEND_SETUP_CHUNK("'>");
+  SEND_SETUP_CHUNK(scan_state == RK_WIFI_SCAN_READY ? "Scan again" : "Scan");
+  SEND_SETUP_CHUNK(
+    " nearby 2.4 GHz networks</a> or type an SSID below.</p>"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     "<label>WiFi Network (SSID)</label>"
@@ -557,7 +580,10 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<h2>Unified Hi-Fi Control</h2>"
     "<label>Server address (optional)</label>"
-    "<input type='text' name='bridge_base' maxlength='127' value='%s' "
+    "<input type='text' name='bridge_base' maxlength='127' value='");
+  SEND_SETUP_CHUNK(escaped_bridge_base);
+  SEND_SETUP_CHUNK(
+    "' "
     "placeholder='http://uhc.local:8088'>"
     "<p>Leave blank to use network discovery.</p>"
     "<input type='submit' value='Connect'>"
@@ -567,24 +593,19 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
-    "</div></body></html>",
-    FAVICON_LINK,
-    cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
-    wifi_html,
-    cfg->wifi_count > 0 ? "</div>" : "",
-    scan_html,
-    scan_state == RK_WIFI_SCAN_READY ? "again" : "1",
-    scan_state == RK_WIFI_SCAN_READY ? "Scan again" : "Scan",
-    escaped_bridge_base);
+    "</div></body></html>");
+  if (send_result == ESP_OK) {
+    send_result = httpd_resp_send_chunk(req, NULL, 0);
+  }
+#undef SEND_SETUP_CHUNK
 
-  httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html, strlen(html));
-  free(html);
+  ESP_LOGI(TAG, "Portal stack headroom after render: %u bytes",
+           (unsigned)uxTaskGetStackHighWaterMark(NULL));
   free(networks);
   free(escaped_bridge_base);
   free(wifi_html);
   free(scan_html);
-  return ESP_OK;
+  return send_result;
 }
 
 // Handler for POST /configure - save credentials
@@ -737,7 +758,7 @@ bool captive_portal_start(void) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
   config.max_uri_handlers = 12;
-  config.stack_size = 8192;
+  config.stack_size = PORTAL_HTTPD_STACK_SIZE;
 
   ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);
 
@@ -1550,7 +1571,7 @@ bool captive_portal_start_sta(void) {
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.max_uri_handlers = 16;
-  config.stack_size = 8192;
+  config.stack_size = PORTAL_HTTPD_STACK_SIZE;
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
 
