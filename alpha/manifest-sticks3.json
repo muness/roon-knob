@@ -1,0 +1,14 @@
+{
+  "name": "M5StickS3 Twist Remote (Alpha)",
+  "version": "2.7.0-alpha.4",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [
+      { "path": "hiphi_sticks3_bootloader.bin", "offset": 0 },
+      { "path": "hiphi_sticks3_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_sticks3_ota_data_initial.bin", "offset": 53248 },
+      { "path": "hiphi_sticks3.bin", "offset": 65536 }
+    ]
+  }]
+}

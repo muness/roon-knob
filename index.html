@@ -1,68 +1,32 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Roon Knob</title>
-  <style>
-    :root { --bg: #1a1a2e; --surface: #16213e; --accent: #e94560; --text: #eee; --text-muted: #888; --donate: #ffdd00; }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; min-height: 100vh; }
-    .container { max-width: 600px; margin: 0 auto; text-align: center; }
-    h1 { color: var(--accent); margin-bottom: 10px; font-size: 2.5em; }
-    .tagline { color: var(--text-muted); margin-bottom: 30px; font-size: 1.2em; }
-    .buttons { margin-bottom: 30px; }
-    .btn { display: inline-block; padding: 14px 28px; border-radius: 8px; font-size: 1.1em; font-weight: 600; margin: 8px; text-decoration: none; }
-    .btn:hover { filter: brightness(1.1); }
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-donate { background: var(--donate); color: #000; }
-    .card { background: var(--surface); border-radius: 12px; padding: 24px; margin-bottom: 20px; text-align: left; }
-    .card h2 { margin-top: 0; }
-    .card p { color: var(--text-muted); line-height: 1.6; margin-bottom: 0; }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .links { margin-top: 30px; }
-    .links a { margin: 0 15px; color: var(--text-muted); }
-    .links a:hover { color: var(--accent); }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Flash HiPhi firmware — Choose a channel</title>
+  <meta name="description" content="Choose Stable, Beta, or Alpha HiPhi firmware deliberately.">
+  <link rel="icon" href="./assets/favicon.ico">
+  <link rel="stylesheet" href="./assets/styles.css">
 </head>
-<body>
-  <div class="container">
-    <h1>Roon Knob</h1>
-    <p class="tagline">A physical volume controller for your hi-fi system</p>
+<body class="flash-shell">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container nav-wrap">
+    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span>Menu</span><span class="nav-face" aria-hidden="true">••</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Primary"><a href="https://hiphi.audio/controllers.html">Controllers</a><a href="https://hiphi.audio/getting-started.html">Get started</a><a href="https://hiphi.audio/mcp.html">UHC + MCP</a><a class="nav-flash" aria-current="page" href="./">Flash firmware</a></nav>
+  </div></header>
 
-    <div class="buttons">
-      <a href="flash.html" class="btn btn-primary">Flash Firmware</a>
-      <a href="https://www.buymeacoffee.com/muness" class="btn btn-donate" target="_blank">Buy Me a Coffee</a>
+  <main class="flash-main" id="main"><div class="container">
+    <a class="flash-breadcrumb" href="https://hiphi.audio/">← HiPhi home</a>
+    <div class="flash-intro"><div><p class="context-line">Firmware center</p><h1>Choose a release.</h1></div><p>Flash over USB from desktop Chrome or Edge. Stable is the release for daily listening.</p></div>
+    <div class="callout"><p><strong>Install Unified Hi-Fi Control first.</strong> HiPhi controllers talk to UHC on your network — <a href="https://hiphi.audio/getting-started.html">install it first</a>, or the controller has nothing to connect to.</p><ul><li>Docker (recommended): <code>docker pull muness/unified-hifi-control:latest</code></li><li>Synology and QNAP packages from <a href="https://github.com/open-horizon-labs/unified-hifi-control/releases" target="_blank" rel="noreferrer">GitHub Releases</a></li><li>LMS plugin if you already run Lyrion Music Server</li><li>Bare binaries for Linux, macOS, and Windows from Releases</li></ul></div>
+    <div class="channel-grid">
+      <article class="channel"><span class="channel-mark">Stable</span><h3>Normal use</h3><p>Hardware-tested firmware eligible for automatic updates.</p><a class="button button-dark" href="./stable/">Open Stable</a></article>
+      <article class="channel"><span class="channel-mark">Beta</span><h3>Release candidates</h3><p>Opt-in USB installs for builds approaching Stable.</p><a class="button button-secondary" href="./beta/">Open Beta</a></article>
+      <article class="channel"><span class="channel-mark">Alpha</span><h3>Active testing</h3><p>The newest target support and fixes, including hardware-unverified builds.</p><a class="button button-secondary" href="./alpha/">Open Alpha</a></article>
     </div>
-
-    <div class="card">
-      <h2>What is this?</h2>
-      <p>Roon Knob is a DIY hardware controller for your hi-fi system. Uses the <a href="https://amzn.to/4pYZdiC" target="_blank">Waveshare ESP32-S3 Knob</a> (~$50). Features a rotary encoder, touchscreen display, and WiFi connectivity. Supports:</p>
-      <p style="margin-top: 12px;">
-        <strong>&bull; Roon</strong> &ndash; Full zone control with album artwork<br>
-        <strong>&bull; Lyrion (LMS)</strong> &ndash; Squeezebox player control<br>
-        <strong>&bull; OpenHome/UPnP</strong> &ndash; Control OpenHome renderers
-      </p>
-    </div>
-
-    <div class="card">
-      <h2>Getting Started</h2>
-      <p>
-        <strong>1.</strong> Flash firmware using the <a href="flash.html">web flasher</a> (Chrome/Edge)<br>
-        <strong>2.</strong> Connect to WiFi via captive portal<br>
-        <strong>3.</strong> Run the control service via Docker:<br>
-        <code style="display: block; background: var(--bg); padding: 12px; border-radius: 6px; margin: 10px 0; font-size: 0.9em;">docker run -d --network host muness/unified-hifi-control</code>
-        <strong>4.</strong> For Roon: Authorize in Settings &rarr; Extensions
-      </p>
-    </div>
-
-    <div class="links">
-      <a href="https://github.com/muness/roon-knob">GitHub</a>
-      <a href="https://github.com/muness/roon-knob/releases">Releases</a>
-      <a href="https://github.com/muness/roon-knob/blob/master/docs/usage/FIRMWARE_FLASHING.md">Docs</a>
-      <a href="https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363">Community</a>
-    </div>
-  </div>
+    <div class="requirements"><h2>Before connecting USB</h2><ul><li>Use Chrome or Edge on a desktop computer with Web Serial.</li><li>Use a data-capable USB cable.</li><li>Verify the exact board and revision on the controller page.</li><li>Decline erase when updating to retain Wi-Fi and controller settings.</li></ul></div>
+  </div></main>
+  <script src="./assets/site.js" defer></script>
 </body>
 </html>
