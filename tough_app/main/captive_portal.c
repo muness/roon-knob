@@ -332,7 +332,17 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   const bool scan_requested =
       httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
       httpd_query_key_value(query, "scan", scan_value, sizeof(scan_value)) == ESP_OK;
-  rk_wifi_network_t scan[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+  rk_wifi_network_t *scan = heap_caps_calloc(
+      RK_WIFI_SCAN_MAX_NETWORKS, sizeof(*scan), MALLOC_CAP_8BIT);
+  char *scan_options = heap_caps_calloc(1, 3072, MALLOC_CAP_8BIT);
+  char *wifi_html = heap_caps_calloc(1, 1024, MALLOC_CAP_8BIT);
+  if (!scan || !scan_options || !wifi_html) {
+    free(scan);
+    free(scan_options);
+    free(wifi_html);
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
   rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
   if (scan_requested && (scan_state == RK_WIFI_SCAN_IDLE ||
                          scan_state == RK_WIFI_SCAN_FAILED)) {
@@ -342,22 +352,20 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   size_t scan_count = scan_state == RK_WIFI_SCAN_READY
                           ? wifi_mgr_scan_results_copy(scan, RK_WIFI_SCAN_MAX_NETWORKS)
                           : 0;
-  char scan_options[3072] = "";
   int scan_pos = 0;
-  for (size_t i = 0; i < scan_count && scan_pos < (int)sizeof(scan_options) - 1; ++i) {
+  for (size_t i = 0; i < scan_count && scan_pos < 3071; ++i) {
     char escaped[128];
     html_escape(scan[i].ssid, escaped, sizeof(escaped));
-    scan_pos += snprintf(scan_options + scan_pos, sizeof(scan_options) - scan_pos,
+    scan_pos += snprintf(scan_options + scan_pos, 3072 - scan_pos,
                          "<option value='%s'>%s (%d dBm)</option>",
                          escaped, escaped, (int)scan[i].rssi);
   }
 
-  char wifi_html[1024] = "";
   int pos = 0;
   for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
     char escaped[128];
     html_escape(cfg->wifi[i].ssid, escaped, sizeof(escaped));
-    pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
+    pos += snprintf(wifi_html + pos, 1024 - pos,
         "<div class='wifi-entry'>"
         "<span>%s</span>"
         "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;'>"
@@ -365,7 +373,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         "<button type='submit' class='btn-rm'>Remove</button>"
         "</form></div>",
         escaped, i);
-    if (pos >= (int)sizeof(wifi_html)) pos = (int)sizeof(wifi_html) - 1;
+    if (pos >= 1024) pos = 1023;
   }
 
   size_t html_size = 8192;
@@ -374,6 +382,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   // PSRAM on targets that actually provide it).
   char *html = heap_caps_malloc(html_size, MALLOC_CAP_8BIT);
   if (!html) {
+    free(scan);
+    free(scan_options);
+    free(wifi_html);
     httpd_resp_set_type(req, "text/html");
     char message[96];
     snprintf(message, sizeof(message), "<h1>%s</h1><p>Out of memory</p>",
@@ -439,6 +450,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
   free(html);
+  free(scan);
+  free(scan_options);
+  free(wifi_html);
   return ESP_OK;
 }
 

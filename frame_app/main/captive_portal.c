@@ -426,7 +426,20 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
                             sizeof(scan_value)) == ESP_OK &&
       (scan_value[0] == '1' || strcmp(scan_value, "again") == 0);
   const bool scan_again_requested = strcmp(scan_value, "again") == 0;
-  rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+  rk_wifi_network_t *networks = heap_caps_calloc(
+      RK_WIFI_SCAN_MAX_NETWORKS, sizeof(*networks), MALLOC_CAP_8BIT);
+  char *escaped_bridge_base = heap_caps_calloc(
+      1, sizeof(cfg->bridge_base) * 6, MALLOC_CAP_8BIT);
+  char *wifi_html = heap_caps_calloc(1, 1024, MALLOC_CAP_8BIT);
+  char *scan_html = heap_caps_calloc(1, 3072, MALLOC_CAP_8BIT);
+  if (!networks || !escaped_bridge_base || !wifi_html || !scan_html) {
+    free(networks);
+    free(escaped_bridge_base);
+    free(wifi_html);
+    free(scan_html);
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
   rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
   if (scan_requested && (scan_again_requested ||
                          scan_state == RK_WIFI_SCAN_IDLE ||
@@ -438,18 +451,16 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
                              ? wifi_mgr_scan_results_copy(networks, RK_WIFI_SCAN_MAX_NETWORKS)
                              : 0;
 
-  char escaped_bridge_base[sizeof(cfg->bridge_base) * 6] = "";
   if (cfg->bridge_base[0] && is_safe_url(cfg->bridge_base)) {
     html_escape(cfg->bridge_base, escaped_bridge_base,
-                sizeof(escaped_bridge_base));
+                sizeof(cfg->bridge_base) * 6);
   }
 
-  char wifi_html[1024] = "";
   int pos = 0;
   for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
     char escaped[128];
     html_escape(cfg->wifi[i].ssid, escaped, sizeof(escaped));
-    pos += snprintf(wifi_html + pos, sizeof(wifi_html) - pos,
+    pos += snprintf(wifi_html + pos, 1024 - pos,
         "<div class='wifi-entry'>"
         "<span>%s</span>"
         "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;'>"
@@ -457,36 +468,35 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         "<button type='submit' class='btn-rm'>Remove</button>"
         "</form></div>",
         escaped, i);
-    if (pos >= (int)sizeof(wifi_html)) pos = (int)sizeof(wifi_html) - 1;
+    if (pos >= 1024) pos = 1023;
   }
 
-  char scan_html[3072] = "";
   if (scan_requested) {
-    int scan_pos = snprintf(scan_html, sizeof(scan_html),
+    int scan_pos = snprintf(scan_html, 3072,
         "<h2>Nearby 2.4 GHz networks</h2><div class='section'>");
     if (scan_state == RK_WIFI_SCAN_RUNNING) {
-      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
           "<p>Scanning nearby networks&hellip; refresh this page in a moment.</p>");
     } else if (scan_state == RK_WIFI_SCAN_FAILED) {
-      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
           "<p>Scan failed. You can still type an SSID manually.</p>");
     } else {
-      for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
+      for (size_t i = 0; i < network_count && scan_pos < 3072; ++i) {
         char escaped[sizeof(networks[i].ssid) * 6] = "";
         html_escape(networks[i].ssid, escaped, sizeof(escaped));
-        scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+        scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
             "<button type='button' class='wifi-choice' data-ssid='%s' "
             "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
             "%s <small>%d dBm</small></button>",
             escaped, escaped, networks[i].rssi);
       }
-      if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
-        scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+      if (network_count == 0 && scan_pos < 3072) {
+        scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
             "<p>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
       }
     }
-    if (scan_pos < (int)sizeof(scan_html)) {
-      snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos, "</div>");
+    if (scan_pos < 3072) {
+      snprintf(scan_html + scan_pos, 3072 - scan_pos, "</div>");
     }
   }
 
@@ -494,6 +504,10 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
+    free(networks);
+    free(escaped_bridge_base);
+    free(wifi_html);
+    free(scan_html);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><p>Out of memory</p>", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -565,6 +579,10 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
   free(html);
+  free(networks);
+  free(escaped_bridge_base);
+  free(wifi_html);
+  free(scan_html);
   return ESP_OK;
 }
 
@@ -951,7 +969,17 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
                             sizeof(scan_value)) == ESP_OK &&
       (scan_value[0] == '1' || strcmp(scan_value, "again") == 0);
   const bool scan_again_requested = strcmp(scan_value, "again") == 0;
-  rk_wifi_network_t networks[RK_WIFI_SCAN_MAX_NETWORKS] = {0};
+  rk_wifi_network_t *networks = heap_caps_calloc(
+      RK_WIFI_SCAN_MAX_NETWORKS, sizeof(*networks), MALLOC_CAP_8BIT);
+  char *saved_html = heap_caps_calloc(1, 1024, MALLOC_CAP_8BIT);
+  char *scan_html = heap_caps_calloc(1, 3072, MALLOC_CAP_8BIT);
+  if (!networks || !saved_html || !scan_html) {
+    free(networks);
+    free(saved_html);
+    free(scan_html);
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    return ESP_FAIL;
+  }
   rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
   if (scan_requested && (scan_again_requested ||
                          scan_state == RK_WIFI_SCAN_IDLE ||
@@ -963,40 +991,38 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
                              ? wifi_mgr_scan_results_copy(networks, RK_WIFI_SCAN_MAX_NETWORKS)
                              : 0;
 
-  char saved_html[1024] = "";
   int saved_pos = 0;
   for (int i = 0; i < snapshot.value.wifi_count && i < RK_MAX_WIFI; ++i) {
     char escaped[sizeof(snapshot.value.wifi[i].ssid) * 6] = "";
     html_escape(snapshot.value.wifi[i].ssid, escaped, sizeof(escaped));
-    saved_pos += snprintf(saved_html + saved_pos, sizeof(saved_html) - saved_pos,
+    saved_pos += snprintf(saved_html + saved_pos, 1024 - saved_pos,
                           "<div class='device'><span>%s%s</span></div>", escaped,
                           i == 0 ? " (current)" : "");
-    if (saved_pos >= (int)sizeof(saved_html)) {
-      saved_pos = (int)sizeof(saved_html) - 1;
+    if (saved_pos >= 1024) {
+      saved_pos = 1023;
       break;
     }
   }
-  char scan_html[3072] = "";
   if (scan_requested) {
-    int scan_pos = snprintf(scan_html, sizeof(scan_html),
+    int scan_pos = snprintf(scan_html, 3072,
                             "<h2>Nearby 2.4 GHz networks</h2>");
     if (scan_state == RK_WIFI_SCAN_RUNNING) {
-      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
                            "<p class='status'>Scanning nearby networks&hellip; refresh this page in a moment.</p>");
     } else if (scan_state == RK_WIFI_SCAN_FAILED) {
-      scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+      scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
                            "<p class='status'>Scan failed. You can still type an SSID manually.</p>");
     } else {
-      for (size_t i = 0; i < network_count && scan_pos < (int)sizeof(scan_html); ++i) {
+      for (size_t i = 0; i < network_count && scan_pos < 3072; ++i) {
         char escaped[sizeof(networks[i].ssid) * 6] = "";
         html_escape(networks[i].ssid, escaped, sizeof(escaped));
-        scan_pos += snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+        scan_pos += snprintf(scan_html + scan_pos, 3072 - scan_pos,
             "<button type='button' class='wifi-choice' data-ssid='%s' "
             "onclick=\"document.getElementById('ssid').value=this.dataset.ssid\">"
             "%s <small>%d dBm</small></button>", escaped, escaped, networks[i].rssi);
       }
-      if (network_count == 0 && scan_pos < (int)sizeof(scan_html)) {
-        snprintf(scan_html + scan_pos, sizeof(scan_html) - scan_pos,
+      if (network_count == 0 && scan_pos < 3072) {
+        snprintf(scan_html + scan_pos, 3072 - scan_pos,
                  "<p class='status'>No visible 2.4 GHz networks found. You can still type an SSID.</p>");
       }
     }
@@ -1005,6 +1031,9 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
   const size_t html_size = 12288;
   char *html = heap_caps_malloc(html_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
+    free(networks);
+    free(saved_html);
+    free(scan_html);
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
@@ -1032,6 +1061,9 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, length);
   free(html);
+  free(networks);
+  free(saved_html);
+  free(scan_html);
   return ESP_OK;
 }
 
