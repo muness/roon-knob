@@ -23,6 +23,7 @@ for legacy_app in ("idf_app", "frame_app", "rlcd_app"):
     require(f"{legacy_app}/CMakeLists.txt", "set(EXCLUDE_COMPONENTS m5_platform kizz_wake_word)")
 
 workflow = ".github/workflows/docker.yml"
+site_workflow = ".github/workflows/firmware-site-preview.yml"
 require(workflow, "cname: firmware.hiphi.audio")
 require(workflow, "publish_dir: ./publish-root")
 require(workflow, "destination_dir: .")
@@ -62,6 +63,24 @@ legacy_release_host = "roon" + "-knob.muness.com"
 forbid(workflow, legacy_release_host)
 forbid(workflow, "destination_dir: ${{ steps.channel.outputs.dir }}")
 forbid(workflow, "destination_dir: flash/${{ steps.channel.outputs.name }}")
+for site_only_path in (
+    "web/**",
+    "docs/**",
+    "README.md",
+    "scripts/check_release_hosting_contract.py",
+    "scripts/check_alpha_release_notes.py",
+    "scripts/classify_firmware_site_changes.py",
+    "scripts/render_firmware_site_preview.py",
+    ".github/workflows/firmware-site-preview.yml",
+):
+    require(workflow, f"- '{site_only_path}'")
+require(site_workflow, "classify-site-only-change")
+require(site_workflow, "needs.classify.outputs.site-only == 'true'")
+require(site_workflow, "scripts/render_firmware_site_preview.py")
+require(site_workflow, "scripts/classify_firmware_site_changes.py")
+require(site_workflow, "No firmware targets were rebuilt.")
+require("scripts/render_firmware_site_preview.py", 'r\'manifest="/alpha/\\1"\'')
+require("scripts/render_firmware_site_preview.py", 'r\'href="/alpha/\\1"\'')
 
 for page in ("web/index.html", "web/flash.html"):
     require(page, 'href="./assets/favicon.ico"')
