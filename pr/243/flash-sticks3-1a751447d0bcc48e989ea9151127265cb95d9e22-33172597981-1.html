@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flash Firmware - PR #243 Preview</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --primary: #0f3460;
+      --accent: #e94560;
+      --text: #eee;
+      --text-muted: #888;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: var(--accent); margin-bottom: 10px; }
+    .subtitle { color: var(--text-muted); margin-bottom: 30px; }
+    .card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
+    .chip-badge {
+      font-size: 12px;
+      background: var(--primary);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-weight: normal;
+    }
+    .description { color: var(--text-muted); margin-bottom: 20px; line-height: 1.6; }
+    .flash-section { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+    esp-web-install-button button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    esp-web-install-button button:hover { filter: brightness(1.1); }
+    .version-info { color: var(--text-muted); font-size: 14px; }
+    .pr-banner {
+      background: linear-gradient(135deg, #f39c12, #e67e22);
+      color: #000;
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      font-weight: 500;
+    }
+    .pr-banner a { color: #000; font-weight: 700; }
+    .pr-banner .pr-title { font-size: 18px; margin-bottom: 8px; }
+    .pr-banner .pr-warning { font-size: 14px; opacity: 0.9; }
+    .preview-meta {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(0, 0, 0, 0.25);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .preview-meta code { font-size: 12px; }
+    .info-box {
+      background: #1a3d5c;
+      border-left: 4px solid #3498db;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .info-box strong { color: #3498db; }
+    .power-summary {
+      background: #12382f;
+      border-left: 4px solid #2ecc71;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .power-summary > strong { color: #2ecc71; }
+    .power-summary ul { margin: 10px 0 0; padding-left: 20px; }
+    .power-summary li { margin-bottom: 8px; color: var(--text-muted); line-height: 1.5; }
+    .power-summary .measurement { margin: 10px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+    .warning {
+      background: #3d2914;
+      border-left: 4px solid #f39c12;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-top: 20px;
+    }
+    .warning strong { color: #f39c12; }
+    .unsupported {
+      display: none;
+      background: #3d1414;
+      border-left: 4px solid #e74c3c;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    a { color: var(--accent); }
+    .back-link { display: inline-block; margin-bottom: 20px; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+    .steps { margin-top: 20px; }
+    .steps ol { padding-left: 20px; }
+    .steps li { margin-bottom: 8px; color: var(--text-muted); }
+    .port-tip { margin-top: 12px; color: var(--text-muted); font-size: 14px; }
+    .steps code {
+      background: var(--primary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .requirements {
+      background: var(--primary);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 30px;
+    }
+    .requirements h3 { margin-top: 0; margin-bottom: 12px; }
+    .requirements ul { margin: 0; padding-left: 20px; }
+    .requirements li { margin-bottom: 8px; color: var(--text-muted); }
+  </style>
+</head>
+<body data-target-filter="sticks3">
+  <div class="container">
+    <a href="/flash.html" class="back-link">&larr; Back to stable release</a>
+
+    <div class="pr-banner">
+      <div class="pr-title">PR #243 Preview Build</div>
+      <div class="pr-warning">
+        This is unreleased code for testing.
+        <a href="https://github.com/muness/roon-knob/pull/243" target="_blank">View PR &rarr;</a>
+      </div>
+      <div class="preview-meta">
+        <div><strong>Built:</strong> <time datetime="2026-08-28T13:00:35Z">2026-08-28T13:00:35Z</time> UTC</div>
+        <div><strong>Commit:</strong> <a href="https://github.com/muness/roon-knob/commit/f53ee114580c327d975cc04d136e58f418505a99" target="_blank"><code>f53ee114580c</code></a> <span id="preview-subject" data-subject-b64="Zml4KGNpKToga2VlcCBsZWdhY3kgaG9zdCBjaGVjayBpZGVudGl0eS1jbGVhbg=="></span></div>
+        <div><strong>Build:</strong> <a href="https://github.com/muness/roon-knob/actions/runs/33172597981" target="_blank">run #33172597981</a>, attempt 1 &middot; merge ref <code>1a751447d0bc</code></div>
+      </div>
+    </div>
+
+    <h1>Flash Firmware</h1>
+    <p class="subtitle">Flash firmware directly from your browser - no tools to install</p>
+
+    <div class="unsupported" id="unsupported">
+      <strong>Browser Not Supported</strong><br>
+      Web Serial requires Chrome or Edge (version 89+). Safari and Firefox are not supported.
+    </div>
+
+    <div class="info-box">
+      <strong>Chip Auto-Detection</strong><br>
+      Not sure which chip? Just try - ESP Web Tools detects the chip and warns if it doesn't match.
+    </div>
+
+    <div class="info-box">
+      <strong>Shared power evidence</strong><br>
+      Every device's connected web UI exposes <code>/power-debug</code> with the same HTML and JSON schema. Dial and Frame also offer a one-time powered Deep-sleep test; other targets explicitly report when an implemented, evidence-retaining test is unavailable.
+    </div>
+
+    <!-- HiPhi Dial -->
+    <div class="card" id="dial-card">
+      <h2>HiPhi Dial <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">
+        The round touchscreen controller with rotary input, WiFi playback
+        control, and optional BLE media-remote support.
+      </p>
+      <div class="power-summary">
+        <strong>Battery work in this alpha</strong>
+        <ul>
+          <li><strong>Radio:</strong> Wi-Fi modem sleep replaces the previous always-awake mode while the Dial stays associated between polls.</li>
+          <li><strong>Main processor:</strong> automatic Light-sleep and clock scaling can run whenever the firmware is idle.</li>
+          <li><strong>Battery checks:</strong> one cached 16-sample ADC reading supplies level and power-source policy for 15 seconds instead of repeating that work throughout every status cycle.</li>
+          <li><strong>Power diagnostics:</strong> the shared power-debug view adds Dial-specific RTC-retained entry/wake evidence and a one-time plugged-in Deep-sleep test.</li>
+          <li><strong>Deep sleep:</strong> the panel, Wi-Fi, and BLE stop; the backlight stays latched off; and turning the encoder wakes the main ESP32-S3 without leaving its RTC peripheral domain on.</li>
+          <li><strong>Second processor:</strong> a separate one-time parking image immediately Deep-sleeps the otherwise-unused classic ESP32 and mutes its audio DAC on every boot.</li>
+        </ul>
+        <p class="measurement"><strong>For the lowest idle draw, update the main Dial first, then park its auxiliary ESP32 once using the second installer below.</strong> The Dial works without the one-time auxiliary step, but that otherwise-unused processor may continue drawing power. These mechanisms are source- and build-verified, but current draw and battery-runtime improvements have not been measured yet.</p>
+      </div>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-s3-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json">
+          <button slot="activate">Update HiPhi Dial</button>
+          <span slot="unsupported">Not supported</span>
+          <span slot="not-allowed">HTTPS required</span>
+        </esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
+      <div class="steps">
+        <strong>Steps:</strong>
+        <ol>
+          <li>Turn on the device (power slider towards USB-C port)</li>
+          <li>Connect via USB-C</li>
+          <li>Click "Flash HiPhi Dial" and select the serial port</li>
+          <li>Wait ~30 seconds for flashing to complete</li>
+        </ol>
+        <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> &middot; Linux: <code>ttyACM0</code> &middot; Windows: <code>COM*</code></p>
+        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180&deg; - one orientation connects to the main ESP32-S3, the other to the auxiliary ESP32.</p>
+      </div>
+    </div>
+
+    <div class="card" id="knobaux-card">
+      <h2>Waveshare Dial Auxiliary ESP32 <span class="chip-badge">One-time power step</span> <span class="chip-badge">ESP32</span></h2>
+      <p class="description">The Waveshare Dial contains a second, otherwise-unused ESP32. This parking firmware makes that processor enter Deep-sleep immediately on every boot and mutes its audio DAC.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-knob-aux-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Park Auxiliary ESP32</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Do this once for the lowest idle draw:</strong> after updating the main Dial above, disconnect USB-C, flip the cable 180&deg;, and reconnect it. Start this installer only if the browser identifies an <strong>ESP32</strong>. Cancel if it identifies an ESP32-S3—that is the main Dial processor. When complete, disconnect USB-C and return the cable to its normal orientation.</p>
+    </div>
+
+    <!-- HiPhi Frame -->
+    <div class="card" id="frame-card">
+      <h2>HiPhi Frame <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 e-ink</span></h2>
+      <p class="description">
+        The rectangular e-ink now-playing display with physical buttons and BLE media-remote support.
+      </p>
+      <p class="warning"><strong>Alpha firmware:</strong> Frame has not completed the same current hardware regression coverage as Dial. Install for early testing and expect rough edges.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-frame-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json">
+          <button slot="activate">Update HiPhi Frame Alpha</button>
+          <span slot="unsupported">Not supported</span>
+          <span slot="not-allowed">HTTPS required</span>
+        </esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
+      <div class="steps">
+        <strong>Steps:</strong>
+        <ol>
+          <li>Connect the Frame to your computer over USB-C</li>
+          <li>Click "Flash HiPhi Frame" and select its serial port</li>
+          <li>Wait for flashing and the first e-ink refresh to complete</li>
+          <li>Connect to <code>hiphi-frame-setup</code> to configure WiFi</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- HiPhi RLCD -->
+    <div class="card" id="rlcd-card">
+      <h2>HiPhi RLCD <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 RLCD</span></h2>
+      <p class="description">
+        The reflective LCD now-playing controller with physical BOOT, KEY, and
+        power buttons, artwork, playback, volume, and zone controls.
+      </p>
+      <p class="warning"><strong>Alpha firmware:</strong> RLCD is under active hardware testing. Install for early testing and expect rough edges.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-rlcd-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json">
+          <button slot="activate">Update HiPhi RLCD Alpha</button>
+          <span slot="unsupported">Not supported</span>
+          <span slot="not-allowed">HTTPS required</span>
+        </esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
+      <div class="steps">
+        <strong>Steps:</strong>
+        <ol>
+          <li>Connect the RLCD to your computer over USB-C</li>
+          <li>Click "Flash HiPhi RLCD" and select its serial port</li>
+          <li>Wait for flashing and the first reflective LCD refresh to complete</li>
+          <li>Connect to <code>hiphi-rlcd-setup</code> to configure WiFi</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="card" id="joy-card">
+      <h2>AtomS3 JoyStick Deck <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32-S3</span></h2>
+      <p class="description">Two sticks turn listening into muscle memory: left stick rides volume, right stick skips tracks, its press opens rooms, and the face button toggles playback. The tiny screen still delivers album art, track context, and explicit action feedback.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-joy-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Flash AtomS3 JoyStick Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack AtomS3 mounted in the Atom JoyStick base. This is not an AtomS3-only touchscreen build.</p>
+    </div>
+
+    <div class="card" id="tough-card">
+      <h2>M5Stack Tough Console <span class="chip-badge">Hardware-unverified alpha</span> <span class="chip-badge">ESP32</span></h2>
+      <p class="description">A rugged, glanceable whole-room controller: large touch targets for play, previous/next, and volume; album art and three lines of now-playing context; swipeable room selection; and display controls behind a deliberate long press.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-tough-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Flash M5Stack Tough Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack Tough K034 (original ESP32). Touch layout and hit-target sizing still need sustained validation on physical hardware.</p>
+    </div>
+
+    <div class="card" id="m5dial-card">
+      <h2>M5 Dial Lab <span class="chip-badge">Hardware-unverified alpha</span></h2>
+      <p class="description">The screen becomes the knob: a full-face volume arc, direct rotary control, press-to-play, and touch-to-choose-room.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-m5dial-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Flash M5 Dial Lab Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack Dial v1.1 K130-V11 (not the end-of-life K130). The firmware refuses to run on a different detected board.</p>
+    </div>
+
+    <div class="card" id="sticks3-card">
+      <h2>M5StickS3 Twist Remote <span class="chip-badge">Hardware-unverified alpha</span></h2>
+      <p class="description">Hold to arm it, then rotate the device in your hand to change volume. The portrait display makes the live/dead state impossible to miss; the second button toggles playback.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-sticks3-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Flash StickS3 Twist Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Intent guard:</strong> twisting does nothing unless the primary button is held. This alpha targets M5StickS3 K150 only.</p>
+    </div>
+
+    <div class="card" id="stopwatch-card">
+      <h2>M5Stack StopWatch Wrist Remote <span class="chip-badge">Hardware-unverified alpha</span></h2>
+      <p class="description">Raise your wrist to wake the AMOLED, use the two edge buttons for volume, and feel a short haptic confirmation. Tap the face for play/pause.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-stopwatch-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Flash StopWatch Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Exact hardware only:</strong> M5Stack StopWatch C152 with OPI PSRAM enabled.</p>
+    </div>
+
+    <div class="card" id="stackchan-card">
+      <h2>Kizz Playback Companion <span class="chip-badge">Hardware-unverified alpha</span></h2>
+      <p class="description">Named for Kismet, Kizz gives your music a face and a body: each new track gets one of several unhurried celebrations, while a lost connection becomes a visible sad face and droop. Tap for play/pause; swipe up for rooms; long-hold to quiet or restore body language.</p>
+      <div class="flash-section">
+        <esp-web-install-button manifest="manifest-stackchan-1a751447d0bcc48e989ea9151127265cb95d9e22-33172597981-1.json"><button slot="activate">Flash Kizz Alpha</button></esp-web-install-button>
+        <span class="version-info">PR #243</span>
+      </div>
+      <p class="warning"><strong>Motion is on by default:</strong> the official M5StackChan board library owns servo setup and movement. Give the body room to move before powering on; long-hold the face to disable body language.</p>
+    </div>
+
+    <div class="warning">
+      <strong>First time?</strong><br>
+      HiPhi Dial creates <code>hiphi-dial-setup</code>; HiPhi Frame creates
+      <code>hiphi-frame-setup</code>; the new M5 betas create a network ending
+      in <code>-beta-setup</code> with the device name.
+      Connect to the matching network to configure WiFi.
+    </div>
+
+    <div class="requirements">
+      <h3>Requirements</h3>
+      <ul>
+        <li><strong>Browser:</strong> Chrome or Edge 89+</li>
+        <li><strong>USB cable</strong> connected to your computer</li>
+        <li><strong>Driver:</strong> <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers" target="_blank">CP210x</a> or <a href="https://www.wch-ic.com/downloads/CH341SER_ZIP.html" target="_blank">CH340</a> may be needed</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const targetFilter = document.body.dataset.targetFilter;
+    const previewSubject = document.getElementById('preview-subject');
+    previewSubject.textContent = atob(previewSubject.dataset.subjectB64);
+    const targetNames = {
+      dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi RLCD',
+      joy: 'AtomS3 JoyStick', tough: 'M5Stack Tough',
+      m5dial: 'M5 Dial Lab', sticks3: 'M5StickS3 Twist Remote',
+      stopwatch: 'M5Stack StopWatch', stackchan: 'Kizz'
+    };
+    if (targetNames[targetFilter]) {
+      document.querySelectorAll('.card').forEach(card => {
+        const keepDialAux = targetFilter === 'dial' && card.id === 'knobaux-card';
+        if (card.id !== `${targetFilter}-card` && !keepDialAux) card.remove();
+      });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]} Firmware`;
+    }
+
+    if (!('serial' in navigator)) {
+      document.getElementById('unsupported').style.display = 'block';
+    }
+  </script>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</body>
+</html>
