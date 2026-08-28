@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "2.7.0-alpha.2")
+set(PROJECT_VER "2.7.0-alpha.4")
 execute_process(
     COMMAND git describe --exact-match --tags HEAD
     RESULT_VARIABLE NOT_ON_TAG
