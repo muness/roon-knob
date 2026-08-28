@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Flash HiPhi PR Preview firmware</title>
+  <meta name="description" content="Flash HiPhi pr-243 firmware for supported controller hardware.">
+  <link rel="icon" href="./assets/favicon.ico">
+  <link rel="stylesheet" href="./assets/styles.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body class="flash-shell" data-target-filter="frame" data-channel="alpha">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container nav-wrap">
+    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span>Menu</span><span class="nav-face" aria-hidden="true">••</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Firmware channels"><a data-channel-link="stable" href="/stable/">Stable</a><a data-channel-link="beta" href="/beta/">Beta</a><a data-channel-link="alpha" href="/alpha/">Alpha</a><a class="nav-flash" href="/">All channels</a></nav>
+  </div></header>
+
+  <main class="flash-main" id="main"><div class="container">
+    <a class="flash-breadcrumb" href="/">← Firmware center</a>
+    <div class="flash-intro"><div><p class="context-line">PR Preview / vpr-243</p><h1>Match the model before flashing.</h1></div><div class="channel-notice alpha"><strong>PR #243 preview build.</strong><p>This is unreleased commit <a href="https://github.com/muness/roon-knob/commit/86d71abd3abc37bfe4d7427b514a57a5e1ab9020"><code>86d71abd3abc</code></a> from <a href="https://github.com/muness/roon-knob/actions/runs/33199744507">run #33199744507</a>, attempt 1. Flash only for focused testing.</p></div></div>
+    <aside class="browser-requirement" data-browser-requirement aria-label="Browser requirements for USB flashing"><strong>Flash from a computer</strong><p>Use a current desktop version of Chrome, Edge, or Firefox with a data-capable USB cable. USB flashing does not work on iPhone, iPad, or Android.</p><p class="browser-status" data-browser-status>Choose the exact model below. The Flash button will open the USB installer on a supported computer.</p></aside>
+
+    <div class="flash-list">
+      <article class="flash-card" id="dial-card"><div><span class="version">Step 1 of 2 / PR Preview / ESP32-S3</span><h2>Dial main controller</h2><p class="hardware">Waveshare ESP32-S3-Knob-Touch-LCD-1.8</p><p>The round touchscreen controller with rotary input, Wi-Fi playback control, and optional BLE media-remote support.</p><details><summary><strong>Battery and power work</strong></summary><ul><li>Wi-Fi modem sleep replaces the previous always-awake mode.</li><li>The main processor uses automatic Light-sleep and clock scaling while idle.</li><li>One cached 16-sample ADC reading supplies battery state for 15 seconds.</li><li>The shared power-debug view records RTC-retained entry and wake evidence.</li><li>Deep-sleep stops the panel, Wi-Fi, and BLE; turning the encoder wakes the controller.</li></ul></details><p class="risk">For the lowest idle draw, install the one-time parking image next. Current draw and battery-runtime gains have not been measured yet.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-s3-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash Dial main controller</button></esp-web-install-button><a class="download-link" href="./hiphi_dial_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="knobaux-card"><div><span class="version">Step 2 of 2 / one-time parking image / ESP32</span><h2>Dial auxiliary parking image</h2><p>The Dial contains a second, otherwise-unused ESP32. This image immediately puts it into Deep-sleep and mutes its audio DAC on every boot.</p><p class="risk">Disconnect USB-C, flip the cable, and reconnect: one orientation connects to the main controller, the other to the auxiliary ESP32. Continue only if the flasher identifies an ESP32. Cancel if it identifies an ESP32-S3.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-knob-aux-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Park the auxiliary ESP32</button></esp-web-install-button><a class="download-link" href="./hiphi_knob_aux_park_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download parking image</a></div></article>
+
+      <article class="flash-card" id="frame-card"><div><span class="version">PR Preview / ESP32-S3 / PhotoPainter</span><h2>Frame</h2><p>Color e-paper now playing, physical buttons, BLE media remote, automatic Wi-Fi scanning, web settings, power diagnostics, and battery-idle Deep-sleep.</p><p class="risk">Exact hardware only. Hardware validation is recorded per release.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-frame-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Frame</button></esp-web-install-button><a class="download-link" href="./hiphi_frame_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="rlcd-card"><div><span class="version">PR Preview / ESP32-S3 / Waveshare RLCD 4.2</span><h2>Slate</h2><p>A reflective LCD now-playing display with physical controls, Wi-Fi setup, and power diagnostics.</p><p class="risk">Waveshare ESP32-S3-RLCD-4.2 only.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-rlcd-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Slate</button></esp-web-install-button><a class="download-link" href="./hiphi_rlcd_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="joy-card"><div><span class="version">PR Preview / ESP32-S3 / M5Stack K137</span><h2>Joy</h2><p>Two-stick navigation, volume, transport, room selection, and compact artwork.</p><p class="risk">K137 assembly only; check release notes for hardware status.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-joy-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Joy</button></esp-web-install-button><a class="download-link" href="./hiphi_joy_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="tough-card"><div><span class="version">PR Preview / ESP32 / M5Stack K034</span><h2>Tough</h2><p>A rugged touchscreen with transport, volume, room, and display controls.</p><p class="risk">Original ESP32 K034 only. Updates currently require USB.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-tough-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Tough</button></esp-web-install-button><a class="download-link" href="./hiphi_tough_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="m5dial-card"><div><span class="version">PR Preview / ESP32-S3 / M5Stack K130</span><h2>Dial Lab</h2><p>A round controller with encoder volume, press transport, touch room selection, Wi-Fi scanning, and power diagnostics.</p><p class="risk">M5Stack Dial v1.1 K130-V11 only.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-m5dial-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Dial Lab</button></esp-web-install-button><a class="download-link" href="./hiphi_m5dial_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="sticks3-card"><div><span class="version">PR Preview / ESP32-S3 / M5Stack K150</span><h2>Twist</h2><p>A handheld twist-to-volume remote with button transport and room selection.</p><p class="risk">M5StickS3 K150 only; check release notes for hardware status.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-sticks3-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Twist</button></esp-web-install-button><a class="download-link" href="./hiphi_sticks3_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="stopwatch-card"><div><span class="version">PR Preview / ESP32-S3 / M5Stack C152</span><h2>Remote</h2><p>A raise-to-wake wrist remote with edge-button volume, haptics, tap transport, and room selection.</p><p class="risk">M5Stack StopWatch C152 only; check release notes for hardware status.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-stopwatch-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Remote</button></esp-web-install-button><a class="download-link" href="./hiphi_stopwatch_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+
+      <article class="flash-card" id="stackchan-card"><div><span class="version">PR Preview / ESP32-S3 / M5Stack K151</span><h2>Kizz Playback Companion</h2><p>Named for Kismet, Kizz is an animated playback companion with touch transport, room selection, and optional servo motion.</p><p class="risk">Motion starts enabled. Give Kizz room to move before powering on.</p></div><div class="flash-action"><esp-web-install-button manifest="manifest-stackchan-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.json"><button slot="activate">Flash PR Preview Kizz</button></esp-web-install-button><a class="download-link" href="./hiphi_stackchan_merged-8731a0fdf9eddf95c983102163531ed1798aa08f-33199744507-1.bin">Download firmware file</a></div></article>
+    </div>
+
+    <div class="requirements"><h2>PR Preview install rules</h2><ul><li>Verify the exact SKU before connecting.</li><li>Use desktop Chrome, Edge, or Firefox and a data-capable USB cable.</li><li>Decline erase during updates to retain settings.</li><li>All controllers expose <code>/power-debug</code>; it records policy and sleep evidence, not amperage.</li></ul><p><a href="https://github.com/muness/roon-knob/pull/243">Review PR #243 and its checks ↗</a></p></div>
+  </div></main>
+
+  <script>
+    const targetFilter = document.body.dataset.targetFilter;
+    const channel = document.body.dataset.channel;
+    const targetNames = {dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate', joy: 'HiPhi Joy', tough: 'M5Stack Tough', m5dial: 'M5 Dial Lab', sticks3: 'HiPhi Twist', stopwatch: 'HiPhi Remote', stackchan: 'Kizz', knobaux: 'Waveshare Dial Auxiliary ESP32'};
+    if (targetNames[targetFilter]) {
+      const allowedCards = targetFilter === 'dial'
+        ? new Set(['dial-card', 'knobaux-card'])
+        : new Set([`${targetFilter}-card`]);
+      document.querySelectorAll('.flash-card').forEach(card => { if (!allowedCards.has(card.id)) card.remove(); });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]}`;
+    }
+    document.querySelector(`[data-channel-link="${channel}"]`)?.setAttribute('aria-current', 'page');
+  </script>
+  <script src="./assets/site.js" defer></script>
+</body>
+</html>
