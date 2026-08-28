@@ -17,15 +17,9 @@ REQUIRED = {
     "web/flash.html": [
         "Kizz Playback Companion",
         "Named for Kismet",
-        "Flash Kizz Alpha",
+        "Flash {{RELEASE_CHANNEL_NAME}} Kizz",
         "stackchan: 'Kizz'",
         'manifest="manifest-stackchan.json"',
-    ],
-    "web/flash-pr.html": [
-        "Kizz Playback Companion",
-        "Named for Kismet",
-        "Flash Kizz Alpha",
-        "stackchan: 'Kizz'",
     ],
     ".github/RELEASE_TEMPLATE.md": [
         "Kizz Playback Companion",
@@ -52,7 +46,6 @@ REQUIRED = {
 FORBIDDEN = {
     "web/manifest-stackchan.json": ["StackChan Playback Companion"],
     "web/flash.html": ["StackChan Playback Companion", "Flash StackChan"],
-    "web/flash-pr.html": ["StackChan Playback Companion", "Flash StackChan"],
     ".github/RELEASE_TEMPLATE.md": ["StackChan Playback Companion"],
     ".github/workflows/docker.yml": [
         'prepare_m5_beta stackchan stackchan "StackChan Playback Companion"',

@@ -35,8 +35,8 @@ The easiest way to flash—no software to install.
 
 1. **Turn on the knob** (power slider towards the USB-C port)
 2. **Connect via USB-C** to your computer
-3. **Open the [Stable Web Flasher](https://firmware.hiphi.audio/flash/stable/)** in Chrome or Edge
-4. **Click "Flash HiPhi Dial"** and select the serial port when prompted
+3. **Open the [Stable Web Flasher](https://firmware.hiphi.audio/stable/)** in Chrome or Edge
+4. **Click "Flash Dial main controller"** and select the serial port when prompted
 5. **Wait ~30 seconds** for flashing to complete
 
 The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!

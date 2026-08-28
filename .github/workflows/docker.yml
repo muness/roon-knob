@@ -1219,15 +1219,11 @@ jobs:
           PR_NUM: ${{ github.event.pull_request.number }}
           PREVIEW_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PREVIEW_MERGE_SHA: ${{ github.sha }}
-          PREVIEW_COMMIT_SUBJECT: ${{ steps.preview-commit.outputs.subject }}
           PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           mkdir -p pr-preview
-          PREVIEW_CREATED_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cp -R web/assets pr-preview/assets
           PREVIEW_HEAD_SHA_SHORT="${PREVIEW_HEAD_SHA:0:12}"
-          PREVIEW_MERGE_SHA_SHORT="${PREVIEW_MERGE_SHA:0:12}"
-          PREVIEW_SUBJECT_B64="$(printf '%s' "${PREVIEW_COMMIT_SUBJECT}" | base64 --wrap=0)"
 
           DIAL_MANIFEST_FILE="manifest-s3-${PREVIEW_ID}.json"
           DIAL_APPLICATION_FILE="hiphi_dial-${PREVIEW_ID}.bin"
@@ -1446,14 +1442,11 @@ jobs:
             sed \
               -e "s/{{PR_NUMBER}}/${PR_NUM}/g" \
               -e "s/{{TARGET_FILTER}}/${target}/g" \
-              -e "s/{{PREVIEW_CREATED_AT}}/${PREVIEW_CREATED_AT}/g" \
-              -e "s/{{PREVIEW_HEAD_SHA}}/${PREVIEW_HEAD_SHA}/g" \
-              -e "s/{{PREVIEW_HEAD_SHA_SHORT}}/${PREVIEW_HEAD_SHA_SHORT}/g" \
-              -e "s/{{PREVIEW_MERGE_SHA_SHORT}}/${PREVIEW_MERGE_SHA_SHORT}/g" \
-              -e "s|{{PREVIEW_RUN_URL}}|${PREVIEW_RUN_URL}|g" \
-              -e "s/{{PREVIEW_RUN_ID}}/${GITHUB_RUN_ID}/g" \
-              -e "s/{{PREVIEW_RUN_ATTEMPT}}/${GITHUB_RUN_ATTEMPT}/g" \
-              -e "s|{{PREVIEW_SUBJECT_B64}}|${PREVIEW_SUBJECT_B64}|g" \
+              -e "s/{{VERSION}}/pr-${PR_NUM}/g" \
+              -e "s/{{RELEASE_CHANNEL}}/alpha/g" \
+              -e "s/{{RELEASE_CHANNEL_NAME}}/PR Preview/g" \
+              -e "s|{{RELEASE_CHANNEL_NOTICE}}|<div class=\"channel-notice alpha\"><strong>PR #${PR_NUM} preview build.</strong><p>This is unreleased commit <a href=\"https://github.com/${GITHUB_REPOSITORY}/commit/${PREVIEW_HEAD_SHA}\"><code>${PREVIEW_HEAD_SHA_SHORT}</code></a> from <a href=\"${PREVIEW_RUN_URL}\">run #${GITHUB_RUN_ID}</a>, attempt ${GITHUB_RUN_ATTEMPT}. Flash only for focused testing.</p></div>|g" \
+              -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/pull/${PR_NUM}\">Review PR #${PR_NUM} and its checks ↗</a>|g" \
               -e "s|manifest-s3.json|${DIAL_MANIFEST_FILE}|g" \
               -e "s|manifest-frame.json|${FRAME_MANIFEST_FILE}|g" \
               -e "s|manifest-rlcd.json|${RLCD_MANIFEST_FILE}|g" \
@@ -1464,10 +1457,21 @@ jobs:
               -e "s|manifest-stopwatch.json|manifest-stopwatch-${PREVIEW_ID}.json|g" \
               -e "s|manifest-stackchan.json|manifest-stackchan-${PREVIEW_ID}.json|g" \
               -e "s|manifest-knob-aux.json|${AUX_MANIFEST_FILE}|g" \
-              web/flash-pr.html > "pr-preview/${page}"
+              -e "s|hiphi_dial_merged.bin|${DIAL_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_knob_aux_park_merged.bin|${AUX_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_frame_merged.bin|${FRAME_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_rlcd_merged.bin|${RLCD_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_joy_merged.bin|${JOY_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_tough_merged.bin|${TOUGH_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_m5dial_merged.bin|hiphi_m5dial_merged-${PREVIEW_ID}.bin|g" \
+              -e "s|hiphi_sticks3_merged.bin|hiphi_sticks3_merged-${PREVIEW_ID}.bin|g" \
+              -e "s|hiphi_stopwatch_merged.bin|hiphi_stopwatch_merged-${PREVIEW_ID}.bin|g" \
+              -e "s|hiphi_stackchan_merged.bin|hiphi_stackchan_merged-${PREVIEW_ID}.bin|g" \
+              web/flash.html > "pr-preview/${page}"
             python3 scripts/check_flash_manifest.py "pr-preview/${manifest}" --assets-dir pr-preview
           done
           python3 scripts/check_flash_manifest.py "pr-preview/${AUX_MANIFEST_FILE}" --assets-dir pr-preview
+          ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL|RELEASE_CHANNEL_NAME|RELEASE_CHANNEL_NOTICE|RELEASE_LINK)\}\}' pr-preview
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1687,10 +1691,16 @@ jobs:
         run: |
           if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
             echo "name=alpha" >> "$GITHUB_OUTPUT"
+            echo "dir=alpha" >> "$GITHUB_OUTPUT"
+            echo "url=https://firmware.hiphi.audio/alpha" >> "$GITHUB_OUTPUT"
           elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
             echo "name=beta" >> "$GITHUB_OUTPUT"
+            echo "dir=beta" >> "$GITHUB_OUTPUT"
+            echo "url=https://firmware.hiphi.audio/beta" >> "$GITHUB_OUTPUT"
           elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "name=stable" >> "$GITHUB_OUTPUT"
+            echo "dir=stable" >> "$GITHUB_OUTPUT"
+            echo "url=https://firmware.hiphi.audio/stable" >> "$GITHUB_OUTPUT"
           else
             echo "Unsupported release tag: ${GITHUB_REF_NAME}" >&2
             exit 1
@@ -1702,29 +1712,51 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           CHANNEL="${{ steps.channel.outputs.name }}"
           if [[ "${CHANNEL}" == "alpha" ]]; then
-            CHANNEL_LABEL=" Alpha"
-            CHANNEL_NOTICE='<div class="warning"><strong>Alpha firmware</strong><br>Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+            CHANNEL_NAME="Alpha"
+            CHANNEL_NOTICE='<div class="channel-notice alpha"><strong>Some boards remain untested.</strong><p>Every file passed software checks. Check each model and the release notes for physical-hardware status. Alpha installs only over USB and never updates Stable devices automatically.</p></div>'
           elif [[ "${CHANNEL}" == "beta" ]]; then
-            CHANNEL_LABEL=" Beta"
-            CHANNEL_NOTICE='<div class="warning"><strong>Beta firmware</strong><br>Beta builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
+            CHANNEL_NAME="Beta"
+            CHANNEL_NOTICE='<div class="channel-notice"><strong>Release-candidate firmware.</strong><p>Beta is opt-in, installs over USB, and never updates Stable devices automatically.</p></div>'
           else
-            CHANNEL_LABEL=""
-            CHANNEL_NOTICE=""
+            CHANNEL_NAME="Stable"
+            CHANNEL_NOTICE='<div class="channel-notice"><strong>For daily listening.</strong><p>Stable releases have completed their required hardware checks and are eligible for automatic updates.</p></div>'
           fi
           sed -e 's/{{TARGET_FILTER}}/all/g' \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
+            -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/index.html
+          sed 's|{{REDIRECT_URL}}|./|g' web/redirect.html \
+            > gh-pages-build/flash.html
           sed -e 's/{{TARGET_FILTER}}/dial/g' \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
+            -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-dial.html
           sed -e 's/{{TARGET_FILTER}}/frame/g' \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
+            -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-frame.html
           sed -e 's/{{TARGET_FILTER}}/rlcd/g' \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
+            -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-rlcd.html
           for target in joy tough m5dial sticks3 stopwatch stackchan knobaux; do
             sed -e "s/{{TARGET_FILTER}}/${target}/g" \
+              -e "s/{{VERSION}}/${VERSION}/g" \
+              -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
+              -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
+              -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
               -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
               > "gh-pages-build/flash-${target}.html"
           done
@@ -1732,6 +1764,7 @@ jobs:
             sed "s/{{VERSION}}/${VERSION}/g" "$manifest" \
               > "gh-pages-build/$(basename "$manifest")"
           done
+          cp -R web/assets gh-pages-build/assets
           cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
           cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_dial_bootloader.bin
@@ -1813,15 +1846,31 @@ jobs:
             python3 scripts/check_flash_manifest.py \
               "gh-pages-build/${manifest}" --assets-dir gh-pages-build
           done
-          ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL_NOTICE)\}\}' gh-pages-build
+          ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL|RELEASE_CHANNEL_NAME|RELEASE_CHANNEL_NOTICE|RELEASE_LINK|REDIRECT_URL)\}\}' gh-pages-build
+          mkdir -p "publish-root/${CHANNEL}"
+          cp -R gh-pages-build/. "publish-root/${CHANNEL}/"
+          cp web/index.html publish-root/index.html
+          cp -R web/assets publish-root/assets
+          sed 's|{{REDIRECT_URL}}|./stable/|g' web/redirect.html \
+            > publish-root/flash.html
+          mkdir -p publish-root/flash
+          sed 's|{{REDIRECT_URL}}|../|g' web/redirect.html \
+            > publish-root/flash/index.html
+          for legacy_channel in stable beta alpha; do
+            mkdir -p "publish-root/flash/${legacy_channel}"
+            sed "s|{{REDIRECT_URL}}|../../${legacy_channel}/|g" web/redirect.html \
+              > "publish-root/flash/${legacy_channel}/index.html"
+            cp "publish-root/flash/${legacy_channel}/index.html" \
+              "publish-root/flash/${legacy_channel}/flash.html"
+          done
           ls -la gh-pages-build/
 
       - name: Deploy firmware channel to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./gh-pages-build
-          destination_dir: flash/${{ steps.channel.outputs.name }}
+          publish_dir: ./publish-root
+          destination_dir: .
           keep_files: true
           cname: firmware.hiphi.audio
 
@@ -1829,7 +1878,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          DEPLOY_BASE="https://firmware.hiphi.audio/flash/${{ steps.channel.outputs.name }}"
+          DEPLOY_BASE="${{ steps.channel.outputs.url }}"
           mkdir -p deployed-release
           for attempt in $(seq 1 180); do
             if curl --fail --silent --location "${DEPLOY_BASE}/manifest-s3.json" \
@@ -1850,10 +1899,28 @@ jobs:
           done
           while IFS= read -r asset; do
             relative="${asset#gh-pages-build/}"
+            mkdir -p "deployed-release/$(dirname "${relative}")"
             curl --fail --silent --show-error --location \
               "${DEPLOY_BASE}/${relative}" --output "deployed-release/${relative}"
             cmp "$asset" "deployed-release/${relative}"
-          done < <(find gh-pages-build -maxdepth 1 -type f ! -name CNAME | sort)
+          done < <(find gh-pages-build -type f ! -name CNAME | sort)
+          curl --fail --silent --show-error --location \
+            "https://firmware.hiphi.audio/" --output deployed-release/firmware-center.html
+          cmp web/index.html deployed-release/firmware-center.html
+          grep -F 'url=./stable/' <(
+            curl --fail --silent --show-error \
+              "https://firmware.hiphi.audio/flash.html"
+          )
+          grep -F 'url=../' <(
+            curl --fail --silent --show-error \
+              "https://firmware.hiphi.audio/flash/"
+          )
+          for legacy_channel in stable beta alpha; do
+            grep -F "url=../../${legacy_channel}/" <(
+              curl --fail --silent --show-error \
+                "https://firmware.hiphi.audio/flash/${legacy_channel}/"
+            )
+          done
           for target in dial frame rlcd joy tough m5dial sticks3 stopwatch stackchan knobaux; do
             test -f "deployed-release/flash-${target}.html"
             grep -F "data-target-filter=\"${target}\"" \

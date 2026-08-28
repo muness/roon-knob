@@ -9,7 +9,7 @@ controller platform, adds BLE media remotes and nearby Wi-Fi lists, and gives
 every controller the same power-debug contract.
 
 > **This is test firmware.** Install it yourself from the
-> [Alpha Web Flasher](https://firmware.hiphi.audio/flash/alpha/). Alpha builds
+> [Alpha Web Flasher](https://firmware.hiphi.audio/alpha/). Alpha builds
 > are never sent through automatic OTA. Every image builds and passes the
 > shared software checks, but the exact release images still need physical
 > regression testing. We have not measured a battery-life improvement yet.
@@ -213,7 +213,7 @@ HiPhi Dial; it is not a tenth controller.
 
 ## Install this alpha
 
-Use the [Alpha Web Flasher](https://firmware.hiphi.audio/flash/alpha/), choose
+Use the [Alpha Web Flasher](https://firmware.hiphi.audio/alpha/), choose
 your exact hardware, and decline the erase option if you want to keep existing
 Wi-Fi and controller settings. The merged `.bin` downloads above are factory
 images; writing one at address `0x0` erases saved settings.

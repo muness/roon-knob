@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED = {
     "web/flash.html": (
-        "Battery work in this alpha",
+        "Battery and power work",
         "Wi-Fi modem sleep",
         "automatic Light-sleep",
         "cached 16-sample ADC reading",
@@ -21,19 +21,6 @@ REQUIRED = {
         "have not been measured yet",
         "the other to the auxiliary ESP32",
         "Cancel if it identifies an ESP32-S3",
-    ),
-    "web/flash-pr.html": (
-        "Battery work in this alpha",
-        "Wi-Fi modem sleep",
-        "automatic Light-sleep",
-        "cached 16-sample ADC reading",
-        "power-debug view",
-        "turning the encoder wakes",
-        "one-time parking image",
-        "have not been measured yet",
-        "Do this once for the lowest idle draw",
-        "Cancel if it identifies an ESP32-S3",
-        "the other to the auxiliary ESP32",
     ),
     ".github/RELEASE_TEMPLATE.md": (
         "two programmable\nprocessors",
