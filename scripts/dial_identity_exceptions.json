@@ -122,14 +122,14 @@
       "id": "repository-and-hosted-flasher-endpoints",
       "category": "deferred-external-endpoint",
       "owner": "#164",
-      "retirement": "Change only when repository redirects, Pages CNAME, host checks, captive-portal links, and preview URLs move together.",
+      "retirement": "Remove the legacy-host allowance after the Cloudflare redirect to firmware.hiphi.audio is live; keep the repository-name allowance until a repository migration is approved.",
       "path_globs": [
         "**"
       ],
       "tokens": [
         "roon-knob"
       ],
-      "line_regex": "(?:github\\.com/(?:muness|open-horizon-labs)/roon-knob|muness/roon-knob|roon-knob\\.muness\\.com)"
+      "line_regex": "(?:github\\.com/(?:muness|open-horizon-labs)/roon-knob|muness/roon-knob)"
     },
     {
       "id": "current-repository-directory-example",

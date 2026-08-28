@@ -9,7 +9,7 @@ controller platform, adds BLE media remotes and nearby Wi-Fi lists, and gives
 every controller the same power-debug contract.
 
 > **This is test firmware.** Install it yourself from the
-> [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html). Alpha builds
+> [Alpha Web Flasher](https://firmware.hiphi.audio/flash/alpha/). Alpha builds
 > are never sent through automatic OTA. Every image builds and passes the
 > shared software checks, but the exact release images still need physical
 > regression testing. We have not measured a battery-life improvement yet.
@@ -213,13 +213,13 @@ HiPhi Dial; it is not a tenth controller.
 
 ## Install this alpha
 
-Use the [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html), choose
+Use the [Alpha Web Flasher](https://firmware.hiphi.audio/flash/alpha/), choose
 your exact hardware, and decline the erase option if you want to keep existing
 Wi-Fi and controller settings. The merged `.bin` downloads above are factory
 images; writing one at address `0x0` erases saved settings.
 
 The stable web flasher and stable OTA feed do not offer this alpha. Return to
-the Beta Web Flasher to install a later test build.
+the Alpha Web Flasher to install a later test build.
 
 If you run the companion control service in Docker Compose, update it with:
 

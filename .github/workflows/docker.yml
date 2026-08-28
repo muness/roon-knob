@@ -66,6 +66,7 @@ jobs:
           # evidence over the real generic snapshot/action boundary.
           python3 tests/test_kizz_semantic_voice_characterization.py
           python3 scripts/check_alpha_release_notes.py
+          python3 scripts/check_release_hosting_contract.py
           python3 scripts/check_platform_power_and_wifi.py
           python3 scripts/check_dial_identity.py
           python3 scripts/check_dial_power_copy.py
@@ -1473,6 +1474,7 @@ jobs:
           publish_dir: ./pr-preview
           destination_dir: pr/${{ github.event.pull_request.number }}
           keep_files: true
+          cname: firmware.hiphi.audio
 
       - name: Verify all deployed previews
         id: verify-preview
@@ -1481,7 +1483,7 @@ jobs:
           PR_NUM: ${{ github.event.pull_request.number }}
           PREVIEW_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          PREVIEW_BASE="https://roon-knob.muness.com/pr/${PR_NUM}"
+          PREVIEW_BASE="https://firmware.hiphi.audio/pr/${PR_NUM}"
           mkdir -p deployed-preview
           for attempt in $(seq 1 180); do
             if curl --fail --silent --location \
@@ -1674,6 +1676,16 @@ jobs:
           name: hiphi-knob-aux-parking-firmware
           path: aux-artifacts
 
+      - name: Select firmware channel
+        id: channel
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-alpha.*) echo "name=alpha" >> "$GITHUB_OUTPUT" ;;
+            *-beta.*) echo "name=beta" >> "$GITHUB_OUTPUT" ;;
+            v[0-9]*.[0-9]*.[0-9]*) echo "name=stable" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unsupported release tag: ${GITHUB_REF_NAME}" >&2; exit 1 ;;
+          esac
+
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
@@ -1689,11 +1701,9 @@ jobs:
             CHANNEL_LABEL=""
             CHANNEL_NOTICE=""
           fi
-          sed "s|{{RELEASE_CHANNEL_LABEL}}|${CHANNEL_LABEL}|g" web/index.html \
-            > gh-pages-build/index.html
           sed -e 's/{{TARGET_FILTER}}/all/g' \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
-            > gh-pages-build/flash.html
+            > gh-pages-build/index.html
           sed -e 's/{{TARGET_FILTER}}/dial/g' \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-dial.html
@@ -1794,34 +1804,22 @@ jobs:
               "gh-pages-build/${manifest}" --assets-dir gh-pages-build
           done
           ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL_NOTICE)\}\}' gh-pages-build
-          echo "roon-knob.muness.com" > gh-pages-build/CNAME
           ls -la gh-pages-build/
 
-      - name: Deploy stable firmware to gh-pages root
-        if: ${{ !contains(github.ref_name, '-') }}
+      - name: Deploy firmware channel to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./gh-pages-build
+          destination_dir: flash/${{ steps.channel.outputs.name }}
           keep_files: true
-
-      - name: Deploy prerelease firmware to beta channel
-        if: ${{ contains(github.ref_name, '-') }}
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./gh-pages-build
-          destination_dir: beta
+          cname: firmware.hiphi.audio
 
       - name: Verify every deployed firmware link
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            DEPLOY_BASE="https://roon-knob.muness.com/beta"
-          else
-            DEPLOY_BASE="https://roon-knob.muness.com"
-          fi
+          DEPLOY_BASE="https://firmware.hiphi.audio/flash/${{ steps.channel.outputs.name }}"
           mkdir -p deployed-release
           for attempt in $(seq 1 180); do
             if curl --fail --silent --location "${DEPLOY_BASE}/manifest-s3.json" \

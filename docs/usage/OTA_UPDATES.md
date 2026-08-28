@@ -14,10 +14,10 @@ The OTA system consists of:
 
 - **Stable:** GitHub's `releases/latest` endpoint is the source used by Unified
   Hi-Fi Control. Stable firmware may therefore be offered to devices over OTA
-  and is published at the root [web flasher](https://roon-knob.muness.com/flash.html).
+  and is published through the [Stable web flasher](https://firmware.hiphi.audio/flash/stable/).
 - **Beta/Alpha prerelease:** GitHub excludes prereleases from `releases/latest`.
   These builds are deliberately manual installs, published under the
-  [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html), and do not
+  [Beta Web Flasher](https://firmware.hiphi.audio/flash/beta/), and do not
   replace the stable flasher or enter the OTA feed.
 
 The on-device Settings panel appends `Beta` or `Alpha` to prerelease versions so

@@ -10,14 +10,14 @@ The easiest way to flash firmware. Works directly in your browser using the Web 
 
 ### Requirements
 - **Browser**: Chrome or Edge (version 89+). Safari and Firefox are NOT supported.
-- **HTTPS**: Web Serial requires HTTPS. Use the hosted flasher at [roon-knob.muness.com](https://roon-knob.muness.com/flash.html).
+- **HTTPS**: Web Serial requires HTTPS. Use the hosted flasher at [firmware.hiphi.audio](https://firmware.hiphi.audio/flash/stable/).
 - **USB cable**: Connect your ESP32 board to your computer
 
 ### Steps
 
 1. Connect the ESP32-S3 board via USB-C
 2. Turn on the device (power slider towards USB-C port)
-3. Go to the **[Web Flasher](https://roon-knob.muness.com/flash.html)**
+3. Go to the **[Stable Web Flasher](https://firmware.hiphi.audio/flash/stable/)**
 4. Click **"Update HiPhi Dial"**
 5. Select the serial port when prompted
 6. Wait ~30 seconds for flashing to complete
