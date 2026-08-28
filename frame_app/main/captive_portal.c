@@ -2,10 +2,17 @@
 #include "dns_server.h"
 #include "controller_config.h"
 #include "eink_ui.h"
-#include "frame_display_preferences.h"
 #include "wifi_manager.h"
 #include "wifi_portal_form.h"
 #include "power_debug_web.h"
+
+#ifndef PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+#define PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS 1
+#endif
+
+#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+#include "frame_display_preferences.h"
+#endif
 
 #ifndef PLATFORM_PORTAL_PRODUCT_NAME
 #define PLATFORM_PORTAL_PRODUCT_NAME "HiPhi Frame"
@@ -825,6 +832,15 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
   uint32_t art_mode_timeout = snapshot.value.art_mode_battery_enabled
                                   ? snapshot.value.art_mode_battery_timeout_sec
                                   : 0;
+#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+  char ip_setting[192] = {0};
+  snprintf(ip_setting, sizeof(ip_setting),
+           "<label><input type='checkbox' name='show_ip' value='1' %s> "
+           "Show IP address on the Frame</label>",
+           frame_display_preferences_show_ip() ? "checked" : "");
+#else
+  const char *ip_setting = "";
+#endif
   const size_t html_size = 8192;
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -854,13 +870,12 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<form method='POST' action='/api/display'>"
       "<label>Album art timeout (seconds)</label>"
       "<input type='number' name='art_mode_timeout_sec' min='0' max='86400' value='%lu'>"
-      "<label><input type='checkbox' name='show_ip' value='1' %s> "
-      "Show IP address on the Frame</label>"
+      "%s"
       "<button type='submit' class='btn'>Save display setting</button>"
       "</form></div></body></html>",
       STA_CSS, FAVICON_LINK, escaped_bridge_base,
       (unsigned long)art_mode_timeout,
-      frame_display_preferences_show_ip() ? "checked" : "");
+      ip_setting);
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
   httpd_resp_set_type(req, "text/html");
@@ -926,11 +941,6 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
                         "Album art timeout must be 0-86400 seconds");
     return ESP_FAIL;
   }
-  char show_ip_text[8] = {0};
-  const bool show_ip = get_form_field(body, "show_ip", show_ip_text,
-                                      sizeof(show_ip_text)) &&
-                       strcmp(show_ip_text, "1") == 0;
-
   controller_remote_preferences_t preferences = {0};
   preferences.present = CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_ENABLED |
                         CONTROLLER_REMOTE_PREFERENCE_ART_MODE_BATTERY_TIMEOUT;
@@ -943,12 +953,18 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
                         "Could not save display settings");
     return ESP_FAIL;
   }
+#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+  char show_ip_text[8] = {0};
+  const bool show_ip = get_form_field(body, "show_ip", show_ip_text,
+                                      sizeof(show_ip_text)) &&
+                       strcmp(show_ip_text, "1") == 0;
   if (!frame_display_preferences_set_show_ip(show_ip)) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                         "Display timeout saved, but IP visibility was not");
     return ESP_FAIL;
   }
   eink_ui_post_show_ip(show_ip);
+#endif
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/settings");
   httpd_resp_send(req, NULL, 0);

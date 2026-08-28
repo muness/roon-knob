@@ -192,6 +192,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     "frame_app/main/captive_portal.c": (
         '"wifi_portal_form.h"',
+        "#define PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS 1",
+        "#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS",
         "rk_wifi_portal_scan_prepare",
         "rk_wifi_portal_render_options",
         "rk_wifi_portal_resolve_ssid",
@@ -277,6 +279,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "rlcd_app/main/CMakeLists.txt": (
         '"../../frame_app/main/captive_portal.c"',
         '"../../common/power_debug_web.c"',
+        '"../../common/wifi_portal_form.c"',
+        "PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS=0",
     ),
     "idf_app/main/CMakeLists.txt": (
         '"../../common/power_debug_web.c"',

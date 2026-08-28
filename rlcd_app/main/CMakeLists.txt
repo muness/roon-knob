@@ -25,6 +25,7 @@ set(SRC_FILES
     "../../common/controller_input_mailbox.c"
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
+    "../../common/wifi_portal_form.c"
     "../../common/wifi_manager.c"
     "../../common/power_debug_web.c"
     "../../common/platform/platform_log.c"
@@ -53,5 +54,6 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PLATFORM_HOSTNAME_FROM_BRIDGE_NAME=0
     PLATFORM_PORTAL_PRODUCT_NAME="HiPhi RLCD"
     PLATFORM_PORTAL_PRODUCT_SLUG="hiphi rlcd"
+    PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS=0
 )
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
