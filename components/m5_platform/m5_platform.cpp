@@ -1604,6 +1604,7 @@ void start_voice_transport() {
                                 255.0f));
                 const bool verifier_pass = verifier_available &&
                     verifier_score_q >= KIZZ_VERIFIER_CUTOFF_Q;
+                kizz_wake_word_record_verifier_decision(verifier_pass);
                 ESP_LOGI(TAG,
                          "Kizz resident verifier: score=%u/255 cutoff=%u/255 "
                          "pass=%s available=%s",

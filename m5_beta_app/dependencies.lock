@@ -723,7 +723,7 @@ dependencies:
       type: service
     version: 0.2.19
   micro_wake_word:
-    component_hash: e6f6423df47402e5389fdcbcfe379f81a419ccf8d3170713f796d6be21deb8b9
+    component_hash: a5d273963c5535d312b22f72ef6ae19d38214594f2a314e2ea577547ec33e63e
     dependencies:
     - name: espressif/esp-tflite-micro
       version: '*'
@@ -733,7 +733,7 @@ dependencies:
       git: https://github.com/open-horizon-labs/micro_wake_word_standalone.git
       path: .
       type: git
-    version: 13581e0aacc2e73b3aa384b43463c953517cfe07
+    version: f3bbc155cbe0c4f9b790022e715f37a6538d7393
 direct_dependencies:
 - espressif/arduino-esp32
 - espressif/esp-sr
@@ -742,6 +742,6 @@ direct_dependencies:
 - idf
 - m5stack/m5unified
 - micro_wake_word
-manifest_hash: 5ad73d6439c5d1da6973ae2f40763f2c0272e7cb777cce1c5696bf61e3eda409
+manifest_hash: 827e65abd3468b07c5a91c71df7d5798a65d45a5d8f3d1ad1603d1bfb7b99280
 target: esp32s3
 version: 2.0.0

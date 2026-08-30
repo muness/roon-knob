@@ -9,7 +9,7 @@ WAKE_MANIFEST = (ROOT / "components/kizz_wake_word/idf_component.yml").read_text
 WAKE_CMAKE = (ROOT / "components/kizz_wake_word/CMakeLists.txt").read_text()
 APP_MANIFEST = (ROOT / "m5_beta_app/main/idf_component.yml").read_text()
 STACKCHAN_DEFAULTS = (ROOT / "m5_beta_app/sdkconfig.stackchan.defaults").read_text()
-FORWARD_SUM_RUNTIME = "13581e0aacc2e73b3aa384b43463c953517cfe07"
+INSTRUMENTED_RUNTIME = "f3bbc155cbe0c4f9b790022e715f37a6538d7393"
 
 
 def test_false_wake_buffer_contract_is_three_seconds_and_288000_bytes():
@@ -103,9 +103,28 @@ def test_scalar_detector_and_resident_verifier_are_the_runtime_decision():
 
 
 def test_external_forward_sum_runtime_cannot_be_shadowed_by_local_component():
-    assert FORWARD_SUM_RUNTIME in WAKE_MANIFEST
-    assert FORWARD_SUM_RUNTIME in APP_MANIFEST
+    assert INSTRUMENTED_RUNTIME in WAKE_MANIFEST
+    assert INSTRUMENTED_RUNTIME in APP_MANIFEST
     assert not (ROOT / "components/micro_wake_word/CMakeLists.txt").exists()
+
+
+def test_stackchan_cascade_exposes_hardware_performance_qualification_metrics():
+    assert "KIZZ_DETECTOR_HOP_BUDGET_US = 10000" in WAKE
+    assert "KIZZ_AUDIO_QUEUE_CAPACITY_BYTES = 16384" in WAKE
+    assert "PerformanceEvent::PIPELINE_HOP" in WAKE
+    assert "detector_hops_over_80_percent_budget" in HEADER
+    assert "detector_hops_over_budget" in HEADER
+    assert "cascade_compute_duty_ppm" in HEADER
+    assert "audio_samples_dropped" in HEADER
+    assert "audio_queue_high_water_bytes" in HEADER
+    assert "ring_buffer_overflow_resets" in HEADER
+    assert "detector_arena_used_bytes" in HEADER
+    assert "verifier_arena_used_bytes" in HEADER
+    assert "detection_task_stack_min_free_bytes" in HEADER
+    assert "KIZZ_PERF timing" in WAKE
+    assert "KIZZ_PERF load" in WAKE
+    assert "KIZZ_PERF memory" in WAKE
+    assert "kizz_wake_word_record_verifier_decision" in PLATFORM
 
 
 def test_detector_holds_full_cpu_only_while_wake_detection_is_armed():
@@ -130,6 +149,7 @@ if __name__ == "__main__":
         test_wake_pcm_comes_from_the_stackchan_m5unified_microphone,
         test_scalar_detector_and_resident_verifier_are_the_runtime_decision,
         test_external_forward_sum_runtime_cannot_be_shadowed_by_local_component,
+        test_stackchan_cascade_exposes_hardware_performance_qualification_metrics,
         test_detector_holds_full_cpu_only_while_wake_detection_is_armed,
         test_stackchan_profile_pins_hardware_proven_audio_resource_choices,
         test_capture_gate_is_enrollment_specific_and_busy_loss_is_measured,
