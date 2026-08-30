@@ -53,10 +53,11 @@ augmentation, and physical tests.
 
 Wake detection is a two-stage cascade. A scalar `HiPhi Kizz` student runs on
 the continuous 30 ms stream at a permissive 0.70 cutoff. When it fires, the
-detector stops and releases its arena, and a separately resident scalar
-verifier scores the frozen three-second PSRAM snapshot. The verifier accepts
-at 167/255 and exits as soon as that score is reached; a rejected candidate
-re-arms the detector without opening a voice turn. The two TFLite models use
+detector stops and releases its arena, and a separately resident
+device-specialist scalar verifier scores the frozen three-second PSRAM
+snapshot. The verifier accepts at 167/255 and exits as soon as that score is
+reached; a rejected candidate re-arms the detector without opening a voice
+turn. The two TFLite models use
 the same ESP-NN-enabled microWakeWord runtime and do not execute concurrently.
 
 The bounded PSRAM snapshot is also retained for quarantined evidence and

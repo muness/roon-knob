@@ -87,7 +87,7 @@ def test_wake_pcm_comes_from_the_stackchan_m5unified_microphone():
 def test_scalar_detector_and_resident_verifier_are_the_runtime_decision():
     assert "add_wake_word_model(" in WAKE
     assert "_binary_hiphi_kizz_tflite_start" in WAKE
-    assert "_binary_hiphi_kizz_verifier_tflite_start" in WAKE
+    assert "_binary_hiphi_kizz_device_specialist_tflite_start" in WAKE
     assert "verifier_.load_model(this->streaming_op_resolver_)" in WAKE
     assert "KIZZ_VERIFIER_EARLY_ACCEPT_CUTOFF" in WAKE
     assert "kizz_wake_word_verify_clip" in WAKE
@@ -97,7 +97,7 @@ def test_scalar_detector_and_resident_verifier_are_the_runtime_decision():
     assert "set_ordered_state_model" not in WAKE
     assert "ordered" not in WAKE.lower()
     assert '"models/hiphi_kizz.tflite"' in WAKE_CMAKE
-    assert '"models/hiphi_kizz_verifier.tflite"' in WAKE_CMAKE
+    assert '"models/hiphi_kizz_device_specialist.tflite"' in WAKE_CMAKE
     assert '"models/hiphi_kizz_ordered.tflite"' not in WAKE_CMAKE
     assert 'wake_model", "kizz_control_compact_ctc_v1' in PLATFORM
 

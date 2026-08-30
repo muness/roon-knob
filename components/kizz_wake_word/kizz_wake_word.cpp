@@ -34,18 +34,19 @@ constexpr float KIZZ_VERIFIER_EARLY_ACCEPT_CUTOFF = 167.0f / 255.0f;
 constexpr char KIZZ_DETECTOR_MODEL_SHA256[] =
     "76250d0cef49f893df4724ea6cce0e87b8a8d0d63cf10fbe23c0e624298871ff";
 constexpr char KIZZ_VERIFIER_MODEL_SHA256[] =
-    "6699c4a0804c39ef33cd0e0c7eee0950bb5fc25a7ea482828eddacaae1c8ef7f";
+    "4e69c38ad5967bf7bf39e83da1f3d411615f9bfae63aee988d585755fa51016d";
 constexpr char KIZZ_NVS_NAMESPACE[] = "kizz_wake";
 constexpr char KIZZ_NVS_CUTOFF_KEY[] = "cutoff_milli";
 constexpr char KIZZ_NVS_WINDOW_KEY[] = "window";
 constexpr char KIZZ_NVS_VERSION_KEY[] = "config_v";
-// Version 7 selects the scalar-detector/resident-verifier cascade artifact.
-constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 7;
+// Version 8 selects the scalar-detector/resident-device-specialist-verifier
+// cascade artifact.
+constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 8;
 
 extern const uint8_t kizz_model_start[]
     asm("_binary_hiphi_kizz_tflite_start");
 extern const uint8_t kizz_verifier_model_start[]
-    asm("_binary_hiphi_kizz_verifier_tflite_start");
+    asm("_binary_hiphi_kizz_device_specialist_tflite_start");
 
 const char *TAG = "kizz_wake_word";
 
