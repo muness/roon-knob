@@ -140,6 +140,7 @@ constexpr size_t FALSE_WAKE_MAX_BYTES =
     FALSE_WAKE_MAX_SAMPLES * sizeof(int16_t);
 constexpr unsigned FALSE_WAKE_PREROLL_MS = static_cast<unsigned>(
     FALSE_WAKE_PREROLL_SAMPLES * 1000 / FALSE_WAKE_SAMPLE_RATE_HZ);
+constexpr unsigned KIZZ_VERIFIER_CUTOFF_Q = 167;
 static_assert(FALSE_WAKE_MAX_BYTES == 288000,
               "false-wake capture must remain within the enrollment limit");
 static_assert(FALSE_WAKE_PREROLL_MS == 3000,
@@ -1593,10 +1594,31 @@ void start_voice_transport() {
             else if (esp_timer_get_time() >=
                      s_enrollment_suppress_wake_until_us.load()) {
                 const size_t evidence_samples = wake_evidence_snapshot();
+                float verifier_probability = 0.0f;
+                const bool verifier_available = evidence_samples != 0 &&
+                    kizz_wake_word_verify_clip(
+                        s_voice_evidence_buffer, evidence_samples,
+                        &verifier_probability);
+                const unsigned verifier_score_q = static_cast<unsigned>(
+                    std::lround(std::clamp(verifier_probability, 0.0f, 1.0f) *
+                                255.0f));
+                const bool verifier_pass = verifier_available &&
+                    verifier_score_q >= KIZZ_VERIFIER_CUTOFF_Q;
+                ESP_LOGI(TAG,
+                         "Kizz resident verifier: score=%u/255 cutoff=%u/255 "
+                         "pass=%s available=%s",
+                         verifier_score_q, KIZZ_VERIFIER_CUTOFF_Q,
+                         verifier_pass ? "true" : "false",
+                         verifier_available ? "true" : "false");
                 const bool evidence_started = s_enrollment_transport_configured &&
                     false_wake_start_capture(s_voice_evidence_buffer,
                                              evidence_samples);
-                if (s_voice_transport_configured) {
+                if (!verifier_pass) {
+                    ESP_LOGI(TAG, "Kizz detector candidate rejected by verifier");
+                    if (evidence_started)
+                        false_wake_finish_capture("verifier_rejected");
+                    kizz_wake_word_resume();
+                } else if (s_voice_transport_configured) {
                     s_voice_wake_pending = true;
                 } else if (!evidence_started) {
                     kizz_wake_word_resume();

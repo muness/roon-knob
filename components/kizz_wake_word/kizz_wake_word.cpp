@@ -1,8 +1,14 @@
 #include "kizz_wake_word.h"
 
+// The managed streaming wrapper intentionally keeps its implementation small
+// and does not expose a reset operation for a resident secondary model. This
+// translation unit needs the two reset primitives to reuse that model safely
+// between independent candidate clips; no framework ABI is changed.
+#define protected public
 #include "esphome/components/micro_wake_word/micro_wake_word.h"
+#undef protected
 #include "esphome/components/microphone/external_audio_microphone.h"
-#include "kizz_control_model_contract.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 #include <algorithm>
 #include <atomic>
@@ -18,28 +24,170 @@
 #include "freertos/task.h"
 
 namespace {
-constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF =
-    kizz_control_deployment::kDisplayProbabilityCutoff;
-// The sequence decoder owns its temporal windows. This compatibility field is
-// fixed at one because no probability averaging follows the decoder.
+constexpr float KIZZ_DEFAULT_PROBABILITY_CUTOFF = 0.70f;
+// Both students use a single streaming output. The detector is deliberately
+// permissive; the verifier supplies the precision gate on a frozen clip.
 constexpr size_t KIZZ_DEFAULT_SLIDING_WINDOW = 1;
 constexpr size_t KIZZ_TENSOR_ARENA_BYTES = 65536;
+constexpr size_t KIZZ_FEATURE_STEP_SAMPLES = 160;
+constexpr float KIZZ_VERIFIER_EARLY_ACCEPT_CUTOFF = 167.0f / 255.0f;
+constexpr char KIZZ_DETECTOR_MODEL_SHA256[] =
+    "76250d0cef49f893df4724ea6cce0e87b8a8d0d63cf10fbe23c0e624298871ff";
+constexpr char KIZZ_VERIFIER_MODEL_SHA256[] =
+    "6699c4a0804c39ef33cd0e0c7eee0950bb5fc25a7ea482828eddacaae1c8ef7f";
 constexpr char KIZZ_NVS_NAMESPACE[] = "kizz_wake";
 constexpr char KIZZ_NVS_CUTOFF_KEY[] = "cutoff_milli";
 constexpr char KIZZ_NVS_WINDOW_KEY[] = "window";
 constexpr char KIZZ_NVS_VERSION_KEY[] = "config_v";
-// Version 6 resets the former Mycroft operating point to the packaged Kizz
-// Control student contract used by this exact firmware artifact.
-constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 6;
+// Version 7 selects the scalar-detector/resident-verifier cascade artifact.
+constexpr uint8_t KIZZ_NVS_CONFIG_VERSION = 7;
 
-extern const uint8_t kizz_ordered_model_start[]
-    asm("_binary_hiphi_kizz_ordered_tflite_start");
+extern const uint8_t kizz_model_start[]
+    asm("_binary_hiphi_kizz_tflite_start");
+extern const uint8_t kizz_verifier_model_start[]
+    asm("_binary_hiphi_kizz_verifier_tflite_start");
+
+const char *TAG = "kizz_wake_word";
 
 class KizzMicroWakeWord final
     : public esphome::micro_wake_word::MicroWakeWord {
+ public:
+    KizzMicroWakeWord()
+        : verifier_(kizz_verifier_model_start, 1.0f,
+                    KIZZ_DEFAULT_SLIDING_WINDOW, "Kizz Control verifier",
+                    KIZZ_TENSOR_ARENA_BYTES) {}
+
+    ~KizzMicroWakeWord() {
+        verifier_.unload_model();
+    }
+
+    void setup() override {
+        esphome::micro_wake_word::MicroWakeWord::setup();
+        if (this->is_failed()) return;
+        // Keep the verifier interpreter and arena resident. The detector is
+        // unloaded by MicroWakeWord before its callback, so this avoids the
+        // candidate-path model allocation/teardown that made the old cascade
+        // expensive and fragmented the heap.
+        if (!verifier_.load_model(this->streaming_op_resolver_)) {
+            ESP_LOGE(TAG, "Kizz verifier failed to load");
+            this->mark_failed();
+        }
+    }
+
+    bool evaluate_clip(const int16_t *samples, size_t sample_count,
+                       float *probability) {
+        using namespace esphome::micro_wake_word;
+        if (!samples || !sample_count || !probability ||
+            !verifier_.load_model(this->streaming_op_resolver_) ||
+            !reset_verifier_state()) {
+            return false;
+        }
+
+        FrontendConfig config = {};
+        config.window.size_ms = FEATURE_DURATION_MS;
+        config.window.step_size_ms = 10;
+        config.filterbank.num_channels = PREPROCESSOR_FEATURE_SIZE;
+        config.filterbank.lower_band_limit = 125.0;
+        config.filterbank.upper_band_limit = 7500.0;
+        config.noise_reduction.smoothing_bits = 10;
+        config.noise_reduction.even_smoothing = 0.025;
+        config.noise_reduction.odd_smoothing = 0.06;
+        config.noise_reduction.min_signal_remaining = 0.05;
+        config.pcan_gain_control.enable_pcan = 1;
+        config.pcan_gain_control.strength = 0.95;
+        config.pcan_gain_control.offset = 80.0;
+        config.pcan_gain_control.gain_bits = 21;
+        config.log_scale.enable_log = 1;
+        config.log_scale.scale_shift = 6;
+
+        FrontendState frontend = {};
+        if (!FrontendPopulateState(&config, &frontend,
+                                   AUDIO_SAMPLE_FREQUENCY)) {
+            FrontendFreeStateContents(&frontend);
+            return false;
+        }
+
+        int16_t padded[KIZZ_FEATURE_STEP_SAMPLES] = {};
+        int8_t features[PREPROCESSOR_FEATURE_SIZE] = {};
+        bool produced_features = false;
+        float peak_probability = 0.0f;
+        for (size_t offset = 0; offset < sample_count;
+             offset += KIZZ_FEATURE_STEP_SAMPLES) {
+            const size_t remaining = sample_count - offset;
+            const size_t count = std::min(remaining,
+                                          KIZZ_FEATURE_STEP_SAMPLES);
+            const int16_t *window = samples + offset;
+            if (count != KIZZ_FEATURE_STEP_SAMPLES) {
+                memset(padded, 0, sizeof(padded));
+                memcpy(padded, window, count * sizeof(int16_t));
+                window = padded;
+            }
+            size_t samples_read = 0;
+            const FrontendOutput output = FrontendProcessSamples(
+                &frontend, window, KIZZ_FEATURE_STEP_SAMPLES, &samples_read);
+            if (samples_read != KIZZ_FEATURE_STEP_SAMPLES) {
+                FrontendFreeStateContents(&frontend);
+                return false;
+            }
+            if (output.size == 0) continue;
+            if (output.size != PREPROCESSOR_FEATURE_SIZE) {
+                FrontendFreeStateContents(&frontend);
+                return false;
+            }
+            produced_features = true;
+            for (size_t feature = 0; feature < output.size; ++feature) {
+                constexpr int32_t value_scale = 256;
+                constexpr int32_t value_div = 666;
+                const int32_t value =
+                    ((output.values[feature] * value_scale) +
+                     (value_div / 2)) /
+                    value_div;
+                features[feature] = static_cast<int8_t>(
+                    std::clamp<int32_t>(value - 128, -128, 127));
+            }
+            if (!verifier_.perform_streaming_inference(features)) {
+                FrontendFreeStateContents(&frontend);
+                return false;
+            }
+            peak_probability = std::max(
+                peak_probability, verifier_.current_probability());
+            // The verifier is only a precision gate. Once it accepts, stop
+            // paying inference cost for the rest of the candidate clip.
+            if (peak_probability >= KIZZ_VERIFIER_EARLY_ACCEPT_CUTOFF) break;
+        }
+        *probability = produced_features ? peak_probability : 0.0f;
+        FrontendFreeStateContents(&frontend);
+        return produced_features;
+    }
+
+ private:
+    bool reset_verifier_state() {
+        verifier_.current_stride_step_ = 0;
+        verifier_.reset_probabilities();
+        if (!verifier_.interpreter_ || !verifier_.mrv_) return false;
+        // MicroResourceVariables owns the streaming tensors used by this
+        // model. Reset it and any ordinary variable tensors so a resident
+        // candidate starts in exactly the same state as a fresh interpreter.
+        if (verifier_.mrv_->ResetAll() != kTfLiteOk) return false;
+        const tflite::Model *model = tflite::GetModel(verifier_.model_start_);
+        for (unsigned subgraph_index = 0;
+             subgraph_index < model->subgraphs()->size(); ++subgraph_index) {
+            const auto *subgraph = model->subgraphs()->Get(subgraph_index);
+            for (unsigned tensor_index = 0;
+                 tensor_index < subgraph->tensors()->size(); ++tensor_index) {
+                if (subgraph->tensors()->Get(tensor_index)->is_variable() &&
+                    verifier_.interpreter_->ResetVariableTensor(
+                        static_cast<int>(tensor_index),
+                        static_cast<int>(subgraph_index)) != kTfLiteOk)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    esphome::micro_wake_word::WakeWordModel verifier_;
 };
 
-const char *TAG = "kizz_wake_word";
 esphome::microphone::ExternalAudioMicrophone *s_microphone = nullptr;
 KizzMicroWakeWord *s_wake_word = nullptr;
 kizz_wake_word_detected_cb_t s_detected_cb = nullptr;
@@ -128,17 +276,12 @@ bool create_wake_word_model() {
     s_wake_word->set_microphone(s_microphone);
     s_wake_word->set_features_step_size(10);
     // StackChan repeatedly hands its one I2S controller between the official
-    // microphone and speaker. Keep the frontend and TFLM allocations resident
-    // across those pauses; rebuilding them on every UI sound fragmented internal
-    // RAM and could eventually starve the Wi-Fi PHY.
-    s_wake_word->set_retain_resources_on_stop(true);
-    s_wake_word->add_ordered_state_model(
-        kizz_ordered_model_start,
-        kizz_control_deployment::kRawScoreThreshold,
-        kizz_control_deployment::kCollisionBeta,
-        cutoff,
-        "Kizz Control",
-        KIZZ_TENSOR_ARENA_BYTES);
+    // microphone and speaker. The verifier stays resident; the detector uses
+    // the framework's normal stop/start lifecycle so its tensor arena is not
+    // held while the candidate clip is verified.
+    s_wake_word->add_wake_word_model(
+        kizz_model_start, cutoff, KIZZ_DEFAULT_SLIDING_WINDOW,
+        "Kizz Control detector", KIZZ_TENSOR_ARENA_BYTES);
     s_wake_word->add_detection_callback([](std::string) {
         s_detection_probability_milli = probability_to_milli(
             s_wake_word ? s_wake_word->get_wake_word_probability() : 0.0f);
@@ -160,15 +303,11 @@ bool create_wake_word_model() {
         return false;
     }
     ESP_LOGI(TAG,
-             "Kizz Control student ready: status=%s raw_threshold=%.6f "
-             "beta=%.6f display_cutoff=%.2f model_sha256=%s",
-             kizz_control_deployment::kDeploymentQualified
-                 ? "qualified"
-                 : "experimental_hardware_evaluation",
-             static_cast<double>(kizz_control_deployment::kRawScoreThreshold),
-             static_cast<double>(kizz_control_deployment::kCollisionBeta),
+             "Kizz cascade ready: detector=scalar cutoff=%.2f "
+             "verifier_cutoff=%.3f detector_sha256=%s verifier_sha256=%s",
              static_cast<double>(cutoff),
-             kizz_control_deployment::kModelSha256);
+             static_cast<double>(KIZZ_VERIFIER_EARLY_ACCEPT_CUTOFF),
+             KIZZ_DETECTOR_MODEL_SHA256, KIZZ_VERIFIER_MODEL_SHA256);
     return true;
 }
 
@@ -226,14 +365,11 @@ void detection_task(void *) {
         if (s_reconfigure_requested.exchange(false)) {
             const float cutoff =
                 s_probability_cutoff_milli.load() / 1000.0f;
-            s_wake_word->set_ordered_state_model_threshold(
-                kizz_control_deployment::kRawScoreThreshold, cutoff);
+            s_wake_word->set_wake_word_model_parameters(
+                cutoff, KIZZ_DEFAULT_SLIDING_WINDOW);
             ESP_LOGI(TAG,
-                     "Kizz Control display mapping updated: cutoff=%.2f "
-                     "(packaged raw threshold remains %.6f)",
-                     static_cast<double>(cutoff),
-                     static_cast<double>(
-                         kizz_control_deployment::kRawScoreThreshold));
+                     "Kizz Control detector cutoff updated: cutoff=%.2f",
+                     static_cast<double>(cutoff));
         }
         if (!s_wake_word) {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -299,11 +435,10 @@ void detection_task(void *) {
             s_probability_log_at_us = now;
             ESP_LOGI(TAG,
                      "Kizz Control score: current=%.3f peak=%.3f "
-                     "cutoff=%.3f raw=%.6f state=%s",
+                     "cutoff=%.3f state=%s",
                      static_cast<double>(probability),
                      static_cast<double>(s_probability_milli.load() / 1000.0f),
                      static_cast<double>(s_probability_cutoff_milli.load() / 1000.0f),
-                     static_cast<double>(s_wake_word->get_ordered_state_score()),
                      kizz_wake_word_runtime_state());
         }
         // At 1 kHz this yields without sleeping long enough to starve the
@@ -385,6 +520,13 @@ extern "C" float kizz_wake_word_probability(void) {
 
 extern "C" float kizz_wake_word_detection_probability(void) {
     return s_detection_probability_milli.load() / 1000.0f;
+}
+
+extern "C" bool kizz_wake_word_verify_clip(const int16_t *samples,
+                                             size_t sample_count,
+                                             float *probability) {
+    return s_wake_word &&
+        s_wake_word->evaluate_clip(samples, sample_count, probability);
 }
 
 extern "C" bool kizz_wake_word_configure(float probability_cutoff,

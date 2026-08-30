@@ -13,7 +13,8 @@ This document explains the implementation and its current evidence. The separate
 ```t
 person speaks
     -> Kizz microphone and M5Unified audio frontend
-    -> local microWakeWord model recognizes “HiPhi Kizz”
+    -> local scalar detector finds a “HiPhi Kizz” candidate
+    -> resident verifier accepts or rejects the candidate
     -> Kizz changes to Listening and buffers the spoken command
     -> LAN WebSocket: UHC /voice/v1
     -> streaming speech-to-text providers
@@ -50,11 +51,16 @@ augmentation, and physical tests.
 
 ### Wake evidence and configurable capture diagnostics
 
-The production decision is made directly by the ordered-state `HiPhi Kizz`
-model. There is no second runtime verifier and no post-detection score gate:
-once the ordered model fires, the device transitions to Listening immediately.
-The firmware retains a bounded PSRAM evidence snapshot only so the resulting
-audio can be quarantined and reviewed; evidence capture cannot reject a wake.
+Wake detection is a two-stage cascade. A scalar `HiPhi Kizz` student runs on
+the continuous 30 ms stream at a permissive 0.70 cutoff. When it fires, the
+detector stops and releases its arena, and a separately resident scalar
+verifier scores the frozen three-second PSRAM snapshot. The verifier accepts
+at 167/255 and exits as soon as that score is reached; a rejected candidate
+re-arms the detector without opening a voice turn. The two TFLite models use
+the same ESP-NN-enabled microWakeWord runtime and do not execute concurrently.
+
+The bounded PSRAM snapshot is also retained for quarantined evidence and
+review. Evidence upload remains independent of the production decision.
 
 The enrollment service accepts the capture diagnostics `c_min_rms_dbfs`,
 `c_max_clip_percent`, and `capture_all_wakes`. These fields describe and select
@@ -68,7 +74,7 @@ wakes are stored under `observations/wakes/`; no-command wakes remain in
 `observations/false-wakes/`. Neither path changes `device-corpus.json`.
 Promotion into a hard negative is a separate human-reviewed operation.
 
-Each observation now includes one second of pre-wake audio from a PSRAM ring
+Each observation now includes three seconds of pre-wake audio from a PSRAM ring
 buffer in the same WAV, with `pre_wake_ms`, `pre_wake_samples`, and
 `post_wake_samples` metadata. C metrics remain calculated from post-wake audio
 only. The training fork can correlate observations with UHC's recent STT race
