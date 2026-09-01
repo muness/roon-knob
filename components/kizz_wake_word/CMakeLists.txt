@@ -5,7 +5,7 @@ idf_component_register(
 )
 
 target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_detector.tflite" BINARY)
-target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_compact_verifier_int8_v10.tflite" BINARY)
+target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_compact_verifier_int8_v15.tflite" BINARY)
 target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_ordered_verifier_int8.tflite" BINARY)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)

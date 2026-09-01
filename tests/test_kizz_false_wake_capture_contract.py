@@ -14,7 +14,7 @@ STACKCHAN_DEFAULTS = (ROOT / "m5_beta_app/sdkconfig.stackchan.defaults").read_te
 CAPTIVE_PORTAL = (ROOT / "tough_app/main/captive_portal.c").read_text()
 PROVENANCE_PATH = (
     ROOT
-    / "components/kizz_wake_word/models/kizz_control_cascade_v10.provenance.json"
+    / "components/kizz_wake_word/models/kizz_control_cascade_v15.provenance.json"
 )
 AOT_RUNTIME = "cc19120f2a363c14a7b1fef9850380abdcbe422f"
 
@@ -96,7 +96,7 @@ def test_wake_pcm_comes_from_the_stackchan_m5unified_microphone():
 
 def test_three_stage_aot_cascade_is_the_runtime_decision():
     assert "_binary_kizz_control_detector_tflite_start" in WAKE
-    assert "_binary_kizz_control_compact_verifier_int8_v10_tflite_start" in WAKE
+    assert "_binary_kizz_control_compact_verifier_int8_v15_tflite_start" in WAKE
     assert "_binary_kizz_control_ordered_verifier_int8_tflite_start" in WAKE
     assert "KizzDetectorAot detector_aot_" in WAKE
     assert "KizzVerifierAot compact_verifier_aot_" in WAKE
@@ -109,7 +109,7 @@ def test_three_stage_aot_cascade_is_the_runtime_decision():
     assert "begin_candidate(probability)" in WAKE
     assert "finish_candidate_post_context(" in WAKE
     assert '"models/kizz_control_detector.tflite"' in WAKE_CMAKE
-    assert '"models/kizz_control_compact_verifier_int8_v10.tflite"' in WAKE_CMAKE
+    assert '"models/kizz_control_compact_verifier_int8_v15.tflite"' in WAKE_CMAKE
     assert '"models/kizz_control_ordered_verifier_int8.tflite"' in WAKE_CMAKE
     assert 'wake_model", "kizz_control_compact_ctc_v1' in PLATFORM
 

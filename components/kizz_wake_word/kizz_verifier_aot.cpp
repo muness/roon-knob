@@ -135,6 +135,7 @@ struct KizzVerifierAot::Impl {
     float multiply_constant{0.0f};
     float output_scale{0.0f};
     int32_t output_zero{0};
+    bool bounded_output{false};
     size_t scratch_bytes{0};
     bool traced{false};
 };
@@ -421,8 +422,13 @@ bool KizzVerifierAot::initialize(const tflite::Model *model, uint8_t *arena,
         return false;
     }
     const auto *graph = model->subgraphs()->Get(0);
-    if (!graph || !graph->tensors() || graph->tensors()->size() != 36 ||
-        !graph->operators() || graph->operators()->size() != 13) {
+    const bool bounded_output = graph && graph->tensors() &&
+        graph->tensors()->size() == 36 && graph->operators() &&
+        graph->operators()->size() == 13;
+    const bool direct_output = graph && graph->tensors() &&
+        graph->tensors()->size() == 33 && graph->operators() &&
+        graph->operators()->size() == 11;
+    if (!bounded_output && !direct_output) {
         ESP_LOGE(TAG, "init failed: graph contract tensors=%u ops=%u",
                  graph && graph->tensors()
                      ? static_cast<unsigned>(graph->tensors()->size()) : 0,
@@ -430,6 +436,7 @@ bool KizzVerifierAot::initialize(const tflite::Model *model, uint8_t *arena,
                      ? static_cast<unsigned>(graph->operators()->size()) : 0);
         return false;
     }
+    const int compact_index_offset = direct_output ? -1 : 0;
 
     ArenaCursor cursor(arena, arena_bytes);
     Impl *impl = cursor.allocate<Impl>();
@@ -452,58 +459,99 @@ bool KizzVerifierAot::initialize(const tflite::Model *model, uint8_t *arena,
 
     PREPARE_OR_FAIL("stem",
         prepare_conv(&impl->convs[0], &cursor, model, graph,
-                     0, 22, 21, 23, 260, 40, 1, 5, 5, 130, 20, 24,
+                     0, 22 + compact_index_offset,
+                     21 + compact_index_offset, 23 + compact_index_offset,
+                     260, 40, 1, 5, 5, 130, 20, 24,
                      2, 2, 1, 1));
     PREPARE_OR_FAIL("dw1",
         prepare_depthwise(&impl->depthwise[0], &cursor, model, graph,
-                          23, 20, 19, 24, 130, 20, 24, 65, 10, 0, 0));
+                          23 + compact_index_offset,
+                          20 + compact_index_offset,
+                          19 + compact_index_offset,
+                          24 + compact_index_offset,
+                          130, 20, 24, 65, 10, 0, 0));
     PREPARE_OR_FAIL("pw1",
         prepare_conv(&impl->convs[1], &cursor, model, graph,
-                     24, 18, 17, 25, 65, 10, 24, 1, 1, 65, 10, 32,
+                     24 + compact_index_offset,
+                     18 + compact_index_offset,
+                     17 + compact_index_offset,
+                     25 + compact_index_offset,
+                     65, 10, 24, 1, 1, 65, 10, 32,
                      1, 1, 0, 0));
     PREPARE_OR_FAIL("dw2",
         prepare_depthwise(&impl->depthwise[1], &cursor, model, graph,
-                          25, 16, 15, 26, 65, 10, 32, 33, 5, 1, 0));
+                          25 + compact_index_offset,
+                          16 + compact_index_offset,
+                          15 + compact_index_offset,
+                          26 + compact_index_offset,
+                          65, 10, 32, 33, 5, 1, 0));
     PREPARE_OR_FAIL("pw2",
         prepare_conv(&impl->convs[2], &cursor, model, graph,
-                     26, 14, 13, 27, 33, 5, 32, 1, 1, 33, 5, 48,
+                     26 + compact_index_offset,
+                     14 + compact_index_offset,
+                     13 + compact_index_offset,
+                     27 + compact_index_offset,
+                     33, 5, 32, 1, 1, 33, 5, 48,
                      1, 1, 0, 0));
     PREPARE_OR_FAIL("dw3",
         prepare_depthwise(&impl->depthwise[2], &cursor, model, graph,
-                          27, 12, 11, 28, 33, 5, 48, 17, 3, 1, 1));
+                          27 + compact_index_offset,
+                          12 + compact_index_offset,
+                          11 + compact_index_offset,
+                          28 + compact_index_offset,
+                          33, 5, 48, 17, 3, 1, 1));
     PREPARE_OR_FAIL("pw3",
         prepare_conv(&impl->convs[3], &cursor, model, graph,
-                     28, 10, 9, 29, 17, 3, 48, 1, 1, 17, 3, 64,
+                     28 + compact_index_offset,
+                     10 + compact_index_offset,
+                     9 + compact_index_offset,
+                     29 + compact_index_offset,
+                     17, 3, 48, 1, 1, 17, 3, 64,
                      1, 1, 0, 0));
     PREPARE_OR_FAIL("dw4",
         prepare_depthwise(&impl->depthwise[3], &cursor, model, graph,
-                          29, 8, 7, 30, 17, 3, 64, 9, 2, 1, 1));
+                          29 + compact_index_offset,
+                          8 + compact_index_offset,
+                          7 + compact_index_offset,
+                          30 + compact_index_offset,
+                          17, 3, 64, 9, 2, 1, 1));
     PREPARE_OR_FAIL("pw4",
         prepare_conv(&impl->convs[4], &cursor, model, graph,
-                     30, 6, 5, 31, 9, 2, 64, 1, 1, 9, 2, 96,
+                     30 + compact_index_offset,
+                     6 + compact_index_offset,
+                     5 + compact_index_offset,
+                     31 + compact_index_offset,
+                     9, 2, 64, 1, 1, 9, 2, 96,
                      1, 1, 0, 0));
 #undef PREPARE_OR_FAIL
 
     impl->large = cursor.allocate<int8_t>(kLargeActivationBytes);
     impl->small = cursor.allocate<int8_t>(kSmallActivationBytes);
-    const auto *dense_input = graph->tensors()->Get(32);
-    const auto *dense_weights = graph->tensors()->Get(4);
-    const auto *dense_bias = graph->tensors()->Get(3);
-    const auto *dense_output = graph->tensors()->Get(33);
-    const auto *tanh_output = graph->tensors()->Get(34);
-    const auto *multiply_constant = graph->tensors()->Get(2);
-    const auto *output = graph->tensors()->Get(35);
-    const int8_t *constant = constant_data<int8_t>(
-        model, multiply_constant, 1);
+    const auto *dense_input = graph->tensors()->Get(
+        32 + compact_index_offset);
+    const auto *dense_weights = graph->tensors()->Get(
+        4 + compact_index_offset);
+    const auto *dense_bias = graph->tensors()->Get(
+        3 + compact_index_offset);
+    const auto *dense_output = graph->tensors()->Get(
+        33 + compact_index_offset);
+    const auto *tanh_output = bounded_output
+        ? graph->tensors()->Get(34) : nullptr;
+    const auto *multiply_constant = bounded_output
+        ? graph->tensors()->Get(2) : nullptr;
+    const auto *output = bounded_output
+        ? graph->tensors()->Get(35) : dense_output;
+    const int8_t *constant = bounded_output
+        ? constant_data<int8_t>(model, multiply_constant, 1) : nullptr;
     impl->dense_weights = constant_data<int8_t>(model, dense_weights, 1728);
     impl->dense_bias = constant_data<int32_t>(model, dense_bias, 1);
     if (!impl->large || !impl->small || !impl->dense_weights ||
-        !impl->dense_bias || !constant ||
+        !impl->dense_bias || (bounded_output && !constant) ||
         !shape_is(dense_input, {1, 1728}) ||
         !shape_is(dense_weights, {1, 1728}) ||
         !shape_is(dense_bias, {1}) ||
         !shape_is(dense_output, {1, 1}) ||
-        !shape_is(tanh_output, {1, 1}) ||
+        (bounded_output && !shape_is(tanh_output, {1, 1})) ||
         !shape_is(output, {1, 1})) {
         ESP_LOGE(TAG, "init failed: activations/dense used=%u/%u",
                  static_cast<unsigned>(cursor.used()),
@@ -520,16 +568,19 @@ bool KizzVerifierAot::initialize(const tflite::Model *model, uint8_t *arena,
     impl->dense_filter_zero = tensor_zero_point(dense_weights);
     impl->dense_output_zero = tensor_zero_point(dense_output);
     impl->dense_output_scale = tensor_scale(dense_output);
-    impl->tanh_output_scale = tensor_scale(tanh_output);
-    impl->tanh_output_zero = tensor_zero_point(tanh_output);
-    impl->multiply_constant =
-        (static_cast<int32_t>(*constant) -
-         tensor_zero_point(multiply_constant)) *
-        tensor_scale(multiply_constant);
+    impl->bounded_output = bounded_output;
+    if (bounded_output) {
+        impl->tanh_output_scale = tensor_scale(tanh_output);
+        impl->tanh_output_zero = tensor_zero_point(tanh_output);
+        impl->multiply_constant =
+            (static_cast<int32_t>(*constant) -
+             tensor_zero_point(multiply_constant)) *
+            tensor_scale(multiply_constant);
+    }
     impl->output_scale = tensor_scale(output);
     impl->output_zero = tensor_zero_point(output);
     if (!(impl->dense_output_scale > 0.0f) ||
-        !(impl->tanh_output_scale > 0.0f) ||
+        (bounded_output && !(impl->tanh_output_scale > 0.0f)) ||
         !(impl->output_scale > 0.0f)) {
         ESP_LOGE(TAG, "init failed: invalid output scale");
         return false;
@@ -640,18 +691,21 @@ bool KizzVerifierAot::invoke(float *logit) {
         -impl_->dense_input_zero, -impl_->dense_filter_zero,
         impl_->dense_output_zero, impl_->dense_multiplier,
         impl_->dense_shift, &dense_quantized);
-    const float dense_real =
-        (static_cast<int32_t>(dense_quantized) -
-         impl_->dense_output_zero) * impl_->dense_output_scale;
-    const int8_t tanh_quantized = quantize_int8(
-        std::tanh(dense_real), impl_->tanh_output_scale,
-        impl_->tanh_output_zero);
-    const float tanh_real =
-        (static_cast<int32_t>(tanh_quantized) -
-         impl_->tanh_output_zero) * impl_->tanh_output_scale;
-    const int8_t output_quantized = quantize_int8(
-        tanh_real * impl_->multiply_constant, impl_->output_scale,
-        impl_->output_zero);
+    int8_t output_quantized = dense_quantized;
+    if (impl_->bounded_output) {
+        const float dense_real =
+            (static_cast<int32_t>(dense_quantized) -
+             impl_->dense_output_zero) * impl_->dense_output_scale;
+        const int8_t tanh_quantized = quantize_int8(
+            std::tanh(dense_real), impl_->tanh_output_scale,
+            impl_->tanh_output_zero);
+        const float tanh_real =
+            (static_cast<int32_t>(tanh_quantized) -
+             impl_->tanh_output_zero) * impl_->tanh_output_scale;
+        output_quantized = quantize_int8(
+            tanh_real * impl_->multiply_constant, impl_->output_scale,
+            impl_->output_zero);
+    }
     *logit = (static_cast<int32_t>(output_quantized) - impl_->output_zero) *
              impl_->output_scale;
     if (trace) {
