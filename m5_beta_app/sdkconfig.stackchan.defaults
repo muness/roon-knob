@@ -24,6 +24,10 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # enrollment despite the expanded socket table. Five-second MSL preserves a
 # bounded stale-packet window while letting one-shot LAN requests age out.
 CONFIG_LWIP_TCP_MSL=5000
+# Keep service discovery available alongside the AFE, wake cascade, and voice
+# transports without consuming another scarce internal-RAM task stack.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
+# CONFIG_MDNS_TASK_CREATE_FROM_INTERNAL is not set
 CONFIG_M5_PLATFORM_EXPECT_STACKCHAN=y
 CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI="ws://192.168.1.101:8088/voice/v1"
 # Enrollment is an independent deployment. Never derive this from the UHC URL.

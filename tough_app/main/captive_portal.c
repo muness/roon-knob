@@ -1063,8 +1063,10 @@ bool captive_portal_start_sta(void) {
 #if HIPHI_M5_TARGET_ID == 4
   /* Kizz also runs the AFE, wake model, and two WebSocket clients. Its
    * STA handlers keep large response bodies on the heap, so a 6 KiB server stack
-   * is sufficient and preserves internal RAM for Wi-Fi DMA and sockets. */
+   * is sufficient. Put that stack in PSRAM so the always-on detector does not
+   * fragment the internal heap needed by Wi-Fi DMA and socket control blocks. */
   config.stack_size = 6144;
+  config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 #else
   config.stack_size = 16384;
 #endif

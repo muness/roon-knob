@@ -13,8 +13,9 @@ This document explains the implementation and its current evidence. The separate
 ```t
 person speaks
     -> Kizz microphone and M5Unified audio frontend
-    -> local scalar detector finds a “HiPhi Kizz” candidate
-    -> resident verifier accepts or rejects the candidate
+    -> local streaming detector finds a “Kizz Control” candidate
+    -> compact fixed-window verifier rejects obvious collisions
+    -> ordered-state verifier makes the final wake decision
     -> Kizz changes to Listening and buffers the spoken command
     -> LAN WebSocket: UHC /voice/v1
     -> streaming speech-to-text providers
@@ -43,22 +44,63 @@ frames feed two consumers:
 The firmware packages the model behind `components/kizz_wake_word`. It exposes
 the detector state, score, threshold, sliding window, and transition count so a
 physical test can distinguish poor recall from a paused or faulted detector.
-The current model and configuration can also be changed at runtime by a
-`wake_config` message; reflashing is not required for a threshold experiment.
+The display probability cutoff and sliding window can also be changed at
+runtime by a `wake_config` message. The provenance-bound detector and verifier
+thresholds are compiled into the firmware and require a rebuilt artifact.
 
 The training recipe is the source of truth for its corpus, split rules,
 augmentation, and physical tests.
 
 ### Wake evidence and configurable capture diagnostics
 
-Wake detection is a two-stage cascade. A scalar `HiPhi Kizz` student runs on
-the continuous 30 ms stream at a permissive 0.70 cutoff. When it fires, the
-detector stops and releases its arena, and a separately resident
-device-specialist scalar verifier scores the frozen three-second PSRAM
-snapshot. The verifier accepts at 167/255 and exits as soon as that score is
-reached; a rejected candidate re-arms the detector without opening a voice
-turn. The two TFLite models use
-the same ESP-NN-enabled microWakeWord runtime and do not execute concurrently.
+Wake detection is a three-stage `Kizz Control` cascade. An ordered-state INT8
+detector runs continuously on 30 ms feature windows. A detector candidate
+freezes 260 feature frames (2.2 seconds before the trigger through 390 ms after
+it). A compact INT8 depthwise-separable verifier rejects obvious collisions;
+only candidates that pass it reach an independent ordered-state verifier for
+the final decision. A rejected candidate re-arms the detector without opening
+a voice turn.
+
+All three networks use fixed generated C execution graphs with statically
+planned arenas and ESP-NN kernels where applicable. The detector keeps a 16 KiB
+arena in internal RAM. The compact verifier uses a 96 KiB PSRAM arena and the
+ordered verifier a separate 16 KiB PSRAM arena, so their transient activation
+memory does not consume the RAM required by Wi-Fi, HTTP, mDNS, UI, and voice
+tasks.
+
+The active v10 compact verifier excludes the 54 short-lead v9 device captures,
+whose 0.55-second playback lead created impossible zero-padded prefixes. V10
+was retrained from 31 qualified full-pre-roll StackChan captures in a clean
+26,986-row candidate corpus. Its threshold was capped at `0.0` on 12/12
+voice-disjoint validation captures before opening a fresh test set, where the
+detector and compact gate retained 12/12 recall.
+
+The exact v10 StackChan binary was built and flashed with ESP-IDF 5.5.5 on an
+ESP32-S3 revision 0.2. All three startup AOT/reference checks passed, followed
+by 12/12 physical speaker-replay accepts. The continuous detector ran at about
+8 ms p99 per 10 ms hop; compact verification took 95–123 ms and ordered
+verification 296–432 ms when reached. The audio queue peaked at 2,048 of 16,384
+bytes with zero ring overflows, partial writes, or partial feature reads. The
+compact arena used 82,480 of 98,304 PSRAM bytes; detector and ordered arenas
+used 12,316 bytes each.
+
+On the unchanged locked 100.47-hour LibriSpeech negative corpus, v10 produced
+23 full-cascade false wakes (`0.229/hour`, one-sided 95% upper bound
+`0.324/hour`). The compact gate forwarded 833 of 19,105 detector candidates
+(4.36%). This meets the maintainer-accepted practical ceiling of `0.4/hour`,
+but not the formal `0.1/hour` upper-confidence gate.
+
+The exact artifact also remained armed without reboot or detector error for a
+30-minute soak. The unavailable voice gateway generated repeated reconnects;
+one socket allocation failed and native Hi-Fi Control recovered. Internal heap
+reached a 16-byte historical low-water mark before returning to roughly 4.9
+KiB free, so normal gateway/STT coexistence and a longer soak remain open
+qualification work.
+
+Wake-transition samples reported as dropped are intentional: the wake source
+microphone is stopped and reset after acceptance while the same PCM continues
+into the AFE/STT path. They are distinct from verifier starvation, for which
+the queue and ring counters remained clean.
 
 The bounded PSRAM snapshot is also retained for quarantined evidence and
 review. Evidence upload remains independent of the production decision.
@@ -209,5 +251,6 @@ hint.
 - Per-turn durable telemetry that joins Kizz capture/transport data, provider
   transcripts, App Server result, and actual music-command result.
 - Physical tests that show a failed STT turn always restores the ARMED listener.
-- Wake-word qualification against the recipe’s held-out people, rooms, and
-  long false-wake guards before calling the model ready.
+- Repeat physical wake testing with human voices, multiple rooms, distances,
+  and playback noise; the 12/12 speaker replay establishes the device execution
+  path, not general human recall.

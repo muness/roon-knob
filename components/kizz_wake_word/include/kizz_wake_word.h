@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 typedef void (*kizz_wake_word_detected_cb_t)(void);
+typedef void (*kizz_wake_word_candidate_cb_t)(bool accepted, float logit);
 
 typedef struct {
     uint32_t samples;
@@ -28,6 +29,8 @@ typedef struct {
     kizz_latency_summary_t verifier_candidate;
     kizz_latency_summary_t verifier_frontend;
     kizz_latency_summary_t verifier_invoke;
+    kizz_latency_summary_t compact_verifier;
+    kizz_latency_summary_t ordered_verifier;
     uint32_t detector_hop_total_us;
     uint32_t verifier_candidate_total_us;
     uint32_t detector_compute_duty_ppm;
@@ -46,6 +49,15 @@ typedef struct {
     uint32_t verifier_model_invocations;
     uint32_t verifier_max_feature_frames;
     uint32_t verifier_max_model_invocations;
+    uint32_t compact_verifier_runs;
+    uint32_t compact_verifier_accepts;
+    uint32_t compact_verifier_rejects;
+    uint32_t compact_verifier_errors;
+    uint32_t ordered_verifier_runs;
+    uint32_t ordered_verifier_accepts;
+    uint32_t ordered_verifier_rejects;
+    uint32_t ordered_verifier_errors;
+    uint32_t ordered_verifier_model_invocations;
     uint32_t audio_samples_offered;
     uint32_t audio_samples_accepted;
     uint32_t audio_samples_dropped;
@@ -56,6 +68,8 @@ typedef struct {
     uint32_t partial_feature_reads;
     uint32_t detector_arena_used_bytes;
     uint32_t verifier_arena_used_bytes;
+    uint32_t compact_verifier_arena_used_bytes;
+    uint32_t ordered_verifier_arena_used_bytes;
     bool detector_arena_in_psram;
     bool verifier_arena_in_psram;
     uint32_t internal_heap_free_bytes;
@@ -67,7 +81,9 @@ typedef struct {
     uint32_t detection_task_stack_min_free_bytes;
 } kizz_wake_word_perf_snapshot_t;
 
-bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb);
+bool kizz_wake_word_reserve_fast_arena(void);
+bool kizz_wake_word_start(kizz_wake_word_detected_cb_t detected_cb,
+                          kizz_wake_word_candidate_cb_t candidate_cb);
 size_t kizz_wake_word_feed(const int16_t *samples, size_t sample_count);
 void kizz_wake_word_pause(void);
 void kizz_wake_word_resume(void);
@@ -77,12 +93,6 @@ float kizz_wake_word_probability(void);
 // Probability captured at the exact detector callback that caused the wake.
 // Unlike kizz_wake_word_probability(), this is not the later telemetry peak.
 float kizz_wake_word_detection_probability(void);
-// Score a frozen 16 kHz mono candidate with the resident verifier. The
-// detector is idle when its callback invokes this precision gate.
-bool kizz_wake_word_verify_clip(const int16_t *samples, size_t sample_count,
-                                float *probability);
-// Records the final precision-gate result after kizz_wake_word_verify_clip().
-void kizz_wake_word_record_verifier_decision(bool accepted);
 bool kizz_wake_word_get_performance(
     kizz_wake_word_perf_snapshot_t *snapshot);
 void kizz_wake_word_log_performance(void);

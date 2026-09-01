@@ -1,6 +1,6 @@
 dependencies:
   micro_wake_word:
     git: https://github.com/open-horizon-labs/micro_wake_word_standalone.git
-    version: f3bbc155cbe0c4f9b790022e715f37a6538d7393
+    version: cc19120f2a363c14a7b1fef9850380abdcbe422f
   espressif/esp-sr:
     version: '>=2.5.0'

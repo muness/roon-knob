@@ -140,7 +140,6 @@ constexpr size_t FALSE_WAKE_MAX_BYTES =
     FALSE_WAKE_MAX_SAMPLES * sizeof(int16_t);
 constexpr unsigned FALSE_WAKE_PREROLL_MS = static_cast<unsigned>(
     FALSE_WAKE_PREROLL_SAMPLES * 1000 / FALSE_WAKE_SAMPLE_RATE_HZ);
-constexpr unsigned KIZZ_VERIFIER_CUTOFF_Q = 167;
 static_assert(FALSE_WAKE_MAX_BYTES == 288000,
               "false-wake capture must remain within the enrollment limit");
 static_assert(FALSE_WAKE_PREROLL_MS == 3000,
@@ -1546,14 +1545,66 @@ void start_voice_transport() {
     }
     xSemaphoreGive(s_voice_audio_lock);
 
+    // Reserve the always-on detector's internal-SRAM arena before ESP-SR
+    // creates the post-wake AFE. The AFE can use PSRAM, while the detector
+    // runs on every candidate hop and needs one contiguous fast block. Audio
+    // is not fed until voice_feed_task is created at the end of this function,
+    // so the callbacks below cannot race the remaining initialization.
+    if (!kizz_wake_word_start(
+            []() {
+                if (s_enrollment_active || s_enrollment_sending) {
+                    s_enrollment_detected = true;
+                } else if (esp_timer_get_time() >=
+                           s_enrollment_suppress_wake_until_us.load()) {
+                    const size_t evidence_samples = wake_evidence_snapshot();
+                    const bool evidence_started =
+                        s_enrollment_transport_configured &&
+                        false_wake_start_capture(s_voice_evidence_buffer,
+                                                 evidence_samples);
+                    if (s_voice_transport_configured) {
+                        s_voice_wake_pending = true;
+                    } else if (!evidence_started) {
+                        kizz_wake_word_resume();
+                    }
+                } else {
+                    // A verified trigger suppressed by an enrollment handoff
+                    // must not leave the detector paused indefinitely.
+                    kizz_wake_word_resume();
+                }
+            },
+            [](bool accepted, float logit) {
+                if (accepted || s_enrollment_active || s_enrollment_sending ||
+                    esp_timer_get_time() <
+                        s_enrollment_suppress_wake_until_us.load())
+                    return;
+                ESP_LOGI(TAG,
+                         "Kizz detector candidate rejected by layered cascade: "
+                         "final_score=%.6f",
+                         static_cast<double>(logit));
+                const size_t evidence_samples = wake_evidence_snapshot();
+                const bool evidence_started =
+                    s_enrollment_transport_configured &&
+                    false_wake_start_capture(s_voice_evidence_buffer,
+                                             evidence_samples);
+                if (evidence_started)
+                    false_wake_finish_capture("verifier_rejected");
+            })) {
+        ESP_LOGE(TAG, "Kizz custom wake model initialization failed");
+        s_voice_listener_enabled = false;
+        return;
+    }
+
     srmodel_list_t *models = esp_srmodel_init("model");
     if (!models) {
         ESP_LOGE(TAG, "Kizz ESP-SR model partition unavailable");
         s_voice_listener_enabled = false;
         return;
     }
+    // Wake inference has its own causal frontend and runs continuously. The AFE
+    // is needed only for post-wake endpointing, so use ESP-SR's low-cost mode
+    // instead of competing with every detector hop for CPU and internal RAM.
     afe_config_t *afe_config =
-        afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+        afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
     if (!afe_config) {
         ESP_LOGE(TAG, "Kizz ESP-SR AFE configuration failed");
         s_voice_listener_enabled = false;
@@ -1574,6 +1625,17 @@ void start_voice_transport() {
         s_voice_listener_enabled = false;
         return;
     }
+    ESP_LOGI(TAG,
+             "Kizz heap after AFE: internal_free=%u internal_largest=%u "
+             "psram_free=%u psram_largest=%u",
+             static_cast<unsigned>(
+                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(
+                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(
+                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(
+                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     // The trigger ring and frozen evidence snapshot belong to production wake
     // capture. They are allocated independently of the enrollment transport;
     // the latter only owns evidence upload and its larger buffer.
@@ -1588,55 +1650,48 @@ void start_voice_transport() {
                  "Kizz evidence pre-roll allocation failed; capture will be unavailable");
     }
 
-    if (!kizz_wake_word_start([]() {
-            if (s_enrollment_active || s_enrollment_sending)
-                s_enrollment_detected = true;
-            else if (esp_timer_get_time() >=
-                     s_enrollment_suppress_wake_until_us.load()) {
-                const size_t evidence_samples = wake_evidence_snapshot();
-                float verifier_probability = 0.0f;
-                const bool verifier_available = evidence_samples != 0 &&
-                    kizz_wake_word_verify_clip(
-                        s_voice_evidence_buffer, evidence_samples,
-                        &verifier_probability);
-                const unsigned verifier_score_q = static_cast<unsigned>(
-                    std::lround(std::clamp(verifier_probability, 0.0f, 1.0f) *
-                                255.0f));
-                const bool verifier_pass = verifier_available &&
-                    verifier_score_q >= KIZZ_VERIFIER_CUTOFF_Q;
-                kizz_wake_word_record_verifier_decision(verifier_pass);
-                ESP_LOGI(TAG,
-                         "Kizz resident verifier: score=%u/255 cutoff=%u/255 "
-                         "pass=%s available=%s",
-                         verifier_score_q, KIZZ_VERIFIER_CUTOFF_Q,
-                         verifier_pass ? "true" : "false",
-                         verifier_available ? "true" : "false");
-                const bool evidence_started = s_enrollment_transport_configured &&
-                    false_wake_start_capture(s_voice_evidence_buffer,
-                                             evidence_samples);
-                if (!verifier_pass) {
-                    ESP_LOGI(TAG, "Kizz detector candidate rejected by verifier");
-                    if (evidence_started)
-                        false_wake_finish_capture("verifier_rejected");
-                    kizz_wake_word_resume();
-                } else if (s_voice_transport_configured) {
-                    s_voice_wake_pending = true;
-                } else if (!evidence_started) {
-                    kizz_wake_word_resume();
-                }
-            }
-        })) {
-        ESP_LOGE(TAG, "Kizz custom wake model initialization failed");
+    // Create the real-time audio workers before optional websocket and
+    // enrollment clients consume internal task-control bookkeeping. Their
+    // stacks live in PSRAM; only their small FreeRTOS control blocks require
+    // scarce internal memory.
+    const BaseType_t feed_task_created = xTaskCreatePinnedToCoreWithCaps(
+        voice_feed_task, "kizz_afe_feed", 6144, nullptr, 5, nullptr, 0,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (feed_task_created != pdPASS) {
+        ESP_LOGE(TAG,
+                 "Kizz AFE feed task allocation failed: internal_free=%u "
+                 "internal_largest=%u psram_free=%u psram_largest=%u",
+                 static_cast<unsigned>(
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(
+                     heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(
+                     heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                 static_cast<unsigned>(
+                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
         s_voice_listener_enabled = false;
+        kizz_wake_word_pause();
         return;
     }
+    if (s_voice_transport_configured &&
+        xTaskCreatePinnedToCoreWithCaps(
+            voice_fetch_task, "kizz_afe_fetch", 6144, nullptr, 5, nullptr, 1,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        ESP_LOGE(TAG, "Kizz AFE fetch task allocation failed");
+        s_voice_listener_enabled = false;
+        kizz_wake_word_pause();
+        return;
+    }
+    ESP_LOGI(TAG, "Kizz AFE voice workers started with PSRAM stacks");
 
     if (s_voice_transport_configured) {
         esp_websocket_client_config_t voice_cfg = {};
         voice_cfg.uri = voice_uri;
         voice_cfg.buffer_size = 2048;
         voice_cfg.network_timeout_ms = 10000;
-        voice_cfg.reconnect_timeout_ms = 1000;
+        // A missing local gateway must not create one TLS task/heap churn every
+        // second while the always-on detector is being qualified.
+        voice_cfg.reconnect_timeout_ms = 5000;
         voice_cfg.enable_close_reconnect = true;
         s_voice_ws = esp_websocket_client_init(&voice_cfg);
         if (!s_voice_ws) {
@@ -1695,25 +1750,6 @@ void start_voice_transport() {
             }
         }
     }
-    const BaseType_t feed_task_created = xTaskCreatePinnedToCoreWithCaps(
-        voice_feed_task, "kizz_afe_feed", 6144, nullptr, 5, nullptr, 0,
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (feed_task_created != pdPASS) {
-        ESP_LOGE(TAG, "Kizz AFE feed task allocation failed");
-        s_voice_listener_enabled = false;
-        kizz_wake_word_pause();
-        return;
-    }
-    if (s_voice_transport_configured &&
-        xTaskCreatePinnedToCoreWithCaps(
-            voice_fetch_task, "kizz_afe_fetch", 6144, nullptr, 5, nullptr, 1,
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        ESP_LOGE(TAG, "Kizz AFE fetch task allocation failed");
-        s_voice_listener_enabled = false;
-        kizz_wake_word_pause();
-        return;
-    }
-    ESP_LOGI(TAG, "Kizz AFE voice workers started with PSRAM stacks");
 }
 #endif
 #endif
@@ -1855,6 +1891,11 @@ uint8_t joystick_adc12_to_u8(uint16_t value) {
 }
 
 extern "C" bool m5_platform_begin(void) {
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+    // Reserve the latency-critical detector arena before the BSP, display,
+    // microphone, WiFi, and endpointing frontend fragment internal SRAM.
+    if (!kizz_wake_word_reserve_fast_arena()) return false;
+#endif
     auto cfg = M5.config();
     cfg.clear_display = true;
     cfg.output_power = true;

@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "kind": "kizz_control_three_stage_aot_cascade",
+  "phrase": "Kizz Control",
+  "execution": {
+    "detector": "fixed_aot_esp_nn",
+    "compact_verifier": "fixed_aot_esp_nn_static_activation_reuse",
+    "ordered_verifier": "fixed_aot_esp_nn",
+    "memory_placement": {
+      "detector_arena": "internal_ram_16_kib",
+      "compact_verifier_arena": "psram_96_kib",
+      "ordered_verifier_arena": "psram_16_kib"
+    },
+    "candidate_window": {
+      "pre_context_frames": 220,
+      "trigger_frames": 1,
+      "post_context_frames": 39,
+      "feature_hop_ms": 10
+    },
+    "startup_self_test": {
+      "detector_reference": "tensorflow_lite_builtin_ref",
+      "ordered_reference": "tensorflow_lite_builtin_ref",
+      "compact_reference": "tensorflow_lite_builtin_ref_golden_outputs",
+      "compact_xorshift_seed": "0x436f6d70",
+      "compact_expected_int8_outputs": [21, -97, -54, -118]
+    }
+  },
+  "models": {
+    "detector": {
+      "filename": "kizz_control_detector.tflite",
+      "sha256": "f07d2c010fba020e923c23734e54ba8e86751dfd1b0f23a018eb5ff79b969ae3",
+      "threshold": -18.20059454471544
+    },
+    "compact_verifier": {
+      "filename": "kizz_control_compact_verifier_int8_v10.tflite",
+      "sha256": "a28e8c8f3fe51ea3ae3fc76f0d79f2abdb06f19c71d7f26e0f08a16464025710",
+      "threshold": 0.0,
+      "topology": "compact_relu6_dscnn_24_32_48_64_96",
+      "parameters": 15793,
+      "macs_per_candidate": 2801952,
+      "training": {
+        "candidate_corpus": "training-workspace/candidate-verifier-dataset-v10-full-preroll-clean/corpus.json",
+        "candidate_corpus_sha256": "f390066c5fcfa26a1fd0e589afc8789ddd754d2db90fc71286b6377f3b89e7ad",
+        "candidate_rows": 26986,
+        "positive_rows": 568,
+        "negative_rows": 26418,
+        "device_train_capture_attempts": 36,
+        "device_train_captures_qualified": 31,
+        "excluded_zero_padded_v9_device_positives": 54,
+        "minimum_declared_preroll_seconds": 2.3,
+        "seed": 1056
+      },
+      "threshold_calibration": {
+        "validation_report": "training-workspace/reports/v10-full-preroll-device-validation-threshold-zero.json",
+        "validation_report_sha256": "77a1df2ade4eda160a5e066b74bdc7c9635b5e177a8d843c06f1477352753018",
+        "physical_test_report": "training-workspace/reports/v10-full-preroll-physical-threshold-zero.json",
+        "physical_test_report_sha256": "c6890240ea5a0ee2c15a7f235757f69ade3625a99c029632332028f564c7895c",
+        "fit_subset": "voice_disjoint_device_validation",
+        "validation_recall": "12/12",
+        "fresh_test_recall": "12/12",
+        "observed_full_recall_threshold": 4.1110600382089615,
+        "maximum_threshold": 0.0,
+        "selected_threshold": 0.0,
+        "test_used_for_selection": false
+      }
+    },
+    "ordered_verifier": {
+      "filename": "kizz_control_ordered_verifier_int8.tflite",
+      "sha256": "956a444d11f802e7780dcd3af6f43551a1fe4601fdacfd7b153bba8e11c48933",
+      "threshold": -19.326665980378795
+    }
+  },
+  "held_out_continuous_negative_evaluation": {
+    "report": "training-workspace/reports/v10-full-preroll-physical-zero-ordered-100h/merged-100h.report.json",
+    "report_sha256": "5329ae5889793fac1811a881abb6856eb49b10dbe30ad74f2082cb393b66b4c2",
+    "detector_threshold": -18.20059454471544,
+    "compact_threshold": 0.0,
+    "matches_active_thresholds": true,
+    "exposure_hours": 100.47043628472223,
+    "detector_candidates": 19105,
+    "compact_accepts": 833,
+    "compact_acceptance_fraction": 0.04360115153101282,
+    "accepted_false_wakes": 23,
+    "accepted_false_wakes_per_hour": 0.2289230628482643,
+    "one_sided_upper_95_per_hour": 0.32432808751264414,
+    "strict_0_1_per_hour_gate": false,
+    "maintainer_accepted_operating_point": true
+  },
+  "firmware_build": {
+    "date": "2026-08-31",
+    "target": "stackchan",
+    "hardware": "M5Stack StackChan ESP32-S3 revision 0.2",
+    "app": "hiphi_stackchan",
+    "esp_idf": "5.5.5",
+    "binary": "m5_beta_app/build-stackchan/hiphi_stackchan.bin",
+    "binary_sha256": "313900521818f73b88a50dfaf18725e369b91ad2adf9dff43c2287b4014e9f7f",
+    "elf": "m5_beta_app/build-stackchan/hiphi_stackchan.elf",
+    "elf_sha256": "32d16fe046bd5a5cc5ed15860bad5af6571f685b3ff4b0f2ee212000b9e2bd04",
+    "binary_bytes": 3219312,
+    "app_partition_free_percent": 56,
+    "profile_checks": "passed",
+    "flash_port": "/dev/cu.usbmodem2101"
+  },
+  "physical_hardware_evaluation": {
+    "date": "2026-08-31",
+    "target": "M5Stack StackChan ESP32-S3 revision 0.2",
+    "status": "exact_v10_artifact_flashed_and_replayed",
+    "startup_detector_aot_equivalence_invokes": 96,
+    "startup_ordered_aot_equivalence_invokes": 96,
+    "startup_compact_golden_equivalence_invokes": 4,
+    "speaker_replay_accepts": 12,
+    "speaker_replay_attempts": 12,
+    "validation_speaker_replay_accepts": 12,
+    "validation_speaker_replay_attempts": 12,
+    "aggregate_replay_accepts": 24,
+    "aggregate_replay_rejects": 1,
+    "detector_hop_p99_us_approx": 8000,
+    "compact_latency_min_ms": 95,
+    "compact_latency_max_ms": 123,
+    "ordered_latency_min_ms": 296,
+    "ordered_latency_max_ms": 432,
+    "audio_queue_high_water_bytes": 2048,
+    "audio_queue_capacity_bytes": 16384,
+    "ring_overflow_resets": 0,
+    "partial_ring_writes": 0,
+    "partial_feature_reads": 0,
+    "detector_arena_used_bytes": 12316,
+    "compact_arena_used_bytes": 82480,
+    "compact_arena_capacity_bytes": 98304,
+    "ordered_arena_used_bytes": 12316,
+    "soak_duration_seconds": 1810,
+    "soak_reboots": 0,
+    "soak_detector_errors": 0,
+    "minimum_internal_free_bytes": 16,
+    "final_internal_free_bytes_approx": 4855,
+    "voice_gateway_during_soak": "unavailable_with_repeated_reconnects",
+    "native_hifi_control_during_soak": "brief_socket_failure_then_recovered",
+    "wake_transition_drop_semantics": "wake source microphone stops and resets after acceptance; PCM continues independently into AFE/STT"
+  },
+  "limitations": [
+    "The strict 0.1 false-wakes/hour qualification criterion remains unmet; the maintainer explicitly accepted the observed 0.229/hour practical operating point.",
+    "Recorded speaker-to-device microphone replay does not replace multi-speaker human recall testing.",
+    "Normal STT and command-handler coexistence was not exercised because the voice gateway was unavailable during this physical replay.",
+    "The 30-minute no-reboot soak observed an internal-heap low-water mark of 16 bytes while the absent voice gateway caused reconnect pressure; longer service-coexistence soak remains required.",
+    "Extended multi-room and thermal soak remains required before broad product qualification."
+  ]
+}

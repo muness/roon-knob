@@ -270,7 +270,7 @@ dependencies:
       type: service
     version: 2.1.3
   espressif/esp-nn:
-    component_hash: 83eca824ef501eb0d8ac7d090970d8a2997ac369e5edb86366a5943e4368d5a5
+    component_hash: 003bfc494fd3faf73088b62dc5f565a3c61b9e36494d90e8cbf5f238ff2b98fe
     dependencies:
     - name: idf
       require: private
@@ -278,9 +278,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.3.0
+    version: 1.3.1
   espressif/esp-sr:
-    component_hash: 0f96f3a5579915a65a0ceb1c2183f9700f7986982f2be3964b75b2136333fc41
+    component_hash: 4e94fb1fd2d47ac1127f16db25b229dc7ccff4f3f211e599692d624f4d0bfcf6
     dependencies:
     - name: espressif/cjson
       registry_url: https://components.espressif.com
@@ -293,7 +293,7 @@ dependencies:
     - name: espressif/esp-dl
       registry_url: https://components.espressif.com
       require: private
-      version: '>=3.3.9'
+      version: '>=3.3.10'
     - name: espressif/esp-dsp
       registry_url: https://components.espressif.com
       require: private
@@ -304,7 +304,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 2.5.1
+    version: 2.5.2
   espressif/esp-tflite-micro:
     component_hash: 1ce00c44af2362d48b5c0eefc5fcc60fa54d84db332c80005ae324556f4df0db
     dependencies:
@@ -548,7 +548,7 @@ dependencies:
       type: service
     version: 1.0.22~1
   espressif/mdns:
-    component_hash: e81ca7a7f53ea34e78274df054da692c272e1315572876b237b1748e267c013b
+    component_hash: 3ba256ac95e07c274be53cbd73f06cb846c403b61e8fbdf1be57bdb79db7a63e
     dependencies:
     - name: idf
       require: private
@@ -556,7 +556,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.11.3
+    version: 1.12.0
   espressif/network_provisioning:
     component_hash: ef2e10182fd1861e68b821491916327c25416ca7ae70e5a6e43313dbc71fe993
     dependencies:
@@ -723,7 +723,7 @@ dependencies:
       type: service
     version: 0.2.19
   micro_wake_word:
-    component_hash: a5d273963c5535d312b22f72ef6ae19d38214594f2a314e2ea577547ec33e63e
+    component_hash: 8135fc0d46d95348120d45c0785d5977b9d68c7a66d45c1eb755d408466fcf0f
     dependencies:
     - name: espressif/esp-tflite-micro
       version: '*'
@@ -733,7 +733,7 @@ dependencies:
       git: https://github.com/open-horizon-labs/micro_wake_word_standalone.git
       path: .
       type: git
-    version: f3bbc155cbe0c4f9b790022e715f37a6538d7393
+    version: cc19120f2a363c14a7b1fef9850380abdcbe422f
 direct_dependencies:
 - espressif/arduino-esp32
 - espressif/esp-sr
@@ -742,6 +742,6 @@ direct_dependencies:
 - idf
 - m5stack/m5unified
 - micro_wake_word
-manifest_hash: 827e65abd3468b07c5a91c71df7d5798a65d45a5d8f3d1ad1603d1bfb7b99280
+manifest_hash: 640c51e8fa18014a2fd2df4cb7a03112d3d06894bda595052fdf17b92f388457
 target: esp32s3
 version: 2.0.0
