@@ -30,8 +30,12 @@ CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
 # CONFIG_MDNS_TASK_CREATE_FROM_INTERNAL is not set
 CONFIG_M5_PLATFORM_EXPECT_STACKCHAN=y
 CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI="ws://192.168.1.101:8088/voice/v1"
-# Enrollment is an independent deployment. Never derive this from the UHC URL.
-CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI="ws://192.168.1.101:8091/v1/device"
+# Enrollment is an independent, directed-training deployment. Keep it disabled
+# in the production StackChan profile so an absent training service cannot
+# consume a socket, task bookkeeping, or reconnect-time internal heap while
+# wake detection and command streaming are active. Directed enrollment builds
+# can still opt in by overriding this empty URI explicitly.
+CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI=""
 CONFIG_M5_PLATFORM_DEVICE_ID="kizz-1"
 CONFIG_M5_PLATFORM_DEVICE_PROFILE="m5stack_stackchan_k151_cores3_room_scale_v2"
 # The compact phoneme model and deterministic CTC decoder run continuously

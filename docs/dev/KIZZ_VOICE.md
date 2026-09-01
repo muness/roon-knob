@@ -90,12 +90,34 @@ On the unchanged locked 100.47-hour LibriSpeech negative corpus, v10 produced
 (4.36%). This meets the maintainer-accepted practical ceiling of `0.4/hour`,
 but not the formal `0.1/hour` upper-confidence gate.
 
-The exact artifact also remained armed without reboot or detector error for a
-30-minute soak. The unavailable voice gateway generated repeated reconnects;
-one socket allocation failed and native Hi-Fi Control recovered. Internal heap
-reached a 16-byte historical low-water mark before returning to roughly 4.9
-KiB free, so normal gateway/STT coexistence and a longer soak remain open
-qualification work.
+The first wake-plus-voice coexistence run exposed a production configuration
+fault rather than a model fault: the optional enrollment client kept reconnecting
+while the voice gateway, Wi-Fi, audio frontend, and cascade were active. That
+run reached a 16-byte internal-heap low-water mark, failed one socket
+allocation, and dropped enough queued detector audio to invalidate product
+qualification.
+
+The production StackChan profile now leaves the independent enrollment URI
+empty. Enrollment remains an explicit directed-training build option. The exact
+replacement firmware binary (`91f8c6162628d1f3823800e35d52ba8f27a350e092c0f1e87e30452d958a0a59`)
+was built with ESP-IDF 5.5.5, flashed to ESP32-S3 MAC
+`7c:4f:ad:af:e7:38`, and exercised against a live UHC voice gateway. A
+12-source physical positive replay accepted 11/12 wakes while internal heap
+stayed above 11,896 bytes. A subsequent event-gated physical command test
+accepted “Kizz Control,” captured “Set the kitchen volume to 38%,” obtained
+usable transcripts from all three configured STT providers, issued the Roon
+action, and independently read Kitchen back at 38%. That run kept 12,944 bytes
+of internal-heap low-water, had no socket-allocation failure, reboot, ring
+overflow, or partial audio read/write, and restored the armed listener after
+the response.
+
+The command run's detector queue peaked at 14,848 of 16,384 bytes. Its 274,432
+reported dropped bytes accumulated while the detector was intentionally paused
+during accepted wake turns and command handling; the command stream itself sent
+all 267,776 captured bytes. Candidate-triggered full-cascade hops remain much
+longer than the 10 ms continuous budget (about 420–460 ms), while the continuous
+detector remained about 7.5 ms at p99. Queue, ring, and partial-I/O counters—not
+the paused-source drop counter alone—are therefore the coexistence gate.
 
 Wake-transition samples reported as dropped are intentional: the wake source
 microphone is stopped and reset after acceptance while the same PCM continues
@@ -163,7 +185,8 @@ controls and attention-worthy connectivity events.
 The exact voice WebSocket URI is a StackChan-only firmware setting,
 `M5_PLATFORM_STACKCHAN_VOICE_WS_URI`. It can point at any LAN host. The training
 enrollment URI is a separate setting and is never derived from the production
-gateway host.
+gateway host. It is empty in the production StackChan profile; a directed
+enrollment build must opt in with an explicit URI override.
 
 ## What runs in UHC
 
@@ -250,7 +273,6 @@ hint.
   than opening all three on every turn.
 - Per-turn durable telemetry that joins Kizz capture/transport data, provider
   transcripts, App Server result, and actual music-command result.
-- Physical tests that show a failed STT turn always restores the ARMED listener.
 - Repeat physical wake testing with human voices, multiple rooms, distances,
   and playback noise; the 12/12 speaker replay establishes the device execution
   path, not general human recall.
