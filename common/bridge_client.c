@@ -398,7 +398,8 @@ static void commit_discovered_endpoint_on_ui(void *arg) {
     controller_config_snapshot_t committed;
     controller_config_write_result_t result =
         controller_config_set_endpoint_if_current(
-            &commit->token, commit->discovered, true, true, &committed);
+            &commit->token, commit->discovered, true,
+            !commit->token.from_mdns, &committed);
     atomic_store_explicit(&s_discovered_endpoint_commit_pending, false,
                           memory_order_release);
 
@@ -615,20 +616,24 @@ static void maybe_update_bridge_base(void) {
     if (!controller_config_capture_endpoint_token(&token)) {
         return;
     }
-    bool need_discovery = token.bridge_base[0] == '\0';
+    // Refresh an endpoint previously learned from mDNS so firmware upgrades
+    // can replace an old TXT hostname with the address resolved from mDNS.
+    // A manually configured endpoint remains authoritative.
+    bool need_discovery = token.bridge_base[0] == '\0' || token.from_mdns;
 
     if (!need_discovery) {
         s_mdns_fail_count = 0;
         return;  // Bridge URL already configured - don't overwrite with mDNS
     }
 
-    // Bridge is empty - try mDNS discovery
+    // Endpoint is empty or discovery-owned - try mDNS discovery.
     char discovered[sizeof(token.bridge_base)];
     bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
 
     if (mdns_ok && host_is_valid(discovered)) {
-        // The endpoint must still be clear when this asynchronous lookup
-        // completes. A manual set/clear advances the token and wins.
+        // The endpoint must still be unchanged when this asynchronous lookup
+        // completes. A manual set/clear advances the token and wins. A prior
+        // mDNS endpoint may be replaced because it is still discovery-owned.
         LOGI("mDNS discovered bridge: %s", discovered);
         strip_trailing_slashes(discovered);
         bool expected = false;

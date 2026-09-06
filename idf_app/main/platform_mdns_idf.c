@@ -1,4 +1,5 @@
 #include "platform/platform_mdns.h"
+#include "platform/platform_mdns_endpoint.h"
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -83,23 +84,39 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
     }
     bool found = false;
     char url[128] = {0};
+    char txt_fallback[128] = {0};
     int count = 0;
     for (mdns_result_t *r = results; r; r = r->next) {
         count++;
         ESP_LOGI(TAG, "mDNS result %d: hostname=%s port=%d txt_count=%zu",
                  count, r->hostname ? r->hostname : "(null)", r->port, r->txt_count);
-        if (!found && txt_find_base(r, url, sizeof(url))) {
-            ESP_LOGI(TAG, "  Found base TXT: %s", url);
-            found = true;
+        char resolved_ip[16] = {0};
+        for (mdns_ip_addr_t *addr = r->addr; addr; addr = addr->next) {
+            if (addr->addr.type == ESP_IPADDR_TYPE_V4) {
+                snprintf(resolved_ip, sizeof(resolved_ip), IPSTR,
+                         IP2STR(&addr->addr.u_addr.ip4));
+                break;
+            }
         }
-        // Prefer IP address over hostname - ESP32 lwIP has issues resolving .local hostnames
-        if (!found && r->addr && r->port) {
-            char ip_str[16];
-            snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
-            snprintf(url, sizeof(url), "http://%s:%u", ip_str, r->port);
-            ESP_LOGI(TAG, "  Using IP:port: %s (hostname=%s)", url, r->hostname ? r->hostname : "(null)");
-            found = true;
+        if (!resolved_ip[0] && r->hostname) {
+            platform_mdns_resolve_local(r->hostname, resolved_ip,
+                                         sizeof(resolved_ip));
         }
+
+        char txt_base[128] = {0};
+        txt_find_base(r, txt_base, sizeof(txt_base));
+        if (platform_mdns_consider_bridge_url(
+                url, sizeof(url), txt_fallback, sizeof(txt_fallback),
+                resolved_ip, r->port, txt_base)) {
+            ESP_LOGI(TAG, "  Selected bridge endpoint: %s (resolved IPv4)", url);
+            found = true;
+            break;
+        }
+    }
+    if (!found && txt_fallback[0]) {
+        copy_str(url, sizeof(url), txt_fallback);
+        ESP_LOGI(TAG, "  Selected bridge endpoint: %s (TXT fallback)", url);
+        found = true;
     }
     ESP_LOGI(TAG, "mDNS: found %d results, selected: %s", count, found ? url : "(none)");
     mdns_query_results_free(results);
