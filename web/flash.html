@@ -1,264 +1,40 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flash Firmware</title>
-  <style>
-    :root {
-      --bg: #1a1a2e;
-      --surface: #16213e;
-      --primary: #0f3460;
-      --accent: #e94560;
-      --text: #eee;
-      --text-muted: #888;
-    }
-    * { box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      margin: 0;
-      padding: 20px;
-      min-height: 100vh;
-    }
-    .container { max-width: 800px; margin: 0 auto; }
-    h1 { color: var(--accent); margin-bottom: 10px; }
-    .subtitle { color: var(--text-muted); margin-bottom: 30px; }
-    .card {
-      background: var(--surface);
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 20px;
-    }
-    .card h2 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
-    .chip-badge {
-      font-size: 12px;
-      background: var(--primary);
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-weight: normal;
-    }
-    .description { color: var(--text-muted); margin-bottom: 20px; line-height: 1.6; }
-    .flash-section { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-    esp-web-install-button button {
-      background: var(--accent);
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    esp-web-install-button button:hover { filter: brightness(1.1); }
-    .version-info { color: var(--text-muted); font-size: 14px; }
-    .info-box {
-      background: #1a3d5c;
-      border-left: 4px solid #3498db;
-      padding: 12px 16px;
-      border-radius: 4px;
-      margin-bottom: 20px;
-    }
-    .info-box strong { color: #3498db; }
-    .warning {
-      background: #3d2914;
-      border-left: 4px solid #f39c12;
-      padding: 12px 16px;
-      border-radius: 4px;
-      margin-top: 20px;
-    }
-    .warning strong { color: #f39c12; }
-    .unsupported {
-      display: none;
-      background: #3d1414;
-      border-left: 4px solid #e74c3c;
-      padding: 12px 16px;
-      border-radius: 4px;
-      margin-bottom: 20px;
-    }
-    a { color: var(--accent); }
-    .back-link { display: inline-block; margin-bottom: 20px; text-decoration: none; }
-    .back-link:hover { text-decoration: underline; }
-    .steps { margin-top: 20px; }
-    .steps ol { padding-left: 20px; }
-    .steps li { margin-bottom: 8px; color: var(--text-muted); }
-    .port-tip { margin-top: 12px; color: var(--text-muted); font-size: 14px; }
-    .steps code {
-      background: var(--primary);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 13px;
-    }
-    .requirements {
-      background: var(--primary);
-      border-radius: 8px;
-      padding: 16px;
-      margin-top: 30px;
-    }
-    .requirements h3 { margin-top: 0; margin-bottom: 12px; }
-    .requirements ul { margin: 0; padding-left: 20px; }
-    .requirements li { margin-bottom: 8px; color: var(--text-muted); }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Flash HiPhi firmware</title>
+  <meta name="description" content="Flash HiPhi firmware for supported controller hardware.">
+  <link rel="stylesheet" href="./assets/styles.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
-<body data-target-filter="{{TARGET_FILTER}}">
-  <div class="container">
-    <a href="./" class="back-link" id="back-link">&larr; Back</a>
-
-    <h1>Flash Firmware</h1>
-    <p class="subtitle">Flash firmware directly from your browser - no tools to install</p>
-
+<body class="flash-shell" data-target-filter="{{TARGET_FILTER}}">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container nav-wrap">
+    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <nav class="site-nav" aria-label="Primary"><a href="https://hiphi.audio/controllers.html">Controllers</a><a href="https://hiphi.audio/getting-started.html">Get started</a><a href="https://hiphi.audio/mcp.html">UHC + MCP</a><a class="nav-flash" aria-current="page" href="/flash.html">Flash firmware</a></nav>
+  </div></header>
+  <main class="flash-main" id="main"><div class="container">
+    <a class="flash-breadcrumb" href="/">← Firmware center</a>
+    <div class="flash-intro"><div><p class="context-line">Firmware center</p><h1>Match the model before flashing.</h1></div><p>Flash over USB from desktop Chrome or Edge. Stable is the release for daily listening.</p></div>
     {{RELEASE_CHANNEL_NOTICE}}
-
-    <div class="unsupported" id="unsupported">
-      <strong>Browser Not Supported</strong><br>
-      Web Serial requires Chrome or Edge (version 89+). Safari and Firefox are not supported.
+    <div class="unsupported" id="unsupported"><strong>This browser cannot flash over USB.</strong> Open this page in desktop Chrome or Edge.</div>
+    <div class="callout"><p><strong>Install Unified Hi-Fi Control first.</strong> HiPhi controllers talk to UHC on your network — <a href="https://hiphi.audio/getting-started.html">install it first</a>, or the controller has nothing to connect to.</p></div>
+    <div class="flash-list">
+      <article class="flash-card" id="dial-card"><div><span class="version">Step 1 / ESP32-S3</span><h2>Dial</h2><p class="hardware">Waveshare ESP32-S3-Knob-Touch-LCD-1.8</p><p>The round touchscreen controller with rotary input, Wi-Fi playback control, and optional BLE media-remote support.</p><p class="risk">Updates keep Wi-Fi and controller settings when you decline the browser erase prompt.</p><details><summary><strong>Dial install steps</strong></summary><ol><li>Turn on the device with the power slider toward USB-C.</li><li>Connect a data-capable USB-C cable.</li><li>Flash only when the browser identifies the ESP32-S3.</li></ol></details></div><div class="flash-action"><esp-web-install-button manifest="./manifest-s3.json"><button slot="activate">Flash HiPhi Dial</button></esp-web-install-button><span class="download-link">USB / Web Serial</span></div></article>
+      <article class="flash-card" id="frame-card"><div><span class="version">Alpha / ESP32-S3 e-ink</span><h2>Frame</h2><p>The rectangular e-ink now-playing display with physical buttons and BLE media-remote support.</p><p class="risk">Exact hardware only. Frame is an early target; expect rough edges.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-frame.json"><button slot="activate">Flash HiPhi Frame</button></esp-web-install-button><span class="download-link">USB / Web Serial</span></div></article>
+      <article class="flash-card" id="rlcd-card"><div><span class="version">Alpha / ESP32-S3 reflective LCD</span><h2>Slate</h2><p>A dedicated now-playing controller for the Waveshare ESP32-S3-RLCD-4.2.</p><p class="risk">Exact hardware only. RLCD support remains an early target.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-rlcd.json"><button slot="activate">Flash HiPhi Slate</button></esp-web-install-button><span class="download-link">USB / Web Serial</span></div></article>
     </div>
-
-    <div class="info-box">
-      <strong>Chip Auto-Detection</strong><br>
-      Not sure which chip? Just try - ESP Web Tools detects the chip and warns if it doesn't match.
-    </div>
-
-    <!-- HiPhi Dial -->
-    <div class="card" id="dial-card">
-      <h2>HiPhi Dial <span class="chip-badge">Beta</span> <span class="chip-badge">ESP32-S3</span></h2>
-      <p class="description">
-        The round touchscreen controller with rotary input, WiFi playback
-        control, and optional BLE media-remote support.
-      </p>
-      <div class="flash-section">
-        <esp-web-install-button manifest="manifest-s3.json">
-          <button slot="activate">Update HiPhi Dial</button>
-          <span slot="unsupported">Not supported</span>
-          <span slot="not-allowed">HTTPS required</span>
-        </esp-web-install-button>
-        <span class="version-info" id="s3-version">Loading...</span>
-      </div>
-      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
-      <div class="steps">
-        <strong>Steps:</strong>
-        <ol>
-          <li>Turn on the device (power slider towards USB-C port)</li>
-          <li>Connect via USB-C</li>
-          <li>Click "Flash HiPhi Dial" and select the serial port</li>
-          <li>Wait ~30 seconds for flashing to complete</li>
-        </ol>
-        <p class="port-tip"><strong>Port name:</strong> macOS: <code>cu.usbmodem*</code> · Linux: <code>ttyACM0</code> · Windows: <code>COM*</code></p>
-        <p class="port-tip"><strong>Trouble connecting?</strong> Flip the USB-C cable 180° - one orientation connects to the ESP32-S3, the other to an unpopulated chip.</p>
-      </div>
-    </div>
-
-    <!-- HiPhi RLCD -->
-    <div class="card" id="rlcd-card">
-      <h2>HiPhi RLCD <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 reflective LCD</span></h2>
-      <p class="description">
-        A dedicated now-playing controller for the Waveshare ESP32-S3-RLCD-4.2.
-      </p>
-      <p class="warning"><strong>Alpha firmware:</strong> RLCD support is hardware-tested, but remains an early target.</p>
-      <div class="flash-section">
-        <esp-web-install-button manifest="manifest-rlcd.json">
-          <button slot="activate">Update HiPhi RLCD Alpha</button>
-          <span slot="unsupported">Not supported</span>
-          <span slot="not-allowed">HTTPS required</span>
-        </esp-web-install-button>
-        <span class="version-info" id="rlcd-version">Loading...</span>
-      </div>
-      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
-      <div class="steps">
-        <strong>Steps:</strong>
-        <ol>
-          <li>Connect the RLCD to your computer over USB-C</li>
-          <li>Click "Flash HiPhi RLCD" and select its serial port</li>
-          <li>Wait for flashing and the reflective display to start</li>
-          <li>Connect to <code>hiphi-rlcd-setup</code> to configure Wi-Fi</li>
-        </ol>
-      </div>
-    </div>
-
-    <!-- HiPhi Frame -->
-    <div class="card" id="frame-card">
-      <h2>HiPhi Frame <span class="chip-badge">Alpha</span> <span class="chip-badge">ESP32-S3 e-ink</span></h2>
-      <p class="description">
-        The rectangular e-ink now-playing display with physical buttons and BLE media-remote support.
-      </p>
-      <p class="warning"><strong>Alpha firmware:</strong> Frame has not completed the same current hardware regression coverage as Dial. Install for early testing and expect rough edges.</p>
-      <div class="flash-section">
-        <esp-web-install-button manifest="manifest-frame.json">
-          <button slot="activate">Update HiPhi Frame Alpha</button>
-          <span slot="unsupported">Not supported</span>
-          <span slot="not-allowed">HTTPS required</span>
-        </esp-web-install-button>
-        <span class="version-info" id="frame-version">Loading...</span>
-      </div>
-      <p class="port-tip"><strong>Update:</strong> keeps Wi-Fi and controller settings when you decline the browser erase prompt.</p>
-      <div class="steps">
-        <strong>Steps:</strong>
-        <ol>
-          <li>Connect the Frame to your computer over USB-C</li>
-          <li>Click "Flash HiPhi Frame" and select its serial port</li>
-          <li>Wait for flashing and the first e-ink refresh to complete</li>
-          <li>Connect to <code>hiphi-frame-setup</code> to configure WiFi</li>
-        </ol>
-      </div>
-    </div>
-
-    <div class="warning">
-      <strong>First time?</strong><br>
-      HiPhi Dial creates <code>hiphi-dial-setup</code>; HiPhi Frame creates
-      <code>hiphi-frame-setup</code>; HiPhi RLCD creates <code>hiphi-rlcd-setup</code>.
-      Connect to the matching network to configure Wi-Fi.
-    </div>
-
-    <div class="requirements">
-      <h3>Requirements</h3>
-      <ul>
-        <li><strong>Browser:</strong> Chrome or Edge 89+</li>
-        <li><strong>USB cable</strong> connected to your computer</li>
-        <li><strong>Driver:</strong> <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers" target="_blank">CP210x</a> or <a href="https://www.wch-ic.com/downloads/CH341SER_ZIP.html" target="_blank">CH340</a> may be needed</li>
-      </ul>
-    </div>
-  </div>
-
+    <div class="requirements"><h2>Before connecting USB</h2><ul><li>Use desktop Chrome or Edge with Web Serial.</li><li>Use a data-capable USB cable.</li><li>Verify the exact board and revision.</li><li>Decline erase during updates to retain settings.</li></ul></div>
+  </div></main>
   <script>
     const targetFilter = document.body.dataset.targetFilter;
-    if (targetFilter === 'dial') {
-      document.getElementById('frame-card').remove();
-      document.getElementById('rlcd-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi Dial Firmware';
-    } else if (targetFilter === 'frame') {
-      document.getElementById('dial-card').remove();
-      document.getElementById('rlcd-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi Frame Firmware';
-    } else if (targetFilter === 'rlcd') {
-      document.getElementById('dial-card').remove();
-      document.getElementById('frame-card').remove();
-      document.querySelector('h1').textContent = 'Flash HiPhi RLCD Firmware';
+    const targetNames = {dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate'};
+    if (targetNames[targetFilter]) {
+      document.querySelectorAll('.flash-card').forEach(card => { if (card.id !== `${targetFilter}-card`) card.remove(); });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]}`;
     }
-
-    if (!('serial' in navigator)) {
-      document.getElementById('unsupported').style.display = 'block';
-    }
-    fetch('/firmware/version')
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('s3-version').textContent = `v${data.version}`;
-        document.getElementById('frame-version').textContent = `v${data.version}`;
-        document.getElementById('rlcd-version').textContent = `v${data.version}`;
-      })
-      .catch(() => {
-        document.getElementById('s3-version').textContent = '(bundled)';
-        document.getElementById('frame-version').textContent = '(bundled)';
-        document.getElementById('rlcd-version').textContent = '(bundled)';
-      });
-
-    // Dynamic back link: / on hosted web, /admin on bridge
-    const backLink = document.getElementById('back-link');
-    if (location.hostname !== 'roon-knob.muness.com') {
-      backLink.href = '/admin';
-      backLink.textContent = '← Back to Admin';
-    }
+    if (!('serial' in navigator)) document.getElementById('unsupported').style.display = 'block';
   </script>
-  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </body>
 </html>
