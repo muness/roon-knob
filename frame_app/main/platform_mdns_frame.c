@@ -2,6 +2,7 @@
 // Only change: device-info product name is "hiphi-frame"
 
 #include "platform/platform_mdns.h"
+#include "platform/platform_mdns_endpoint.h"
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -77,17 +78,28 @@ bool platform_mdns_discover_base_url(char *out, size_t len) {
     bool found = false;
     char url[128] = {0};
     for (mdns_result_t *r = results; r; r = r->next) {
-        if (!found && txt_find_base(r, url, sizeof(url))) {
-            ESP_LOGI(TAG, "Found base TXT: %s", url);
-            found = true;
-        }
-        if (!found && r->addr && r->port &&
-            r->addr->addr.type == ESP_IPADDR_TYPE_V4) {
-            char ip_str[16];
-            snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
-            snprintf(url, sizeof(url), "http://%s:%u", ip_str, r->port);
-            ESP_LOGI(TAG, "Using IP:port: %s", url);
-            found = true;
+        if (!found) {
+            char resolved_ip[16] = {0};
+            for (mdns_ip_addr_t *addr = r->addr; addr; addr = addr->next) {
+                if (addr->addr.type == ESP_IPADDR_TYPE_V4) {
+                    snprintf(resolved_ip, sizeof(resolved_ip), IPSTR,
+                             IP2STR(&addr->addr.u_addr.ip4));
+                    break;
+                }
+            }
+            if (!resolved_ip[0] && r->hostname) {
+                platform_mdns_resolve_local(r->hostname, resolved_ip,
+                                             sizeof(resolved_ip));
+            }
+
+            char txt_base[128] = {0};
+            txt_find_base(r, txt_base, sizeof(txt_base));
+            if (platform_mdns_build_bridge_url(url, sizeof(url), resolved_ip,
+                                                r->port, txt_base)) {
+                ESP_LOGI(TAG, "Selected bridge endpoint: %s%s", url,
+                         resolved_ip[0] ? " (resolved IPv4)" : " (TXT fallback)");
+                found = true;
+            }
         }
     }
     mdns_query_results_free(results);

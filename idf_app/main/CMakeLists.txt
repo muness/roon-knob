@@ -43,6 +43,7 @@ set(SRC_FILES
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_mdns_endpoint.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
 )

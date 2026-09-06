@@ -266,6 +266,12 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror \
             -Icommon tests/test_rk_cfg.c -o /tmp/test-rk-cfg
           /tmp/test-rk-cfg
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Icommon \
+            tests/test_platform_mdns_endpoint.c \
+            common/platform/platform_mdns_endpoint.c \
+            -o /tmp/test-platform-mdns-endpoint
+          /tmp/test-platform-mdns-endpoint
           cc -std=c11 -Wall -Wextra -Werror \
             -Icomponents/rk_ble_hid_host/include \
             tests/test_rk_ble_hid_usage.c \

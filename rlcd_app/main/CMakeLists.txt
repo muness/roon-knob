@@ -25,6 +25,7 @@ set(SRC_FILES
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_mdns_endpoint.c"
     "../../common/platform/platform_task.c"
     "../../common/platform/platform_time.c"
     "../../frame_app/main/captive_portal.c"
