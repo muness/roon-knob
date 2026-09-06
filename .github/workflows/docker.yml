@@ -952,6 +952,7 @@ jobs:
               web/flash-pr.html > "pr-preview/${page}"
             python3 scripts/check_flash_manifest.py "pr-preview/${manifest}" --assets-dir pr-preview
           done
+          cp -R web/assets pr-preview/assets
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1102,6 +1103,7 @@ jobs:
       - name: Prepare gh-pages content
         run: |
           mkdir -p gh-pages-build
+          cp -R web/assets gh-pages-build/assets
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             CHANNEL_LABEL=" Beta"
             CHANNEL_NOTICE='<div class="warning"><strong>Pre-release firmware</strong><br>Beta and Alpha builds are opt-in test builds. They are not delivered by automatic OTA updates; return here to install a newer test build.</div>'
