@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Flash HiPhi Firmware · PR #252</title>
+  <link rel="stylesheet" href="./assets/styles.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body class="flash-shell" data-target-filter="rlcd">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container nav-wrap">
+    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <nav class="site-nav" aria-label="Primary"><a href="https://hiphi.audio/controllers.html">Controllers</a><a href="https://hiphi.audio/getting-started.html">Get started</a><a href="https://hiphi.audio/mcp.html">UHC + MCP</a><a class="nav-flash" aria-current="page" href="/">Firmware center</a></nav>
+  </div></header>
+  <main class="flash-main" id="main"><div class="container">
+    <a class="flash-breadcrumb" href="/">← Firmware center</a>
+    <div class="pr-banner"><strong>PR #252 preview build</strong><span>This is unreleased code for testing. <a href="https://github.com/muness/roon-knob/pull/252" target="_blank" rel="noreferrer">View PR →</a></span><div class="preview-meta"><div><b>Built:</b> <time datetime="2026-09-06T14:36:54Z">2026-09-06T14:36:54Z</time> UTC</div><div><b>Commit:</b> <a href="https://github.com/muness/roon-knob/commit/e72c8283aec66336523d5befac112faf0a9058b5" target="_blank" rel="noreferrer"><code>e72c8283aec6</code></a> <span id="preview-subject" data-subject-b64="Zml4KHdlYik6IHJlc3RvcmUgSGlQaGkgZmlybXdhcmUgcGFnZSBzdHlsaW5n"></span></div><div><b>Build:</b> <a href="https://github.com/muness/roon-knob/actions/runs/34039493051" target="_blank" rel="noreferrer">run #34039493051</a>, attempt 1 · merge ref <code>1e6431849153</code></div></div></div>
+    <div class="flash-intro"><div><p class="context-line">PR #252 preview</p><h1>Match the model before flashing.</h1></div><p>Test this exact unreleased build over USB. Keep your settings by declining the erase prompt.</p></div>
+    <div class="unsupported" id="unsupported"><strong>This browser cannot flash over USB.</strong> Open this page in desktop Chrome or Edge.</div>
+    <div class="callout"><p><strong>Chip auto-detection:</strong> ESP Web Tools detects the chip and warns if it does not match. Cancel if the identified board is not the exact model below.</p></div>
+    <div class="flash-list">
+      <article class="flash-card" id="dial-card"><div><span class="version">PR #252 / ESP32-S3</span><h2>Dial</h2><p class="hardware">Waveshare ESP32-S3-Knob-Touch-LCD-1.8</p><p>The round touchscreen controller with rotary input, Wi-Fi playback control, and optional BLE media-remote support.</p><p class="risk">Decline the browser erase prompt to retain Wi-Fi and controller settings.</p><details><summary><strong>Flash steps</strong></summary><ol><li>Turn on the device with the power slider toward USB-C.</li><li>Connect a data-capable USB-C cable.</li><li>Select the port only when the browser identifies the ESP32-S3.</li><li>Wait for flashing and reboot to complete.</li></ol></details></div><div class="flash-action"><esp-web-install-button manifest="manifest-s3-1e643184915379e479041c9c50523cd7776864e6-34039493051-1.json"><button slot="activate">Flash HiPhi Dial</button></esp-web-install-button><span class="download-link">PR #252</span></div></article>
+      <article class="flash-card" id="frame-card"><div><span class="version">PR #252 / ESP32-S3 e-ink</span><h2>Frame</h2><p>The rectangular e-ink now-playing display with physical buttons and BLE media-remote support.</p><p class="risk">Exact hardware only; this is an early preview build.</p></div><div class="flash-action"><esp-web-install-button manifest="manifest-frame-1e643184915379e479041c9c50523cd7776864e6-34039493051-1.json"><button slot="activate">Flash HiPhi Frame</button></esp-web-install-button><span class="download-link">PR #252</span></div></article>
+      <article class="flash-card" id="rlcd-card"><div><span class="version">PR #252 / ESP32-S3 reflective LCD</span><h2>Slate</h2><p>A dedicated now-playing controller for the Waveshare ESP32-S3-RLCD-4.2.</p><p class="risk">Exact hardware only; this is an early preview build.</p></div><div class="flash-action"><esp-web-install-button manifest="manifest-rlcd-1e643184915379e479041c9c50523cd7776864e6-34039493051-1.json"><button slot="activate">Flash HiPhi Slate</button></esp-web-install-button><span class="download-link">PR #252</span></div></article>
+    </div>
+    <div class="requirements"><h2>Preview install rules</h2><ul><li>Use desktop Chrome or Edge and a data cable.</li><li>Verify the exact board before flashing.</li><li>Decline erase to retain settings.</li><li>Stop if the browser reports a different chip.</li></ul></div>
+  </div></main>
+  <script>
+    const targetFilter = document.body.dataset.targetFilter;
+    const targetNames = {dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate'};
+    if (targetNames[targetFilter]) {
+      document.querySelectorAll('.flash-card').forEach(card => { if (card.id !== `${targetFilter}-card`) card.remove(); });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]}`;
+    }
+    if (!('serial' in navigator)) document.getElementById('unsupported').style.display = 'block';
+  </script>
+</body>
+</html>
