@@ -214,49 +214,52 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config page");
 
-    controller_config_snapshot_t snapshot = {0};
-    if (!controller_config_snapshot(&snapshot)) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Settings are unavailable");
+    /* Keep request scratch storage off the small HTTP server task stack. */
+    struct connection_render {
+        controller_config_snapshot_t snapshot;
+        controller_connection_t connection;
+        rk_wifi_portal_scan_t scan;
+        char wifi_html[1024], scan_options[4096];
+        char summary[96], details[384], escaped_details[2304], escaped_summary[576], status[3072];
+    } *render = heap_caps_calloc(1, sizeof(*render), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!render) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
-    const rk_cfg_t *cfg = &snapshot.value;
-
+    if (!controller_config_snapshot(&render->snapshot)) {
+        free(render);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Settings are unavailable");
+        return ESP_FAIL;
+    }
+    const rk_cfg_t *cfg = &render->snapshot.value;
     const char *current = cfg->bridge_base[0] ? cfg->bridge_base : "(mDNS auto-discovery)";
-
-    controller_connection_t connection;
-    bridge_client_connection_snapshot(&connection);
-    const char *status_class = controller_connection_ready(&connection) ? "status-ok" : "status-warn";
-    struct connection_render {
-        char summary[96], details[384], escaped_details[2304], escaped_summary[576], status[3072];
-    } *render = heap_caps_malloc(sizeof(*render), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!render) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory"); return ESP_FAIL; }
+    bridge_client_connection_snapshot(&render->connection);
+    const char *status_class = controller_connection_ready(&render->connection) ? "status-ok" : "status-warn";
     bridge_client_connection_status(render->summary, sizeof(render->summary), render->details, sizeof(render->details));
     html_escape(render->summary, render->escaped_summary, sizeof(render->escaped_summary));
     html_escape(render->details, render->escaped_details, sizeof(render->escaped_details));
     snprintf(render->status, sizeof(render->status), "%s<details><summary>Connection details</summary>%s</details>",
              render->escaped_summary, render->escaped_details);
 
-    char wifi_html[1024] = "";
     size_t wifi_pos = 0;
     for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
         char escaped_ssid[192];
         html_escape(cfg->wifi[i].ssid, escaped_ssid, sizeof(escaped_ssid));
         int written = snprintf(
-            wifi_html + wifi_pos, sizeof(wifi_html) - wifi_pos,
+            render->wifi_html + wifi_pos, sizeof(render->wifi_html) - wifi_pos,
             "<div class='wifi-entry'><span>%d. %s</span>"
             "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;padding:0;'>"
             "<input type='hidden' name='idx' value='%d'>"
             "<input type='submit' value='Remove' class='btn-sm btn-clear'>"
             "</form></div>",
             i + 1, escaped_ssid, i);
-        if (written < 0 || (size_t)written >= sizeof(wifi_html) - wifi_pos) {
+        if (written < 0 || (size_t)written >= sizeof(render->wifi_html) - wifi_pos) {
             break;
         }
         wifi_pos += (size_t)written;
     }
     if (wifi_pos == 0) {
-        snprintf(wifi_html, sizeof(wifi_html),
+        snprintf(render->wifi_html, sizeof(render->wifi_html),
                  "<div class='wifi-entry'><em>No saved networks</em></div>");
     }
 
@@ -267,13 +270,11 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
         httpd_query_key_value(query, "scan", scan_value,
                               sizeof(scan_value)) == ESP_OK &&
         strcmp(scan_value, "again") == 0;
-    rk_wifi_portal_scan_t scan = {0};
-    rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
-    char scan_options[4096] = {0};
-    rk_wifi_portal_render_options(&scan, scan_options, sizeof(scan_options));
+    rk_wifi_portal_scan_prepare(&render->scan, scan_again_requested);
+    rk_wifi_portal_render_options(&render->scan, render->scan_options, sizeof(render->scan_options));
 
     // Build HTML with current values, saved networks, and bridge status.
-    const size_t html_size = 12288;
+    const size_t html_size = 16384;
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
@@ -283,9 +284,9 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     }
 
     snprintf(html, html_size, HTML_CONFIG, current, status_class, render->status,
-             wifi_html, rk_wifi_portal_scan_placeholder(&scan), scan_options,
+             render->wifi_html, rk_wifi_portal_scan_placeholder(&render->scan), render->scan_options,
              cfg->bridge_base,
-             rk_wifi_portal_scan_should_refresh(&scan)
+             rk_wifi_portal_scan_should_refresh(&render->scan)
                  ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
 
     httpd_resp_set_type(req, "text/html");
@@ -518,7 +519,7 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
     size_t result_count = rk_ble_hid_host_scan_results_copy(
         results, RK_BLE_HID_HOST_MAX_RESULTS, &scan_generation);
 
-    const size_t html_size = 12288;
+    const size_t html_size = 16384;
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {

@@ -1160,18 +1160,22 @@ bool bridge_client_execute_command(const controller_command_t *command) {
 
     if (command->kind == CONTROLLER_COMMAND_PREVIOUS_ZONE ||
         command->kind == CONTROLLER_COMMAND_NEXT_ZONE) {
-        bridge_zone_t zones[BRIDGE_CLIENT_MAX_ZONES];
-        const int count = bridge_client_get_zones(zones, BRIDGE_CLIENT_MAX_ZONES);
-        if (count < 2) return false;
-        char current[sizeof(zones[0].id)] = {};
-        (void)bridge_client_get_current_zone_id(current, sizeof(current));
-        int index = 0;
-        for (int i = 0; i < count; ++i) {
-            if (strcmp(zones[i].id, current) == 0) { index = i; break; }
+        char next_id[MAX_ZONE_NAME] = {0};
+        lock_state();
+        const int count = s_state.zone_count;
+        if (count >= 2) {
+            int index = 0;
+            for (int i = 0; i < count; ++i) {
+                if (strcmp(s_state.zones[i].id, s_state.runtime_zone_id) == 0) {
+                    index = i;
+                    break;
+                }
+            }
+            const int delta = command->kind == CONTROLLER_COMMAND_NEXT_ZONE ? 1 : -1;
+            rk_strlcpy(next_id, s_state.zones[(index + delta + count) % count].id, sizeof(next_id));
         }
-        const int delta = command->kind == CONTROLLER_COMMAND_NEXT_ZONE ? 1 : -1;
-        const int next = (index + delta + count) % count;
-        return bridge_client_set_zone(zones[next].id);
+        unlock_state();
+        return next_id[0] && bridge_client_set_zone(next_id);
     }
 
     bridge_command_context_t context;

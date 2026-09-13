@@ -145,4 +145,17 @@ static void test_partial_api_success_preserves_backoff(void) {
         clock_ms = s_connection.next_attempt_ms;
     }
 }
-int main(void) { test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+static void test_zone_cycle_wraps_without_copying_inventory(void) {
+    reset("http://192.168.1.2:8088", true);
+    s_state.zone_count = 2;
+    strcpy(s_state.zones[0].id, "roon:a"); strcpy(s_state.zones[0].name, "A");
+    strcpy(s_state.zones[1].id, "roon:b"); strcpy(s_state.zones[1].name, "B");
+    strcpy(s_state.runtime_zone_id, "roon:a"); s_state.runtime_zone_pinned = true;
+    controller_command_t command = {.kind = CONTROLLER_COMMAND_PREVIOUS_ZONE};
+    assert(bridge_client_execute_command(&command));
+    assert(strcmp(s_state.runtime_zone_id, "roon:b") == 0);
+    command.kind = CONTROLLER_COMMAND_NEXT_ZONE;
+    assert(bridge_client_execute_command(&command));
+    assert(strcmp(s_state.runtime_zone_id, "roon:a") == 0);
+}
+int main(void) { test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
