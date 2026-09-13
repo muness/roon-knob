@@ -263,13 +263,22 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
 static esp_err_t root_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config form");
 
-    controller_config_snapshot_t snapshot = {0};
-    if (!config_snapshot(&snapshot)) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Settings are unavailable");
+    struct request_scratch {
+        controller_config_snapshot_t snapshot;
+        rk_wifi_portal_scan_t scan;
+        char options[4096];
+    } *scratch = calloc(1, sizeof(*scratch));
+    if (!scratch) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
-    const rk_cfg_t *cfg = &snapshot.value;
+    if (!config_snapshot(&scratch->snapshot)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Settings are unavailable");
+        free(scratch);
+        return ESP_FAIL;
+    }
+    const rk_cfg_t *cfg = &scratch->snapshot.value;
 
     char query[32] = {0};
     char scan_value[8] = {0};
@@ -278,10 +287,8 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         httpd_query_key_value(query, "scan", scan_value,
                               sizeof(scan_value)) == ESP_OK &&
         strcmp(scan_value, "again") == 0;
-    rk_wifi_portal_scan_t scan = {0};
-    rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
-    char options[4096] = {0};
-    rk_wifi_portal_render_options(&scan, options, sizeof(options));
+    rk_wifi_portal_scan_prepare(&scratch->scan, scan_again_requested);
+    rk_wifi_portal_render_options(&scratch->scan, scratch->options, sizeof(scratch->options));
 
     httpd_resp_set_type(req, "text/html");
     static const char options_marker[] = "<!--WIFI_OPTIONS-->";
@@ -296,9 +303,9 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 
     if (options_at) {
         httpd_resp_sendstr_chunk(req,
-                                 rk_wifi_portal_scan_placeholder(&scan));
+                                 rk_wifi_portal_scan_placeholder(&scratch->scan));
         httpd_resp_sendstr_chunk(req, "</option>");
-        httpd_resp_sendstr_chunk(req, options);
+        httpd_resp_sendstr_chunk(req, scratch->options);
     }
 
     const char *after_scan = options_at
@@ -328,12 +335,13 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         httpd_resp_sendstr_chunk(req, "</div>");
     }
 
-    if (rk_wifi_portal_scan_should_refresh(&scan)) {
+    if (rk_wifi_portal_scan_should_refresh(&scratch->scan)) {
         httpd_resp_sendstr_chunk(req, RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT);
     }
 
     httpd_resp_sendstr_chunk(req, closing ? closing : "");
     httpd_resp_send_chunk(req, NULL, 0);
+    free(scratch);
     return ESP_OK;
 }
 

@@ -139,7 +139,7 @@ static bool select_picker_entry(void) {
 
     bridge_zone_selection_result_t result =
         bridge_client_select_zone_value(selected_id);
-    if (result.found && result.became_operational) {
+    if (result.found && result.became_ready) {
         controller_presentation_set_network_status(NULL);
     }
     (void)hide_picker(CONTROLLER_INTERACTION_CONTEXT_MEDIA);

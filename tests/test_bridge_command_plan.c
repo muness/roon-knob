@@ -5,9 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
-static bridge_command_context_t context(bool operational) {
+static bridge_command_context_t context(bool ready) {
     bridge_command_context_t value = {
-        .operational = operational,
+        .ready = ready,
         .zone_id = "zone-living",
         .volume = -20.0f,
         .volume_min = -80.0f,
@@ -18,7 +18,7 @@ static bridge_command_context_t context(bool operational) {
 }
 
 static void test_simple_commands(void) {
-    bridge_command_context_t ctx = context(false);
+    bridge_command_context_t ctx = context(true);
     bridge_command_plan_t plan;
 
     controller_command_t command =
@@ -57,7 +57,7 @@ static void test_volume_readiness_noop_and_clamp(void) {
     assert(bridge_command_plan_build(&command, &ctx, &plan));
     assert(!plan.accepted);
     assert(!plan.updates_volume);
-    assert(plan.rejection_feedback == BRIDGE_COMMAND_FEEDBACK_CONNECTING);
+    assert(plan.rejection_feedback == BRIDGE_COMMAND_FEEDBACK_NOT_READY);
     assert(plan.json[0] == '\0');
 
     command = controller_command_adjust_volume(0);
@@ -67,7 +67,7 @@ static void test_volume_readiness_noop_and_clamp(void) {
     assert(!plan.updates_volume);
     assert(plan.json[0] == '\0');
 
-    ctx.operational = true;
+    ctx.ready = true;
     command = controller_command_adjust_volume(3);
     assert(bridge_command_plan_build(&command, &ctx, &plan));
     assert(plan.accepted);
@@ -120,12 +120,24 @@ static void test_fail_closed_and_bounded_output(void) {
     controller_command_t toggle =
         controller_command_make(CONTROLLER_COMMAND_TOGGLE_PLAYBACK);
     assert(bridge_command_plan_build(&toggle, &ctx, &plan));
-    assert(strcmp(plan.json,
-                  "{\"zone_id\":\"\",\"action\":\"play_pause\"}") == 0);
-    assert(strlen(plan.json) < BRIDGE_COMMAND_JSON_CAPACITY);
+    assert(!plan.accepted && !plan.json[0]);
 }
 
+static void test_all_commands_share_readiness(void) {
+    bridge_command_context_t ctx = context(false);
+    controller_command_kind_t kinds[] = {CONTROLLER_COMMAND_TOGGLE_PLAYBACK,
+        CONTROLLER_COMMAND_NEXT_TRACK, CONTROLLER_COMMAND_PREVIOUS_TRACK,
+        CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS};
+    for (size_t i=0; i<sizeof(kinds)/sizeof(kinds[0]); ++i) {
+        controller_command_t command = controller_command_make(kinds[i]);
+        command.volume_steps = 1;
+        bridge_command_plan_t plan;
+        assert(bridge_command_plan_build(&command,&ctx,&plan));
+        assert(!plan.accepted && !plan.json[0]);
+    }
+}
 int main(void) {
+    test_all_commands_share_readiness();
     test_simple_commands();
     test_volume_readiness_noop_and_clamp();
     test_fail_closed_and_bounded_output();

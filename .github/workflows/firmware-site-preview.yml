@@ -94,7 +94,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./site-preview
           destination_dir: pr/${{ github.event.pull_request.number }}/site
-          keep_files: true
+          keep_files: false
           cname: firmware.hiphi.audio
 
       - name: Verify deployed site preview

@@ -34,8 +34,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install runtime test dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y libcjson-dev
+
       - name: Test shared configuration contracts
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -Icommon tests/test_controller_connection.c common/controller_connection.c -o /tmp/test-controller-connection
+          /tmp/test-controller-connection
+          scripts/test_connection_runtime.sh
+          python3 tests/test_firmware_stack_audit.py
+          python3 tests/test_firmware_artifact_cache.py
+          python3 tests/test_prune_firmware_previews.py
+          python3 tests/test_connection_web_status.py
+          python3 tests/test_pr_index.py
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Iframe_app/main \
             tests/test_frame_power_policy.c \
@@ -352,13 +363,35 @@ jobs:
 
   build-idf:
     name: build-idf
+    needs: test-shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target dial --directory firmware-cache/dial
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/dial
+          key: firmware-v1-dial-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target dial --directory firmware-cache/dial; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get version from tag or CMakeLists
+        if: steps.reuse.outputs.reused != 'true'
         id: version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -370,6 +403,7 @@ jobs:
           echo "Building firmware version: $VERSION"
 
       - name: Inject version into CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.version.outputs.version }}")/' idf_app/CMakeLists.txt
           grep PROJECT_VER idf_app/CMakeLists.txt
@@ -380,6 +414,7 @@ jobs:
       # changes reuse prior object compilation while a distinct SHA key saves the
       # updated cache after each successful build.
       - name: Restore ESP-IDF compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache
@@ -388,12 +423,14 @@ jobs:
             ${{ runner.os }}-esp-idf-v5.5.5-ccache-
 
       - name: Restore Dial managed components
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: idf_app/managed_components
           key: ${{ runner.os }}-esp-idf-v5.5.5-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
 
       - name: Build with ESP-IDF
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -423,6 +460,7 @@ jobs:
             grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig;
             grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig;
             grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_dial.elf --output build/stack-audit.json --enforce-dial;
             grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig;
             grep -F "/components/esp_hid/" build/compile_commands.json;
             grep -F "/generated/nimble_hidh.c" build/compile_commands.json;
@@ -430,8 +468,6 @@ jobs:
             ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
             grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map;
             ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map;
-            cp build/hiphi_dial.bin build/roon_knob.bin;
-            cmp build/hiphi_dial.bin build/roon_knob.bin;
             esptool.py --chip esp32s3 merge_bin
             -o ../hiphi_dial_merged.bin
             --flash_mode dio --flash_freq 80m --flash_size 16MB
@@ -442,38 +478,67 @@ jobs:
             ccache --show-stats
 
       - name: Verify merged Dial flash image
+        if: steps.reuse.outputs.reused != 'true'
         run: |
-          # Compatibility aliases remain byte-identical while bridge/release
-          # consumers migrate to the HiPhi Dial artifact names.
-          cp hiphi_dial_merged.bin roon_knob_merged.bin
-          cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin
-          cmp hiphi_dial_merged.bin roon_knob_merged.bin
-          ls -la idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin \
-            hiphi_dial_merged.bin roon_knob_merged.bin
+          ls -la idf_app/build/hiphi_dial.bin hiphi_dial_merged.bin
 
-      - name: Upload ESP32-S3 artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: esp32s3-firmware
-          path: |
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            idf_app/build/stack-audit.json
             idf_app/build/hiphi_dial.bin
-            idf_app/build/roon_knob.bin
             idf_app/build/bootloader/bootloader.bin
             idf_app/build/partition_table/partition-table.bin
             idf_app/build/ota_data_initial.bin
             hiphi_dial_merged.bin
-            roon_knob_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target dial --directory firmware-cache/dial
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/dial
+          key: firmware-v1-dial-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload HiPhi Dial artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-dial-firmware
+          path: firmware-cache/dial/
           retention-days: 30
 
   build-frame:
     name: build-frame
+    needs: test-shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target frame --directory firmware-cache/frame
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/frame
+          key: firmware-v1-frame-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target frame --directory firmware-cache/frame; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
         id: frame-version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -485,11 +550,13 @@ jobs:
           echo "Building HiPhi Frame firmware version: $VERSION"
 
       - name: Inject version into Frame CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.frame-version.outputs.version }}")/' frame_app/CMakeLists.txt
           grep PROJECT_VER frame_app/CMakeLists.txt
 
       - name: Restore Frame compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache-frame
@@ -498,12 +565,14 @@ jobs:
             ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-
 
       - name: Restore Frame managed components
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: frame_app/managed_components
           key: ${{ runner.os }}-esp-idf-v5.5.5-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
 
       - name: Build HiPhi Frame with ESP-IDF
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -517,6 +586,7 @@ jobs:
             set -e;
             ccache --zero-stats;
             idf.py build;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_frame.elf --output build/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
@@ -553,33 +623,70 @@ jobs:
             ccache --show-stats
 
       - name: Verify merged HiPhi Frame image
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           # ESP-IDF boots QIO configurations from a DIO image header, then the
           # second-stage bootloader enables quad mode.
           test "$(od -An -tu1 -j2 -N1 hiphi_frame_merged.bin | tr -d ' ')" = "2"
           ls -la frame_app/build/hiphi_frame.bin hiphi_frame_merged.bin
 
-      - name: Upload HiPhi Frame artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: hiphi-frame-firmware
-          path: |
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            frame_app/build/stack-audit.json
             frame_app/build/hiphi_frame.bin
             frame_app/build/bootloader/bootloader.bin
             frame_app/build/partition_table/partition-table.bin
             frame_app/build/ota_data_initial.bin
             hiphi_frame_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target frame --directory firmware-cache/frame
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/frame
+          key: firmware-v1-frame-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload HiPhi Frame artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-frame-firmware
+          path: firmware-cache/frame/
           retention-days: 30
 
   build-rlcd:
     name: build-rlcd
+    needs: test-shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target rlcd --directory firmware-cache/rlcd
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/rlcd
+          key: firmware-v1-rlcd-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target rlcd --directory firmware-cache/rlcd; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
         id: rlcd-version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -590,11 +697,13 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Inject version into RLCD CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.rlcd-version.outputs.version }}")/' rlcd_app/CMakeLists.txt
           grep PROJECT_VER rlcd_app/CMakeLists.txt
 
       - name: Restore RLCD compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache-rlcd
@@ -603,12 +712,14 @@ jobs:
             ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-
 
       - name: Restore RLCD managed components
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: rlcd_app/managed_components
           key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
 
       - name: Build HiPhi RLCD with ESP-IDF
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -622,13 +733,13 @@ jobs:
             set -e;
             ccache --zero-stats;
             idf.py build;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_rlcd_42.elf --output build/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_SPIRAM=y" sdkconfig;
             grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
             grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
-            cp build/hiphi_rlcd_42.bin ../hiphi_rlcd.bin;
             esptool.py --chip esp32s3 merge_bin
             -o ../hiphi_rlcd_merged.bin
             --flash_mode dio --flash_freq 80m --flash_size 16MB
@@ -640,39 +751,77 @@ jobs:
             ccache --show-stats
 
       - name: Verify merged HiPhi RLCD image
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           test "$(od -An -tu1 -j2 -N1 hiphi_rlcd_merged.bin | tr -d ' ')" = "2"
-          ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd.bin hiphi_rlcd_merged.bin
+          ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd_merged.bin
+
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            rlcd_app/build/stack-audit.json
+            rlcd_app/build/hiphi_rlcd_42.bin
+            rlcd_app/build/bootloader/bootloader.bin
+            rlcd_app/build/partition_table/partition-table.bin
+            rlcd_app/build/ota_data_initial.bin
+            hiphi_rlcd_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target rlcd --directory firmware-cache/rlcd
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/rlcd
+          key: firmware-v1-rlcd-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload HiPhi RLCD artifact
         uses: actions/upload-artifact@v6
         with:
           name: hiphi-rlcd-firmware
-          path: |
-            rlcd_app/build/hiphi_rlcd_42.bin
-            rlcd_app/build/bootloader/bootloader.bin
-            rlcd_app/build/partition_table/partition-table.bin
-            rlcd_app/build/ota_data_initial.bin
-            hiphi_rlcd.bin
-            hiphi_rlcd_merged.bin
+          path: firmware-cache/rlcd/
           retention-days: 30
 
   build-atom:
     name: build-atom-s3-joystick
+    needs: test-shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target atom --directory firmware-cache/atom
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/atom
+          key: firmware-v1-atom-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target atom --directory firmware-cache/atom; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
         id: atom-version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' atom_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Inject version into Atom CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.atom-version.outputs.version }}")/' atom_app/CMakeLists.txt
       - name: Restore Atom compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache-atom
@@ -680,11 +829,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-esp-idf-v5.5.5-atom-ccache-
       - name: Restore Atom managed components
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: atom_app/managed_components
           key: ${{ runner.os }}-esp-idf-v5.5.5-atom-components-${{ hashFiles('atom_app/dependencies.lock') }}
       - name: Build AtomS3 Joystick with ESP-IDF
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -698,6 +849,7 @@ jobs:
             set -e;
             ccache --zero-stats;
             idf.py build;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_joy.elf --output build/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y" sdkconfig;
@@ -711,33 +863,71 @@ jobs:
             esptool.py --chip esp32s3 merge_bin -o ../hiphi_joy_merged.bin --flash_mode dio --flash_freq 80m --flash_size 8MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_joy.bin;
             esptool.py --chip esp32s3 image_info ../hiphi_joy_merged.bin;
             ccache --show-stats
-      - name: Upload AtomS3 Joystick artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: hiphi-joy-firmware
-          path: |
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            atom_app/build/stack-audit.json
             atom_app/build/hiphi_joy.bin
             atom_app/build/bootloader/bootloader.bin
             atom_app/build/partition_table/partition-table.bin
             atom_app/build/ota_data_initial.bin
             hiphi_joy_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target atom --directory firmware-cache/atom
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/atom
+          key: firmware-v1-atom-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload AtomS3 Joystick artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-joy-firmware
+          path: firmware-cache/atom/
           retention-days: 30
 
   build-tough:
     name: build-m5-tough
+    needs: test-shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target tough --directory firmware-cache/tough
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/tough
+          key: firmware-v1-tough-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target tough --directory firmware-cache/tough; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
         id: tough-version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' tough_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Inject version into Tough CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.tough-version.outputs.version }}")/' tough_app/CMakeLists.txt
       - name: Restore Tough compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache-tough
@@ -745,11 +935,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-esp-idf-v5.5.5-tough-ccache-
       - name: Restore Tough managed components
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: tough_app/managed_components
           key: ${{ runner.os }}-esp-idf-v5.5.5-tough-components-${{ hashFiles('tough_app/dependencies.lock') }}
       - name: Build M5Stack Tough with pure ESP-IDF
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -763,6 +955,7 @@ jobs:
             set -e;
             ccache --zero-stats;
             idf.py build;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_tough.elf --output build/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y" sdkconfig;
@@ -777,20 +970,35 @@ jobs:
             esptool.py --chip esp32 image_info build/bootloader/bootloader.bin;
             esptool.py --chip esp32 image_info build/hiphi_tough.bin;
             ccache --show-stats
-      - name: Upload M5Stack Tough artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: hiphi-tough-firmware
-          path: |
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            tough_app/build/stack-audit.json
             tough_app/build/hiphi_tough.bin
             tough_app/build/bootloader/bootloader.bin
             tough_app/build/partition_table/partition-table.bin
             tough_app/build/ota_data_initial.bin
             hiphi_tough_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target tough --directory firmware-cache/tough
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/tough
+          key: firmware-v1-tough-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload M5Stack Tough artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-tough-firmware
+          path: firmware-cache/tough/
           retention-days: 30
 
   build-m5-betas:
     name: build-m5-beta-${{ matrix.target }}
+    needs: test-shared
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -817,14 +1025,37 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target m5 --directory firmware-cache/m5-${{ matrix.target }} --variant ${{ matrix.target }}
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/m5-${{ matrix.target }}
+          key: firmware-v1-m5-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target m5 --directory firmware-cache/m5-${{ matrix.target }} --variant ${{ matrix.target }}; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
         id: m5-beta-version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' m5_beta_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Inject version into M5 beta CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.m5-beta-version.outputs.version }}")/' m5_beta_app/CMakeLists.txt
       - name: Restore M5 beta compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache-m5-beta-${{ matrix.target }}
@@ -832,11 +1063,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-${{ matrix.target }}-ccache-
       - name: Restore M5 beta managed components
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: m5_beta_app/managed_components
           key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-components-${{ hashFiles('m5_beta_app/dependencies.lock') }}
       - name: Build exact M5 beta profile
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -852,6 +1085,7 @@ jobs:
             idf.py -B build-${{ matrix.target }}
             -D HIPHI_M5_TARGET=${{ matrix.target }}
             -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig build;
+            python3 ../scripts/audit_firmware_stack.py build-${{ matrix.target }}/hiphi_${{ matrix.target }}.elf --output build-${{ matrix.target }}/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" build-${{ matrix.target }}/sdkconfig;
             grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" build-${{ matrix.target }}/sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_${{ matrix.flash_size }}=y" build-${{ matrix.target }}/sdkconfig;
@@ -873,36 +1107,74 @@ jobs:
             0x10000 build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin;
             esptool.py --chip esp32s3 image_info ../hiphi_${{ matrix.target }}_merged.bin;
             ccache --show-stats
-      - name: Upload M5 beta artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: hiphi-m5-beta-${{ matrix.target }}
-          path: |
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            m5_beta_app/build-${{ matrix.target }}/stack-audit.json
             m5_beta_app/build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin
             m5_beta_app/build-${{ matrix.target }}/bootloader/bootloader.bin
             m5_beta_app/build-${{ matrix.target }}/partition_table/partition-table.bin
             m5_beta_app/build-${{ matrix.target }}/ota_data_initial.bin
             hiphi_${{ matrix.target }}_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target m5 --directory firmware-cache/m5-${{ matrix.target }} --variant ${{ matrix.target }}
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/m5-${{ matrix.target }}
+          key: firmware-v1-m5-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload M5 beta artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-m5-beta-${{ matrix.target }}
+          path: firmware-cache/m5-${{ matrix.target }}/
           retention-days: 30
 
   build-knob-aux:
     name: build-waveshare-knob-aux-parking-image
+    needs: test-shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target aux --directory firmware-cache/aux
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/aux
+          key: firmware-v1-aux-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target aux --directory firmware-cache/aux; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
         id: knob-aux-version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' knob_aux_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Inject version into auxiliary CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.knob-aux-version.outputs.version }}")/' knob_aux_app/CMakeLists.txt
 
       - name: Restore auxiliary compiler cache
+        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache@v5
         with:
           path: .ci/ccache-knob-aux
@@ -911,6 +1183,7 @@ jobs:
             ${{ runner.os }}-esp-idf-v5.5.5-knob-aux-ccache-
 
       - name: Build auxiliary ESP32 parking firmware
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -924,6 +1197,7 @@ jobs:
             set -e;
             ccache --zero-stats;
             idf.py build;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_knob_aux_park.elf --output build/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
             grep -Fx "CONFIG_IDF_TARGET_ESP32=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y" sdkconfig;
@@ -943,15 +1217,29 @@ jobs:
             esptool.py --chip esp32 image_info build/hiphi_knob_aux_park.bin;
             ccache --show-stats
 
-      - name: Upload auxiliary parking firmware
-        uses: actions/upload-artifact@v6
-        with:
-          name: hiphi-knob-aux-parking-firmware
-          path: |
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            knob_aux_app/build/stack-audit.json
             knob_aux_app/build/hiphi_knob_aux_park.bin
             knob_aux_app/build/bootloader/bootloader.bin
             knob_aux_app/build/partition_table/partition-table.bin
             hiphi_knob_aux_park_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target aux --directory firmware-cache/aux
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/aux
+          key: firmware-v1-aux-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload auxiliary parking firmware
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-knob-aux-parking-firmware
+          path: firmware-cache/aux/
           retention-days: 30
 
   release:
@@ -969,8 +1257,8 @@ jobs:
       - name: Download ESP32-S3 firmware
         uses: actions/download-artifact@v7
         with:
-          name: esp32s3-firmware
-          path: esp32s3-artifacts
+          name: hiphi-dial-firmware
+          path: dial-artifacts
 
       - name: Download HiPhi Frame firmware
         uses: actions/download-artifact@v7
@@ -1052,16 +1340,16 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin release-assets/
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin release-assets/
-          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin release-assets/
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin release-assets/roon_knob.bin
+          cp dial-artifacts/idf_app/build/bootloader/bootloader.bin \
             release-assets/hiphi_dial_bootloader.bin
-          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+          cp dial-artifacts/idf_app/build/partition_table/partition-table.bin \
             release-assets/hiphi_dial_partition-table.bin
-          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+          cp dial-artifacts/idf_app/build/ota_data_initial.bin \
             release-assets/hiphi_dial_ota_data_initial.bin
-          cp esp32s3-artifacts/hiphi_dial_merged.bin release-assets/
-          cp esp32s3-artifacts/roon_knob_merged.bin release-assets/
+          cp dial-artifacts/hiphi_dial_merged.bin release-assets/
+          cp dial-artifacts/hiphi_dial_merged.bin release-assets/roon_knob_merged.bin
           cmp release-assets/hiphi_dial.bin release-assets/roon_knob.bin
           cmp release-assets/hiphi_dial_merged.bin \
             release-assets/roon_knob_merged.bin
@@ -1073,7 +1361,7 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin \
             release-assets/hiphi_frame_ota_data_initial.bin
           cp frame-artifacts/hiphi_frame_merged.bin release-assets/
-          cp rlcd-artifacts/hiphi_rlcd.bin release-assets/
+          cp rlcd-artifacts/rlcd_app/build/hiphi_rlcd_42.bin release-assets/hiphi_rlcd.bin
           cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin \
             release-assets/hiphi_rlcd_bootloader.bin
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin \
@@ -1208,8 +1496,8 @@ jobs:
       - name: Download Dial firmware
         uses: actions/download-artifact@v7
         with:
-          name: esp32s3-firmware
-          path: esp32s3-artifacts
+          name: hiphi-dial-firmware
+          path: dial-artifacts
 
       - name: Download Frame firmware
         uses: actions/download-artifact@v7
@@ -1320,13 +1608,13 @@ jobs:
           TOUGH_FLASH_PAGE="flash-tough-${PREVIEW_ID}.html"
 
           # Use immutable names so an older preview can never flash a newer build.
-          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_APPLICATION_FILE}"
-          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin "pr-preview/${DIAL_BOOTLOADER_FILE}"
-          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin "pr-preview/${DIAL_PARTITION_FILE}"
-          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin "pr-preview/${DIAL_OTA_DATA_FILE}"
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
-          cp esp32s3-artifacts/hiphi_dial_merged.bin "pr-preview/${DIAL_FIRMWARE_FILE}"
-          cp esp32s3-artifacts/roon_knob_merged.bin "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_APPLICATION_FILE}"
+          cp dial-artifacts/idf_app/build/bootloader/bootloader.bin "pr-preview/${DIAL_BOOTLOADER_FILE}"
+          cp dial-artifacts/idf_app/build/partition_table/partition-table.bin "pr-preview/${DIAL_PARTITION_FILE}"
+          cp dial-artifacts/idf_app/build/ota_data_initial.bin "pr-preview/${DIAL_OTA_DATA_FILE}"
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
+          cp dial-artifacts/hiphi_dial_merged.bin "pr-preview/${DIAL_FIRMWARE_FILE}"
+          cp dial-artifacts/hiphi_dial_merged.bin "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
           cmp "pr-preview/${DIAL_APPLICATION_FILE}" "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
           cmp "pr-preview/${DIAL_FIRMWARE_FILE}" "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
 
@@ -1341,7 +1629,7 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin "pr-preview/${FRAME_OTA_DATA_FILE}"
           cp frame-artifacts/hiphi_frame_merged.bin "pr-preview/${FRAME_FIRMWARE_FILE}"
 
-          cp rlcd-artifacts/hiphi_rlcd.bin "pr-preview/${RLCD_APPLICATION_FILE}"
+          cp rlcd-artifacts/rlcd_app/build/hiphi_rlcd_42.bin "pr-preview/${RLCD_APPLICATION_FILE}"
           cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin "pr-preview/${RLCD_BOOTLOADER_FILE}"
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin "pr-preview/${RLCD_PARTITION_FILE}"
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin "pr-preview/${RLCD_OTA_DATA_FILE}"
@@ -1518,6 +1806,7 @@ jobs:
           done
           python3 scripts/check_flash_manifest.py "pr-preview/${AUX_MANIFEST_FILE}" --assets-dir pr-preview
           ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL|RELEASE_CHANNEL_NAME|RELEASE_CHANNEL_NOTICE|RELEASE_LINK)\}\}' pr-preview
+          python3 scripts/build_pr_index.py pr-preview --pr "$PR_NUM" --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1526,7 +1815,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./pr-preview
           destination_dir: pr/${{ github.event.pull_request.number }}
-          keep_files: true
+          keep_files: false
           cname: firmware.hiphi.audio
 
       - name: Verify all deployed previews
@@ -1576,7 +1865,9 @@ jobs:
           done
 
           {
-            echo "dial_page_url=${PREVIEW_BASE}/flash-dial-${PREVIEW_ID}.html"
+            curl --fail --silent --show-error --location "${PREVIEW_BASE}/" -o deployed-preview/index.html
+            cmp pr-preview/index.html deployed-preview/index.html
+            echo "dial_page_url=${PREVIEW_BASE}/"
             echo "frame_page_url=${PREVIEW_BASE}/flash-frame-${PREVIEW_ID}.html"
             echo "rlcd_page_url=${PREVIEW_BASE}/flash-rlcd-${PREVIEW_ID}.html"
             echo "joy_page_url=${PREVIEW_BASE}/flash-joy-${PREVIEW_ID}.html"
@@ -1692,8 +1983,8 @@ jobs:
       - name: Download ESP32-S3 firmware
         uses: actions/download-artifact@v7
         with:
-          name: esp32s3-firmware
-          path: esp32s3-artifacts
+          name: hiphi-dial-firmware
+          path: dial-artifacts
 
       - name: Download HiPhi Frame firmware
         uses: actions/download-artifact@v7
@@ -1811,17 +2102,17 @@ jobs:
               > "gh-pages-build/$(basename "$manifest")"
           done
           cp -R web/assets gh-pages-build/assets
-          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
-          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
+          cp dial-artifacts/idf_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_dial_bootloader.bin
-          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+          cp dial-artifacts/idf_app/build/partition_table/partition-table.bin \
             gh-pages-build/hiphi_dial_partition-table.bin
-          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+          cp dial-artifacts/idf_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_dial_ota_data_initial.bin
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin gh-pages-build/
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/roon_knob.bin
           cmp gh-pages-build/hiphi_dial.bin gh-pages-build/roon_knob.bin
-          cp esp32s3-artifacts/hiphi_dial_merged.bin gh-pages-build/
-          cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/
+          cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/
+          cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/roon_knob_merged.bin
           cmp gh-pages-build/hiphi_dial_merged.bin \
             gh-pages-build/roon_knob_merged.bin
           cp frame-artifacts/hiphi_frame_merged.bin gh-pages-build/
@@ -1833,7 +2124,7 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_frame_ota_data_initial.bin
           cp rlcd-artifacts/hiphi_rlcd_merged.bin gh-pages-build/
-          cp rlcd-artifacts/hiphi_rlcd.bin gh-pages-build/
+          cp rlcd-artifacts/rlcd_app/build/hiphi_rlcd_42.bin gh-pages-build/hiphi_rlcd.bin
           cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_rlcd_bootloader.bin
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin \

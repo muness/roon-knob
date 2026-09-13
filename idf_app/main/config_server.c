@@ -89,7 +89,7 @@ static const char *HTML_CONFIG =
     "<div class='current'>"
     "<strong>Current Unified Hi-Fi Control:</strong> %s"
     "</div>"
-    "<div class='status %s'>"
+    "<div id='connection-status' class='status %s'>"
     "<strong>Status:</strong> %s"
     "</div>"
         "<h2>Saved WiFi Networks</h2>"
@@ -107,10 +107,10 @@ static const char *HTML_CONFIG =
     "<h2>Unified Hi-Fi Control Override</h2>"
     "<label>Unified Hi-Fi Control URL</label>"
     "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088' value='%s'>"
-    "<p class='hint'>Leave empty for mDNS auto-discovery. Check the HiPhi Dial display for connection progress.</p>"
+    "<p class='hint'>Leave empty to find your bridge automatically. Connection status appears above.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form>%s</body></html>";
+    "</form>%s<script>let busy=false,lastUpdate=Date.now();function unavailable(){const o=document.getElementById('connection-status');if(o){o.className='status status-warn';o.textContent='Dial unavailable - reconnecting. Last update: '+Math.floor((Date.now()-lastUpdate)/1000)+' seconds ago.';}}setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('response');const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);lastUpdate=Date.now();}else throw new Error('status missing');}catch(e){unavailable();}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>";
 
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
@@ -211,114 +211,55 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
     dst[pos] = '\0';
 }
 
-// Resolve .local hostname in URL to IP address via mDNS
-// Modifies url in place if resolution succeeds
-static void resolve_local_in_url(char *url, size_t url_len) {
-    if (!url || !url[0]) return;
-
-    // Check if URL contains .local
-    char *local_pos = strstr(url, ".local");
-    if (!local_pos) return;
-
-    // Make sure it's actually the hostname suffix (followed by : or / or end)
-    char after = local_pos[6];
-    if (after != ':' && after != '/' && after != '\0') return;
-
-    // Extract hostname: skip http://
-    const char *host_start = strstr(url, "://");
-    if (!host_start) return;
-    host_start += 3;
-
-    // Find end of hostname
-    const char *host_end = host_start;
-    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
-
-    // Extract hostname
-    size_t host_len = host_end - host_start;
-    if (host_len == 0 || host_len >= 64) return;
-
-    char hostname[64];
-    memcpy(hostname, host_start, host_len);
-    hostname[host_len] = '\0';
-
-    // Resolve via mDNS
-    char ip[16];
-    if (!platform_mdns_resolve_local(hostname, ip, sizeof(ip))) {
-        ESP_LOGW(TAG, "Could not resolve %s via mDNS", hostname);
-        return;
-    }
-
-    // Build new URL with IP instead of hostname
-    char new_url[128];
-    size_t scheme_len = host_start - url;
-    snprintf(new_url, sizeof(new_url), "%.*s%s%s", (int)scheme_len, url, ip, host_end);
-
-    // Copy back if it fits
-    if (strlen(new_url) < url_len) {
-        strcpy(url, new_url);
-        ESP_LOGI(TAG, "Resolved .local URL to: %s", url);
-    }
-}
-
-// Handler for GET / - serve the config form
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config page");
 
-    controller_config_snapshot_t snapshot = {0};
-    if (!controller_config_snapshot(&snapshot)) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Settings are unavailable");
+    /* Keep request scratch storage off the small HTTP server task stack. */
+    struct connection_render {
+        controller_config_snapshot_t snapshot;
+        controller_connection_t connection;
+        rk_wifi_portal_scan_t scan;
+        char wifi_html[1024], scan_options[4096];
+        char summary[96], details[384], escaped_details[2304], escaped_summary[576], status[3072];
+    } *render = heap_caps_calloc(1, sizeof(*render), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!render) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
-    const rk_cfg_t *cfg = &snapshot.value;
-
-    const char *current = cfg->bridge_base[0] ? cfg->bridge_base : "(mDNS auto-discovery)";
-
-    // Get bridge connection status
-    const char *status_class;
-    char status_text[64];
-    bool bridge_connected = bridge_client_is_bridge_connected();
-    int retry_count = bridge_client_get_bridge_retry_count();
-    int retry_max = bridge_client_get_bridge_retry_max();
-
-    if (bridge_connected) {
-        status_class = "status-ok";
-        snprintf(status_text, sizeof(status_text), "Connected");
-    } else if (!cfg->bridge_base[0]) {
-        status_class = "status-warn";
-        snprintf(status_text, sizeof(status_text), "Searching via mDNS...");
-    } else if (retry_count >= retry_max) {
-        status_class = "status-err";
-        snprintf(status_text, sizeof(status_text),
-                 "Unreachable - check Unified Hi-Fi Control");
-    } else if (retry_count > 0) {
-        status_class = "status-warn";
-        snprintf(status_text, sizeof(status_text), "Connecting... (%d/%d)", retry_count, retry_max);
-    } else {
-        status_class = "status-warn";
-        snprintf(status_text, sizeof(status_text), "Connecting...");
+    if (!controller_config_snapshot(&render->snapshot)) {
+        free(render);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Settings are unavailable");
+        return ESP_FAIL;
     }
+    const rk_cfg_t *cfg = &render->snapshot.value;
+    const char *current = cfg->bridge_base[0] ? cfg->bridge_base : "(mDNS auto-discovery)";
+    bridge_client_connection_snapshot(&render->connection);
+    const char *status_class = controller_connection_ready(&render->connection) ? "status-ok" : "status-warn";
+    bridge_client_connection_status(render->summary, sizeof(render->summary), render->details, sizeof(render->details));
+    html_escape(render->summary, render->escaped_summary, sizeof(render->escaped_summary));
+    html_escape(render->details, render->escaped_details, sizeof(render->escaped_details));
+    snprintf(render->status, sizeof(render->status), "%s<details><summary>Connection details</summary><div style='white-space:pre-line'>%s</div></details>",
+             render->escaped_summary, render->escaped_details);
 
-    char wifi_html[1024] = "";
     size_t wifi_pos = 0;
     for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
         char escaped_ssid[192];
         html_escape(cfg->wifi[i].ssid, escaped_ssid, sizeof(escaped_ssid));
         int written = snprintf(
-            wifi_html + wifi_pos, sizeof(wifi_html) - wifi_pos,
+            render->wifi_html + wifi_pos, sizeof(render->wifi_html) - wifi_pos,
             "<div class='wifi-entry'><span>%d. %s</span>"
             "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;padding:0;'>"
             "<input type='hidden' name='idx' value='%d'>"
             "<input type='submit' value='Remove' class='btn-sm btn-clear'>"
             "</form></div>",
             i + 1, escaped_ssid, i);
-        if (written < 0 || (size_t)written >= sizeof(wifi_html) - wifi_pos) {
+        if (written < 0 || (size_t)written >= sizeof(render->wifi_html) - wifi_pos) {
             break;
         }
         wifi_pos += (size_t)written;
     }
     if (wifi_pos == 0) {
-        snprintf(wifi_html, sizeof(wifi_html),
+        snprintf(render->wifi_html, sizeof(render->wifi_html),
                  "<div class='wifi-entry'><em>No saved networks</em></div>");
     }
 
@@ -329,29 +270,29 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
         httpd_query_key_value(query, "scan", scan_value,
                               sizeof(scan_value)) == ESP_OK &&
         strcmp(scan_value, "again") == 0;
-    rk_wifi_portal_scan_t scan = {0};
-    rk_wifi_portal_scan_prepare(&scan, scan_again_requested);
-    char scan_options[4096] = {0};
-    rk_wifi_portal_render_options(&scan, scan_options, sizeof(scan_options));
+    rk_wifi_portal_scan_prepare(&render->scan, scan_again_requested);
+    rk_wifi_portal_render_options(&render->scan, render->scan_options, sizeof(render->scan_options));
 
     // Build HTML with current values, saved networks, and bridge status.
-    const size_t html_size = 12288;
+    const size_t html_size = 16384;
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
+        free(render);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, html_size, HTML_CONFIG, current, status_class, status_text,
-             wifi_html, rk_wifi_portal_scan_placeholder(&scan), scan_options,
+    snprintf(html, html_size, HTML_CONFIG, current, status_class, render->status,
+             render->wifi_html, rk_wifi_portal_scan_placeholder(&render->scan), render->scan_options,
              cfg->bridge_base,
-             rk_wifi_portal_scan_should_refresh(&scan)
+             rk_wifi_portal_scan_should_refresh(&render->scan)
                  ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
     free(html);
+    free(render);
     return ESP_OK;
 }
 
@@ -389,11 +330,6 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
         }
 
         rk_strlcpy(bridge_base, bridge, sizeof(bridge_base));
-
-        // Resolve .local hostnames to IPs (ESP32 lwIP has issues with .local DNS)
-        if (bridge[0]) {
-            resolve_local_in_url(bridge_base, sizeof(bridge_base));
-        }
 
         message = bridge_base[0] ? "Unified Hi-Fi Control URL saved!"
                                  : "Unified Hi-Fi Control cleared! Will use mDNS.";
@@ -583,7 +519,7 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
     size_t result_count = rk_ble_hid_host_scan_results_copy(
         results, RK_BLE_HID_HOST_MAX_RESULTS, &scan_generation);
 
-    const size_t html_size = 12288;
+    const size_t html_size = 16384;
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {

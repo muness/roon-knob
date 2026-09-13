@@ -109,9 +109,7 @@
       "owner": "#163",
       "retirement": "Remove only after dual advertise/query compatibility is deployed and old consumers have migrated.",
       "path_globs": [
-        "idf_app/main/platform_mdns_idf.c",
-        "frame_app/main/platform_mdns_frame.c",
-        "tough_app/main/platform_mdns_tough.c"
+        "common/platform/platform_mdns_esp.c"
       ],
       "tokens": [
         "_roonknob"
@@ -143,6 +141,19 @@
         "roon-knob"
       ],
       "line_regex": "^roon-knob/"
+    },
+    {
+      "id": "connection-diagnostic-wire-service",
+      "category": "compatibility",
+      "owner": "#249",
+      "retirement": "Remove when the legacy DNS-SD service is retired and diagnostic documentation is updated.",
+      "path_globs": [
+        "docs/connection-recovery.md"
+      ],
+      "tokens": [
+        "_roonknob"
+      ],
+      "line_regex": "of NAS2 observed `_roonknob\\._tcp\\.local`"
     }
   ],
   "required": [
@@ -177,8 +188,8 @@
       "min_count": 3
     },
     {
-      "path": "idf_app/main/platform_mdns_idf.c",
-      "contains": "{\"product\", \"hiphi-dial\"}"
+      "path": "common/platform/platform_mdns_esp.c",
+      "contains": "{\"product\", PLATFORM_MDNS_PRODUCT}"
     },
     {
       "path": "idf_app/main/platform_log_idf.c",
@@ -195,14 +206,6 @@
     {
       "path": "web/manifest-s3.json",
       "contains": "\"path\": \"hiphi_dial.bin\""
-    },
-    {
-      "path": ".github/workflows/docker.yml",
-      "contains": "cp build/hiphi_dial.bin build/roon_knob.bin"
-    },
-    {
-      "path": ".github/workflows/docker.yml",
-      "contains": "cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin"
     },
     {
       "path": ".github/workflows/docker.yml",
@@ -230,11 +233,11 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_APPLICATION_FILE}\""
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_APPLICATION_FILE}\""
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
     },
     {
       "path": ".github/workflows/docker.yml",
@@ -246,19 +249,19 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/hiphi_dial_merged.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/roon_knob_merged.bin"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/roon_knob.bin"
     },
     {
       "path": "README.md",
@@ -273,15 +276,7 @@
       "contains": "**Click \"Flash Dial main controller\"**"
     },
     {
-      "path": "idf_app/main/platform_mdns_idf.c",
-      "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
-    },
-    {
-      "path": "frame_app/main/platform_mdns_frame.c",
-      "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
-    },
-    {
-      "path": "tough_app/main/platform_mdns_tough.c",
+      "path": "common/platform/platform_mdns_esp.c",
       "contains": "static const char *SERVICE_TYPE = \"_roonknob\";"
     },
     {
@@ -311,7 +306,7 @@
       "contains": "roon-knob"
     },
     {
-      "path": "idf_app/main/platform_mdns_idf.c",
+      "path": "common/platform/platform_mdns_esp.c",
       "contains": "{\"product\", \"roon-knob\"}"
     }
   ]

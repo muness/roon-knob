@@ -163,13 +163,15 @@ static frame_power_decision_t build_snapshot(
     }
 #endif
 
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
     *snapshot = (frame_power_snapshot_t){
         .enabled = enabled,
         // Read the PMIC only after every cheaper inhibitor has cleared.
         .power_source = FRAME_POWER_SOURCE_UNKNOWN,
         .now_ms = current_ms,
         .sleep_not_before_ms = sleep_not_before_ms,
-        .bridge_connected = bridge_client_is_bridge_connected(),
+        .bridge_connected = controller_connection_ready(&connection),
         .zone_state_known = eink_ui_power_state_known(),
         .playing = eink_ui_is_playing(),
         /* The same HTTP server serves connected settings in STA mode. Its

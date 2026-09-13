@@ -6,6 +6,7 @@
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
+#include "platform/platform_mdns_endpoint.h"
 #include "platform/platform_power.h"
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
@@ -13,6 +14,7 @@
 #include "controller_presentation.h"
 #include "controller_view.h"
 #include "controller_view_compat.h"
+#include "wifi_manager.h"
 
 #include <ctype.h>
 #include <stddef.h>
@@ -102,26 +104,6 @@ struct now_playing_state {
     char zones_sha[9];    // Zones SHA for zone list change detection
 };
 
-// Device operational state for safe volume control
-typedef enum {
-    DEVICE_STATE_BOOT,        // Hardware ready, no network
-    DEVICE_STATE_CONNECTING,  // WiFi attempting
-    DEVICE_STATE_CONNECTED,   // Network ready, zones unknown
-    DEVICE_STATE_OPERATIONAL, // Zones loaded, fully ready
-    DEVICE_STATE_RECONNECTING // Was operational, lost connection
-} device_state_t;
-
-static const char* device_state_name(device_state_t state) {
-    switch (state) {
-        case DEVICE_STATE_BOOT: return "BOOT";
-        case DEVICE_STATE_CONNECTING: return "CONNECTING";
-        case DEVICE_STATE_CONNECTED: return "CONNECTED";
-        case DEVICE_STATE_OPERATIONAL: return "OPERATIONAL";
-        case DEVICE_STATE_RECONNECTING: return "RECONNECTING";
-        default: return "UNKNOWN";
-    }
-}
-
 struct bridge_state {
     bridge_zone_t zones[MAX_ZONES];
     int zone_count;
@@ -133,41 +115,30 @@ struct bridge_state {
      */
     char runtime_zone_id[sizeof(((rk_cfg_t *)0)->zone_id)];
     bool runtime_zone_pinned;
-    bool zone_resolved;
-    bool net_connected;
 };
 
 static struct bridge_state s_state;
+static controller_connection_t s_connection;
 static os_mutex_t s_state_lock = OS_MUTEX_INITIALIZER;
 static atomic_bool s_running = ATOMIC_VAR_INIT(false);
 static atomic_uint s_worker_start_attempts = ATOMIC_VAR_INIT(0);
 static bool s_trigger_poll;
-static bool s_last_net_ok;
 static atomic_bool s_network_ready = ATOMIC_VAR_INIT(false);
-static device_state_t s_device_state = DEVICE_STATE_BOOT;  // Initial state
 static bool s_force_artwork_refresh;  // Force artwork reload on zone change
 static float s_last_known_volume = 0.0f;   // Cached volume for optimistic UI updates
 static float s_last_known_volume_min = -80.0f;  // Cached volume min for clamping
 static float s_last_known_volume_max = 0.0f;    // Cached volume max for clamping
 static float s_last_known_volume_step = 1.0f;  // Cached volume step
 static uint32_t s_artwork_generation;
-static bool s_bridge_verified = false;  // True after bridge found AND responded successfully
-static uint32_t s_last_mdns_check_ms = 0;  // Timestamp of last mDNS check
 static bool s_last_charging_state = true;  // Track charging state for config reapply
 static bool s_last_is_playing = false;     // Track play state for extended sleep polling
 static char s_last_zones_sha[9] = {0};     // Track zones SHA for zone list change detection
-#define MDNS_RECHECK_INTERVAL_MS (3600 * 1000)  // Re-check mDNS every hour if bridge stops responding
 
 // Bridge connection retry tracking (mirrors WiFi retry pattern)
-#define BRIDGE_FAIL_THRESHOLD 5  // Show recovery info after this many consecutive failures
-#define MDNS_FAIL_THRESHOLD 10   // Show recovery info after this many mDNS failures (~30s)
 #define BRIDGE_POLL_TASK_STACK_SIZE 16384
 #define BRIDGE_POLL_TASK_START_ATTEMPTS 2
 _Static_assert(BRIDGE_POLL_TASK_STACK_SIZE >= 16384,
                "bridge worker stack budget must cover response parsing");
-static int s_bridge_fail_count = 0;
-static int s_mdns_fail_count = 0;
-static char s_device_ip[16] = {0};  // Device IP for recovery messages
 
 void bridge_client_request_poll(void) {
     s_trigger_poll = true;
@@ -280,10 +251,10 @@ static bool bridge_endpoint_snapshot(char *bridge_base, size_t bridge_len,
     rk_strlcpy(bridge_base, cfg.bridge_base, bridge_len);
     rk_strlcpy(zone_id, cfg.zone_id, zone_len);
     lock_state();
-    /* Once zones have been resolved, runtime selection is authoritative for
-     * every endpoint. Using persisted cfg.zone_id here lets artwork and
-     * now-playing race a zone change and refer to different zones. */
-    if (s_state.zone_resolved && s_state.runtime_zone_id[0]) {
+    if (strcmp(s_connection.selected, cfg.bridge_base) == 0 && s_connection.resolved) {
+        rk_strlcpy(bridge_base, s_connection.endpoint, bridge_len);
+    }
+    if (s_state.runtime_zone_pinned) {
         rk_strlcpy(zone_id, s_state.runtime_zone_id, zone_len);
     }
     unlock_state();
@@ -303,8 +274,7 @@ static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(const platform_power_snapshot_t *power);
 static void bridge_poll_thread(void *arg);
-static bool host_is_valid(const char *url);
-static void maybe_update_bridge_base(void);
+static bool update_connection(void);
 static void commit_discovered_endpoint_on_ui(void *arg);
 static void post_ui_update(const struct now_playing_state *state);
 static void post_ui_status(bool online);
@@ -314,8 +284,6 @@ static void post_ui_message_copy(char *msg_copy);
 static void strip_trailing_slashes(char *url);
 static void post_ui_status_copy(bool *status_copy);
 static void post_ui_zone_name_copy(char *name_copy);
-static void reset_bridge_fail_count(void);
-static void increment_bridge_fail_count(void);
 
 static void ui_update_cb(void *arg) {
     controller_media_view_t *view = arg;
@@ -334,17 +302,6 @@ static void ui_update_cb(void *arg) {
 
     controller_view_compat_apply_media(view);
     free(view);
-}
-
-static bool host_is_valid(const char *url) {
-    // Accept any URL with a non-empty hostname (IP or mDNS name like rooExtend.localdomain)
-    if (!url || !url[0]) return false;
-    const char *host = url;
-    const char *scheme = strstr(url, "://");
-    if (scheme) host = scheme + 3;
-    const char *end = host;
-    while (*end && *end != ':' && *end != '/') ++end;
-    return (end > host);
 }
 
 static void ui_status_cb(void *arg) {
@@ -410,7 +367,8 @@ static void commit_discovered_endpoint_on_ui(void *arg) {
     controller_config_snapshot_t committed;
     controller_config_write_result_t result =
         controller_config_set_endpoint_if_current(
-            &commit->token, commit->discovered, true, true, &committed);
+            &commit->token, commit->discovered, true,
+            !commit->token.from_mdns, &committed);
     atomic_store_explicit(&s_discovered_endpoint_commit_pending, false,
                           memory_order_release);
 
@@ -593,8 +551,12 @@ static void post_ui_zone_name(const char *name) {
 static void wait_for_poll_interval(const platform_power_snapshot_t *power) {
     // Use longer delay when display is sleeping, on battery, or bridge unreachable
     uint32_t delay_ms;
-    if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
-        delay_ms = POLL_DELAY_BRIDGE_ERROR_MS;  // Slow down when bridge unreachable
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
+    if (!controller_connection_ready(&connection)) {
+        uint64_t now = platform_millis();
+        uint64_t remaining = connection.next_attempt_ms > now ? connection.next_attempt_ms - now : 1000;
+        delay_ms = (uint32_t)(remaining > 60000 ? 60000 : remaining);
     } else if (platform_display_is_sleeping()) {
         // When sleeping AND zone not playing, use extended poll interval from config
         rk_cfg_t cfg;
@@ -632,61 +594,112 @@ static void strip_trailing_slashes(char *url) {
     }
 }
 
-static void maybe_update_bridge_base(void) {
-    // Only use mDNS when no bridge URL is configured.
-    // This respects user-set URLs (via web config) and allows Clear to trigger fresh discovery.
+/* Probe without publishing zones or changing durable selection. */
+static bool probe_connection(const char *base, controller_connection_t *connection) {
+    char url[256], zone[64] = {0}, knob_id[16];
+    bridge_client_get_current_zone_id(zone, sizeof(zone));
+    platform_http_get_knob_id(knob_id, sizeof(knob_id));
+    int written = snprintf(url, sizeof(url), "%s/zones?knob_id=%s", base, knob_id);
+    if (written <= 0 || (size_t)written >= sizeof(url)) return false;
+    char *response = NULL; size_t response_len = 0;
+    int result = platform_http_get(url, &response, &response_len);
+    bool valid = false, selected = false; int count = -1;
+    if (result == 0 && response) {
+        cJSON *root = cJSON_ParseWithLength(response, response_len);
+        cJSON *zones = cJSON_GetObjectItemCaseSensitive(root, "zones");
+        valid = cJSON_IsObject(root) && cJSON_IsArray(zones);
+        if (valid) {
+            count = cJSON_GetArraySize(zones);
+            cJSON *item;
+            cJSON_ArrayForEach(item, zones) {
+                cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "zone_id");
+                if (zone[0] && cJSON_IsString(id) && strcmp(zone, id->valuestring) == 0)
+                    selected = true;
+            }
+        }
+        cJSON_Delete(root);
+    }
+    platform_http_free(response);
+    controller_connection_api(connection, valid, count, selected, platform_millis());
+    return valid;
+}
+
+static bool update_connection(void) {
     controller_config_endpoint_token_t token;
-    if (!controller_config_capture_endpoint_token(&token)) {
-        return;
+    if (!controller_config_capture_endpoint_token(&token)) return false;
+    controller_connection_t next;
+    lock_state(); next = s_connection; unlock_state();
+    controller_connection_select(&next, token.bridge_base,
+                                 token.from_mdns || !token.bridge_base[0], token.generation);
+    uint64_t now = platform_millis();
+    next.offline = false;
+    char selected_host[64] = {0};
+    bool literal = platform_mdns_url_host(token.bridge_base, selected_host, sizeof(selected_host), NULL) &&
+                   strspn(selected_host, "0123456789.") == strlen(selected_host);
+    bool needs_discovery = next.automatic || !literal;
+    controller_connection_attempt_phase_t phase = controller_connection_attempt_phase(
+        &next, needs_discovery, platform_mdns_is_ready(), now);
+    switch (phase) {
+    case CONNECTION_WAIT_NETWORK:
+    case CONNECTION_WAIT_DISCOVERY_INIT:
+    case CONNECTION_WAIT_RETRY:
+        /* Waiting for prerequisites is not a failed attempt and consumes no retry. */
+        return false;
+    case CONNECTION_ATTEMPT_READY:
+        break;
     }
-    bool need_discovery = token.bridge_base[0] == '\0';
-
-    if (!need_discovery) {
-        s_mdns_fail_count = 0;
-        return;  // Bridge URL already configured - don't overwrite with mDNS
+    platform_mdns_observation_t observed = {0};
+    if (next.automatic) platform_mdns_observe_bridge(token.bridge_base, &observed);
+    next.discovered = observed.seen;
+    next.ambiguous = observed.ambiguous;
+    next.mdns_resolution_failed = false;
+    next.resolved = false;
+    next.resolver = CONNECTION_RESOLVER_NONE;
+    next.endpoint[0] = 0;
+    const char *identity = observed.seen ? observed.identity : token.bridge_base;
+    if (!next.ambiguous && observed.endpoint[0]) {
+        rk_strlcpy(next.endpoint, observed.endpoint, sizeof(next.endpoint));
+        next.resolved = true; next.resolver = CONNECTION_RESOLVER_MDNS;
+    } else if (!next.ambiguous && identity[0]) {
+        bool dns = false, failed = false;
+        next.resolved = platform_mdns_resolve_base_url(identity, next.endpoint,
+                                sizeof(next.endpoint), &dns, &failed);
+        next.mdns_resolution_failed = failed;
+        if (next.resolved) {
+            char host[64];
+            bool literal = platform_mdns_url_host(identity, host, sizeof(host), NULL) &&
+                           strspn(host, "0123456789.") == strlen(host);
+            next.resolver = literal ? CONNECTION_RESOLVER_LITERAL :
+                            dns ? CONNECTION_RESOLVER_DNS : CONNECTION_RESOLVER_MDNS;
+        }
     }
-
-    // Bridge is empty - try mDNS discovery
-    char discovered[sizeof(token.bridge_base)];
-    bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
-
-    if (mdns_ok && host_is_valid(discovered)) {
-        // The endpoint must still be clear when this asynchronous lookup
-        // completes. A manual set/clear advances the token and wins.
-        LOGI("mDNS discovered bridge: %s", discovered);
-        strip_trailing_slashes(discovered);
+    bool valid = next.resolved && probe_connection(next.endpoint, &next);
+    if (!valid) controller_connection_api(&next, false, -1, false, platform_millis());
+    if (valid) next.next_attempt_ms = platform_millis() + 60000;
+    else controller_connection_schedule(&next, platform_millis(), false);
+    /* Reject all evidence as well as writes if a manual decision raced I/O. */
+    controller_config_endpoint_token_t current;
+    if (!controller_config_capture_endpoint_token(&current) || current.generation != token.generation)
+        return false;
+    lock_state(); s_connection = next; unlock_state();
+    char summary[128];
+    controller_connection_summary(&next, summary, sizeof(summary));
+    LOGI("Connection: %s (discovered=%d resolver=%d zones=%d retry_in_ms=%llu)",
+         summary, next.discovered, next.resolver, next.zone_count,
+         (unsigned long long)(next.next_attempt_ms - next.observed_ms));
+    if (valid && observed.seen && !observed.ambiguous &&
+        strcmp(token.bridge_base, observed.identity) != 0) {
         bool expected = false;
-        if (!atomic_compare_exchange_strong_explicit(
-                &s_discovered_endpoint_commit_pending, &expected, true,
-                memory_order_acq_rel, memory_order_acquire)) {
-            LOGI("Discovered endpoint commit already pending");
-            return;
+        if (atomic_compare_exchange_strong_explicit(&s_discovered_endpoint_commit_pending,
+                &expected, true, memory_order_acq_rel, memory_order_acquire)) {
+            s_discovered_endpoint_commit.token = token;
+            rk_strlcpy(s_discovered_endpoint_commit.discovered, observed.identity,
+                       sizeof(s_discovered_endpoint_commit.discovered));
+            if (!platform_task_post_to_ui(commit_discovered_endpoint_on_ui, &s_discovered_endpoint_commit))
+                atomic_store_explicit(&s_discovered_endpoint_commit_pending, false, memory_order_release);
         }
-        s_discovered_endpoint_commit.token = token;
-        rk_strlcpy(s_discovered_endpoint_commit.discovered, discovered,
-                   sizeof(s_discovered_endpoint_commit.discovered));
-        if (!platform_task_post_to_ui(commit_discovered_endpoint_on_ui,
-                                      &s_discovered_endpoint_commit)) {
-            atomic_store_explicit(&s_discovered_endpoint_commit_pending, false,
-                                  memory_order_release);
-            LOGW("Could not queue discovered endpoint commit");
-        }
-        return;
     }
-
-    // mDNS failed - try compile-time default fallback
-    if (CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0') {
-        LOGI("mDNS discovery failed, using fallback: %s", CONFIG_RK_DEFAULT_BRIDGE_BASE);
-        // The fallback remains derived runtime behavior: it is intentionally
-        // not persisted, so future mDNS discovery can still replace it.
-    } else {
-        // No fallback configured - increment mDNS failure counter
-        if (s_mdns_fail_count < MDNS_FAIL_THRESHOLD) {
-            s_mdns_fail_count++;
-        }
-        LOGW("mDNS discovery failed (%d/%d) - use Settings to configure bridge",
-             s_mdns_fail_count, MDNS_FAIL_THRESHOLD);
-    }
+    return valid;
 }
 
 static bool fetch_now_playing(struct now_playing_state *state,
@@ -875,6 +888,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
 
     if (platform_http_get(url, &resp, &resp_len) != 0 || !resp) {
         LOGI("refresh_zone_label: HTTP request failed");
+        parse_zones_from_response(NULL);
         platform_http_free(resp);
         return false;
     }
@@ -896,7 +910,6 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     }
     LOGI("refresh_zone_label: Parsed %d zones", s_state.zone_count);
     if (s_state.zone_count > 0) {
-        bool found = false;
         for (int i = 0; i < s_state.zone_count; ++i) {
             bridge_zone_t *entry = &s_state.zones[i];
             if (prefer_zone_id && preferred_zone_id[0] &&
@@ -905,7 +918,6 @@ static bool refresh_zone_label(bool prefer_zone_id) {
                            sizeof(selected_zone_id));
                 rk_strlcpy(zone_label_copy, entry->name,
                            sizeof(zone_label_copy));
-                found = true;
                 break;
             }
             if (!preferred_zone_id[0]) {
@@ -913,16 +925,9 @@ static bool refresh_zone_label(bool prefer_zone_id) {
                            sizeof(selected_zone_id));
                 rk_strlcpy(zone_label_copy, entry->name,
                            sizeof(zone_label_copy));
-                found = true;
                 persist_zone = true;
                 break;
             }
-        }
-        if (!found && s_state.zone_count > 0) {
-            bridge_zone_t *entry = &s_state.zones[0];
-            rk_strlcpy(selected_zone_id, entry->id, sizeof(selected_zone_id));
-            rk_strlcpy(zone_label_copy, entry->name, sizeof(zone_label_copy));
-            persist_zone = true;
         }
         success = zone_label_copy[0] != '\0';
     }
@@ -949,23 +954,13 @@ static bool refresh_zone_label(bool prefer_zone_id) {
             return false;
         }
     }
-    bool became_operational = false;
     lock_state();
     rk_strlcpy(s_state.zone_label, zone_label_copy, sizeof(s_state.zone_label));
     rk_strlcpy(s_state.runtime_zone_id, selected_zone_id,
                sizeof(s_state.runtime_zone_id));
     s_state.runtime_zone_pinned = true;
-    s_state.zone_resolved = true;
-    if (s_device_state != DEVICE_STATE_OPERATIONAL) {
-        LOGI("Device state: %s -> OPERATIONAL (zones loaded)",
-             device_state_name(s_device_state));
-        s_device_state = DEVICE_STATE_OPERATIONAL;
-        became_operational = true;
-    }
+    s_connection.selected_zone_available = true;
     unlock_state();
-    if (became_operational) {
-        post_ui_network_status("");
-    }
     LOGI("refresh_zone_label: Selected zone '%s', posting to UI",
          zone_label_copy);
     post_ui_zone_name(zone_label_copy);
@@ -973,32 +968,32 @@ static bool refresh_zone_label(bool prefer_zone_id) {
 }
 
 static void parse_zones_from_response(const char *resp) {
-    if (!resp) {
-        return;
-    }
+    char selected[64] = {0};
+    bridge_client_get_current_zone_id(selected, sizeof(selected));
+    cJSON *root = resp ? cJSON_Parse(resp) : NULL;
+    cJSON *zones = cJSON_GetObjectItemCaseSensitive(root, "zones");
+    bool valid = cJSON_IsObject(root) && cJSON_IsArray(zones);
+    bool available = false;
     lock_state();
     s_state.zone_count = 0;
-    const char *cursor = resp;
-    while (s_state.zone_count < MAX_ZONES && (cursor = strstr(cursor, "\"zone_id\""))) {
-        char id[MAX_ZONE_NAME] = {0};
-        char name[MAX_ZONE_NAME] = {0};
-        const char *next = extract_json_string(cursor, "\"zone_id\"", id, sizeof(id));
-        if (!next) {
-            break;
+    if (valid) {
+        cJSON *item;
+        cJSON_ArrayForEach(item, zones) {
+            cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "zone_id");
+            cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "zone_name");
+            if (!cJSON_IsString(id) || !cJSON_IsString(name)) continue;
+            if (selected[0] && strcmp(selected, id->valuestring) == 0) available = true;
+            if (s_state.zone_count == MAX_ZONES) continue;
+            bridge_zone_t *entry = &s_state.zones[s_state.zone_count++];
+            rk_strlcpy(entry->id, id->valuestring, sizeof(entry->id));
+            rk_strlcpy(entry->name, name->valuestring, sizeof(entry->name));
         }
-        const char *after_name = extract_json_string(next, "\"zone_name\"", name, sizeof(name));
-        if (!after_name) {
-            cursor = next;
-            continue;
-        }
-        rk_strlcpy(s_state.zones[s_state.zone_count].id, id,
-                   sizeof(s_state.zones[0].id));
-        rk_strlcpy(s_state.zones[s_state.zone_count].name, name,
-                   sizeof(s_state.zones[0].name));
-        s_state.zone_count++;
-        cursor = after_name;
     }
+    controller_connection_api(&s_connection, valid,
+        valid ? cJSON_GetArraySize(zones) : -1, available, platform_millis());
+    if (!valid) controller_connection_schedule(&s_connection, platform_millis(), false);
     unlock_state();
+    cJSON_Delete(root);
 }
 
 static const char *extract_json_string(const char *start, const char *key, char *out, size_t len) {
@@ -1077,22 +1072,28 @@ static void bridge_poll_thread(void *arg) {
             continue;
         }
 
-        // Only run mDNS discovery if:
-        // 1. We haven't verified a working bridge yet, OR
-        // 2. It's been over an hour since last check (in case bridge IP changed)
-        uint32_t now_ms = (uint32_t)platform_millis();
-        bool should_check_mdns = !s_bridge_verified ||
-            (now_ms - s_last_mdns_check_ms > MDNS_RECHECK_INTERVAL_MS);
-        if (should_check_mdns) {
-            maybe_update_bridge_base();
-            s_last_mdns_check_ms = now_ms;
+        controller_connection_t connection;
+        bridge_client_connection_snapshot(&connection);
+        bool was_ready = controller_connection_ready(&connection);
+        bool checked = update_connection();
+        bridge_client_connection_snapshot(&connection);
+        if (checked && connection.reachable) refresh_zone_label(true);
+        bridge_client_connection_snapshot(&connection);
+        bool ready = controller_connection_ready(&connection);
+        bool ok = ready && fetch_now_playing(&state, &power);
+        if (ok) {
+            lock_state();
+            controller_connection_api(&s_connection, true, s_state.zone_count, true, platform_millis());
+            s_connection.failures = 0;
+            unlock_state();
+        } else if (ready) {
+            lock_state();
+            controller_connection_api(&s_connection, false, -1, false, platform_millis());
+            controller_connection_schedule(&s_connection, platform_millis(), false);
+            unlock_state();
         }
-
-        if (!s_state.zone_resolved) {
-            refresh_zone_label(true);
-        }
-        bool ok = fetch_now_playing(&state, &power);
-        post_ui_status(ok);
+        bridge_client_connection_snapshot(&connection);
+        post_ui_status(controller_connection_ready(&connection));
 
         // Track play state for extended sleep polling
         if (ok) {
@@ -1108,17 +1109,14 @@ static void bridge_poll_thread(void *arg) {
         // Always check charging state (works in AP mode too)
         check_charging_state_change(power.external_power);
 
-        // Handle bridge connection status (mirrors WiFi retry pattern)
+        // Present the connection owner's current evidence.
         if (ok) {
             // Bridge connected - show now playing data
             post_ui_update(&state);
-            if (!s_last_net_ok) {
-                // Just connected - clear status, restore zone name, mark verified
-                LOGI("Hi-Fi Control connection established");
-                reset_bridge_fail_count();
+            if (!was_ready) {
+                // Readiness was established - restore the playback presentation.
                 post_ui_message("Hi-Fi Control: Connected");
                 post_ui_network_status("");
-                s_bridge_verified = true;
                 // Restore zone name (was cleared during error display)
                 lock_state();
                 char zone_name_copy[MAX_ZONE_NAME];
@@ -1129,97 +1127,16 @@ static void bridge_poll_thread(void *arg) {
                     post_ui_zone_name(zone_name_copy);
                 }
             }
-        } else if (!ok && s_last_net_ok) {
-            // Just lost connection to bridge - start retry tracking
-            LOGW("Hi-Fi Control connection lost; retrying");
-            // line1=main content (bottom), line2=header (top)
-            increment_bridge_fail_count();
-            s_bridge_verified = false;
-            char line1_msg[64];
-            snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
-                     s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
-            post_ui_zone_name("");  // Clear zone name to avoid overlay
-            post_ui_connectivity_update(line1_msg, "Testing Hi-Fi Control");
-            post_ui_network_status("Hi-Fi Control: Offline - retrying...");
-        } else if (!ok && !s_last_net_ok) {
-            // Still trying to connect - check if we have a bridge URL
-            rk_cfg_t cfg;
-            bool has_bridge = bridge_config_snapshot(&cfg) &&
-                              (cfg.bridge_base[0] != '\0' ||
-                               CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0');
-
-            if (!has_bridge) {
-                // No bridge URL - searching via mDNS
-                // Show retry progress or recovery info based on failure count
-                char line1_msg[64];
-                char line2_msg[64];
-                char status_msg[96];
-                post_ui_zone_name("");  // Clear zone name to avoid overlay
-
-                if (s_mdns_fail_count >= MDNS_FAIL_THRESHOLD) {
-                    // mDNS search exhausted - show recovery info
-                    if (s_device_ip[0]) {
-                        snprintf(line1_msg, sizeof(line1_msg), "http://%s", s_device_ip);
-                        snprintf(line2_msg, sizeof(line2_msg), "Set Hi-Fi Control at:");
-                        snprintf(status_msg, sizeof(status_msg),
-                                 "mDNS failed. Set Hi-Fi Control at http://%s", s_device_ip);
-                    } else {
-                        snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
-                        snprintf(line2_msg, sizeof(line2_msg), "Hi-Fi Control Not Found");
-                        snprintf(status_msg, sizeof(status_msg),
-                                 "mDNS failed. Configure Hi-Fi Control in Settings.");
-                    }
-                    post_ui_connectivity_update(line1_msg, line2_msg);
-                    post_ui_network_status(status_msg);
-                } else {
-                    // Still searching - show progress
-                    snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
-                             s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
-                    post_ui_connectivity_update(line1_msg,
-                                                "Finding Hi-Fi Control");
-                    snprintf(status_msg, sizeof(status_msg), "mDNS: %d/%d",
-                             s_mdns_fail_count + 1, MDNS_FAIL_THRESHOLD);
-                    post_ui_network_status(status_msg);
-                }
-            } else {
-                // Bridge URL configured but not responding - show retry progress
-                increment_bridge_fail_count();
-                char line1_msg[64];
-                char status_msg[96];
-
-                if (s_bridge_fail_count >= BRIDGE_FAIL_THRESHOLD) {
-                    // Max retries reached - show recovery info with device IP
-                    // line1=main content (bottom), line2=header (top)
-                    char line2_msg[64];
-                    if (s_device_ip[0]) {
-                        snprintf(line1_msg, sizeof(line1_msg),
-                                 "http://%s", s_device_ip);
-                        snprintf(line2_msg, sizeof(line2_msg), "Update Hi-Fi Control at:");
-                        snprintf(status_msg, sizeof(status_msg),
-                                 "Hi-Fi Control unreachable after %d attempts", BRIDGE_FAIL_THRESHOLD);
-                    } else {
-                        snprintf(line1_msg, sizeof(line1_msg), "Use zone menu > Settings");
-                        snprintf(line2_msg, sizeof(line2_msg), "Hi-Fi Control Unreachable");
-                        snprintf(status_msg, sizeof(status_msg),
-                                 "Hi-Fi Control unreachable. Check Settings.");
-                    }
-                    post_ui_zone_name("");  // Clear zone name to avoid overlay
-                    post_ui_connectivity_update(line1_msg, line2_msg);
-                    post_ui_network_status(status_msg);
-                } else {
-                    // Still retrying - show progress on main display
-                    // line1=main content (bottom), line2=header (top)
-                    snprintf(line1_msg, sizeof(line1_msg), "Attempt %d of %d...",
-                             s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
-                    post_ui_zone_name("");  // Clear zone name to avoid overlay
-                    post_ui_connectivity_update(line1_msg, "Testing Hi-Fi Control");
-                    snprintf(status_msg, sizeof(status_msg), "Hi-Fi Control: Retry %d/%d",
-                             s_bridge_fail_count, BRIDGE_FAIL_THRESHOLD);
-                    post_ui_network_status(status_msg);
-                }
-            }
+        } else {
+            controller_connection_t status;
+            bridge_client_connection_snapshot(&status);
+            char title[128], action[128], device_ip[16] = {0};
+            wifi_mgr_get_ip(device_ip, sizeof(device_ip));
+            controller_connection_recovery(&status, device_ip, title, sizeof(title), action, sizeof(action));
+            post_ui_zone_name("Hi-Fi Control");
+            post_ui_connectivity_update(title, action);
+            post_ui_network_status(status.reachable ? "" : "Retrying automatically");
         }
-        s_last_net_ok = ok;
         wait_for_poll_interval(&power);
     }
 }
@@ -1234,7 +1151,7 @@ void bridge_client_start(void) {
     platform_task_init();
     lock_state();
     strncpy(s_state.zone_label,
-            cfg.zone_id[0] ? cfg.zone_id : "Choose a zone in device controls",
+            "Connection setup",
             sizeof(s_state.zone_label) - 1);
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     char initial_zone_label[MAX_ZONE_NAME];
@@ -1260,18 +1177,22 @@ bool bridge_client_execute_command(const controller_command_t *command) {
 
     if (command->kind == CONTROLLER_COMMAND_PREVIOUS_ZONE ||
         command->kind == CONTROLLER_COMMAND_NEXT_ZONE) {
-        bridge_zone_t zones[BRIDGE_CLIENT_MAX_ZONES];
-        const int count = bridge_client_get_zones(zones, BRIDGE_CLIENT_MAX_ZONES);
-        if (count < 2) return false;
-        char current[sizeof(zones[0].id)] = {};
-        (void)bridge_client_get_current_zone_id(current, sizeof(current));
-        int index = 0;
-        for (int i = 0; i < count; ++i) {
-            if (strcmp(zones[i].id, current) == 0) { index = i; break; }
+        char next_id[MAX_ZONE_NAME] = {0};
+        lock_state();
+        const int count = s_state.zone_count;
+        if (count >= 2) {
+            int index = 0;
+            for (int i = 0; i < count; ++i) {
+                if (strcmp(s_state.zones[i].id, s_state.runtime_zone_id) == 0) {
+                    index = i;
+                    break;
+                }
+            }
+            const int delta = command->kind == CONTROLLER_COMMAND_NEXT_ZONE ? 1 : -1;
+            rk_strlcpy(next_id, s_state.zones[(index + delta + count) % count].id, sizeof(next_id));
         }
-        const int delta = command->kind == CONTROLLER_COMMAND_NEXT_ZONE ? 1 : -1;
-        const int next = (index + delta + count) % count;
-        return bridge_client_set_zone(zones[next].id);
+        unlock_state();
+        return next_id[0] && bridge_client_set_zone(next_id);
     }
 
     bridge_command_context_t context;
@@ -1280,9 +1201,13 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     if (!bridge_config_snapshot(&cfg)) {
         return false;
     }
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
+    char current_zone[64];
+    bridge_client_get_current_zone_id(current_zone, sizeof(current_zone));
     lock_state();
-    context.operational = s_device_state == DEVICE_STATE_OPERATIONAL;
-    context.zone_id = cfg.zone_id;
+    context.ready = controller_connection_ready(&connection);
+    context.zone_id = current_zone;
     context.volume = s_last_known_volume;
     context.volume_min = s_last_known_volume_min;
     context.volume_max = s_last_known_volume_max;
@@ -1299,7 +1224,7 @@ bool bridge_client_execute_command(const controller_command_t *command) {
 
     static const char *const feedback_text[] = {
         [BRIDGE_COMMAND_FEEDBACK_NONE] = NULL,
-        [BRIDGE_COMMAND_FEEDBACK_CONNECTING] = "Connecting...",
+        [BRIDGE_COMMAND_FEEDBACK_NOT_READY] = "Not ready",
         [BRIDGE_COMMAND_FEEDBACK_PLAYBACK_FAILED] = "Play/pause failed",
         [BRIDGE_COMMAND_FEEDBACK_NEXT_FAILED] = "Next track failed",
         [BRIDGE_COMMAND_FEEDBACK_PREVIOUS_FAILED] = "Previous track failed",
@@ -1309,7 +1234,11 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     if (!plan.accepted) {
         if (plan.rejection_feedback > BRIDGE_COMMAND_FEEDBACK_NONE &&
             plan.rejection_feedback <= BRIDGE_COMMAND_FEEDBACK_VOLUME_FAILED) {
-            post_ui_message(feedback_text[plan.rejection_feedback]);
+            if (plan.rejection_feedback == BRIDGE_COMMAND_FEEDBACK_NOT_READY) {
+                char summary[128];
+                controller_connection_summary(&connection, summary, sizeof(summary));
+                post_ui_message(summary);
+            } else post_ui_message(feedback_text[plan.rejection_feedback]);
         }
         return false;
     }
@@ -1354,26 +1283,17 @@ void bridge_client_set_network_ready(bool ready) {
         }
     }
 
-    const char *network_status;
+    if (ready == was_ready) return;
     lock_state();
-    if (ready) {
-        LOGI("Device state: %s -> CONNECTED (network ready)", device_state_name(s_device_state));
-        s_device_state = DEVICE_STATE_CONNECTED;  // Transition: WiFi connected, zones not yet loaded
-        network_status = "Loading zones...";
-        s_trigger_poll = true;  // Trigger immediate poll when network becomes ready
-    } else {
-        // Transition to RECONNECTING if we were operational, otherwise back to BOOT
-        device_state_t new_state = (s_device_state == DEVICE_STATE_OPERATIONAL)
-            ? DEVICE_STATE_RECONNECTING
-            : DEVICE_STATE_BOOT;
-        LOGI("Device state: %s -> %s (network lost)", device_state_name(s_device_state), device_state_name(new_state));
-        s_device_state = new_state;
-        network_status = new_state == DEVICE_STATE_RECONNECTING
-            ? "Reconnecting..."
-            : "Connecting...";
-    }
+    s_connection.offline = !ready;
+    s_connection.reachable = false;
+    s_connection.zones_current = false;
+    s_connection.next_attempt_ms = 0;
+    s_trigger_poll = true;
     unlock_state();
-    post_ui_network_status(network_status);
+    char summary[128];
+    bridge_client_connection_status(summary, sizeof(summary), NULL, 0);
+    post_ui_network_status(summary);
 }
 
 const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height) {
@@ -1489,38 +1409,9 @@ int bridge_client_stream_artwork(const char *image_key, int width, int height,
 }
 
 bool bridge_client_is_ready_for_art_mode(void) {
-    lock_state();
-    bool ready = s_state.zone_count > 0;
-    unlock_state();
-    return ready;
-}
-
-// Bridge retry tracking functions
-static void reset_bridge_fail_count(void) {
-    s_bridge_fail_count = 0;
-}
-
-static void increment_bridge_fail_count(void) {
-    if (s_bridge_fail_count < BRIDGE_FAIL_THRESHOLD) {
-        s_bridge_fail_count++;
-    }
-}
-
-void bridge_client_set_device_ip(const char *ip) {
-    if (ip && ip[0]) {
-        strncpy(s_device_ip, ip, sizeof(s_device_ip) - 1);
-        s_device_ip[sizeof(s_device_ip) - 1] = '\0';
-    } else {
-        s_device_ip[0] = '\0';
-    }
-}
-
-int bridge_client_get_bridge_retry_count(void) {
-    return s_bridge_fail_count;
-}
-
-int bridge_client_get_bridge_retry_max(void) {
-    return BRIDGE_FAIL_THRESHOLD;
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
+    return controller_connection_ready(&connection);
 }
 
 bool bridge_client_get_bridge_url(char *buf, size_t len) {
@@ -1538,10 +1429,19 @@ bool bridge_client_get_bridge_url(char *buf, size_t len) {
     return has_bridge;
 }
 
-bool bridge_client_is_bridge_connected(void) {
-    return s_last_net_ok;
+void bridge_client_connection_snapshot(controller_connection_t *out) {
+    controller_config_endpoint_token_t token;
+    lock_state(); *out = s_connection; unlock_state();
+    if (controller_config_capture_endpoint_token(&token))
+        controller_connection_select(out, token.bridge_base,
+            token.from_mdns || !token.bridge_base[0], token.generation);
+    else memset(out, 0, sizeof(*out));
+    controller_connection_expire(out, platform_millis());
+    out->offline = !atomic_load_explicit(&s_network_ready, memory_order_acquire);
+    if (out->offline) {
+        out->reachable = false; out->zones_current = false;
+    }
 }
-
 bool bridge_client_is_bridge_mdns(void) {
     rk_cfg_t cfg;
     return bridge_config_snapshot(&cfg) && cfg.bridge_from_mdns != 0;
@@ -1653,9 +1553,9 @@ bridge_zone_selection_result_t bridge_client_select_zone_value(
                sizeof(s_state.runtime_zone_id));
     s_state.runtime_zone_pinned = true;
     rk_strlcpy(result.zone_name, s_state.zone_label, sizeof(result.zone_name));
-    s_state.zone_resolved = true;
-    result.became_operational = s_device_state != DEVICE_STATE_OPERATIONAL;
-    s_device_state = DEVICE_STATE_OPERATIONAL;
+    bool was_ready = controller_connection_ready(&s_connection);
+    s_connection.selected_zone_available = true;
+    result.became_ready = !was_ready && controller_connection_ready(&s_connection);
     s_trigger_poll = true;
     s_force_artwork_refresh = true;
     result.persisted = true;
@@ -1933,12 +1833,7 @@ static bool fetch_knob_config(void) {
         return false;
     }
     char bridge_base[sizeof(token.bridge_base)] = {0};
-    rk_strlcpy(bridge_base, token.bridge_base, sizeof(bridge_base));
-    if (bridge_base[0] == '\0') {
-        rk_strlcpy(bridge_base, CONFIG_RK_DEFAULT_BRIDGE_BASE,
-                   sizeof(bridge_base));
-        strip_trailing_slashes(bridge_base);
-    }
+    bridge_client_get_request_base(bridge_base, sizeof(bridge_base));
     if (bridge_base[0] == '\0') {
         LOGW("fetch_knob_config: No bridge configured");
         return false;
@@ -2008,4 +1903,29 @@ static void check_charging_state_change(bool current_charging) {
             apply_knob_config(&cfg);
         }
     }
+}
+
+void bridge_client_connection_status(char *summary, size_t summary_len, char *details, size_t details_len) {
+    controller_connection_t status;
+    bridge_client_connection_snapshot(&status);
+    if (summary && summary_len) {
+        controller_connection_summary(&status, summary, summary_len);
+        if (controller_connection_ready(&status)) {
+            char zone[MAX_ZONE_NAME], host[128];
+            lock_state();
+            rk_strlcpy(zone, s_state.zone_label, sizeof(zone));
+            unlock_state();
+            const char *identity = status.selected[0] ? status.selected : status.endpoint;
+            if (!platform_mdns_url_host(identity, host, sizeof(host), NULL))
+                rk_strlcpy(host, "Bridge", sizeof(host));
+            snprintf(summary, summary_len, "Ready - %s%s%s", host,
+                     zone[0] ? " - " : "", zone);
+        }
+    }
+    if (details && details_len) controller_connection_details(&status, platform_millis(), details, details_len);
+}
+
+bool bridge_client_get_request_base(char *out, size_t len) {
+    char zone[64];
+    return bridge_endpoint_snapshot(out, len, zone, sizeof(zone)) && out[0];
 }

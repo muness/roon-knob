@@ -1,0 +1,36 @@
+name: Prune firmware previews
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * *'
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: firmware-pages
+  cancel-in-progress: false
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: published-site
+      - name: Retain current open PR previews
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '.[].number' > open-prs.txt
+          python3 -c 'import json; json.dump([int(n) for n in open("open-prs.txt")],open("open-prs.json","w"))'
+          python3 scripts/prune_firmware_previews.py published-site --open-prs open-prs.json --apply
+          cd published-site
+          git add pr
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'chore: expire obsolete firmware PR previews'
+          git push origin HEAD:gh-pages

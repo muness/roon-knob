@@ -85,7 +85,6 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
   case RK_NET_EVT_GOT_IP:
     ESP_LOGI(TAG, "WiFi connected with IP: %s", ip_opt ? ip_opt : "unknown");
     post_runtime_network_status("WiFi: Connected");
-    bridge_client_set_device_ip(ip_opt);
     bridge_client_set_network_ready(true);
     eink_ui_post_device_ip(ip_opt);
     eink_ui_post_show_ip(frame_display_preferences_show_ip());

@@ -829,6 +829,10 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     html_escape(snapshot.value.bridge_base, escaped_bridge_base,
                 sizeof(escaped_bridge_base));
   }
+  char summary[96], details[384], escaped_summary[384], escaped_details[1536];
+  bridge_client_connection_status(summary, sizeof(summary), details, sizeof(details));
+  html_escape(summary, escaped_summary, sizeof(escaped_summary));
+  html_escape(details, escaped_details, sizeof(escaped_details));
   uint32_t art_mode_timeout = snapshot.value.art_mode_battery_enabled
                                   ? snapshot.value.art_mode_battery_timeout_sec
                                   : 0;
@@ -841,7 +845,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
 #else
   const char *ip_setting = "";
 #endif
-  const size_t html_size = 8192;
+  const size_t html_size = 16384;
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
@@ -856,6 +860,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/settings'>Settings</a><a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Unified Hi-Fi Control</h2>"
+      "<div id='connection-status'><p>%s</p><details><summary>Connection details</summary>%s</details></div>"
       "<p class='status'>Enter the address of your Unified Hi-Fi Control server. "
       "Leave it blank to use network discovery.</p>"
       "<form method='POST' action='/api/endpoint'>"
@@ -872,10 +877,9 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<input type='number' name='art_mode_timeout_sec' min='0' max='86400' value='%lu'>"
       "%s"
       "<button type='submit' class='btn'>Save display setting</button>"
-      "</form></div></body></html>",
-      STA_CSS, FAVICON_LINK, escaped_bridge_base,
-      (unsigned long)art_mode_timeout,
-      ip_setting);
+      "</form></div><script>let busy=false;setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)return;const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);}}catch(e){}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>",
+      STA_CSS, FAVICON_LINK, escaped_summary, escaped_details, escaped_bridge_base,
+      (unsigned long)art_mode_timeout, ip_setting);
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
   httpd_resp_set_type(req, "text/html");

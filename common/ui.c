@@ -626,10 +626,25 @@ static void zone_list_item_event_cb(lv_event_t *e) {
 static void apply_state(const struct ui_state *state) {
     // Update track/artist labels
     if (s_track_label && s_artist_label) {
-        set_marquee_text(s_track_label, state->line1);
+        if (state->online) {
+            lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_to_index(s_artist_label, 1);
+            lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+            set_marquee_text(s_track_label, state->line1);
+            set_marquee_text(s_artist_label, state->line2);
+            /* Restore scrolling even if the text did not change at recovery. */
+            lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+            lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+        } else {
+            lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_to_index(s_track_label, 1);
+            lv_obj_set_style_text_font(s_track_label, font_small(), 0);
+            lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_WRAP);
+            lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_WRAP);
+            lv_label_set_text(s_track_label, state->line1);
+            lv_label_set_text(s_artist_label, state->line2);
+        }
         lv_obj_invalidate(s_track_label);
-
-        set_marquee_text(s_artist_label, state->line2);
         lv_obj_invalidate(s_artist_label);
     } else {
         ESP_LOGE(UI_TAG, "Label pointers are NULL! track=%p artist=%p", s_track_label, s_artist_label);
