@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 void platform_mdns_init(const char *hostname);
+bool platform_mdns_is_ready(void);
 
 // Resolve a .local hostname to IP address via mDNS
 // hostname can be "foo" or "foo.local" - .local suffix is stripped automatically

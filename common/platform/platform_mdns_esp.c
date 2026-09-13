@@ -1,8 +1,6 @@
-// platform_mdns.h implementation — identical to idf_app/platform_mdns_idf.c
-// Only change: device-info product name is "hiphi-frame"
-
 #include "platform/platform_mdns.h"
 #include "platform/platform_mdns_endpoint.h"
+#include "platform/platform_identity.h"
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -16,7 +14,7 @@ static const char *TAG = "platform_mdns";
 static const char *SERVICE_TYPE = "_roonknob";
 static const char *SERVICE_PROTO = "_tcp";
 #ifndef PLATFORM_MDNS_PRODUCT
-#define PLATFORM_MDNS_PRODUCT "hiphi-frame"
+#define PLATFORM_MDNS_PRODUCT platform_device_slug()
 #endif
 static volatile bool s_mdns_ready = false;
 

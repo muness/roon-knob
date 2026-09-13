@@ -9,10 +9,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-CMAKE_FILE="$ROOT_DIR/idf_app/CMakeLists.txt"
+CMAKE_FILES=(
+    "$ROOT_DIR/idf_app/CMakeLists.txt"
+    "$ROOT_DIR/frame_app/CMakeLists.txt"
+    "$ROOT_DIR/rlcd_app/CMakeLists.txt"
+    "$ROOT_DIR/atom_app/CMakeLists.txt"
+    "$ROOT_DIR/tough_app/CMakeLists.txt"
+    "$ROOT_DIR/m5_beta_app/CMakeLists.txt"
+    "$ROOT_DIR/knob_aux_app/CMakeLists.txt"
+)
 
 show_usage() {
-    CURRENT=$(grep 'set(PROJECT_VER' "$CMAKE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+    CURRENT=$(grep 'set(PROJECT_VER' "${CMAKE_FILES[0]}" | sed 's/.*"\(.*\)".*/\1/')
     echo "Current version: $CURRENT"
     echo ""
     echo "Usage: $0 <version>"
@@ -56,23 +64,26 @@ if git -C "$ROOT_DIR" tag -l "v$NEW_VERSION" | grep -q "v$NEW_VERSION"; then
 fi
 
 # Get current version
-CURRENT_VERSION=$(grep 'set(PROJECT_VER' "$CMAKE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+CURRENT_VERSION=$(grep 'set(PROJECT_VER' "${CMAKE_FILES[0]}" | sed 's/.*"\(.*\)".*/\1/')
 
 echo "=== Releasing v$NEW_VERSION ==="
 
 # Step 1: Update version in CMakeLists.txt
-echo "[1/4] Updating version in CMakeLists.txt..."
+echo "[1/4] Updating every firmware version..."
+for cmake_file in "${CMAKE_FILES[@]}"; do
+    sed -i '' "s/set(PROJECT_VER \".*\")/set(PROJECT_VER \"$NEW_VERSION\")/" "$cmake_file"
+    grep -qF "set(PROJECT_VER \"$NEW_VERSION\")" "$cmake_file"
+done
 if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
-    echo "      Version already set to $NEW_VERSION"
+    echo "      Every firmware already set to $NEW_VERSION"
 else
-    sed -i '' "s/set(PROJECT_VER \".*\")/set(PROJECT_VER \"$NEW_VERSION\")/" "$CMAKE_FILE"
     echo "      Version updated: $CURRENT_VERSION -> $NEW_VERSION"
 fi
 
 # Step 2: Commit (only if there are changes)
 echo "[2/4] Committing..."
 cd "$ROOT_DIR"
-git add "$CMAKE_FILE"
+git add "${CMAKE_FILES[@]}"
 if git diff --cached --quiet; then
     echo "      No changes to commit (version was already $NEW_VERSION)"
 else
@@ -87,7 +98,8 @@ echo "      Tag created"
 
 # Step 4: Push
 echo "[4/4] Pushing to GitHub..."
-git push && git push --tags
+git push
+git push origin "v$NEW_VERSION"
 
 echo ""
 echo "=== Done! ==="

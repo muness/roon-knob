@@ -54,6 +54,18 @@ int platform_task_start_external_stack(const char *name, uint32_t stack_size,
     return err;
 }
 
+int platform_task_start_internal_stack(const char *name, uint32_t stack_size,
+                                       platform_task_fn_t fn, void *arg) {
+    if (!name || name[0] == '\0' || stack_size == 0 || !fn) {
+        return -1;
+    }
+    os_thread_t thread;
+    int err = os_thread_create_internal_stack(&thread, fn, arg, name,
+                                              stack_size);
+    (void)thread;
+    return err;
+}
+
 size_t platform_task_current_stack_free_bytes(void) {
     return os_thread_current_stack_free_bytes();
 }
@@ -107,4 +119,14 @@ void platform_task_run_pending(void) {
             task.fn(task.arg);
         }
     }
+}
+
+bool platform_task_has_pending(void) {
+    if (!s_initialized) {
+        return false;
+    }
+    os_mutex_lock(&s_ui_mutex);
+    bool pending = s_head != s_tail;
+    os_mutex_unlock(&s_ui_mutex);
+    return pending;
 }

@@ -122,12 +122,19 @@ bool pmic_init(void) {
     return true;
 }
 
-bool pmic_is_charging(void) {
-    if (!s_initialized) return false;
+pmic_power_source_t pmic_power_source(void) {
+    if (!s_initialized) return PMIC_POWER_SOURCE_UNKNOWN;
     uint8_t status;
-    if (pmic_read_reg(AXP2101_STATUS1, &status) != ESP_OK) return false;
-    // Bit 5 of STATUS1 indicates charging
-    return (status & 0x20) != 0;
+    if (pmic_read_reg(AXP2101_STATUS1, &status) != ESP_OK) {
+        return PMIC_POWER_SOURCE_UNKNOWN;
+    }
+    // AXP2101 register 0x00 bit 5 is VBUS-good, not charger activity.
+    return (status & 0x20) ? PMIC_POWER_SOURCE_EXTERNAL
+                           : PMIC_POWER_SOURCE_BATTERY;
+}
+
+bool pmic_is_charging(void) {
+    return pmic_power_source() == PMIC_POWER_SOURCE_EXTERNAL;
 }
 
 int pmic_get_battery_percent(void) {
@@ -146,4 +153,20 @@ int pmic_get_battery_voltage(void) {
     // 14-bit ADC, 1mV per LSB
     int raw = ((h & 0x3F) << 8) | l;
     return raw;  // mV
+}
+
+bool pmic_prepare_for_deep_sleep(void) {
+    if (!s_initialized) return false;
+    uint8_t ldo_ctrl = 0;
+    if (pmic_read_reg(AXP2101_LDO_ONOFF0, &ldo_ctrl) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not read e-paper rail state");
+        return false;
+    }
+    ldo_ctrl &= (uint8_t)~0x0F;
+    if (pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not disable ALDO1-4 e-paper rails");
+        return false;
+    }
+    ESP_LOGI(TAG, "Deep-sleep rails prepared: ALDO1-4 off");
+    return true;
 }

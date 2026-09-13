@@ -77,7 +77,10 @@ static void show_picker_for_zones(const bridge_zone_t *zones,
     }
 
     for (int i = 0; i < zone_count; ++i) {
-        names[count] = zones[i].name;
+        /* Zone labels are shared semantic data. Never hand a target a blank
+         * picker row: the stable zone id is the honest fallback when a
+         * provider omitted its display name. */
+        names[count] = zones[i].name[0] ? zones[i].name : zones[i].id;
         ids[count] = zones[i].id;
         if (current_zone_id &&
             strcmp(zones[i].id, current_zone_id) == 0) {
@@ -163,7 +166,7 @@ bool controller_action_router_handle(const controller_action_t *action) {
     case CONTROLLER_ACTION_COMMAND:
         if (action->value.command.kind <= CONTROLLER_COMMAND_NONE ||
             action->value.command.kind >
-                CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS ||
+                CONTROLLER_COMMAND_NEXT_ZONE ||
             (action->value.command.kind ==
                  CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS &&
              action->value.command.volume_steps == 0) ||

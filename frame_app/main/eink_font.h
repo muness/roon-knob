@@ -1,16 +1,13 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
-// Simple bitmap font for e-ink rendering (ASCII only, multiple sizes)
-// Each glyph is stored as a 1-bit-per-pixel bitmap, MSB first per byte.
+// Unicode bitmap font for e-ink rendering, scaled to multiple sizes.
 
 typedef struct {
     uint8_t width;
     uint8_t height;
-    uint8_t first_char;   // First ASCII code (usually 32 = space)
-    uint8_t last_char;    // Last ASCII code (usually 126 = ~)
-    const uint8_t *data;  // Packed 1bpp bitmaps, row-major, ((width+7)/8)*height bytes per glyph
 } eink_font_t;
 
 // Built-in fonts
@@ -26,3 +23,8 @@ void eink_font_draw_string(uint16_t x, uint16_t y, const char *str,
 
 // Measure string width in pixels
 int eink_font_string_width(const char *str, const eink_font_t *font);
+
+// Measure one Unicode code point, including fallback-glyph behavior.
+int eink_font_codepoint_width(uint32_t codepoint, const eink_font_t *font);
+
+bool eink_font_has_glyph(uint32_t codepoint);

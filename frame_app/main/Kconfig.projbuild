@@ -12,4 +12,12 @@ config RK_DEFAULT_BRIDGE_BASE
     string "Default Bridge Base URL (leave empty for mDNS discovery)"
     default ""
 
+config RK_FRAME_DEEP_SLEEP
+    bool "Enable fail-awake Frame ESP32-S3 Deep-sleep policy"
+    default n
+    help
+        Enables the Frame-owned stopped-zone Deep-sleep policy. The exact
+        Frame profile opts in explicitly; unknown PMIC state, active playback,
+        provisioning, pending e-ink work, and wake setup failures stay awake.
+
 endmenu

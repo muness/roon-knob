@@ -77,7 +77,8 @@ retirement condition.
 
 ## Enforcement boundary
 
-The first slice enforces direct quoted C header includes only:
+The first slice enforces direct quoted C header includes for Dial and Frame,
+plus target composition for Atom and Tough:
 
 - every repository-local quoted include reachable from each target's literal
   `SRC_FILES` inventory is an exact checked edge;
@@ -86,6 +87,11 @@ The first slice enforces direct quoted C header includes only:
   allowance is retired;
 - known forbidden directions are machine-classified, so they cannot be added as
   ownerless allowances;
+- Atom and Tough CMake inventories are checked for target-to-target source
+  inclusion, foreign include directories, and cross-target quoted includes;
+- temporary Atom-to-Tough composition debt is recorded as exact entries with
+  an owner, retirement issue, and reason. Wildcards are rejected, so adding a
+  new Tough source or include requires a failing policy check;
 - unsupported `SRC_FILES` mutation, unresolved repository includes, local
   angle-bracket includes, and macro includes fail instead of being skipped;
 - the CMake contract requires `SRCS ${SRC_FILES}` exclusively and rejects
@@ -94,12 +100,12 @@ The first slice enforces direct quoted C header includes only:
   and `include(...)` indirection, and rejects ESP-IDF `SRC_DIRS` or
   `EXCLUDE_SRCS` source mutation;
 - the only accepted `set` and `set_property` forms are the literal source
-  inventory and the two existing non-source build properties;
+  inventory and the existing non-source build properties;
 - adversarial fixtures prove rejection of a previously unknown target header,
   comment-separated and line-spliced include tokens, an ownerless forbidden
   edge, and seven compiled-source bypass forms.
 
-This does **not** claim IDF component-level or link-level separation. Both
+This does **not** claim IDF component-level or link-level separation. The
 targets still compile shared and target files in one component. Later #190
 slices may strengthen the check after the source graph is split. External
 angle-bracket includes, preprocessor condition semantics, symbols, and runtime
@@ -137,8 +143,9 @@ incidental internal call sequences. Hardware validation remains separate.
 
 ## Migration sequence
 
-1. **This slice:** decision, exact direct-include ratchet, negative fixture, and
-   input/presentation characterization. Keep #190 open.
+1. **This slice:** decision, exact direct-include ratchet, Atom/Tough
+   composition checks, negative fixtures, and input/presentation
+   characterization. Keep #190 open.
 2. Introduce renderer-free controller view and command value types behind
    compatibility adapters.
 3. Characterize and centralize configuration mutations and connectivity events;

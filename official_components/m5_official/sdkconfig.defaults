@@ -1,0 +1,40 @@
+# Compile the official Arduino runtime plus Wire only. The published component
+# defaults every optional Arduino library on, although these M5Stack board
+# libraries do not use them.
+CONFIG_ARDUINO_SELECTIVE_COMPILATION=y
+# CONFIG_ARDUINO_SELECTIVE_SPI is not set
+CONFIG_ARDUINO_SELECTIVE_Wire=y
+# CONFIG_ARDUINO_SELECTIVE_ESP_SR is not set
+# CONFIG_ARDUINO_SELECTIVE_ESP_Video is not set
+# CONFIG_ARDUINO_SELECTIVE_EEPROM is not set
+# CONFIG_ARDUINO_SELECTIVE_Preferences is not set
+# CONFIG_ARDUINO_SELECTIVE_Ticker is not set
+# CONFIG_ARDUINO_SELECTIVE_Update is not set
+# CONFIG_ARDUINO_SELECTIVE_Zigbee is not set
+# CONFIG_ARDUINO_SELECTIVE_FS is not set
+# CONFIG_ARDUINO_SELECTIVE_SD is not set
+# CONFIG_ARDUINO_SELECTIVE_SD_MMC is not set
+# CONFIG_ARDUINO_SELECTIVE_SPIFFS is not set
+# CONFIG_ARDUINO_SELECTIVE_FFat is not set
+# CONFIG_ARDUINO_SELECTIVE_LittleFS is not set
+# CONFIG_ARDUINO_SELECTIVE_Network is not set
+# CONFIG_ARDUINO_SELECTIVE_Ethernet is not set
+# CONFIG_ARDUINO_SELECTIVE_PPP is not set
+# CONFIG_ARDUINO_SELECTIVE_Hash is not set
+# CONFIG_ARDUINO_SELECTIVE_ArduinoOTA is not set
+# CONFIG_ARDUINO_SELECTIVE_AsyncUDP is not set
+# CONFIG_ARDUINO_SELECTIVE_DNSServer is not set
+# CONFIG_ARDUINO_SELECTIVE_ESPmDNS is not set
+# CONFIG_ARDUINO_SELECTIVE_HTTPClient is not set
+# CONFIG_ARDUINO_SELECTIVE_Matter is not set
+# CONFIG_ARDUINO_SELECTIVE_NetBIOS is not set
+# CONFIG_ARDUINO_SELECTIVE_WebServer is not set
+# CONFIG_ARDUINO_SELECTIVE_WiFi is not set
+# CONFIG_ARDUINO_SELECTIVE_NetworkClientSecure is not set
+# CONFIG_ARDUINO_SELECTIVE_WiFiProv is not set
+# CONFIG_ARDUINO_SELECTIVE_BLE is not set
+# CONFIG_ARDUINO_SELECTIVE_BluetoothSerial is not set
+# CONFIG_ARDUINO_SELECTIVE_SimpleBLE is not set
+# CONFIG_ARDUINO_SELECTIVE_RainMaker is not set
+# CONFIG_ARDUINO_SELECTIVE_OpenThread is not set
+# CONFIG_ARDUINO_SELECTIVE_Insights is not set

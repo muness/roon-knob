@@ -34,7 +34,7 @@ Migrate each identity according to its own compatibility boundary.
 | Merged web image | `hiphi_dial_merged.bin` | Publish byte-identical `roon_knob_merged.bin` alias | #162 |
 | Discovery service | `_roonknob._tcp` | No change until dual migration | #163 |
 | Device-info TXT product | `hiphi-dial` | No repository consumer found; `_device-info._udp` remains | #162 |
-| Repository/domain | Existing `muness/roon-knob` and `roon-knob.muness.com` | Keep until redirects, CNAME, host checks, and previews move together | #164 |
+| Repository/domain | Existing `muness/roon-knob`; firmware host migrated to `firmware.hiphi.audio` | Keep the repository name; redirect the retired host while CNAME, host checks, previews, and release links move together | #164 |
 | Source directories | `idf_app/`, `frame_app/` | No change in #162 | #174 |
 | Persistent configuration | Existing `rk_cfg` / `cfg` / `rk_cfg_t` / `knob_name` | No schema or key rename | Not scheduled; unnecessary |
 | Historical records | Original name where historically true | Preserve provenance | Permanent |

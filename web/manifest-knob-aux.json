@@ -1,0 +1,13 @@
+{
+  "name": "Waveshare Dial Auxiliary ESP32 Parking Image",
+  "version": "{{VERSION}}",
+  "new_install_prompt_erase": true,
+  "builds": [{
+    "chipFamily": "ESP32",
+    "parts": [
+      { "path": "hiphi_knob_aux_park_bootloader.bin", "offset": 4096 },
+      { "path": "hiphi_knob_aux_park_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_knob_aux_park.bin", "offset": 65536 }
+    ]
+  }]
+}

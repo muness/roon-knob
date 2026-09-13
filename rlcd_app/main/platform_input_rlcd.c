@@ -1,4 +1,5 @@
 #include "platform/platform_input.h"
+#include "platform_input_rlcd.h"
 
 #include "controller_button_gesture.h"
 #include "controller_input.h"
@@ -34,6 +35,7 @@ static volatile bool s_boot_long;
 static volatile bool s_key_long;
 static bool s_key_track_mode;
 static esp_timer_handle_t s_timer;
+static volatile uint32_t s_last_activity_ms;
 static const char *TAG = "rlcd_input";
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
@@ -44,6 +46,7 @@ static void poll(void *arg) {
     uint32_t now = now_ms();
     bool boot_now = pressed(&s_boot);
     if (boot_now && !s_boot.down) {
+        s_last_activity_ms = now;
         s_boot.down_since_ms = now;
         s_boot.long_sent = false;
     }
@@ -66,6 +69,7 @@ static void poll(void *arg) {
         CONTROLLER_PHYSICAL_GESTURE_TAP) s_boot_single = true;
     bool key_now = pressed(&s_key);
     if (key_now && !s_key.down) {
+        s_last_activity_ms = now;
         s_key.down_since_ms = now;
         s_key.long_sent = false;
     }
@@ -108,11 +112,19 @@ void platform_input_init(void) {
         .pin_bit_mask = (1ULL << RLCD_BOOT_PIN) | (1ULL << RLCD_KEY_PIN),
         .pull_up_en = GPIO_PULLUP_ENABLE};
     gpio_config(&config);
+    s_last_activity_ms = now_ms();
     controller_button_gesture_reset(&s_boot_gesture);
     controller_button_gesture_reset(&s_key_gesture);
     esp_timer_create_args_t args = {.callback = poll, .name = "rlcd_buttons"};
     ESP_ERROR_CHECK(esp_timer_create(&args, &s_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, BUTTON_POLL_US));
+}
+uint64_t rlcd_input_last_activity_ms(void) { return s_last_activity_ms; }
+bool rlcd_input_wake_button_released(void) {
+    /* KEY is the qualified Deep-sleep wake input. BOOT is also RTC-capable,
+     * but using the ESP32-S3 strapping pin as a wake source could leave a
+     * held button selecting the ROM downloader during the wake reset. */
+    return gpio_get_level(RLCD_KEY_PIN) != 0;
 }
 void platform_input_process_events(void) {
     if (s_boot_long) {

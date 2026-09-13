@@ -1,7 +1,7 @@
 # Firmware Flashing
 
 This guide covers how to flash firmware to your HiPhi Dial hardware. There are two methods:
-1. **Web Flasher** (recommended) - No tools to install, works in Chrome/Edge
+1. **Web Flasher** (recommended) - No tools to install; use desktop Chrome, Edge, or Firefox
 2. **esptool.py** - Command-line tool for advanced users
 
 ## Web Flasher (Recommended)
@@ -9,16 +9,16 @@ This guide covers how to flash firmware to your HiPhi Dial hardware. There are t
 The easiest way to flash firmware. Works directly in your browser using the Web Serial API.
 
 ### Requirements
-- **Browser**: Chrome or Edge (version 89+). Safari and Firefox are NOT supported.
-- **HTTPS**: Web Serial requires HTTPS. Use the hosted flasher at [roon-knob.muness.com](https://roon-knob.muness.com/flash.html).
+- **Browser**: A current desktop version of Chrome, Edge, or Firefox. Safari is not supported; iPhone, iPad, and Android cannot flash over USB.
+- **HTTPS**: Web Serial requires HTTPS. Choose a channel at [firmware.hiphi.audio](https://firmware.hiphi.audio/).
 - **USB cable**: Connect your ESP32 board to your computer
 
 ### Steps
 
 1. Connect the ESP32-S3 board via USB-C
 2. Turn on the device (power slider towards USB-C port)
-3. Go to the **[Web Flasher](https://roon-knob.muness.com/flash.html)**
-4. Click **"Update HiPhi Dial"**
+3. Go to the **[Stable Web Flasher](https://firmware.hiphi.audio/stable/)**
+4. Click **"Flash Dial main controller"**
 5. Select the serial port when prompted
 6. Wait ~30 seconds for flashing to complete
 

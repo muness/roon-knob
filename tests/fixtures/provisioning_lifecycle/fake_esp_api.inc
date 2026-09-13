@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 typedef int esp_err_t;
 
@@ -47,6 +48,14 @@ esp_netif_t *esp_netif_create_default_wifi_sta(void);
 esp_netif_t *esp_netif_create_default_wifi_ap(void);
 esp_err_t esp_netif_set_hostname(esp_netif_t *netif, const char *hostname);
 esp_err_t esp_netif_get_hostname(esp_netif_t *netif, const char **hostname);
+
+typedef struct {
+    const char *server;
+    void (*sync_cb)(struct timeval *tv);
+} esp_sntp_config_t;
+#define ESP_NETIF_SNTP_DEFAULT_CONFIG(server_name) \
+    ((esp_sntp_config_t){.server = (server_name), .sync_cb = NULL})
+esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *config);
 
 typedef uint32_t esp_ip4_addr_t;
 char *esp_ip4addr_ntoa(const esp_ip4_addr_t *addr, char *buf, size_t size);
@@ -155,6 +164,8 @@ void fixture_set_provisioning_ready(bool ready);
 int fixture_provisioning_start_calls(void);
 int fixture_provisioning_stop_calls(void);
 int fixture_wifi_connect_calls(void);
+int fixture_sntp_init_calls(void);
+wifi_ps_type_t fixture_wifi_power_save(void);
 const char *fixture_wifi_ssid(void);
 const char *fixture_wifi_pass(void);
 bool fixture_timer_active(const char *name);

@@ -4,8 +4,9 @@ Custom firmware and a companion service that turn a [Waveshare ESP32-S3 Knob](ht
 
 See what's playing, adjust volume, skip tracks, and switch zones—all from a physical knob on your desk.
 
-> **Firmware maturity:** HiPhi Dial is **Beta** and has direct hardware-test
-> coverage. HiPhi Frame is **Alpha**: builds are available for early testing,
+> **Firmware maturity:** the current v2.7 prerelease is **Alpha** across every
+> target because its exact artifacts still need physical regression testing.
+> HiPhi Frame builds are available for early testing,
 > but its current shared-stack firmware has not completed equivalent hardware
 > regression coverage.
 
@@ -29,12 +30,12 @@ See what's playing, adjust volume, skip tracks, and switch zones—all from a ph
 
 ### 1. Flash the Firmware (one-time)
 
-Use the [Web Flasher](https://roon-knob.muness.com/flash.html) in Chrome or Edge—no tools to install. Just plug in the knob via USB-C and click "Flash HiPhi Dial".
+Use the [Stable Web Flasher](https://firmware.hiphi.audio/stable/) in a current desktop version of Chrome, Edge, or Firefox—no tools to install. iPhone, iPad, and Android cannot flash over USB. On a supported computer, plug in the knob via USB-C and click "Flash Dial main controller".
 
 > **Prefer command line?** See [Firmware Flashing](docs/usage/FIRMWARE_FLASHING.md) for esptool instructions.
 
 Stable firmware updates are available over Wi-Fi. Beta and Alpha prereleases
-remain opt-in through the [Beta Web Flasher](https://roon-knob.muness.com/beta/flash.html)
+remain opt-in through the [Beta Web Flasher](https://firmware.hiphi.audio/beta/)
 and are never pushed through the stable OTA feed.
 
 ### 2. Run the Control Service

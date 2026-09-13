@@ -1,0 +1,11 @@
+menu "HiPhi RLCD Defaults"
+
+config RK_RLCD_DEEP_SLEEP
+    bool "Enable fail-awake RLCD ESP32-S3 Deep-sleep policy"
+    default y
+    help
+        After the configured battery idle timeout, quiesce BLE and Wi-Fi,
+        put the ST7305 into Sleep In, and enter ESP32-S3 Deep-sleep. GPIO18
+        KEY wakes the exact Waveshare ESP32-S3-RLCD-4.2 target.
+
+endmenu

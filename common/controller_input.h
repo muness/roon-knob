@@ -106,6 +106,9 @@ typedef enum {
     CONTROLLER_INPUT_TRANSFORM_ROTATION_DIRECTION,
 } controller_input_transform_t;
 
+/* Apply the same accelerated signed-step policy used by Dial rotation. */
+int32_t controller_input_accelerated_steps(int32_t ticks);
+
 typedef enum {
     CONTROLLER_INPUT_BINDING_NONE = 0,
     CONTROLLER_INPUT_BINDING_LOCKED_DEFAULT = 1u << 0,

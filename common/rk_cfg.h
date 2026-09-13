@@ -50,7 +50,7 @@ typedef struct {
 #define RK_DEFAULT_DEEP_SLEEP_CHARGING_ENABLED 0
 #define RK_DEFAULT_DEEP_SLEEP_CHARGING_TIMEOUT_SEC 0
 #define RK_DEFAULT_DEEP_SLEEP_BATTERY_ENABLED 1
-#define RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC 1200  // 20 minutes after soft sleep
+#define RK_DEFAULT_DEEP_SLEEP_BATTERY_TIMEOUT_SEC 60  // 1 minute after soft sleep
 
 // Power management defaults (disabled until proven stable)
 #define RK_DEFAULT_WIFI_POWER_SAVE_ENABLED 0

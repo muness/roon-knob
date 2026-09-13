@@ -50,6 +50,11 @@ bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) { queued = cb; q
 void controller_presentation_set_message(const char *msg) { (void)msg; }
 void controller_presentation_set_network_status(const char *msg) { (void)msg; }
 void platform_log_backend(const char *level, const char *fmt, va_list args) { (void)level; (void)fmt; (void)args; }
+controller_config_write_result_t controller_config_set_zone(const char *zone, controller_config_snapshot_t *out) {
+    strcpy(fixture.value.zone_id, zone); *out = fixture;
+    return CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+}
+void controller_presentation_set_zone_name(const char *name) { (void)name; }
 static unsigned controls;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));

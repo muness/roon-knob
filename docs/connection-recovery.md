@@ -31,3 +31,5 @@ Local recovery starts immediately, then backs off 5/15/30/60 seconds, capped at 
 The selected approach survives the two alternatives: merely showing more labels would retain competing command gates; merely storing IPs would require manual recovery after DHCP changes. No global rediscovery may substitute another selected service. Model-checkable risks are covered by the tests above; naming continuity is not a unique installation identifier and the compatibility limits above remain explicit.
 
 Exact-artifact hardware validation is still required: flash/boot Dial and Frame, reproduce the reported volume failure, compare web/knob Settings, test HA/QNAP discovery, induce an outage and an address change, and verify UI readability, retained settings and normal playback. Host tests and compilation do not establish those physical results. Keep PR #250 draft until that evidence is recorded.
+
+All ESP-IDF targets compile one mDNS adapter (`common/platform/platform_mdns_esp.c`). Product identity comes from the platform identity provider (with the existing RLCD product override preserved); discovery, candidate selection, and hostname resolution do not vary by board.

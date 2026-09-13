@@ -154,6 +154,22 @@ bool rlcd_display_init(void) {
     return true;
 }
 
+bool rlcd_display_prepare_for_sleep(void) {
+    if (!s_io) return false;
+    /* ST7305 SLPIN stops the panel DC/DC converter, internal oscillator, and
+     * panel scanning while retaining display RAM.  The datasheet requires a
+     * five-millisecond command quiet period; use 100 ms so the panel has also
+     * completed the documented Sleep-In transition before the S3 powers down. */
+    esp_err_t err = esp_lcd_panel_io_tx_param(s_io, 0x10, NULL, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7305 Sleep In failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_LOGI(TAG, "ST7305 Sleep In complete");
+    return true;
+}
+
 void rlcd_display_clear(bool white) {
     if (!s_framebuffer) return;
     memset(s_framebuffer, white ? 0xFF : 0x00, RLCD_FRAMEBUFFER_BYTES);
