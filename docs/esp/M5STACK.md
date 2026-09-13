@@ -61,4 +61,3 @@ Create a new platform/display/input profile with explicit chip, flash, PSRAM,
 display, touch, and power capabilities. Keep playback, Wi-Fi, configuration,
 and recovery in shared code. Only the target profile should depend on the
 M5-specific platform component or add a new M5 library dependency.
-
