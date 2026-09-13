@@ -62,3 +62,13 @@ Discovery attempts have a derived prerequisite lifecycle:
 Transitions skip prerequisites already satisfied. Waiting consumes no failure or
 retry delay; a manually configured IPv4 endpoint does not depend on mDNS.
 The platform adapter retains a defensive initialization check as well.
+
+For a local receive/parser diagnostic build, run
+`python3 scripts/instrument_mdns_receive.py` after the Dial's managed components
+are installed, then rebuild. This explicitly patches the local managed mDNS
+sources; it is not part of CI/release builds. It traces the first 256 packets at
+each layer: UDP receipt/source/size, interface and queue disposition, parser
+entry and record-to-query matching. Reinstall the managed mDNS component to
+remove it. The script rejects unexpected source layouts and is idempotent.
+Timing-sensitive failures can change under logging; compare good/bad attempts
+before concluding that a packet was lost on Wi-Fi rather than in software.
