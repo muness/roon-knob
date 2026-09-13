@@ -141,6 +141,19 @@
         "roon-knob"
       ],
       "line_regex": "^roon-knob/"
+    },
+    {
+      "id": "connection-diagnostic-wire-service",
+      "category": "compatibility",
+      "owner": "#249",
+      "retirement": "Remove when the legacy DNS-SD service is retired and diagnostic documentation is updated.",
+      "path_globs": [
+        "docs/connection-recovery.md"
+      ],
+      "tokens": [
+        "_roonknob"
+      ],
+      "line_regex": "of NAS2 observed `_roonknob\\._tcp\\.local`"
     }
   ],
   "required": [
