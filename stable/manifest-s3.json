@@ -1,0 +1,16 @@
+{
+  "name": "HiPhi Dial (Stable)",
+  "version": "2.5.2",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "hiphi_dial_merged-v2.5.2.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

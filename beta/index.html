@@ -1,68 +1,22 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HiPhi Dial Alpha</title>
-  <style>
-    :root { --bg: #1a1a2e; --surface: #16213e; --accent: #e94560; --text: #eee; --text-muted: #888; --donate: #ffdd00; }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; min-height: 100vh; }
-    .container { max-width: 600px; margin: 0 auto; text-align: center; }
-    h1 { color: var(--accent); margin-bottom: 10px; font-size: 2.5em; }
-    .tagline { color: var(--text-muted); margin-bottom: 30px; font-size: 1.2em; }
-    .buttons { margin-bottom: 30px; }
-    .btn { display: inline-block; padding: 14px 28px; border-radius: 8px; font-size: 1.1em; font-weight: 600; margin: 8px; text-decoration: none; }
-    .btn:hover { filter: brightness(1.1); }
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-donate { background: var(--donate); color: #000; }
-    .card { background: var(--surface); border-radius: 12px; padding: 24px; margin-bottom: 20px; text-align: left; }
-    .card h2 { margin-top: 0; }
-    .card p { color: var(--text-muted); line-height: 1.6; margin-bottom: 0; }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .links { margin-top: 30px; }
-    .links a { margin: 0 15px; color: var(--text-muted); }
-    .links a:hover { color: var(--accent); }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>HiPhi Beta firmware</title>
+  <meta name="description" content="HiPhi Beta release availability.">
+  <link rel="icon" href="../alpha/assets/favicon.ico">
+  <link rel="stylesheet" href="../alpha/assets/styles.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
-<body>
-  <div class="container">
-    <h1>HiPhi Dial Alpha</h1>
-    <p class="tagline">A physical volume controller for your hi-fi system</p>
+<body class="flash-shell" data-target-filter="all" data-channel="beta">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container nav-wrap">
+    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span>Menu</span><span class="nav-face" aria-hidden="true">••</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Firmware channels"><a data-channel-link="stable" href="/stable/">Stable</a><a data-channel-link="beta" href="/beta/">Beta</a><a data-channel-link="alpha" href="/alpha/">Alpha</a><a class="nav-flash" href="/">All channels</a></nav>
+  </div></header>
 
-    <div class="buttons">
-      <a href="flash.html" class="btn btn-primary">Flash Alpha Firmware</a>
-      <a href="https://www.buymeacoffee.com/muness" class="btn btn-donate" target="_blank">Buy Me a Coffee</a>
-    </div>
-
-    <div class="card">
-      <h2>What is this?</h2>
-      <p>HiPhi Dial is a DIY hardware controller for your hi-fi system. It uses the <a href="https://amzn.to/4pYZdiC" target="_blank">Waveshare ESP32-S3 Knob</a> (~$50) with a rotary encoder, touchscreen display, WiFi, and optional BLE media-remote support. It supports:</p>
-      <p style="margin-top: 12px;">
-        <strong>&bull; Roon</strong> &ndash; Full zone control with album artwork<br>
-        <strong>&bull; Lyrion (LMS)</strong> &ndash; Squeezebox player control<br>
-        <strong>&bull; OpenHome/UPnP</strong> &ndash; Control OpenHome renderers
-      </p>
-    </div>
-
-    <div class="card">
-      <h2>Getting Started</h2>
-      <p>
-        <strong>1.</strong> Flash firmware using the <a href="flash.html">web flasher</a> (Chrome/Edge)<br>
-        <strong>2.</strong> Connect to WiFi via captive portal<br>
-        <strong>3.</strong> Run the control service via Docker:<br>
-        <code style="display: block; background: var(--bg); padding: 12px; border-radius: 6px; margin: 10px 0; font-size: 0.9em;">docker run -d --network host muness/unified-hifi-control</code>
-        <strong>4.</strong> For Roon: Authorize in Settings &rarr; Extensions
-      </p>
-    </div>
-
-    <div class="links">
-      <a href="https://github.com/muness/roon-knob">GitHub</a>
-      <a href="https://github.com/muness/roon-knob/releases">Releases</a>
-      <a href="https://github.com/muness/roon-knob/blob/master/docs/usage/FIRMWARE_FLASHING.md">Docs</a>
-      <a href="https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363">Community</a>
-    </div>
-  </div>
-</body>
-</html>
+  <main class="flash-main" id="main"><div class="container">
+    <a class="flash-breadcrumb" href="/">← Firmware center</a>
+    <div class="flash-intro"><div><p class="context-line">Beta</p><h1>No Beta release yet.</h1></div><p>Use <a href="/stable/">Stable 2.5.2</a> for HiPhi Dial, or <a href="/alpha/">Alpha 2.7</a> to test the latest firmware.</p></div></div></main><script src="../alpha/assets/site.js" defer></script></body></html>

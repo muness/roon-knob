@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Flash HiPhi Stable firmware</title>
+  <meta name="description" content="Flash HiPhi 2.5.2 firmware for supported controller hardware.">
+  <link rel="icon" href="../alpha/assets/favicon.ico">
+  <link rel="stylesheet" href="../alpha/assets/styles.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body class="flash-shell" data-target-filter="all" data-channel="stable">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container nav-wrap">
+    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span>Menu</span><span class="nav-face" aria-hidden="true">••</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Firmware channels"><a data-channel-link="stable" href="/stable/">Stable</a><a data-channel-link="beta" href="/beta/">Beta</a><a data-channel-link="alpha" href="/alpha/">Stable</a><a class="nav-flash" href="/">All channels</a></nav>
+  </div></header>
+
+  <main class="flash-main" id="main"><div class="container">
+    <a class="flash-breadcrumb" href="/">← Firmware center</a>
+    <div class="flash-intro"><div><p class="context-line">Stable / v2.5.2</p><h1>Match the model before flashing.</h1></div><div class="channel-notice"><strong>Stable v2.5.2</strong><p>For the HiPhi Dial. New 2.7 firmware and other controller models are available in <a href="/alpha/">Alpha</a>.</p></div></div>
+    <aside class="browser-requirement" data-browser-requirement aria-label="Browser requirements for USB flashing"><strong>Flash from a computer</strong><p>Use a current desktop version of Chrome, Edge, or Firefox with a data-capable USB cable. USB flashing does not work on iPhone, iPad, or Android.</p><p class="browser-status" data-browser-status>Choose the exact model below. The Flash button will open the USB installer on a supported computer.</p></aside>
+
+    <div class="flash-list">
+      <article class="flash-card" id="dial-card"><div><span class="version">Stable / v2.5.2 / ESP32-S3</span><h2>HiPhi Dial</h2><p class="hardware">Waveshare ESP32-S3-Knob-Touch-LCD-1.8</p><p>The stable firmware for the round touchscreen controller with rotary input and Wi-Fi playback control.</p></div><div class="flash-action"><esp-web-install-button manifest="./manifest-s3.json"><button slot="activate">Flash Stable 2.5.2</button></esp-web-install-button><a class="download-link" href="./hiphi_dial_merged-v2.5.2.bin">Download firmware file</a></div></article>
+
+      
+
+      
+
+      
+
+      
+
+      
+
+      
+
+      
+
+      
+
+      
+    </div>
+
+    <div class="requirements"><h2>Install Stable</h2><ul><li>Use desktop Chrome or Edge and a data-capable USB cable.</li><li>Decline erase during updates to retain settings.</li></ul><p><a href="https://github.com/muness/roon-knob/releases/tag/v2.5.2">v2.5.2 release notes</a></p></div>
+  </div></main>
+
+  <script>
+    const targetFilter = document.body.dataset.targetFilter;
+    const channel = document.body.dataset.channel;
+    const targetNames = {dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate', joy: 'HiPhi Joy', tough: 'M5Stack Tough', m5dial: 'M5 Dial Lab', sticks3: 'HiPhi Twist', stopwatch: 'HiPhi Remote', stackchan: 'Kizz', knobaux: 'Waveshare Dial Auxiliary ESP32'};
+    if (targetNames[targetFilter]) {
+      const allowedCards = targetFilter === 'dial'
+        ? new Set(['dial-card', 'knobaux-card'])
+        : new Set([`${targetFilter}-card`]);
+      document.querySelectorAll('.flash-card').forEach(card => { if (!allowedCards.has(card.id)) card.remove(); });
+      document.querySelector('h1').textContent = `Flash ${targetNames[targetFilter]}`;
+    }
+    document.querySelector(`[data-channel-link="${channel}"]`)?.setAttribute('aria-current', 'page');
+  </script>
+  <script src="../alpha/assets/site.js" defer></script>
+</body>
+</html>
