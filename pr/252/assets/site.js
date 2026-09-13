@@ -1,6 +1,12 @@
 // Firmware-owned fork of https://github.com/open-horizon-labs/hiphi/blob/main/site.js
 // Keep this aligned with the HiPhi site when navigation behavior changes.
 (() => {
+  const subject = document.getElementById('preview-subject');
+  if (subject?.dataset.subjectB64) {
+    const bytes = Uint8Array.from(atob(subject.dataset.subjectB64), c => c.charCodeAt(0));
+    subject.textContent = new TextDecoder().decode(bytes);
+  }
+
   const header = document.querySelector('.site-header');
   const toggle = header?.querySelector('.nav-toggle');
   const nav = header?.querySelector('.site-nav');
