@@ -46,7 +46,17 @@ int platform_http_get(const char *url, char **out, size_t *len) {
 }
 void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
 void platform_http_free(char *value) { free(value); }
-bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) { queued = cb; queued_arg = arg; return true; }
+bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) {
+    /* Only endpoint commits are delayed deliberately for race tests. Other
+     * callbacks must consume their owned messages as the real UI loop does. */
+    if (cb == commit_discovered_endpoint_on_ui) {
+        assert(!queued);
+        queued = cb; queued_arg = arg;
+    } else {
+        cb(arg);
+    }
+    return true;
+}
 void controller_presentation_set_message(const char *msg) { (void)msg; }
 void controller_presentation_set_network_status(const char *msg) { (void)msg; }
 void platform_log_backend(const char *level, const char *fmt, va_list args) { (void)level; (void)fmt; (void)args; }
@@ -83,7 +93,7 @@ static void test_unresolved_then_recovered(void) {
     clock_ms = s_connection.next_attempt_ms; resolution_ok = true;
     update_connection();
     assert(s_connection.reachable && s_connection.zone_count == 0 && queued);
-    queued(queued_arg); assert(writes == 1);
+    { void (*cb)(void *) = queued; void *arg = queued_arg; queued = NULL; queued_arg = NULL; cb(arg); } assert(writes == 1);
     assert(strcmp(fixture.value.bridge_base,"http://nas2.local:8088") == 0);
     /* After restart and DHCP change, resolve the durable name to its new address. */
     memset(&s_connection,0,sizeof(s_connection));
@@ -107,7 +117,7 @@ static void test_failed_and_stale_candidates(void) {
     update_connection(); assert(queued);
     ++generation; strcpy(fixture.value.bridge_base,"http://manual:8088");
     fixture.value.bridge_from_mdns = false;
-    queued(queued_arg); assert(writes == 0);
+    { void (*cb)(void *) = queued; void *arg = queued_arg; queued = NULL; queued_arg = NULL; cb(arg); } assert(writes == 0);
     reset("http://NAS2:8088",false);
     update_connection(); assert(discovery_calls == 0 && writes == 0);
 }
