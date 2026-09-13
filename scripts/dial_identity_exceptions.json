@@ -196,14 +196,6 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp build/hiphi_dial.bin build/roon_knob.bin"
-    },
-    {
-      "path": ".github/workflows/docker.yml",
-      "contains": "cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin"
-    },
-    {
-      "path": ".github/workflows/docker.yml",
       "contains": "release-assets/hiphi_dial_merged.bin"
     },
     {
@@ -228,11 +220,11 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_APPLICATION_FILE}\""
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_APPLICATION_FILE}\""
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin \"pr-preview/${DIAL_LEGACY_APPLICATION_FILE}\""
     },
     {
       "path": ".github/workflows/docker.yml",
@@ -244,19 +236,19 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/hiphi_dial_merged.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/roon_knob_merged.bin"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/"
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "cp esp32s3-artifacts/idf_app/build/roon_knob.bin gh-pages-build/"
+      "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/roon_knob.bin"
     },
     {
       "path": "README.md",

@@ -436,8 +436,6 @@ jobs:
             ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
             grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map;
             ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map;
-            cp build/hiphi_dial.bin build/roon_knob.bin;
-            cmp build/hiphi_dial.bin build/roon_knob.bin;
             esptool.py --chip esp32s3 merge_bin
             -o ../hiphi_dial_merged.bin
             --flash_mode dio --flash_freq 80m --flash_size 16MB
@@ -449,26 +447,18 @@ jobs:
 
       - name: Verify merged Dial flash image
         run: |
-          # Compatibility aliases remain byte-identical while bridge/release
-          # consumers migrate to the HiPhi Dial artifact names.
-          cp hiphi_dial_merged.bin roon_knob_merged.bin
-          cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin
-          cmp hiphi_dial_merged.bin roon_knob_merged.bin
-          ls -la idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin \
-            hiphi_dial_merged.bin roon_knob_merged.bin
+          ls -la idf_app/build/hiphi_dial.bin hiphi_dial_merged.bin
 
-      - name: Upload ESP32-S3 artifact
+      - name: Upload HiPhi Dial artifact
         uses: actions/upload-artifact@v6
         with:
-          name: esp32s3-firmware
+          name: hiphi-dial-firmware
           path: |
             idf_app/build/hiphi_dial.bin
-            idf_app/build/roon_knob.bin
             idf_app/build/bootloader/bootloader.bin
             idf_app/build/partition_table/partition-table.bin
             idf_app/build/ota_data_initial.bin
             hiphi_dial_merged.bin
-            roon_knob_merged.bin
           retention-days: 30
 
   build-frame:
@@ -634,7 +624,6 @@ jobs:
             grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
             grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
-            cp build/hiphi_rlcd_42.bin ../hiphi_rlcd.bin;
             esptool.py --chip esp32s3 merge_bin
             -o ../hiphi_rlcd_merged.bin
             --flash_mode dio --flash_freq 80m --flash_size 16MB
@@ -648,7 +637,7 @@ jobs:
       - name: Verify merged HiPhi RLCD image
         run: |
           test "$(od -An -tu1 -j2 -N1 hiphi_rlcd_merged.bin | tr -d ' ')" = "2"
-          ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd.bin hiphi_rlcd_merged.bin
+          ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd_merged.bin
 
       - name: Upload HiPhi RLCD artifact
         uses: actions/upload-artifact@v6
@@ -659,7 +648,6 @@ jobs:
             rlcd_app/build/bootloader/bootloader.bin
             rlcd_app/build/partition_table/partition-table.bin
             rlcd_app/build/ota_data_initial.bin
-            hiphi_rlcd.bin
             hiphi_rlcd_merged.bin
           retention-days: 30
 
@@ -975,8 +963,8 @@ jobs:
       - name: Download ESP32-S3 firmware
         uses: actions/download-artifact@v7
         with:
-          name: esp32s3-firmware
-          path: esp32s3-artifacts
+          name: hiphi-dial-firmware
+          path: dial-artifacts
 
       - name: Download HiPhi Frame firmware
         uses: actions/download-artifact@v7
@@ -1058,16 +1046,16 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin release-assets/
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin release-assets/
-          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin release-assets/
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin release-assets/roon_knob.bin
+          cp dial-artifacts/idf_app/build/bootloader/bootloader.bin \
             release-assets/hiphi_dial_bootloader.bin
-          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+          cp dial-artifacts/idf_app/build/partition_table/partition-table.bin \
             release-assets/hiphi_dial_partition-table.bin
-          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+          cp dial-artifacts/idf_app/build/ota_data_initial.bin \
             release-assets/hiphi_dial_ota_data_initial.bin
-          cp esp32s3-artifacts/hiphi_dial_merged.bin release-assets/
-          cp esp32s3-artifacts/roon_knob_merged.bin release-assets/
+          cp dial-artifacts/hiphi_dial_merged.bin release-assets/
+          cp dial-artifacts/hiphi_dial_merged.bin release-assets/roon_knob_merged.bin
           cmp release-assets/hiphi_dial.bin release-assets/roon_knob.bin
           cmp release-assets/hiphi_dial_merged.bin \
             release-assets/roon_knob_merged.bin
@@ -1079,7 +1067,7 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin \
             release-assets/hiphi_frame_ota_data_initial.bin
           cp frame-artifacts/hiphi_frame_merged.bin release-assets/
-          cp rlcd-artifacts/hiphi_rlcd.bin release-assets/
+          cp rlcd-artifacts/rlcd_app/build/hiphi_rlcd_42.bin release-assets/hiphi_rlcd.bin
           cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin \
             release-assets/hiphi_rlcd_bootloader.bin
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin \
@@ -1214,8 +1202,8 @@ jobs:
       - name: Download Dial firmware
         uses: actions/download-artifact@v7
         with:
-          name: esp32s3-firmware
-          path: esp32s3-artifacts
+          name: hiphi-dial-firmware
+          path: dial-artifacts
 
       - name: Download Frame firmware
         uses: actions/download-artifact@v7
@@ -1326,13 +1314,13 @@ jobs:
           TOUGH_FLASH_PAGE="flash-tough-${PREVIEW_ID}.html"
 
           # Use immutable names so an older preview can never flash a newer build.
-          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_APPLICATION_FILE}"
-          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin "pr-preview/${DIAL_BOOTLOADER_FILE}"
-          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin "pr-preview/${DIAL_PARTITION_FILE}"
-          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin "pr-preview/${DIAL_OTA_DATA_FILE}"
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
-          cp esp32s3-artifacts/hiphi_dial_merged.bin "pr-preview/${DIAL_FIRMWARE_FILE}"
-          cp esp32s3-artifacts/roon_knob_merged.bin "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_APPLICATION_FILE}"
+          cp dial-artifacts/idf_app/build/bootloader/bootloader.bin "pr-preview/${DIAL_BOOTLOADER_FILE}"
+          cp dial-artifacts/idf_app/build/partition_table/partition-table.bin "pr-preview/${DIAL_PARTITION_FILE}"
+          cp dial-artifacts/idf_app/build/ota_data_initial.bin "pr-preview/${DIAL_OTA_DATA_FILE}"
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
+          cp dial-artifacts/hiphi_dial_merged.bin "pr-preview/${DIAL_FIRMWARE_FILE}"
+          cp dial-artifacts/hiphi_dial_merged.bin "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
           cmp "pr-preview/${DIAL_APPLICATION_FILE}" "pr-preview/${DIAL_LEGACY_APPLICATION_FILE}"
           cmp "pr-preview/${DIAL_FIRMWARE_FILE}" "pr-preview/${DIAL_LEGACY_FIRMWARE_FILE}"
 
@@ -1347,7 +1335,7 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin "pr-preview/${FRAME_OTA_DATA_FILE}"
           cp frame-artifacts/hiphi_frame_merged.bin "pr-preview/${FRAME_FIRMWARE_FILE}"
 
-          cp rlcd-artifacts/hiphi_rlcd.bin "pr-preview/${RLCD_APPLICATION_FILE}"
+          cp rlcd-artifacts/rlcd_app/build/hiphi_rlcd_42.bin "pr-preview/${RLCD_APPLICATION_FILE}"
           cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin "pr-preview/${RLCD_BOOTLOADER_FILE}"
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin "pr-preview/${RLCD_PARTITION_FILE}"
           cp rlcd-artifacts/rlcd_app/build/ota_data_initial.bin "pr-preview/${RLCD_OTA_DATA_FILE}"
@@ -1698,8 +1686,8 @@ jobs:
       - name: Download ESP32-S3 firmware
         uses: actions/download-artifact@v7
         with:
-          name: esp32s3-firmware
-          path: esp32s3-artifacts
+          name: hiphi-dial-firmware
+          path: dial-artifacts
 
       - name: Download HiPhi Frame firmware
         uses: actions/download-artifact@v7
@@ -1817,17 +1805,17 @@ jobs:
               > "gh-pages-build/$(basename "$manifest")"
           done
           cp -R web/assets gh-pages-build/assets
-          cp esp32s3-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
-          cp esp32s3-artifacts/idf_app/build/bootloader/bootloader.bin \
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/
+          cp dial-artifacts/idf_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_dial_bootloader.bin
-          cp esp32s3-artifacts/idf_app/build/partition_table/partition-table.bin \
+          cp dial-artifacts/idf_app/build/partition_table/partition-table.bin \
             gh-pages-build/hiphi_dial_partition-table.bin
-          cp esp32s3-artifacts/idf_app/build/ota_data_initial.bin \
+          cp dial-artifacts/idf_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_dial_ota_data_initial.bin
-          cp esp32s3-artifacts/idf_app/build/roon_knob.bin gh-pages-build/
+          cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/roon_knob.bin
           cmp gh-pages-build/hiphi_dial.bin gh-pages-build/roon_knob.bin
-          cp esp32s3-artifacts/hiphi_dial_merged.bin gh-pages-build/
-          cp esp32s3-artifacts/roon_knob_merged.bin gh-pages-build/
+          cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/
+          cp dial-artifacts/hiphi_dial_merged.bin gh-pages-build/roon_knob_merged.bin
           cmp gh-pages-build/hiphi_dial_merged.bin \
             gh-pages-build/roon_knob_merged.bin
           cp frame-artifacts/hiphi_frame_merged.bin gh-pages-build/
@@ -1839,7 +1827,7 @@ jobs:
           cp frame-artifacts/frame_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_frame_ota_data_initial.bin
           cp rlcd-artifacts/hiphi_rlcd_merged.bin gh-pages-build/
-          cp rlcd-artifacts/hiphi_rlcd.bin gh-pages-build/
+          cp rlcd-artifacts/rlcd_app/build/hiphi_rlcd_42.bin gh-pages-build/hiphi_rlcd.bin
           cp rlcd-artifacts/rlcd_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_rlcd_bootloader.bin
           cp rlcd-artifacts/rlcd_app/build/partition_table/partition-table.bin \
