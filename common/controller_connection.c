@@ -101,7 +101,7 @@ void controller_connection_recovery(const controller_connection_t *c, const char
     else if (c->reachable)
         snprintf(action, action_len, "Check Hi-Fi Control");
     else
-        snprintf(action, action_len, "Manual setup:\n%s", device_ip);
+        snprintf(action, action_len, "Manual setup:\nhttp://%s", device_ip);
 }
 
 controller_connection_attempt_phase_t controller_connection_attempt_phase(

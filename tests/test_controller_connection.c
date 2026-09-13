@@ -70,10 +70,10 @@ static void test_recovery_guidance(void) {
  controller_connection_schedule(&c,100,false);
  controller_connection_recovery(&c,"192.168.1.25",title,sizeof title,action,sizeof action);
  assert(strcmp(title,"Bridge not found")==0);
- assert(strcmp(action,"Manual setup:\n192.168.1.25")==0);
+ assert(strcmp(action,"Manual setup:\nhttp://192.168.1.25")==0);
  assert(!strstr(action,"8088"));
  controller_connection_recovery(&c,"255.255.255.255",title,sizeof title,action,sizeof action);
- assert(strcmp(action,"Manual setup:\n255.255.255.255")==0);
+ assert(strcmp(action,"Manual setup:\nhttp://255.255.255.255")==0);
  assert(strlen(title)<=24);
  controller_connection_details(&c,200,action,sizeof action);
  assert(!strstr(action,"saved bridge"));
