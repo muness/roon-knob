@@ -953,6 +953,11 @@ jobs:
             python3 scripts/check_flash_manifest.py "pr-preview/${manifest}" --assets-dir pr-preview
           done
           cp -R web/assets pr-preview/assets
+          # New HTML must not load a cached asset from an older preview.
+          cp web/assets/styles.css "pr-preview/assets/styles-${GITHUB_SHA}.css"
+          cp web/assets/site.js "pr-preview/assets/site-${GITHUB_SHA}.js"
+          sed -i -e "s|./assets/styles.css|./assets/styles-${GITHUB_SHA}.css|g" \
+            -e "s|./assets/site.js|./assets/site-${GITHUB_SHA}.js|g" pr-preview/*.html
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1125,6 +1130,10 @@ jobs:
           sed -e 's/{{TARGET_FILTER}}/rlcd/g' \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-rlcd.html
+          cp web/assets/styles.css "gh-pages-build/assets/styles-${GITHUB_SHA}.css"
+          cp web/assets/site.js "gh-pages-build/assets/site-${GITHUB_SHA}.js"
+          sed -i -e "s|./assets/styles.css|./assets/styles-${GITHUB_SHA}.css|g" \
+            -e "s|./assets/site.js|./assets/site-${GITHUB_SHA}.js|g" gh-pages-build/*.html
           cp web/manifest-s3.json gh-pages-build/
           cp web/manifest-frame.json gh-pages-build/
           cp web/manifest-rlcd.json gh-pages-build/
