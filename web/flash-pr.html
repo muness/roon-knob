@@ -5,13 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Flash HiPhi Firmware · PR #{{PR_NUMBER}}</title>
   <link rel="stylesheet" href="./assets/styles.css">
+  <script defer src="./assets/site.js"></script>
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body class="flash-shell" data-target-filter="{{TARGET_FILTER}}">
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header"><div class="container nav-wrap">
     <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
-    <nav class="site-nav" aria-label="Primary"><a href="https://hiphi.audio/controllers.html">Controllers</a><a href="https://hiphi.audio/getting-started.html">Get started</a><a href="https://hiphi.audio/mcp.html">UHC + MCP</a><a class="nav-flash" aria-current="page" href="/">Firmware center</a></nav>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav"><span>Menu</span><span class="nav-face" aria-hidden="true">··</span></button>
+    <nav class="site-nav" id="primary-nav" aria-label="Primary"><a href="https://hiphi.audio/controllers.html">Controllers</a><a href="https://hiphi.audio/getting-started.html">Get started</a><a href="https://hiphi.audio/mcp.html">UHC + MCP</a><a class="nav-flash" aria-current="page" href="/">Firmware center</a></nav>
   </div></header>
   <main class="flash-main" id="main"><div class="container">
     <a class="flash-breadcrumb" href="/">← Firmware center</a>

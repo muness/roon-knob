@@ -1,6 +1,6 @@
 /*
  * Firmware-owned fork of https://github.com/open-horizon-labs/hiphi/blob/main/styles.css
- * Keep this aligned with the HiPhi site; preserve the local font-face block when syncing.
+ * Keep this aligned with the HiPhi site. System fonts are used when brand fonts are unavailable.
  */
 :root {
   --midnight: #071a2e;
