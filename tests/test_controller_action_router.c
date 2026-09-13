@@ -342,14 +342,14 @@ static void test_picker_back_settings_current(void) {
     assert(s_selection_calls == 0);
 }
 
-static void assert_found_selection(bool persisted, bool became_operational) {
+static void assert_found_selection(bool persisted, bool became_ready) {
     reset_state();
     open_picker_for_test();
     snprintf(s_picker_selected_id, sizeof(s_picker_selected_id), "%s",
              "zone-kitchen");
     s_selection_result.found = true;
     s_selection_result.persisted = persisted;
-    s_selection_result.became_operational = became_operational;
+    s_selection_result.became_ready = became_ready;
     snprintf(s_selection_result.zone_name,
              sizeof(s_selection_result.zone_name), "%s", "Kitchen");
 
@@ -361,8 +361,8 @@ static void assert_found_selection(bool persisted, bool became_operational) {
     assert(strcmp(s_selected_zone_id, "zone-kitchen") == 0);
     int baseline_trace = 1;  // open picker
     assert(s_trace_count ==
-           baseline_trace + (became_operational ? 2 : 1));
-    if (became_operational) {
+           baseline_trace + (became_ready ? 2 : 1));
+    if (became_ready) {
         assert(s_trace[baseline_trace] == TRACE_NETWORK_STATUS);
         assert(s_trace[baseline_trace + 1] == TRACE_HIDE_PICKER);
     } else {

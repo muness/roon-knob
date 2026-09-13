@@ -29,6 +29,19 @@ bool bridge_command_plan_build(const controller_command_t *command,
     memset(plan, 0, sizeof(*plan));
     const char *zone_id = context->zone_id ? context->zone_id : "";
 
+    bool supported = command->kind == CONTROLLER_COMMAND_TOGGLE_PLAYBACK ||
+        command->kind == CONTROLLER_COMMAND_NEXT_TRACK ||
+        command->kind == CONTROLLER_COMMAND_PREVIOUS_TRACK ||
+        command->kind == CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS;
+    if (!supported) return false;
+    if (command->kind == CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS && command->volume_steps == 0) {
+        plan->accepted = true; plan->no_op = true; return true;
+    }
+    if (!context->ready || !zone_id[0]) {
+        plan->rejection_feedback = BRIDGE_COMMAND_FEEDBACK_NOT_READY;
+        return true;
+    }
+
     switch (command->kind) {
     case CONTROLLER_COMMAND_TOGGLE_PLAYBACK:
         return build_simple_plan(
@@ -42,16 +55,6 @@ bool bridge_command_plan_build(const controller_command_t *command,
             plan, zone_id, "prev",
             BRIDGE_COMMAND_FEEDBACK_PREVIOUS_FAILED);
     case CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS:
-        if (command->volume_steps == 0) {
-            plan->accepted = true;
-            plan->no_op = true;
-            return true;
-        }
-        if (!context->operational) {
-            plan->rejection_feedback = BRIDGE_COMMAND_FEEDBACK_CONNECTING;
-            return true;
-        }
-
         plan->predicted_volume =
             context->volume +
             ((float)command->volume_steps * context->volume_step);

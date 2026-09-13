@@ -77,9 +77,11 @@ Go to **Roon → Settings → Extensions** and enable **"Unified Hi-Fi Control"*
 
 Power on the dial. It creates a WiFi network called **"hiphi-dial-setup"**. Connect to it, enter your WiFi credentials, and you're done.
 
-The knob finds the extension automatically via mDNS. It keeps the selected bridge address until you clear or edit the Bridge URL. If the bridge's IP changes, clear the URL to discover again or enter its new address. This prevents another bridge on the network from taking over during a refresh.
+The knob finds the extension automatically via mDNS. It remembers the selected bridge's name and resolves its current address when reconnecting, so an IP change does not normally require editing settings. If multiple bridges are found before a selection is established, Settings asks you to choose one by entering its URL.
 
-Firmware upgrades can replace a previously discovered hostname with its resolved IP after the bridge responds successfully. Manually entered URLs are preserved.
+Knob Settings and the web configuration page share the same connection status: searching, discovered but unresolved, resolved but unavailable, connected with no zones, selected zone unavailable, or ready. Connection details show the resolution method, current address, zone freshness, next check and last successful response. The web status refreshes without replacing unsaved form fields.
+
+Existing discovered IP-only settings can adopt a bridge name while that IP still matches its mDNS advertisement. An already-obsolete IP with no stored name cannot safely identify its former bridge; set its URL once rather than guessing another installation. Manual URLs are preserved. See [connection recovery](docs/connection-recovery.md) for behavior and validation.
 
 ## Controls
 

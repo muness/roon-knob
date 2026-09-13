@@ -22,6 +22,7 @@ set(SRC_FILES
     "../../common/app_main.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
+    "../../common/controller_connection.c"
     "../../common/controller_action_router.c"
     "../../common/controller_config.c"
     "../../common/controller_ble_input.c"

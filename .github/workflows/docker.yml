@@ -23,8 +23,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install runtime test dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y libcjson-dev
+
       - name: Test shared configuration contracts
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -Icommon tests/test_controller_connection.c common/controller_connection.c \
+            -o /tmp/test-controller-connection
+          /tmp/test-controller-connection
+          scripts/test_connection_runtime.sh
           python3 scripts/check_dial_identity.py
           python3 scripts/check_controller_dependencies.py
           python3 scripts/check_controller_dependencies.py --self-test

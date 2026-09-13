@@ -4,28 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Prefer an address resolved from the mDNS service record over its optional
- * TXT base URL. TXT remains a compatibility fallback for responders that do
- * not return an address in the PTR result. */
-bool platform_mdns_build_bridge_url(char *out, size_t len,
-                                    const char *resolved_ipv4,
-                                    uint16_t port,
-                                    const char *txt_base);
-
-/* Consider one mDNS result, retaining a TXT endpoint until all results have
- * been checked for a usable resolved IPv4 endpoint. */
-bool platform_mdns_consider_bridge_url(char *selected, size_t selected_len,
-                                       char *txt_fallback, size_t fallback_len,
-                                       const char *resolved_ipv4,
-                                       uint16_t port,
-                                       const char *txt_base);
-
-/* Return a candidate to persist, or false to retain the current endpoint.
- * Callbacks keep selection policy testable without an ESP or network. */
-typedef bool (*platform_mdns_discover_fn)(char *, size_t);
-typedef bool (*platform_mdns_resolve_fn)(const char *, char *, size_t);
-typedef bool (*platform_mdns_verify_fn)(const char *);
-bool platform_mdns_select_bridge_update(
-    const char *current, bool from_mdns, char *out, size_t len,
-    platform_mdns_discover_fn discover, platform_mdns_resolve_fn resolve,
-    platform_mdns_verify_fn verify);
+/* DNS-SD identity is retained separately from its currently resolved address. */
+typedef struct {
+    char identity[128];
+    char endpoint[128];
+    bool seen, ambiguous;
+} platform_mdns_observation_t;
+/* Matching is scoped to the saved hostname, or an advertised address equal to
+ * a legacy saved IP. Unrelated responders cannot replace a selection. */
+void platform_mdns_consider_record(platform_mdns_observation_t *,
+    const char *selected, const char *identity, const char *endpoint);
+bool platform_mdns_url_host(const char *, char *, size_t, const char **);

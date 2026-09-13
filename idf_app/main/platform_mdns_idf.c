@@ -4,6 +4,8 @@
 #include <esp_err.h>
 #include <esp_log.h>
 #include <mdns.h>
+#include <lwip/netdb.h>
+#include <lwip/inet.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -50,82 +52,6 @@ void platform_mdns_init(const char *hostname) {
     mdns_service_add(NULL, "_device-info", "_udp", 9, txt, sizeof(txt) / sizeof(txt[0]));
 }
 
-static bool txt_find_base(const mdns_result_t *result, char *out, size_t len) {
-    if (!result || !out || len == 0) {
-        return false;
-    }
-    if (!result->txt) {
-        return false;
-    }
-    for (size_t i = 0; i < result->txt_count; ++i) {
-        const mdns_txt_item_t *item = &result->txt[i];
-        if (item->key && strcmp(item->key, "base") == 0 && item->value) {
-            copy_str(out, len, item->value);
-            return true;
-        }
-    }
-    return false;
-}
-
-bool platform_mdns_discover_base_url(char *out, size_t len) {
-    if (!out || len == 0) {
-        return false;
-    }
-    ESP_LOGI(TAG, "Querying mDNS for %s.%s...", SERVICE_TYPE, SERVICE_PROTO);
-    mdns_result_t *results = NULL;
-    esp_err_t err = mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 3000, 4, &results);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS query failed: %s", esp_err_to_name(err));
-        return false;
-    }
-    if (!results) {
-        ESP_LOGW(TAG, "mDNS query returned no results");
-        return false;
-    }
-    bool found = false;
-    char url[128] = {0};
-    char txt_fallback[128] = {0};
-    int count = 0;
-    for (mdns_result_t *r = results; r; r = r->next) {
-        count++;
-        ESP_LOGI(TAG, "mDNS result %d: hostname=%s port=%d txt_count=%zu",
-                 count, r->hostname ? r->hostname : "(null)", r->port, r->txt_count);
-        char resolved_ip[16] = {0};
-        for (mdns_ip_addr_t *addr = r->addr; addr; addr = addr->next) {
-            if (addr->addr.type == ESP_IPADDR_TYPE_V4) {
-                snprintf(resolved_ip, sizeof(resolved_ip), IPSTR,
-                         IP2STR(&addr->addr.u_addr.ip4));
-                break;
-            }
-        }
-        if (!resolved_ip[0] && r->hostname) {
-            platform_mdns_resolve_local(r->hostname, resolved_ip,
-                                         sizeof(resolved_ip));
-        }
-
-        char txt_base[128] = {0};
-        txt_find_base(r, txt_base, sizeof(txt_base));
-        if (platform_mdns_consider_bridge_url(
-                url, sizeof(url), txt_fallback, sizeof(txt_fallback),
-                resolved_ip, r->port, txt_base)) {
-            ESP_LOGI(TAG, "  Selected bridge endpoint: %s (resolved IPv4)", url);
-            found = true;
-            break;
-        }
-    }
-    if (!found && txt_fallback[0]) {
-        copy_str(url, sizeof(url), txt_fallback);
-        ESP_LOGI(TAG, "  Selected bridge endpoint: %s (TXT fallback)", url);
-        found = true;
-    }
-    ESP_LOGI(TAG, "mDNS: found %d results, selected: %s", count, found ? url : "(none)");
-    mdns_query_results_free(results);
-    if (found && url[0]) {
-        copy_str(out, len, url);
-    }
-    return found && out[0];
-}
-
 bool platform_mdns_resolve_local(const char *hostname, char *ip_out, size_t ip_len) {
     if (!hostname || !ip_out || ip_len < 16) {
         return false;
@@ -151,5 +77,49 @@ bool platform_mdns_resolve_local(const char *hostname, char *ip_out, size_t ip_l
 
     snprintf(ip_out, ip_len, IPSTR, IP2STR(&addr));
     ESP_LOGI(TAG, "Resolved %s -> %s", host, ip_out);
+    return true;
+}
+
+void platform_mdns_observe_bridge(const char *selected, platform_mdns_observation_t *out) {
+    memset(out, 0, sizeof(*out));
+    mdns_result_t *results = NULL;
+    if (mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 3000, 16, &results) != ESP_OK) return;
+    for (mdns_result_t *r = results; r; r = r->next) {
+        if (!r->hostname || !r->port) continue;
+        char identity[128], endpoint[128] = {0};
+        int n = snprintf(identity, sizeof(identity), "http://%s%s:%u", r->hostname,
+                         strstr(r->hostname, ".local") ? "" : ".local", (unsigned)r->port);
+        if (n <= 0 || (size_t)n >= sizeof(identity)) continue;
+        bool address = false;
+        for (mdns_ip_addr_t *a = r->addr; a; a = a->next) {
+            if (a->addr.type != ESP_IPADDR_TYPE_V4 || !a->addr.u_addr.ip4.addr) continue;
+            snprintf(endpoint, sizeof(endpoint), "http://" IPSTR ":%u",
+                     IP2STR(&a->addr.u_addr.ip4), (unsigned)r->port);
+            platform_mdns_consider_record(out, selected, identity, endpoint);
+            address = true;
+        }
+        if (!address) platform_mdns_consider_record(out, selected, identity, "");
+    }
+    mdns_query_results_free(results);
+}
+bool platform_mdns_resolve_base_url(const char *base, char *out, size_t len,
+                                    bool *used_dns, bool *mdns_failed) {
+    char host[64], ip[16] = {0}; const char *suffix;
+    out[0] = 0; *used_dns = false; *mdns_failed = false;
+    if (!platform_mdns_url_host(base, host, sizeof(host), &suffix)) return false;
+    struct in_addr literal;
+    if (inet_pton(AF_INET, host, &literal) == 1) inet_ntop(AF_INET, &literal, ip, sizeof(ip));
+    else if (!platform_mdns_resolve_local(host, ip, sizeof(ip))) {
+        *mdns_failed = true;
+        struct addrinfo hints = {0}, *answer = NULL;
+        hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(host, NULL, &hints, &answer) != 0 || !answer) return false;
+        struct sockaddr_in *addr = (struct sockaddr_in *)answer->ai_addr;
+        inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
+        freeaddrinfo(answer);
+        *used_dns = true;
+    }
+    int n = snprintf(out, len, "http://%s%s", ip, suffix);
+    if (n <= 0 || (size_t)n >= len) { out[0] = 0; return false; }
     return true;
 }
