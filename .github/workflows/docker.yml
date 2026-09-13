@@ -44,6 +44,7 @@ jobs:
           scripts/test_connection_runtime.sh
           python3 tests/test_firmware_stack_audit.py
           python3 tests/test_firmware_artifact_cache.py
+          python3 tests/test_prune_firmware_previews.py
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Iframe_app/main \
             tests/test_frame_power_policy.c \
@@ -1811,7 +1812,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./pr-preview
           destination_dir: pr/${{ github.event.pull_request.number }}
-          keep_files: true
+          keep_files: false
           cname: firmware.hiphi.audio
 
       - name: Verify all deployed previews
