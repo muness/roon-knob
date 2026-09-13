@@ -25,7 +25,6 @@ void rk_net_evt_cb(rk_net_evt_t event, const char *ip) {
     case RK_NET_EVT_GOT_IP:
         rlcd_ui_set_setup_mode(false);
         rlcd_ui_set_network_status("WiFi connected");
-        bridge_client_set_device_ip(ip);
         bridge_client_set_network_ready(true);
         atomic_store(&s_mdns_pending, true);
         atomic_store(&s_ble_pending, true);
