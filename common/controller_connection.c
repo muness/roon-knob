@@ -88,15 +88,20 @@ void controller_connection_expire(controller_connection_t *c, uint64_t now) {
 
 void controller_connection_recovery(const controller_connection_t *c, const char *device_ip,
                                     char *title, size_t title_len, char *action, size_t action_len) {
-    controller_connection_summary(c, title, title_len);
-    if (!c->offline && !c->reachable && !c->discovered && !c->resolved && !c->ambiguous)
-        snprintf(title, title_len, "%s", c->failures ? "Cannot find your bridge" : "Looking for your bridge...");
+    const char *message = c->offline ? "Wi-Fi disconnected" :
+        c->ambiguous ? "Choose a bridge" :
+        c->reachable ? (c->zones_current ?
+            (c->zone_count == 0 ? "No playback zones" : "Choose a zone") : "Checking zones...") :
+        c->discovered && !c->resolved ? "Bridge address missing" :
+        c->resolved ? "Bridge unavailable" :
+        c->failures ? "Bridge not found" : "Finding bridge...";
+    snprintf(title, title_len, "%s", message);
     if (c->offline || !device_ip || !device_ip[0])
-        snprintf(action, action_len, "Open Connection settings");
+        snprintf(action, action_len, "Open Settings");
     else if (c->reachable)
-        snprintf(action, action_len, "Check bridge at %s", c->endpoint);
+        snprintf(action, action_len, "Check Hi-Fi Control");
     else
-        snprintf(action, action_len, "Set up at http://%s", device_ip);
+        snprintf(action, action_len, "Manual setup:\n%s", device_ip);
 }
 
 controller_connection_attempt_phase_t controller_connection_attempt_phase(

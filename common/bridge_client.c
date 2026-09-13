@@ -1133,7 +1133,7 @@ static void bridge_poll_thread(void *arg) {
             char title[128], action[128], device_ip[16] = {0};
             wifi_mgr_get_ip(device_ip, sizeof(device_ip));
             controller_connection_recovery(&status, device_ip, title, sizeof(title), action, sizeof(action));
-            post_ui_zone_name("Connection setup");
+            post_ui_zone_name("Hi-Fi Control");
             post_ui_connectivity_update(title, action);
             post_ui_network_status(status.reachable ? "" : "Retrying automatically");
         }
