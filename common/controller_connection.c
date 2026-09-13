@@ -37,36 +37,40 @@ void controller_connection_schedule(controller_connection_t *c, uint64_t now, bo
 }
 void controller_connection_summary(const controller_connection_t *c, char *out, size_t len) {
     const char *message;
-    if (c->offline) message = "Network unavailable";
-    else if (c->stale) message = "Connection check pending - last result expired";
+    if (c->offline) message = "Wi-Fi disconnected - reconnecting automatically";
+    else if (c->stale) message = "Connection status expired - checking again";
     else if (c->ambiguous) message = "Choose your bridge";
     else if (c->reachable && c->zones_current && c->zone_count == 0)
-        message = "Bridge connected - no playback zones";
+        message = "Bridge connected - no playback zones; check your music server";
     else if (c->reachable && c->zones_current && !c->selected_zone_available)
         message = "Bridge connected - choose a zone";
     else if (controller_connection_ready(c))
         message = "Ready";
     else if (c->reachable) message = "Bridge connected - checking zones";
     else if (c->resolved) message = "Bridge unavailable - retrying automatically";
-    else if (c->discovered) message = "Discovered - cannot resolve address; retrying";
-    else if (c->automatic || !c->selected[0]) message = "Searching for selected bridge";
-    else message = "Cannot resolve configured address - retrying";
+    else if (c->discovered) message = "Bridge discovered, but its address is unavailable - retrying";
+    else if (!c->selected[0]) message = "Looking for a bridge";
+    else if (c->automatic) message = "Searching for saved bridge";
+    else message = "Cannot find bridge address - retrying automatically";
     snprintf(out, len, "%s", message);
 }
 void controller_connection_details(const controller_connection_t *c, uint64_t now,
                                    char *out, size_t len) {
-    const char *resolvers[] = {"none", "IP literal", "mDNS", "DNS"};
     uint64_t retry = now < c->next_attempt_ms ? (c->next_attempt_ms - now + 999)/1000 : 0;
-    char success[40], zones[48];
-    if (c->last_success_ms) snprintf(success, sizeof(success), "%llus ago", (unsigned long long)((now - c->last_success_ms)/1000));
-    else snprintf(success, sizeof(success), "never");
-    if (c->zones_current) snprintf(zones, sizeof(zones), "%d current", c->zone_count);
-    else snprintf(zones, sizeof(zones), "unknown/stale");
-    snprintf(out, len, "%s; discovered: %s; resolver: %s%s; address: %s; zones: %s; %s: %llus; last success: %s",
-        c->automatic ? "Automatic" : "Manual", c->discovered ? "yes" : "not observed",
-        resolvers[c->resolver], c->mdns_resolution_failed ? " (mDNS lookup failed)" : "",
-        c->endpoint[0] ? c->endpoint : "unknown", zones,
-        c->reachable ? "next check" : "retry", (unsigned long long)retry, success);
+    char success[48], zones[48], next[64];
+    if (c->last_success_ms && now >= c->last_success_ms)
+        snprintf(success, sizeof(success), "%llu seconds ago", (unsigned long long)((now - c->last_success_ms)/1000));
+    else snprintf(success, sizeof(success), "Not yet received");
+    if (c->zones_current) snprintf(zones, sizeof(zones), "%d available", c->zone_count);
+    else snprintf(zones, sizeof(zones), "Waiting for an update");
+    if (retry) snprintf(next, sizeof(next), "In %llu seconds", (unsigned long long)retry);
+    else snprintf(next, sizeof(next), "Due now");
+    const char *method = !c->automatic ? "Manually configured" :
+        c->resolver == CONNECTION_RESOLVER_LITERAL ? "Automatic, using a saved address" :
+        c->discovered ? "Automatic discovery" : "Automatic, using a saved bridge";
+    snprintf(out, len, "Bridge address: %s\nConnection method: %s\nPlayback zones: %s\nLast response: %s\n%s: %s",
+        c->endpoint[0] ? c->endpoint : "Not found yet", method, zones, success,
+        c->reachable ? "Next connection check" : "Next retry", next);
 }
 
 bool controller_connection_ready(const controller_connection_t *c) {

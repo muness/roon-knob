@@ -1891,7 +1891,20 @@ static void check_charging_state_change(bool current_charging) {
 void bridge_client_connection_status(char *summary, size_t summary_len, char *details, size_t details_len) {
     controller_connection_t status;
     bridge_client_connection_snapshot(&status);
-    if (summary && summary_len) controller_connection_summary(&status, summary, summary_len);
+    if (summary && summary_len) {
+        controller_connection_summary(&status, summary, summary_len);
+        if (controller_connection_ready(&status)) {
+            char zone[MAX_ZONE_NAME], host[128];
+            lock_state();
+            rk_strlcpy(zone, s_state.zone_label, sizeof(zone));
+            unlock_state();
+            const char *identity = status.selected[0] ? status.selected : status.endpoint;
+            if (!platform_mdns_url_host(identity, host, sizeof(host), NULL))
+                rk_strlcpy(host, "Bridge", sizeof(host));
+            snprintf(summary, summary_len, "Ready - %s%s%s", host,
+                     zone[0] ? " - " : "", zone);
+        }
+    }
     if (details && details_len) controller_connection_details(&status, platform_millis(), details, details_len);
 }
 

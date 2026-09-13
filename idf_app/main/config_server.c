@@ -107,10 +107,10 @@ static const char *HTML_CONFIG =
     "<h2>Unified Hi-Fi Control Override</h2>"
     "<label>Unified Hi-Fi Control URL</label>"
     "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088' value='%s'>"
-    "<p class='hint'>Leave empty for mDNS auto-discovery. Check the HiPhi Dial display for connection progress.</p>"
+    "<p class='hint'>Leave empty to find your bridge automatically. Connection status appears above.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form>%s<script>let busy=false;setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)return;const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);}}catch(e){}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>";
+    "</form>%s<script>let busy=false,lastUpdate=Date.now();function unavailable(){const o=document.getElementById('connection-status');if(o){o.className='status status-warn';o.textContent='Dial unavailable - reconnecting. Last update: '+Math.floor((Date.now()-lastUpdate)/1000)+' seconds ago.';}}setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('response');const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);lastUpdate=Date.now();}else throw new Error('status missing');}catch(e){unavailable();}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>";
 
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
@@ -238,7 +238,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     bridge_client_connection_status(render->summary, sizeof(render->summary), render->details, sizeof(render->details));
     html_escape(render->summary, render->escaped_summary, sizeof(render->escaped_summary));
     html_escape(render->details, render->escaped_details, sizeof(render->escaped_details));
-    snprintf(render->status, sizeof(render->status), "%s<details><summary>Connection details</summary>%s</details>",
+    snprintf(render->status, sizeof(render->status), "%s<details><summary>Connection details</summary><div style='white-space:pre-line'>%s</div></details>",
              render->escaped_summary, render->escaped_details);
 
     size_t wifi_pos = 0;

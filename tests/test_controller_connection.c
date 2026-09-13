@@ -9,7 +9,7 @@ static void test_evidence_states(void) {
     assert(strstr(text, "Searching"));
     c.discovered = true;
     controller_connection_summary(&c, text, sizeof(text));
-    assert(strstr(text, "Discovered") && strstr(text, "resolve"));
+    assert(strstr(text, "discovered") && strstr(text, "address"));
     c.resolved = true;
     controller_connection_summary(&c, text, sizeof(text));
     assert(strstr(text, "unavailable"));
@@ -49,4 +49,17 @@ static void test_bounded_retries(void) {
         assert(c.next_attempt_ms > now && c.next_attempt_ms - now <= 60000);
     }
 }
-int main(void) { test_evidence_states(); test_bounded_retries(); }
+static void test_readable_details(void) {
+ controller_connection_t c={0}; char text[512];
+ controller_connection_select(&c,"",true,1);
+ controller_connection_summary(&c,text,sizeof text);
+ assert(strcmp(text,"Looking for a bridge")==0);
+ c.resolved=true;c.resolver=CONNECTION_RESOLVER_LITERAL;strcpy(c.endpoint,"http://192.168.1.2:8088");
+ controller_connection_api(&c,true,8,true,1000);
+ controller_connection_details(&c,3000,text,sizeof text);
+ assert(strstr(text,"Connection method: Automatic, using a saved address"));
+ assert(strstr(text,"Playback zones: 8 available"));
+ assert(strstr(text,"Last response: 2 seconds ago"));
+ assert(!strstr(text,"not observed") && !strstr(text,"resolver:"));
+}
+int main(void) { test_readable_details(); test_evidence_states(); test_bounded_retries(); }
