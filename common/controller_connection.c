@@ -98,3 +98,11 @@ void controller_connection_recovery(const controller_connection_t *c, const char
     else
         snprintf(action, action_len, "Set up at http://%s", device_ip);
 }
+
+controller_connection_attempt_phase_t controller_connection_attempt_phase(
+    const controller_connection_t *c, bool needs_discovery, bool discovery_ready, uint64_t now) {
+    if (c->offline) return CONNECTION_WAIT_NETWORK;
+    if (needs_discovery && !discovery_ready) return CONNECTION_WAIT_DISCOVERY_INIT;
+    if (!controller_connection_due(c, now)) return CONNECTION_WAIT_RETRY;
+    return CONNECTION_ATTEMPT_READY;
+}

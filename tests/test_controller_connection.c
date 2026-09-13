@@ -78,4 +78,15 @@ static void test_recovery_guidance(void) {
  controller_connection_recovery(&c,"",title,sizeof title,action,sizeof action);
  assert(!strstr(action,"http://"));
 }
-int main(void) { test_recovery_guidance(); test_readable_details(); test_evidence_states(); test_bounded_retries(); }
+static void test_attempt_phases(void) {
+ controller_connection_t c={0};
+ c.offline=true;
+ assert(controller_connection_attempt_phase(&c,true,false,10)==CONNECTION_WAIT_NETWORK);
+ c.offline=false;
+ assert(controller_connection_attempt_phase(&c,true,false,10)==CONNECTION_WAIT_DISCOVERY_INIT);
+ c.next_attempt_ms=20;
+ assert(controller_connection_attempt_phase(&c,true,true,10)==CONNECTION_WAIT_RETRY);
+ assert(controller_connection_attempt_phase(&c,true,true,20)==CONNECTION_ATTEMPT_READY);
+ assert(controller_connection_attempt_phase(&c,false,false,20)==CONNECTION_ATTEMPT_READY);
+}
+int main(void) { test_attempt_phases(); test_recovery_guidance(); test_readable_details(); test_evidence_states(); test_bounded_retries(); }

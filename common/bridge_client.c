@@ -633,7 +633,21 @@ static bool update_connection(void) {
                                  token.from_mdns || !token.bridge_base[0], token.generation);
     uint64_t now = platform_millis();
     next.offline = false;
-    if (!controller_connection_due(&next, now)) return false;
+    char selected_host[64] = {0};
+    bool literal = platform_mdns_url_host(token.bridge_base, selected_host, sizeof(selected_host), NULL) &&
+                   strspn(selected_host, "0123456789.") == strlen(selected_host);
+    bool needs_discovery = next.automatic || !literal;
+    controller_connection_attempt_phase_t phase = controller_connection_attempt_phase(
+        &next, needs_discovery, platform_mdns_is_ready(), now);
+    switch (phase) {
+    case CONNECTION_WAIT_NETWORK:
+    case CONNECTION_WAIT_DISCOVERY_INIT:
+    case CONNECTION_WAIT_RETRY:
+        /* Waiting for prerequisites is not a failed attempt and consumes no retry. */
+        return false;
+    case CONNECTION_ATTEMPT_READY:
+        break;
+    }
     platform_mdns_observation_t observed = {0};
     if (next.automatic) platform_mdns_observe_bridge(token.bridge_base, &observed);
     next.discovered = observed.seen;

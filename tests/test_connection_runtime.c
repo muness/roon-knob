@@ -7,6 +7,8 @@ static platform_mdns_observation_t advertised;
 static uint64_t clock_ms;
 static uint32_t generation;
 static unsigned discovery_calls, resolve_calls, http_calls, writes;
+static bool mdns_ready = true;
+bool platform_mdns_is_ready(void) { return mdns_ready; }
 static bool resolution_ok, http_ok, race;
 static const char *http_body;
 static void (*queued)(void *);
@@ -168,4 +170,13 @@ static void test_zone_cycle_wraps_without_copying_inventory(void) {
     assert(bridge_client_execute_command(&command));
     assert(strcmp(s_state.runtime_zone_id, "roon:a") == 0);
 }
-int main(void) { test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+static void test_discovery_waits_for_initialization(void) {
+ reset("", true); mdns_ready=false;
+ for (int i=0;i<5;i++) { update_connection(); clock_ms+=2000; }
+ assert(discovery_calls==0 && resolve_calls==0 && http_calls==0);
+ assert(s_connection.failures==0 && s_connection.next_attempt_ms==0);
+ mdns_ready=true;update_connection();assert(discovery_calls==1);
+ reset("http://192.168.1.2:8088",false);mdns_ready=false;
+ update_connection();assert(http_calls==1);mdns_ready=true;
+}
+int main(void) { test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

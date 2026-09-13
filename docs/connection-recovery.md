@@ -56,3 +56,9 @@ the bridge address. With no local IP it directs the user to Connection settings.
 Initial search becomes “Cannot find your bridge” after an unsuccessful attempt;
 automatic retries continue. The startup zone label never displays the persisted
 provider zone ID as a user-facing name.
+
+Discovery attempts have a derived prerequisite lifecycle:
+`WAIT_NETWORK -> WAIT_DISCOVERY_INIT -> WAIT_RETRY -> ATTEMPT_READY`.
+Transitions skip prerequisites already satisfied. Waiting consumes no failure or
+retry delay; a manually configured IPv4 endpoint does not depend on mDNS.
+The platform adapter retains a defensive initialization check as well.

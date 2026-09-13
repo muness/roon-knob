@@ -30,3 +30,12 @@ bool controller_connection_ready(const controller_connection_t *);
 void controller_connection_expire(controller_connection_t *, uint64_t);
 void controller_connection_recovery(const controller_connection_t *, const char *device_ip,
                                     char *title, size_t title_len, char *action, size_t action_len);
+/* Derived attempt lifecycle; connection evidence remains the single owner of state. */
+typedef enum {
+    CONNECTION_WAIT_NETWORK,
+    CONNECTION_WAIT_DISCOVERY_INIT,
+    CONNECTION_WAIT_RETRY,
+    CONNECTION_ATTEMPT_READY
+} controller_connection_attempt_phase_t;
+controller_connection_attempt_phase_t controller_connection_attempt_phase(
+    const controller_connection_t *, bool needs_discovery, bool discovery_ready, uint64_t now);
