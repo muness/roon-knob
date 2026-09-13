@@ -1,0 +1,11 @@
+{
+  "name": "HiPhi RLCD Alpha (PR #250 Preview)",
+  "version": "pr-250",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_rlcd_bootloader-8790affd016856ffb669daf2f850f90306a2add3-34765305300-1.bin", "offset": 0},
+    {"path": "hiphi_rlcd_partition-table-8790affd016856ffb669daf2f850f90306a2add3-34765305300-1.bin", "offset": 32768},
+    {"path": "hiphi_rlcd_ota_data_initial-8790affd016856ffb669daf2f850f90306a2add3-34765305300-1.bin", "offset": 53248},
+    {"path": "hiphi_rlcd-8790affd016856ffb669daf2f850f90306a2add3-34765305300-1.bin", "offset": 65536}
+  ]}]
+}
