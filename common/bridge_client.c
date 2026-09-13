@@ -14,6 +14,7 @@
 #include "controller_presentation.h"
 #include "controller_view.h"
 #include "controller_view_compat.h"
+#include "wifi_manager.h"
 
 #include <ctype.h>
 #include <stddef.h>
@@ -1115,10 +1116,12 @@ static void bridge_poll_thread(void *arg) {
         } else {
             controller_connection_t status;
             bridge_client_connection_snapshot(&status);
-            char summary[128];
-            controller_connection_summary(&status, summary, sizeof(summary));
-            post_ui_connectivity_update("See Settings for details", summary);
-            post_ui_network_status(summary);
+            char title[128], action[128], device_ip[16] = {0};
+            wifi_mgr_get_ip(device_ip, sizeof(device_ip));
+            controller_connection_recovery(&status, device_ip, title, sizeof(title), action, sizeof(action));
+            post_ui_zone_name("Connection setup");
+            post_ui_connectivity_update(title, action);
+            post_ui_network_status(status.reachable ? "" : "Retrying automatically");
         }
         wait_for_poll_interval(&power);
     }
@@ -1134,7 +1137,7 @@ void bridge_client_start(void) {
     platform_task_init();
     lock_state();
     strncpy(s_state.zone_label,
-            cfg.zone_id[0] ? cfg.zone_id : "Choose a zone in device controls",
+            "Connection setup",
             sizeof(s_state.zone_label) - 1);
     s_state.zone_label[sizeof(s_state.zone_label) - 1] = '\0';
     char initial_zone_label[MAX_ZONE_NAME];

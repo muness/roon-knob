@@ -33,3 +33,26 @@ The selected approach survives the two alternatives: merely showing more labels 
 Exact-artifact hardware validation is still required: flash/boot Dial and Frame, reproduce the reported volume failure, compare web/knob Settings, test HA/QNAP discovery, induce an outage and an address change, and verify UI readability, retained settings and normal playback. Host tests and compilation do not establish those physical results. Keep PR #250 draft until that evidence is recorded.
 
 All ESP-IDF targets compile one mDNS adapter (`common/platform/platform_mdns_esp.c`). Product identity comes from the platform identity provider (with the existing RLCD product override preserved); discovery, candidate selection, and hostname resolution do not vary by board.
+
+### Diagnosing discovery on hardware
+
+Serial `platform_mdns` messages report each PTR query's service, timeout, saved
+selection and initialization state; the query error or empty-result outcome;
+each returned service's hostname, port and TTL; each advertised IPv4 endpoint;
+and ignored addresses/records with reasons. The final line reports record and
+address counts, selected identity/endpoint and ambiguity. A queries and DNS
+fallback failures are reported separately. Logging follows the existing bounded
+retry schedule; it does not add network queries.
+
+A PTR service response can include SRV, TXT and A/AAAA address records. UHC's
+`mdns_sd` advertisement already supplies these standard additional records;
+there is no separate IP-list TXT protocol. On 2026-09-13 a Mac-side packet check
+of NAS2 observed `_roonknob._tcp.local`, `NAS2.local:8088`, and A `192.168.1.2`
+in one response. This verifies the server response on the Mac's network path,
+not receipt on the Dial's Wi-Fi path.
+
+The recovery screen uses the controller's own current IP for manual setup, never
+the bridge address. With no local IP it directs the user to Connection settings.
+Initial search becomes “Cannot find your bridge” after an unsuccessful attempt;
+automatic retries continue. The startup zone label never displays the persisted
+provider zone ID as a user-facing name.

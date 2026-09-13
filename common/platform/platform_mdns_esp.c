@@ -66,7 +66,7 @@ bool platform_mdns_resolve_local(const char *hostname, char *ip_out, size_t ip_l
     addr.addr = 0;
     esp_err_t err = mdns_query_a(host, 2000, &addr);
     if (err != ESP_OK || addr.addr == 0) {
-        ESP_LOGW(TAG, "mDNS resolve failed for %s", host);
+        ESP_LOGW(TAG, "A query host=%s timeout=2000ms result=%s address_present=%d", host, esp_err_to_name(err), addr.addr != 0);
         return false;
     }
 
@@ -78,23 +78,61 @@ bool platform_mdns_resolve_local(const char *hostname, char *ip_out, size_t ip_l
 void platform_mdns_observe_bridge(const char *selected, platform_mdns_observation_t *out) {
     memset(out, 0, sizeof(*out));
     mdns_result_t *results = NULL;
-    if (mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 3000, 16, &results) != ESP_OK) return;
+    ESP_LOGI(TAG, "PTR query service=%s.%s.local timeout=3000ms limit=16 selected=%s ready=%d",
+             SERVICE_TYPE, SERVICE_PROTO, selected[0] ? selected : "(none)", s_mdns_ready);
+    if (!s_mdns_ready) {
+        ESP_LOGI(TAG, "PTR query deferred: mDNS initialization pending");
+        return;
+    }
+    esp_err_t query_error = mdns_query_ptr(SERVICE_TYPE, SERVICE_PROTO, 3000, 16, &results);
+    if (query_error != ESP_OK) {
+        ESP_LOGW(TAG, "PTR query failed: %s", esp_err_to_name(query_error));
+        if (results) mdns_query_results_free(results);
+        return;
+    }
+    unsigned records = 0, addresses = 0;
+    if (!results) ESP_LOGW(TAG, "PTR query completed: no results within 3000ms");
     for (mdns_result_t *r = results; r; r = r->next) {
-        if (!r->hostname || !r->port) continue;
+        ++records;
+        ESP_LOGI(TAG, "PTR result #%u instance=%s host=%s port=%u ttl=%lu protocol=%d",
+                 records, r->instance_name ? r->instance_name : "(missing)",
+                 r->hostname ? r->hostname : "(missing)", (unsigned)r->port,
+                 (unsigned long)r->ttl, (int)r->ip_protocol);
+        if (!r->hostname || !r->port) {
+            ESP_LOGW(TAG, "Result ignored: missing SRV hostname or port");
+            continue;
+        }
         char identity[128], endpoint[128] = {0};
         int n = snprintf(identity, sizeof(identity), "http://%s%s:%u", r->hostname,
                          strstr(r->hostname, ".local") ? "" : ".local", (unsigned)r->port);
-        if (n <= 0 || (size_t)n >= sizeof(identity)) continue;
+        if (n <= 0 || (size_t)n >= sizeof(identity)) {
+            ESP_LOGW(TAG, "Result ignored: service identity exceeds buffer");
+            continue;
+        }
         bool address = false;
         for (mdns_ip_addr_t *a = r->addr; a; a = a->next) {
-            if (a->addr.type != ESP_IPADDR_TYPE_V4 || !a->addr.u_addr.ip4.addr) continue;
+            if (a->addr.type != ESP_IPADDR_TYPE_V4 || !a->addr.u_addr.ip4.addr) {
+                ESP_LOGI(TAG, "Address ignored: unsupported IPv6 or empty IPv4 (type=%d)", (int)a->addr.type);
+                continue;
+            }
+            ++addresses;
             snprintf(endpoint, sizeof(endpoint), "http://" IPSTR ":%u",
                      IP2STR(&a->addr.u_addr.ip4), (unsigned)r->port);
+            ESP_LOGI(TAG, "Advertised address: identity=%s endpoint=%s", identity, endpoint);
+            platform_mdns_observation_t candidate = {0};
+            platform_mdns_consider_record(&candidate, selected, identity, endpoint);
+            if (!candidate.seen) ESP_LOGI(TAG, "Address ignored: does not match saved bridge");
             platform_mdns_consider_record(out, selected, identity, endpoint);
             address = true;
         }
-        if (!address) platform_mdns_consider_record(out, selected, identity, "");
+        if (!address) {
+            ESP_LOGW(TAG, "Service has no usable IPv4 address: %s", identity);
+            platform_mdns_consider_record(out, selected, identity, "");
+        }
     }
+    ESP_LOGI(TAG, "Discovery complete: records=%u IPv4_addresses=%u selected=%s endpoint=%s ambiguous=%d",
+             records, addresses, out->seen ? out->identity : "(none)",
+             out->endpoint[0] ? out->endpoint : "(unresolved)", out->ambiguous);
     mdns_query_results_free(results);
 }
 bool platform_mdns_resolve_base_url(const char *base, char *out, size_t len,
@@ -108,11 +146,18 @@ bool platform_mdns_resolve_base_url(const char *base, char *out, size_t len,
         *mdns_failed = true;
         struct addrinfo hints = {0}, *answer = NULL;
         hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
-        if (getaddrinfo(host, NULL, &hints, &answer) != 0 || !answer) return false;
+        ESP_LOGI(TAG, "DNS fallback query host=%s", host);
+        int dns_error = getaddrinfo(host, NULL, &hints, &answer);
+        if (dns_error != 0 || !answer) {
+            ESP_LOGW(TAG, "DNS fallback failed host=%s error=%d", host, dns_error);
+            if (answer) freeaddrinfo(answer);
+            return false;
+        }
         struct sockaddr_in *addr = (struct sockaddr_in *)answer->ai_addr;
         inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
         freeaddrinfo(answer);
         *used_dns = true;
+        ESP_LOGI(TAG, "DNS fallback resolved %s -> %s", host, ip);
     }
     int n = snprintf(out, len, "http://%s%s", ip, suffix);
     if (n <= 0 || (size_t)n >= len) { out[0] = 0; return false; }

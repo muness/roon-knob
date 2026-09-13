@@ -28,3 +28,5 @@ void controller_connection_details(const controller_connection_t *, uint64_t, ch
 bool controller_connection_ready(const controller_connection_t *);
 
 void controller_connection_expire(controller_connection_t *, uint64_t);
+void controller_connection_recovery(const controller_connection_t *, const char *device_ip,
+                                    char *title, size_t title_len, char *action, size_t action_len);

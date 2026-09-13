@@ -65,7 +65,7 @@ void controller_connection_details(const controller_connection_t *c, uint64_t no
     else snprintf(zones, sizeof(zones), "Waiting for an update");
     if (retry) snprintf(next, sizeof(next), "In %llu seconds", (unsigned long long)retry);
     else snprintf(next, sizeof(next), "Due now");
-    const char *method = !c->automatic ? "Manually configured" :
+    const char *method = c->automatic && !c->selected[0] && !c->discovered && !c->resolved ? "Automatic discovery" : !c->automatic ? "Manually configured" :
         c->resolver == CONNECTION_RESOLVER_LITERAL ? "Automatic, using a saved address" :
         c->discovered ? "Automatic discovery" : "Automatic, using a saved bridge";
     snprintf(out, len, "Bridge address: %s\nConnection method: %s\nPlayback zones: %s\nLast response: %s\n%s: %s",
@@ -84,4 +84,17 @@ void controller_connection_expire(controller_connection_t *c, uint64_t now) {
         c->reachable = false;
         c->zones_current = false;
     }
+}
+
+void controller_connection_recovery(const controller_connection_t *c, const char *device_ip,
+                                    char *title, size_t title_len, char *action, size_t action_len) {
+    controller_connection_summary(c, title, title_len);
+    if (!c->offline && !c->reachable && !c->discovered && !c->resolved && !c->ambiguous)
+        snprintf(title, title_len, "%s", c->failures ? "Cannot find your bridge" : "Looking for your bridge...");
+    if (c->offline || !device_ip || !device_ip[0])
+        snprintf(action, action_len, "Open Connection settings");
+    else if (c->reachable)
+        snprintf(action, action_len, "Check bridge at %s", c->endpoint);
+    else
+        snprintf(action, action_len, "Set up at http://%s", device_ip);
 }
