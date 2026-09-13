@@ -91,3 +91,8 @@ Tutorials for porting and reusing patterns.
 
 - [PORTING.md](howto/PORTING.md) - Porting to other ESP32 boards or building different apps
 - [AtomS3 Joystick hardware](esp/hw-reference/board-atom-s3-joystick.md)
+
+## M5 hardware and Wi-Fi setup
+
+- [M5Stack Tough build, flash, and controls](esp/M5STACK.md)
+- [Wi-Fi scan behavior and troubleshooting](esp/WIFI_SCAN.md)
