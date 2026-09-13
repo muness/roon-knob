@@ -46,6 +46,7 @@ jobs:
           python3 tests/test_firmware_artifact_cache.py
           python3 tests/test_prune_firmware_previews.py
           python3 tests/test_connection_web_status.py
+          python3 tests/test_pr_index.py
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Iframe_app/main \
             tests/test_frame_power_policy.c \
@@ -1805,6 +1806,7 @@ jobs:
           done
           python3 scripts/check_flash_manifest.py "pr-preview/${AUX_MANIFEST_FILE}" --assets-dir pr-preview
           ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL|RELEASE_CHANNEL_NAME|RELEASE_CHANNEL_NOTICE|RELEASE_LINK)\}\}' pr-preview
+          python3 scripts/build_pr_index.py pr-preview --pr "$PR_NUM" --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1863,7 +1865,9 @@ jobs:
           done
 
           {
-            echo "dial_page_url=${PREVIEW_BASE}/flash-dial-${PREVIEW_ID}.html"
+            curl --fail --silent --show-error --location "${PREVIEW_BASE}/" -o deployed-preview/index.html
+            cmp pr-preview/index.html deployed-preview/index.html
+            echo "dial_page_url=${PREVIEW_BASE}/"
             echo "frame_page_url=${PREVIEW_BASE}/flash-frame-${PREVIEW_ID}.html"
             echo "rlcd_page_url=${PREVIEW_BASE}/flash-rlcd-${PREVIEW_ID}.html"
             echo "joy_page_url=${PREVIEW_BASE}/flash-joy-${PREVIEW_ID}.html"
