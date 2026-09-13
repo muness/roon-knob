@@ -6,6 +6,7 @@
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
+#include "platform/platform_mdns_endpoint.h"
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "os_mutex.h"
@@ -609,9 +610,28 @@ static void strip_trailing_slashes(char *url) {
     }
 }
 
+/* Probe without publishing zones or altering the selected endpoint. */
+static bool discovered_bridge_responds(const char *base) {
+    char url[256];
+    int written = snprintf(url, sizeof(url), "%s/zones", base);
+    if (written <= 0 || (size_t)written >= sizeof(url)) return false;
+    char *response = NULL;
+    size_t response_len = 0;
+    int result = platform_http_get(url, &response, &response_len);
+    bool valid = false;
+    if (result == 0 && response) {
+        cJSON *root = cJSON_ParseWithLength(response, response_len);
+        valid = cJSON_IsObject(root) &&
+                cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(root, "zones"));
+        cJSON_Delete(root);
+    }
+    platform_http_free(response);
+    return valid;
+}
+
 static void maybe_update_bridge_base(void) {
-    // Only use mDNS when no bridge URL is configured.
-    // This respects user-set URLs (via web config) and allows Clear to trigger fresh discovery.
+    // Discover an empty endpoint or migrate its saved legacy hostname.
+    // Clear explicitly allows discovery to select another bridge.
     controller_config_endpoint_token_t token;
     if (!controller_config_capture_endpoint_token(&token)) {
         return;
@@ -628,7 +648,10 @@ static void maybe_update_bridge_base(void) {
 
     // Endpoint is empty or discovery-owned - try mDNS discovery.
     char discovered[sizeof(token.bridge_base)];
-    bool mdns_ok = platform_mdns_discover_base_url(discovered, sizeof(discovered));
+    bool mdns_ok = platform_mdns_select_bridge_update(
+        token.bridge_base, token.from_mdns, discovered, sizeof(discovered),
+        platform_mdns_discover_base_url, platform_mdns_resolve_local,
+        discovered_bridge_responds);
 
     if (mdns_ok && host_is_valid(discovered)) {
         // The endpoint must still be unchanged when this asynchronous lookup
@@ -654,6 +677,9 @@ static void maybe_update_bridge_base(void) {
         }
         return;
     }
+
+    // Retaining an existing endpoint is normal, not failed discovery.
+    if (token.bridge_base[0]) return;
 
     // mDNS failed - try compile-time default fallback
     if (CONFIG_RK_DEFAULT_BRIDGE_BASE[0] != '\0') {
@@ -1044,7 +1070,8 @@ static void bridge_poll_thread(void *arg) {
 
         // Only run mDNS discovery if:
         // 1. We haven't verified a working bridge yet, OR
-        // 2. It's been over an hour since last check (in case bridge IP changed)
+        // 2. It's been over an hour since last check (retry legacy hostname migration).
+        // Saved IPs remain selected until the user clears or edits the URL.
         uint32_t now_ms = (uint32_t)platform_millis();
         bool should_check_mdns = !s_bridge_verified ||
             (now_ms - s_last_mdns_check_ms > MDNS_RECHECK_INTERVAL_MS);

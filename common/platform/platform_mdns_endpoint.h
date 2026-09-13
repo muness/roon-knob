@@ -19,3 +19,13 @@ bool platform_mdns_consider_bridge_url(char *selected, size_t selected_len,
                                        const char *resolved_ipv4,
                                        uint16_t port,
                                        const char *txt_base);
+
+/* Return a candidate to persist, or false to retain the current endpoint.
+ * Callbacks keep selection policy testable without an ESP or network. */
+typedef bool (*platform_mdns_discover_fn)(char *, size_t);
+typedef bool (*platform_mdns_resolve_fn)(const char *, char *, size_t);
+typedef bool (*platform_mdns_verify_fn)(const char *);
+bool platform_mdns_select_bridge_update(
+    const char *current, bool from_mdns, char *out, size_t len,
+    platform_mdns_discover_fn discover, platform_mdns_resolve_fn resolve,
+    platform_mdns_verify_fn verify);

@@ -77,7 +77,9 @@ Go to **Roon → Settings → Extensions** and enable **"Unified Hi-Fi Control"*
 
 Power on the dial. It creates a WiFi network called **"hiphi-dial-setup"**. Connect to it, enter your WiFi credentials, and you're done.
 
-The knob finds the extension automatically via mDNS.
+The knob finds the extension automatically via mDNS. It keeps the selected bridge address until you clear or edit the Bridge URL. If the bridge's IP changes, clear the URL to discover again or enter its new address. This prevents another bridge on the network from taking over during a refresh.
+
+Firmware upgrades can replace a previously discovered hostname with its resolved IP after the bridge responds successfully. Manually entered URLs are preserved.
 
 ## Controls
 
