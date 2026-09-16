@@ -145,12 +145,30 @@ idf.py build
 See [docs/dev/KCONFIG.md](docs/dev/KCONFIG.md) for details.
 
 ### ESP-IDF Version
-CI currently uses ESP-IDF `v5.4.3`, matching the last working release. Use that
-exact version locally when
-reproducing CI or hardware behavior; version changes are explicit migration work.
+CI builds every target with ESP-IDF `v5.5.5` (`esp_idf_version` in
+`.github/workflows/docker.yml`). Use that exact version locally; the install is
+symlinked at `~/esp/esp-idf`. Version changes are explicit migration work, not
+a local convenience.
+
+### Fresh Checkout / Worktree Setup
+```bash
+git submodule update --init --recursive   # M5 vendor components under components/m5_official/vendor
+source ~/esp/esp-idf/export.sh
+```
+Without the submodules, `atom_app` and `m5_beta_app` fail at configure time.
 
 ### Target Chip
-The target is ESP32-S3, not ESP32. If you get weird errors, check:
+Targets differ per app. Each `sdkconfig.defaults` pins its chip so a fresh
+checkout configures correctly:
+
+| App | Chip |
+|-----|------|
+| `idf_app`, `frame_app`, `rlcd_app`, `atom_app`, `m5_beta_app` | `esp32s3` |
+| `tough_app`, `knob_aux_app` | `esp32` |
+
+If a build fails with undeclared `ESP_EXT1_WAKEUP_*` or similar, a stale
+`sdkconfig` was generated for the wrong chip:
 ```bash
-idf.py set-target esp32s3
+rm sdkconfig
+idf.py set-target esp32s3   # or esp32 for tough_app / knob_aux_app
 ```
