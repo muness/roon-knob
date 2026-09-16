@@ -1,5 +1,5 @@
 {
-  "name": "Kizz Playback Companion (Alpha)",
+  "name": "Kizz (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{

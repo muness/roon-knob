@@ -1,5 +1,5 @@
 {
-  "name": "Waveshare Dial Auxiliary ESP32 Parking Image",
+  "name": "Dial auxiliary parking image",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{

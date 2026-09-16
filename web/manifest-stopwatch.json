@@ -1,5 +1,5 @@
 {
-  "name": "M5Stack StopWatch Wrist Remote (Alpha)",
+  "name": "HiPhi Remote (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{

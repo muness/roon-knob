@@ -1,5 +1,5 @@
 {
-  "name": "HiPhi RLCD (Alpha)",
+  "name": "HiPhi Slate (Alpha)",
   "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{
