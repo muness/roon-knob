@@ -15,6 +15,8 @@
 
 #include <M5Unified.h>
 
+#include "assets/hiphi_logo_rgb565.h"
+
 #include <esp_app_desc.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -562,11 +564,16 @@ void draw_provisioning(void) {
     const int w = static_cast<int>(m5_platform_display_width());
     const int h = static_cast<int>(m5_platform_display_height());
     s_draw_target->fillScreen(0x101018);
-    draw_center(platform_product_name(), w / 2, 16, 2, 0xfafafa);
-    draw_center("Join Wi-Fi:", w / 2, 45, 1, 0xaaaaaa);
-    draw_center(platform_provisioning_ssid(), w / 2, 64, 2, HIPHI_ACCENT);
-    draw_center("Open 192.168.4.1", w / 2, 91, 1, 0xfafafa);
-    draw_center("Choose a network + enter password", w / 2, 111, 1, 0xaaaaaa);
+    // HiPhi mark above the product title, drawn into the same frame as the
+    // rest of this screen. The vertical rhythm below is tightened to pay for
+    // it: the SSID keeps its size-2 prominence and the scan list still shows
+    // five rows on this 320x240 panel.
+    hiphi_logo_draw_rgb565(*s_draw_target, w / 2 - 32, 2, 64, 0x101018);
+    draw_center(platform_product_name(), w / 2, 78, 2, 0xfafafa);
+    draw_center("Join Wi-Fi:", w / 2, 96, 1, 0xaaaaaa);
+    draw_center(platform_provisioning_ssid(), w / 2, 112, 2, HIPHI_ACCENT);
+    draw_center("Open 192.168.4.1", w / 2, 130, 1, 0xfafafa);
+    draw_center("Choose a network + enter password", w / 2, 145, 1, 0xaaaaaa);
     rk_wifi_network_t scan[6] = {};
     const rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
     if (scan_state == RK_WIFI_SCAN_IDLE || scan_state == RK_WIFI_SCAN_FAILED) {
@@ -575,7 +582,7 @@ void draw_provisioning(void) {
     const size_t count = scan_state == RK_WIFI_SCAN_READY
                              ? wifi_mgr_scan_results_copy(scan, 6)
                              : 0;
-    int y = 135;
+    int y = 158;
     if (count == 0) {
         draw_center("Scanning...", w / 2, y, 1, HIPHI_ATTENTION);
     } else {

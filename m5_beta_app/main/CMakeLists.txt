@@ -1,5 +1,6 @@
 set(SRC_FILES
     "touch_ui.cpp"
+    "../../common/assets/hiphi_logo_rgb565.c"
     "controller_presentation_beta.c"
     "controller_presentation_semantic.c"
     "kizz_semantic_layout.cpp"

@@ -1,6 +1,7 @@
 set(SRC_FILES
     "main_atom.c"
     "touch_ui.cpp"
+    "../../common/assets/hiphi_logo_rgb565.c"
     "controller_presentation_atom.c"
     "platform_input_atom.c"
     "platform_identity_atom.c"

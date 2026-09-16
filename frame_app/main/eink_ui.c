@@ -10,6 +10,7 @@
 #include "platform/platform_time.h"
 #include "platform/platform_log.h"
 #include "platform/platform_task.h"
+#include "assets/hiphi_logo_mono.h"
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -135,6 +136,20 @@ static void draw_hline(uint16_t x, uint16_t y, uint16_t w, uint8_t color) {
     }
 }
 
+// HiPhi mark, 1-bit, drawn as EINK_BLACK on the already-white framebuffer.
+// Paper bits are skipped rather than written white, so this never disturbs
+// anything already in the framebuffer.
+static void draw_logo_mono(int x, int y) {
+    for (int row = 0; row < HIPHI_LOGO_MONO_SIZE; ++row) {
+        for (int col = 0; col < HIPHI_LOGO_MONO_SIZE; ++col) {
+            if (hiphi_logo_mono_pixel(col, row)) {
+                eink_display_set_pixel((uint16_t)(x + col), (uint16_t)(y + row),
+                                       EINK_BLACK);
+            }
+        }
+    }
+}
+
 // Truncate string to fit width, adding "..." if needed
 static void truncate_to_fit(const char *src, char *dst, size_t dst_len,
                             int max_width, const eink_font_t *font) {
@@ -244,6 +259,13 @@ static bool render_full_screen(void) {
             eink_display_set_pixel(ART_X, ART_Y + i, EINK_BLACK);
             eink_display_set_pixel(ART_X + ART_W - 1, ART_Y + i, EINK_BLACK);
         }
+        // This is the boot and Wi-Fi setup state: no artwork has ever loaded,
+        // and the text bar below is showing the product name and SSID. Centre
+        // the HiPhi mark in the empty placeholder. Drawn into the framebuffer
+        // of the refresh this function already performs - no extra
+        // eink_display_refresh(), no added boot delay.
+        draw_logo_mono(ART_X + (ART_W - HIPHI_LOGO_MONO_SIZE) / 2,
+                       ART_Y + (ART_H - HIPHI_LOGO_MONO_SIZE) / 2);
     }
 
     // ── Text bar at bottom ───────────────────────────────────────────────

@@ -1,6 +1,7 @@
 set(SRC_FILES
     "main_tough.c"
     "touch_ui.cpp"
+    "../../common/assets/hiphi_logo_rgb565.c"
     "controller_input_profile_tough.c"
     "controller_presentation_tough.c"
     "platform_input_tough.c"
