@@ -5,6 +5,7 @@
 // this is not a stub, there is nothing to configure.
 
 #include "captive_portal.h"
+#include "portal_brand.h"
 #include "dns_server.h"
 #include "controller_config.h"
 #include "touch_ui.h"
@@ -154,21 +155,11 @@ static const char *HTML_SUCCESS_HEAD =
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>";
 
+static const char *HTML_SUCCESS_TITLE =
+    "<title>" HIPHI_BRAND " - Saved</title><style>";
+
 static const char *HTML_SUCCESS_BODY =
-    "<title>" HIPHI_BRAND " - Saved</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
-    "text-align:center;}"
-    "h1{color:#4fc3f7;}"
-    ".status{padding:20px;margin:20px "
-    "auto;border-radius:10px;max-width:300px;background:#2e7d32;}"
-    ".next{padding:15px;margin:20px "
-    "auto;border-radius:10px;max-width:300px;background:#16213e;text-align:"
-    "left;}"
-    ".next li{margin:8px 0;}"
-    "</style></head><body>"
-    "<h1>" HIPHI_BRAND "</h1>"
-    "<div class='status'>"
+    "<div class='status success'>"
     "<p><strong>WiFi credentials saved!</strong></p>"
     "</div>"
     "<div class='next'>"
@@ -178,7 +169,7 @@ static const char *HTML_SUCCESS_BODY =
     "<li>Reconnect your phone to your home WiFi</li>"
     "<li>The " HIPHI_BRAND " will connect and start displaying</li>"
     "</ol>"
-    "</div></body></html>";
+    "</div>";
 
 // URL decode a string in place
 static void url_decode(char *str) {
@@ -364,7 +355,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     if (pos >= 1024) pos = 1023;
   }
 
-  size_t html_size = 8192;
+  size_t html_size = 16384;  /* includes the shared brand stylesheet */
   // MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT requires PSRAM.  AtomS3 has no
   // PSRAM, so use any 8-bit heap and let ESP-IDF choose internal RAM (or
   // PSRAM on targets that actually provide it).
@@ -385,32 +376,11 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>" HIPHI_BRAND " Setup</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
-    "p{color:#888;margin-top:0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:300px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=password]{width:100%%;padding:10px;border:1px solid "
-    "#333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{width:100%%;padding:12px;margin-top:20px;background:#4fc3f7;"
-    "color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;"
-    "display:flex;justify-content:space-between;align-items:center;max-width:300px;}"
-    ".btn-rm{color:#ff7043;text-decoration:none;font-size:13px;}"
-    ".btn-rm:hover{color:#ff5722;}"
-    ".section{max-width:300px;}"
-    ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
-    "margin-top:20px;font-size:13px;}"
-    ".note a{color:#4fc3f7;}"
-    "select{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;"
-    "background:#0f0f1a;color:#fff;box-sizing:border-box;}"
+    "<style>%s"
     "</style>"
     "</head><body>"
-    "<h1>" HIPHI_BRAND "</h1>"
-    "<p>WiFi Setup</p>"
+    "%s"
+    "<h1>WiFi Setup</h1>"
     "%s%s%s"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
@@ -424,13 +394,16 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
-    "</div><script>%s</script></body></html>",
+    "</div><script>%s</script>%s</body></html>",
+    PORTAL_BRAND_CSS,
+    portal_brand_header_html(),
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
     cfg->wifi_count > 0 ? "</div>" : "",
     scan_placeholder,
     scan_options,
-    scan_refresh);
+    scan_refresh,
+    portal_brand_footer_html());
 
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html, strlen(html));
@@ -496,15 +469,21 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
     ESP_LOGE(TAG, "Failed to save config");
-    httpd_resp_send(req,
+    httpd_resp_send_chunk(req,
       "<!DOCTYPE html><html><head>"
       "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-      "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
-      "text-align:center;}h1{color:#4fc3f7;}.error{padding:20px;margin:20px "
-      "auto;border-radius:10px;max-width:300px;background:#c62828;}</style></head><body>"
-      "<h1>" HIPHI_BRAND "</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
-      "<p>Please try again.</p></div></body></html>",
+      "<title>" HIPHI_BRAND " - Not saved</title><style>",
       HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, PORTAL_BRAND_CSS, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, "</style></head><body>", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, portal_brand_header_html(), HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req,
+      "<div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
+      "<p>Please try again.</p></div>",
+      HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, portal_brand_footer_html(), HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, "</body></html>", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, NULL, 0);
     touch_ui_post_network_status("SAVE FAILED!");
     vTaskDelay(pdMS_TO_TICKS(5000));
     return ESP_FAIL;
@@ -525,7 +504,13 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   apply_committed_wifi(false);
 
   httpd_resp_send_chunk(req, HTML_SUCCESS_HEAD, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, HTML_SUCCESS_TITLE, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, PORTAL_BRAND_CSS, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</style></head><body>", HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_header_html(), HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, HTML_SUCCESS_BODY, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_footer_html(), HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</body></html>", HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, NULL, 0);
 
   ESP_LOGI(TAG, "Credentials saved, scheduling reboot...");
@@ -639,28 +624,9 @@ fail:
   return false;
 }
 
-// ── Common CSS for STA-mode pages ──────────────────────────────────────────
+// ── Shared brand stylesheet for STA-mode pages ─────────────────────────────
 
-static const char *STA_CSS =
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
-    "a{color:#4fc3f7;}"
-    "nav{margin:10px 0 20px;}"
-    "nav a{margin-right:15px;text-decoration:none;}"
-    ".card{background:#16213e;padding:15px 20px;border-radius:10px;max-width:400px;margin:10px 0;}"
-    ".zone{display:flex;justify-content:space-between;align-items:center;"
-    "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;cursor:pointer;}"
-    ".zone:hover{background:#1e3a5f;}"
-    ".zone.active{border:1px solid #4fc3f7;}"
-    ".zone form{display:inline;margin:0;}"
-    ".btn{padding:8px 16px;background:#4fc3f7;color:#000;border:none;"
-    "border-radius:5px;font-weight:bold;cursor:pointer;}"
-    ".btn:hover{background:#29b6f6;}"
-    ".btn-danger{background:#ff7043;}"
-    ".btn-danger:hover{background:#ff5722;}"
-    ".status{color:#aaa;margin:10px 0;}"
-    ;
+#define STA_CSS PORTAL_BRAND_CSS
 
 // ── STA-mode zone picker page (GET /zones) ─────────────────────────────────
 
@@ -673,7 +639,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
   char bridge_url[128] = "";
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
-  size_t html_size = 12288;  // Extra room for zone list
+  size_t html_size = 20480;  // zone list + brand stylesheet
   char *html = heap_caps_malloc(html_size, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -690,13 +656,15 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>" HIPHI_BRAND " - Zones</title>"
     "<style>%s</style></head><body>"
-    "<h1>" HIPHI_BRAND "</h1>"
+    "%s"
+    "<h1>Zones</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
     "<a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
     STA_CSS,
+    portal_brand_header_html(),
     esc_bridge_url[0] ? "<a href='" : "",
     esc_bridge_url[0] ? esc_bridge_url : "",
     esc_bridge_url[0] ? "' target='_blank'>Unified Hi-Fi Control</a>" : "");
@@ -735,7 +703,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<form method='POST' action='/api/restart'>"
     "<button type='submit' class='btn btn-danger'>Restart Device</button>"
     "</form></div>"
-    "</body></html>");
+    "%s</body></html>", portal_brand_footer_html());
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   httpd_resp_set_type(req, "text/html");
@@ -799,20 +767,20 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     voice_volume == 1 ? "selected" : "",
     voice_volume == 2 ? "selected" : "");
 #endif
-  char *html = heap_caps_calloc(1, 12288, MALLOC_CAP_8BIT);
+  char *html = heap_caps_calloc(1, 20480, MALLOC_CAP_8BIT);
   if (!html) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     return ESP_FAIL;
   }
-  int pos = snprintf(html, 12288,
+  int pos = snprintf(html, 20480,
     "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>" HIPHI_BRAND " - Settings</title><style>%s"
     "label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0;}"
-    "input[type=number]{width:88px;padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
+    "input[type=number]{width:88px;padding:7px;background:var(--pb-bg);"
+    "color:var(--pb-text);border:1px solid var(--pb-line);border-radius:8px;}"
     "input[type=checkbox]{width:22px;height:22px;}"
-    "select{padding:7px;background:#0f0f1a;color:#eee;border:1px solid #444;border-radius:4px;}"
-    "small{color:#aaa;}"
-    "</style></head><body><h1>" HIPHI_BRAND "</h1>"
+    "small{color:var(--pb-muted);}"
+    "</style></head><body>%s<h1>Settings</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
     "<a href='/power-debug'>Power</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
@@ -834,14 +802,14 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "%s"
     "<p><small>Zero seconds disables a stage. Deep sleep is intentionally not enabled on Tough until its wake source is qualified.</small></p>"
     "<button class='btn' type='submit'>Save settings</button></form></div>"
-    "</body></html>", STA_CSS,
+    "%s</body></html>", STA_CSS, portal_brand_header_html(),
     cfg->art_mode_battery_enabled ? "checked" : "", cfg->art_mode_battery_timeout_sec,
     cfg->dim_battery_enabled ? "checked" : "", cfg->dim_battery_timeout_sec,
     cfg->sleep_battery_enabled ? "checked" : "", cfg->sleep_battery_timeout_sec,
     cfg->art_mode_charging_enabled ? "checked" : "", cfg->art_mode_charging_timeout_sec,
     cfg->dim_charging_enabled ? "checked" : "", cfg->dim_charging_timeout_sec,
     cfg->sleep_charging_enabled ? "checked" : "", cfg->sleep_charging_timeout_sec,
-    personality_html);
+    personality_html, portal_brand_footer_html());
   if (pos < 0) pos = 0;
   if (pos >= 12288) pos = 12287;
   httpd_resp_set_type(req, "text/html");
@@ -962,14 +930,20 @@ static esp_err_t sta_zone_set_handler(httpd_req_t *req) {
 static esp_err_t sta_restart_handler(httpd_req_t *req) {
   ESP_LOGW(TAG, "Web UI: restart requested");
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req,
+  httpd_resp_send_chunk(req,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<style>body{font-family:sans-serif;margin:40px;background:#1a1a2e;color:#eee;"
-    "text-align:center;}h1{color:#4fc3f7;}</style></head><body>"
-    "<h1>Restarting...</h1><p>The device will reconnect in a few seconds.</p>"
-    "</body></html>",
+    "<title>Restarting</title><style>",
     HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, PORTAL_BRAND_CSS, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</style></head><body>", HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_header_html(), HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req,
+    "<h1>Restarting...</h1><p>The device will reconnect in a few seconds.</p>",
+    HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_footer_html(), HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</body></html>", HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, NULL, 0);
   vTaskDelay(pdMS_TO_TICKS(1000));
   esp_restart();
   return ESP_OK;  // unreachable

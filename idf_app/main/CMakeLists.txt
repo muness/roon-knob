@@ -42,6 +42,7 @@ set(SRC_FILES
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
     "../../common/wifi_portal_form.c"
+    "../../common/portal_brand.c"
     "../../common/power_debug_web.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
@@ -88,6 +89,8 @@ idf_component_register(
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0
+    PLATFORM_PORTAL_PRODUCT_SLUG="HiPhi Dial"
+    PORTAL_BRAND_PRODUCT="Dial")
 # TODO(#183): Remove after ESP-IDF 6.0 migration (Picolibc has proper strlcpy)
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
