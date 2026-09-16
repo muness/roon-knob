@@ -26,6 +26,7 @@
 #include <nvs_flash.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include "platform/platform_identity.h"
 
 static const char *TAG = "main";
 
@@ -111,7 +112,15 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
   case RK_NET_EVT_AP_STARTED:
     ESP_LOGI(TAG, "WiFi: AP mode started (SSID: hiphi-frame-setup)");
-    eink_ui_post_network_status("WiFi Setup: Connect to\nhiphi-frame-setup");
+    {
+      /* Product name is the title; the SSID is the instruction line. Posted
+       * into the refresh the AP transition already triggers - no extra
+       * e-ink refresh is added here. */
+      char setup_msg[160];
+      snprintf(setup_msg, sizeof(setup_msg), "%s\nJoin Wi-Fi %s",
+               platform_product_name(), platform_provisioning_ssid());
+      eink_ui_post_network_status(setup_msg);
+    }
     eink_ui_post_zone_name("WiFi Setup");
     bridge_client_set_network_ready(false);
     eink_ui_post_device_ip(NULL);

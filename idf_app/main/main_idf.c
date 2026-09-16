@@ -29,6 +29,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <stdatomic.h>
+#include "platform/platform_identity.h"
 
 static const char *TAG = "main";
 
@@ -242,8 +243,14 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     case RK_NET_EVT_AP_STARTED:
         ESP_LOGI(TAG, "WiFi: AP mode started (SSID: hiphi-dial-setup)");
         stop_wifi_msg_alternation();
-        // Show setup instructions in main display area (line2 is top, line1 is bottom)
-        ui_update("hiphi-dial-setup", "Connect to WiFi:", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
+        // Product name is the primary line; the SSID is the instruction line.
+        {
+            char setup_line[160];
+            snprintf(setup_line, sizeof(setup_line), "Join Wi-Fi %s",
+                     platform_provisioning_ssid());
+            ui_update(platform_product_name(), setup_line, false, 0.0f, 0.0f,
+                      100.0f, 1.0f, 0, 0);
+        }
         ui_set_zone_name("WiFi Setup");
         bridge_client_set_network_ready(false);
         atomic_store_explicit(&s_config_server_start_pending, false,

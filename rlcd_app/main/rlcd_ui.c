@@ -13,6 +13,7 @@
 #include <lvgl.h>
 #include <stdio.h>
 #include <string.h>
+#include "platform/platform_identity.h"
 
 #define RLCD_REFRESH_DEBOUNCE_MS 300
 #define RLCD_PICKER_MAX_ZONES 18
@@ -358,8 +359,15 @@ static void apply_view(void) {
         lv_obj_add_flag(s_artwork, LV_OBJ_FLAG_HIDDEN);
         copy_text(status, sizeof(status), "Connect  •  Configure  •  Listen");
         copy_text(volume, sizeof(volume), "");
-        lv_label_set_text(s_track, "Connect to\nhiphi-rlcd-setup");
-        lv_label_set_text(s_artist, "Then open 192.168.4.1");
+        {
+            /* Product name is the title; the SSID is the instruction line. */
+            char setup_line[160];
+            snprintf(setup_line, sizeof(setup_line),
+                     "Join Wi-Fi %s\nThen open 192.168.4.1",
+                     platform_provisioning_ssid());
+            lv_label_set_text(s_track, platform_product_name());
+            lv_label_set_text(s_artist, setup_line);
+        }
     } else {
         lv_obj_set_style_pad_all(s_screen, 14, 0);
         lv_obj_add_flag(s_picker_controls, LV_OBJ_FLAG_HIDDEN);

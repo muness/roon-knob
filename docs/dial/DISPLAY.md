@@ -40,6 +40,34 @@ The SH8601 is an LCD driver IC that accepts pixel data over Quad SPI, allowing f
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Brand colors
+
+Every target draws its active-state chrome from the same four HiPhi tokens.
+Each display source declares them once in a named constants block near the top
+of the file; no accent hex literals belong in widget or draw code.
+
+| Constant | Value | Applies to |
+|---|---|---|
+| `HIPHI_ACCENT` | `0x00c8f0` | Active indicator: volume arc indicator, selected list row, primary button border, focus |
+| `HIPHI_ACCENT_SOFT` | `0x9cefff` | Progress arc/bar, pressed button borders, transient volume emphasis |
+| `HIPHI_ATTENTION` | `0xff654a` | Low battery, offline, and other attention states (plain red stays for critical errors only) |
+| `HIPHI_SUCCESS` | `0x10b981` | Online / connected indicator dot |
+
+Where they are declared:
+
+- `common/ui.c` (Dial, LVGL) - used through `lv_color_hex()`.
+- `atom_app/main/touch_ui.cpp` (Joy), `tough_app/main/touch_ui.cpp` (Tough),
+  `m5_beta_app/main/touch_ui.cpp` (Dial Lab, Twist, Remote, Kizz) - M5GFX draw
+  calls take a `uint32_t` as 24-bit RGB888 and convert to the panel format
+  internally, so these are the brand hex values verbatim.
+- `rlcd_app` (Slate) draws no color accent; its reflective LCD UI is
+  monochrome and is intentionally left alone.
+- Kizz keeps its own character palette (the `STACK_*` tokens) for its face and
+  animation layouts. Only the control chrome it shares with the other M5
+  targets uses the brand accents.
+
+Neutral surfaces, text greys, and per-target background colors are unchanged.
+
 ## LVGL Integration
 
 [LVGL](https://lvgl.io/) is a graphics library designed for embedded systems. It provides widgets (buttons, labels, arcs, etc.) and handles rendering to a framebuffer. The firmware uses LVGL 9.x.

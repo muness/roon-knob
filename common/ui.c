@@ -39,6 +39,15 @@
 #define COLOR_GREY          lv_color_hex(0x5a5a5a)
 #define COLOR_DARK_GREY     lv_color_hex(0x3c3c3c)
 
+// ---------------------------------------------------------------------------
+// HiPhi brand accents (see docs/esp/DISPLAY.md "Brand colors")
+// Shared across every HiPhi target; keep literals out of the widget code.
+// ---------------------------------------------------------------------------
+#define HIPHI_ACCENT        0x00c8f0  // Active indicator: volume arc, primary border, focus
+#define HIPHI_ACCENT_SOFT   0x9cefff  // Progress, pressed states, transient emphasis
+#define HIPHI_ATTENTION     0xff654a  // Low battery and other attention states
+#define HIPHI_SUCCESS       0x10b981  // Online / success indicator
+
 struct ui_state {
     char line1[128];
     char line2[128];
@@ -280,7 +289,7 @@ static void create_styles(void) {
     lv_style_set_bg_color(&style_button_primary, lv_color_hex(0x2c2c2c));  // Dark grey
     lv_style_set_bg_opa(&style_button_primary, LV_OPA_COVER);
     lv_style_set_border_width(&style_button_primary, 3);
-    lv_style_set_border_color(&style_button_primary, lv_color_hex(0x5a9fd4));  // Light blue
+    lv_style_set_border_color(&style_button_primary, lv_color_hex(HIPHI_ACCENT));  // HiPhi cyan
     lv_style_set_border_opa(&style_button_primary, LV_OPA_COVER);
     lv_style_set_shadow_width(&style_button_primary, 0);
 
@@ -364,7 +373,7 @@ static void build_layout(void) {
 
     // Arc colors - dark grey background track, blue indicator
     lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x3a3a3a), LV_PART_MAIN);  // Lighter grey for visibility
-    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x5a9fd4), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(HIPHI_ACCENT), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
@@ -385,7 +394,7 @@ static void build_layout(void) {
 
     // Progress arc colors - subtle grey track, lighter blue indicator
     lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x2a2a2a), LV_PART_MAIN);  // Slightly lighter
-    lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x7bb9e8), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(HIPHI_ACCENT_SOFT), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
@@ -514,7 +523,7 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_btn_prev, lv_color_hex(0x1a1a1a), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_prev, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_prev, COLOR_GREY, LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_btn_prev, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_btn_prev, lv_color_hex(HIPHI_ACCENT_SOFT), LV_STATE_PRESSED);
 
     lv_obj_t *prev_label = lv_label_create(s_btn_prev);
 #if !TARGET_PC
@@ -534,8 +543,8 @@ static void build_layout(void) {
     lv_obj_add_event_cb(s_btn_play, btn_play_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_style_bg_color(s_btn_play, lv_color_hex(0x2c2c2c), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_play, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(0x5a9fd4), LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(0x7bb9e8), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(HIPHI_ACCENT), LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(HIPHI_ACCENT_SOFT), LV_STATE_PRESSED);
 
     s_play_icon = lv_label_create(s_btn_play);
 #if !TARGET_PC
@@ -556,7 +565,7 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_btn_next, lv_color_hex(0x1a1a1a), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_next, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_next, COLOR_GREY, LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_btn_next, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_btn_next, lv_color_hex(HIPHI_ACCENT_SOFT), LV_STATE_PRESSED);
 
     lv_obj_t *next_label = lv_label_create(s_btn_next);
 #if !TARGET_PC
@@ -732,7 +741,7 @@ static void apply_state(const struct ui_state *state) {
 
 static void set_status_dot(bool online) {
     if (online) {
-        lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(0x00ff00), 0);  // Green
+        lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(HIPHI_SUCCESS), 0);  // HiPhi success green
     } else {
         lv_obj_set_style_bg_color(s_status_dot, COLOR_GREY, 0);
     }
@@ -917,7 +926,7 @@ static void update_battery_display(void) {
 
     // Warning color for critical/low battery, neutral grey otherwise
     if (level <= 1 && !charging) {
-        lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0xff0000), 0);
+        lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(HIPHI_ATTENTION), 0);
     } else {
         lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);
     }
@@ -984,8 +993,8 @@ static void emphasize_volume_label(void) {
         return;
     }
 
-    // Emphasize with bright blue
-    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0x7bb9e8), 0);
+    // Emphasize with the soft HiPhi accent
+    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(HIPHI_ACCENT_SOFT), 0);
 
     // Reset/create timer to remove emphasis after 1.5 seconds
     if (s_volume_emphasis_timer) {
