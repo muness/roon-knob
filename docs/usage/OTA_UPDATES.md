@@ -316,5 +316,5 @@ On tag push (`v*`), GitHub Actions (`.github/workflows/docker.yml`):
 The control service (Unified Hi-Fi Control) downloads the latest stable firmware
 from GitHub Releases and serves it to knobs for OTA updates. It deliberately does
 not download GitHub prereleases. Docker images are built in the
-[unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)
+[unified-hifi-control](https://github.com/open-horizon-labs/unified-hifi-control)
 repository.

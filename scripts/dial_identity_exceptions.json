@@ -44,8 +44,8 @@
         "docs/meta/analysis/**",
         "docs/meta/decisions/2025-12-20_DECISION_ROTATION.md",
         "docs/dev/IMPLEMENTATION_NOTES.md",
-        "docs/esp/NETWORK_IDENTITY.md",
-        "docs/esp/BLE_HID.md"
+        "docs/dial/NETWORK_IDENTITY.md",
+        "docs/dial/BLE_HID.md"
       ],
       "tokens": [
         "Roon Knob",
@@ -72,19 +72,6 @@
         "roon-knob"
       ],
       "line_regex": "Container roon-knob-roon-knob-bridge"
-    },
-    {
-      "id": "historical-image-filename",
-      "category": "historical-provenance",
-      "owner": "#174",
-      "retirement": "Rename only when asset paths are migrated with redirects or all references.",
-      "path_globs": [
-        "README.md"
-      ],
-      "tokens": [
-        "roon-knob"
-      ],
-      "line_regex": "docs/images/roon-knob-photo\\.jpg"
     },
     {
       "id": "legacy-firmware-aliases",
@@ -154,6 +141,20 @@
         "_roonknob"
       ],
       "line_regex": "of NAS2 observed `_roonknob\\._tcp\\.local`"
+    },
+    {
+      "id": "agent-guide-wire-contract-reference",
+      "category": "compatibility",
+      "owner": "#164",
+      "retirement": "Remove together with the retained wire-contract tokens it documents.",
+      "path_globs": [
+        "AGENTS.md"
+      ],
+      "tokens": [
+        "_roonknob",
+        "roon_knob"
+      ],
+      "line_regex": "Wire-contract strings|release aliases"
     }
   ],
   "required": [
@@ -264,7 +265,7 @@
       "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/roon_knob.bin"
     },
     {
-      "path": "README.md",
+      "path": "docs/usage/DIAL.md",
       "contains": "click \"Flash Dial main controller\""
     },
     {

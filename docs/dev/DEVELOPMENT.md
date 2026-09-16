@@ -8,7 +8,7 @@ HiPhi Dial has three components:
 |-----------|-------------|
 | **ESP32-S3 Firmware** | LVGL-based UI on a 360×360 round LCD. Polls the bridge for now-playing data and sends control commands. |
 | **PC Simulator** | SDL2 desktop build that mirrors the firmware UI for rapid development without hardware. |
-| **Bridge** | Node.js service that connects to Roon/HiFi systems. See [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control). |
+| **Bridge** | Node.js service that connects to Roon/HiFi systems. See [unified-hifi-control](https://github.com/open-horizon-labs/unified-hifi-control). |
 
 ## Repository Structure
 
@@ -44,7 +44,7 @@ The simulator lets you develop UI without flashing hardware.
 ./scripts/run_pc.sh     # Builds and runs simulator
 ```
 
-The simulator expects the bridge at `http://127.0.0.1:8088`. Run the bridge from the [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control) repo.
+The simulator expects the bridge at `http://127.0.0.1:8088`. Run the bridge from the [unified-hifi-control](https://github.com/open-horizon-labs/unified-hifi-control) repo.
 
 ### Simulator Controls
 
@@ -94,7 +94,7 @@ The CI builds firmware, creates a GitHub release, and deploys the web flasher.
 
 ## Bridge Development
 
-Bridge code is at [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control).
+Bridge code is at [unified-hifi-control](https://github.com/open-horizon-labs/unified-hifi-control).
 
 ## Hardware
 
@@ -107,7 +107,7 @@ The [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/wiki/ESP32
 - Battery management (charging + voltage monitoring)
 - Vibration motor
 
-See [board overview](../esp/hw-reference/board.md) for pin mappings.
+See [board overview](../dial/hw-reference/board.md) for pin mappings.
 
 ## Task Management
 

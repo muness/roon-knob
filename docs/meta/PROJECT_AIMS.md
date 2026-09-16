@@ -1,19 +1,21 @@
 # Project Aims Alignment
 
-How HiPhi Dial connects to broader goals and how to use that connection when prioritizing work.
+How the HiPhi ESP firmware family connects to broader goals and how to use that connection when prioritizing work.
 
 This document applies the [Open Horizons](https://muness.com/posts/open-horizons/) framework—specifically its principle of **nested feedback loops** operating at different scales. Small-scale decisions (what to fix this week) should reinforce larger-scale aims (what this project is for), and vice versa.
 
 ## Why This Project Exists
 
-HiPhi Dial turns a $50 commodity device into a purpose-built physical controller for Roon. It's a side project that demonstrates technology as a force-multiplier: taking off-the-shelf hardware and firmware expertise and compressing them into something non-developers can use.
+This repository is the firmware for the **HiPhi controller family** — Dial, Frame, Slate, Joy, Tough, Dial Lab, Twist, Remote, and Kizz — which turn commodity ESP32 boards, most of them under $50, into purpose-built physical controllers for a hi-fi system. They control **Roon**, **Lyrion Music Server (LMS)**, and **OpenHome/UPnP** renderers through the Unified Hi-Fi Control bridge, so the source you run is a choice rather than a lock-in.
+
+The point is a dedicated object rather than another app: something on the desk, the couch, or the wall that shows what is playing and changes it without a general-purpose screen in the way. It's a side project that demonstrates technology as a force-multiplier: taking off-the-shelf hardware and firmware expertise and compressing them into something non-developers can use.
 
 It's also a **learning platform** for:
 - AI coding agents (Claude Code workflows)
 - Phase-specific Open Horizons skills and review/dissent workflows
 - Embedded systems development (ESP-IDF, LVGL, FreeRTOS)
-- UI/UX design on constrained devices
-- Roon extension development
+- UI/UX design across very different constrained displays and input devices
+- Multi-source music control integration (Roon, LMS, OpenHome)
 
 The learning value is as important as the product output. Experiments here inform how I work on other projects.
 
@@ -24,14 +26,14 @@ The learning value is as important as the product output. Experiments here infor
 This is the core alignment. The project:
 
 - Transforms commodity hardware into specialized tooling
-- Demonstrates "compression engine" in action: Roon API + ESP32 embedded dev + LVGL UI + Docker networking → something a motivated user can deploy
-- Creates real behavior change (physical knob on desk changes how people interact with their music)
+- Demonstrates "compression engine" in action: Roon/LMS/OpenHome control + ESP32 embedded dev + LVGL UI + Docker networking → something a motivated user can deploy
+- Creates real behavior change (a physical controller in the room changes how people interact with their music)
 
 **Implication for prioritization:** Work that lowers the barrier to unlocking this leverage multiplies reach. Every setup simplification expands who can benefit.
 
 ### Secondary: Aim 3 — Reach and Equip People (Spread)
 
-The Roon community is self-selected: people who value quality and will invest effort. They're the right audience for "better ways of working with music." But even technically capable users hit friction.
+The Roon, Lyrion, and OpenHome communities are self-selected: people who value quality and will invest effort. They're the right audience for "better ways of working with music." But even technically capable users hit friction.
 
 **Implication for prioritization:** Simplification = spread. Documentation clarity matters. Error recovery matters.
 

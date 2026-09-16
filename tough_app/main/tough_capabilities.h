@@ -9,7 +9,7 @@
 // greppable for this Alpha slice. If a future target needs a real capability
 // registry, promote this into a shared struct at that point.
 //
-// See docs/esp/hw-reference/board-tough.md for sourcing of these facts.
+// See docs/dial/hw-reference/board-tough.md for sourcing of these facts.
 
 // Bluetooth (BLE and Classic) is permanently OFF for this Alpha slice,
 // pending #193/#191 classic-ESP32 Wi-Fi/BT coexistence evidence. No BLE

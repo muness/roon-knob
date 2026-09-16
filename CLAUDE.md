@@ -8,20 +8,34 @@ See [AGENTS.md](AGENTS.md) for complete instructions on working with this projec
 
 | Area | Path | Description |
 |------|------|-------------|
-| **Usage** | `docs/usage/` | End-user guides: WiFi setup, OTA updates |
+| **Usage** | `docs/usage/` | End-user guides: Dial setup, WiFi provisioning, OTA updates |
+| **Targets** | `docs/targets/` | Per-controller index: what is documented for each target |
+| **Dial** | `docs/dial/` | Dial and shared ESP32 hardware: display, touch, encoder, battery |
 | **Dev** | `docs/dev/` | Developer reference: build, boot sequence, FreeRTOS, NVS storage |
-| **ESP** | `docs/esp/` | Hardware specifics: display, touch, encoder, battery |
 | **Meta** | `docs/meta/` | Project aims, roadmap ideas, architectural decisions |
 | **Howto** | `docs/howto/` | Tutorials: porting to other boards, reusing patterns |
 
+**Per-target docs:**
+
+| Controller | Target dir | Docs |
+|---|---|---|
+| HiPhi Dial | `idf_app` | `docs/usage/DIAL.md`, `docs/dial/` |
+| Dial auxiliary parking image | `knob_aux_app` | `docs/dial/DUAL_CHIP_ARCHITECTURE.md` |
+| HiPhi Frame | `frame_app` | `docs/dial/BLE_HID.md`, `.oh/frame-recovery.md` |
+| HiPhi Slate | `rlcd_app` | `docs/targets/README.md` |
+| HiPhi Joy | `atom_app` | `docs/dial/hw-reference/board-atom-s3-joystick.md` |
+| HiPhi Tough | `tough_app` | `docs/dial/M5STACK.md`, `docs/dial/hw-reference/board-tough.md` |
+| Dial Lab / Twist / Remote / Kizz | `m5_beta_app` | `docs/dial/hw-reference/m5-form-native-betas.md`, `docs/dev/KIZZ_VOICE.md` |
+
 **When working on:**
-- **UI changes** → `docs/esp/DISPLAY.md`, `docs/esp/TOUCH_INPUT.md`, `docs/esp/FONTS.md`
-- **Input handling** → `docs/esp/ROTARY_ENCODER.md`, `docs/esp/SWIPE_GESTURES.md`
+- **UI changes** → `docs/dial/DISPLAY.md`, `docs/dial/TOUCH_INPUT.md`, `docs/dial/FONTS.md`
+- **Input handling** → `docs/dial/ROTARY_ENCODER.md`, `docs/dial/SWIPE_GESTURES.md`
 - **WiFi/networking** → `docs/usage/WIFI_PROVISIONING.md`, `docs/dev/NVS_STORAGE.md`
 - **Build/config** → `docs/dev/KCONFIG.md`, `docs/dev/DEVELOPMENT.md`
 - **Architecture decisions** → `docs/meta/decisions/`
+- **A target that is not the Dial** → `docs/targets/README.md` first
 
-**Keeping docs current:** When you learn something new about the hardware (pin mappings, component behavior, timing), update the relevant file in `docs/esp/hw-reference/`.
+**Keeping docs current:** When you learn something new about the hardware (pin mappings, component behavior, timing), update the relevant file in `docs/dial/hw-reference/`.
 
 ## Key Points
 
@@ -122,14 +136,21 @@ git push origin v1.X.Y
 
 The GitHub Actions workflow (`docker.yml`) automatically:
 - Extracts version from the tag name
-- Injects it into `idf_app/CMakeLists.txt` (ESP32-S3 firmware)
+- Injects it into every target's `CMakeLists.txt`
 - Builds firmware and creates GitHub release with binaries
 - Deploys web flasher to GitHub Pages
 
-**Version locations (DO NOT EDIT MANUALLY):**
-- `idf_app/CMakeLists.txt` → `PROJECT_VER` (injected by CI)
+**Version locations (DO NOT EDIT MANUALLY).** CI injects `PROJECT_VER` into each
+of these in `docker.yml`:
+- `idf_app/CMakeLists.txt` (HiPhi Dial)
+- `frame_app/CMakeLists.txt` (HiPhi Frame)
+- `rlcd_app/CMakeLists.txt` (HiPhi Slate)
+- `atom_app/CMakeLists.txt` (HiPhi Joy)
+- `tough_app/CMakeLists.txt` (HiPhi Tough)
+- `m5_beta_app/CMakeLists.txt` (Dial Lab, Twist, Remote, Kizz)
+- `knob_aux_app/CMakeLists.txt` (Dial auxiliary parking image)
 
-**Bridge:** [unified-hifi-control](https://github.com/cloud-atlas-ai/unified-hifi-control)
+**Bridge:** [unified-hifi-control](https://github.com/open-horizon-labs/unified-hifi-control)
 
 ## Common Pitfalls (READ THIS FIRST)
 
