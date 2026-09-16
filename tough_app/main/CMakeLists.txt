@@ -29,6 +29,7 @@ set(SRC_FILES
     "../../common/portal_brand.c"
     "../../common/power_debug_web.c"
     "../../common/m5_terminal_power.c"
+    "../../common/zone_label_policy.c"
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_power.c"
     "../../common/platform/platform_time.c"

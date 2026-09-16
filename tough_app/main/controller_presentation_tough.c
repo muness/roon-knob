@@ -43,6 +43,10 @@ void controller_presentation_set_zone_name(const char *zone_name) {
     touch_ui_set_zone_name(zone_name);
 }
 
+void controller_presentation_set_zone_count(int count) {
+    touch_ui_set_zone_count(count);
+}
+
 void controller_presentation_set_network_status(const char *status) {
     const char *warning = config_durability_warning();
     touch_ui_set_network_status(warning ? warning : status);

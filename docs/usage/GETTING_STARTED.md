@@ -335,7 +335,7 @@ The knob can't find the bridge. Check:
 - Is the bridge running? (`docker compose ps`)
 - Is the bridge authorized in Roon?
 - Are the knob and bridge on the same network?
-- Some networks block mDNS. Try entering the bridge URL manually (long-press the zone name on the knob to access Settings)
+- Some networks block mDNS. Try entering the bridge URL manually (long-press the top of the screen on the knob - zone name or zone icon - to access Settings)
 
 ### Bridge won't start
 

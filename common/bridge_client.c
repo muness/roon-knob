@@ -279,6 +279,7 @@ static void commit_discovered_endpoint_on_ui(void *arg);
 static void post_ui_update(const struct now_playing_state *state);
 static void post_ui_status(bool online);
 static void post_ui_zone_name(const char *name);
+static void post_ui_zone_count(int count);
 static void post_ui_message(const char *msg);
 static void post_ui_message_copy(char *msg_copy);
 static void strip_trailing_slashes(char *url);
@@ -414,6 +415,26 @@ static void ui_zone_name_cb(void *arg) {
     }
     controller_presentation_set_zone_name(name);
     free(name);
+}
+
+static void ui_zone_count_cb(void *arg) {
+    int *count = arg;
+    if (!count) {
+        return;
+    }
+    controller_presentation_set_zone_count(*count);
+    free(count);
+}
+
+static void post_ui_zone_count(int count) {
+    int *copy = malloc(sizeof(int));
+    if (!copy) {
+        return;
+    }
+    *copy = count;
+    if (!platform_task_post_to_ui(ui_zone_count_cb, copy)) {
+        free(copy);
+    }
 }
 
 static void ui_battery_cb(void *arg) {
@@ -895,6 +916,10 @@ static bool refresh_zone_label(bool prefer_zone_id) {
 
     LOGI("refresh_zone_label: Received %zu bytes", resp_len);
     parse_zones_from_response(resp);
+    lock_state();
+    int parsed_zone_count = s_state.zone_count;
+    unlock_state();
+    post_ui_zone_count(parsed_zone_count);
 
     char zone_label_copy[MAX_ZONE_NAME] = {0};
     char selected_zone_id[sizeof(cfg.zone_id)] = {0};

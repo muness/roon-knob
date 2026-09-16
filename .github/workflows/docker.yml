@@ -53,6 +53,7 @@ jobs:
             frame_app/main/frame_power_policy.c \
             -o /tmp/test-frame-power-policy
           /tmp/test-frame-power-policy
+          scripts/test_zone_label_policy.sh
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Icomponents/m5_platform/include \
             tests/test_m5_interaction_policy.c \

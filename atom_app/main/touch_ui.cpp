@@ -9,7 +9,9 @@
 #include "platform/platform_http.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_task.h"
+#include "platform/platform_time.h"
 #include "wifi_manager.h"
+#include "zone_label_policy.h"
 
 #include <M5Unified.h>
 #include <esp_log.h>
@@ -112,6 +114,9 @@ struct State {
 };
 
 State s;
+zone_label_policy_t s_zone_policy;
+bool s_zone_label_faded = false;
+bool s_last_normal_control = true;
 std::atomic_bool s_artwork_loading{false};
 std::atomic_uint32_t s_artwork_generation{0};
 lgfx::LovyanGFX *s_draw_target = &M5.Display;
@@ -463,6 +468,26 @@ void draw_ellipsized_text(const char *text, int x, int y, int width, int size,
     draw_clipped_text(bounded, x, y, width, size, color);
 }
 
+// Small dim music-note glyph drawn in place of the zone name once the
+// presence policy decides a long-stable single zone can fade. Built from
+// primitives, not a font glyph, so it renders identically regardless of
+// what fonts happen to be linked in.
+void draw_zone_glyph(int x, int y, uint32_t color) {
+    s_draw_target->fillRect(x + 6, y, 2, 9, color);
+    s_draw_target->fillCircle(x + 4, y + 9, 3, color);
+}
+
+// Re-evaluates the zone label presence policy and marks the UI dirty only
+// when the decision actually changes (framebuffer targets do a plain swap,
+// no animation).
+void refresh_zone_label_presence(uint32_t now_ms) {
+    const bool should_show = zone_label_policy_visible(&s_zone_policy, now_ms);
+    const bool currently_shown = !s_zone_label_faded;
+    if (should_show == currently_shown) return;
+    s_zone_label_faded = !should_show;
+    s.dirty = true;
+}
+
 void draw_scrolling_text(const char *text, int x, int y, int width, int size,
                          uint32_t color) {
     const char *value = text ? text : "";
@@ -551,15 +576,23 @@ void draw_action_ack(int y_origin) {
 
 void draw_top_strip(void) {
     if (!ensure_region_buffers()) {
-        draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
-                             s.online ? 0x7dd3fc : 0xf87171);
+        if (s_zone_label_faded) {
+            draw_zone_glyph(3, 7, 0x555555);
+        } else {
+            draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
+                                 s.online ? 0x7dd3fc : 0xf87171);
+        }
         return;
     }
     lgfx::LovyanGFX *previous = s_draw_target;
     s_draw_target = &s_top_strip;
     s_top_strip.fillScreen(0x08111d);
-    draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
-                         s.online ? 0x7dd3fc : 0xf87171);
+    if (s_zone_label_faded) {
+        draw_zone_glyph(3, 7, 0x555555);
+    } else {
+        draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
+                             s.online ? 0x7dd3fc : 0xf87171);
+    }
     s_draw_target = previous;
     s_top_strip.pushSprite(&M5.Display, 0, 0);
 }
@@ -633,6 +666,15 @@ void redraw(void) {
     s_draw_target->startWrite();
     const bool normal_control = !wifi_mgr_is_ap_mode() && !s.art_mode &&
                                 !s.picker && !s.settings && !s.sleeping;
+    if (normal_control && !s_last_normal_control) {
+        // Re-entering the now-playing screen from the picker, settings, art
+        // mode, or provisioning counts as a reveal trigger for a faded zone
+        // label, mirroring Dial's ui_set_controls_visible(true).
+        const uint32_t now_ms = (uint32_t)platform_millis();
+        zone_label_policy_feed_controls_visible(&s_zone_policy, now_ms);
+        refresh_zone_label_presence(now_ms);
+    }
+    s_last_normal_control = normal_control;
     const bool clear_art_surface = s.art_surface_needs_clear;
     if (clear_art_surface) {
         /* Full-screen artwork is streamed directly to the panel, so leaving
@@ -977,6 +1019,9 @@ void update_power(void) {
 
 extern "C" void touch_ui_init(void) {
     s = State{};
+    zone_label_policy_init(&s_zone_policy);
+    s_zone_label_faded = false;
+    s_last_normal_control = true;
     s_artwork_generation.store(0);
     s_artwork_loading.store(false);
     s.power_started_us = esp_timer_get_time();
@@ -1032,11 +1077,13 @@ extern "C" void touch_ui_process(void) {
         !s.settings && !wifi_mgr_is_ap_mode() && !s.sleeping) {
         s.dirty = true;
     }
+    refresh_zone_label_presence((uint32_t)platform_millis());
     redraw();
 }
 extern "C" void touch_ui_set_status(bool v) { if (s.online != v) { s.online = v; s.dirty = true; } }
 extern "C" void touch_ui_set_message(const char *v) { if (strcmp(s.network, v ? v : "") != 0) { copy_text(s.network, sizeof(s.network), v); s.dirty = true; } }
-extern "C" void touch_ui_set_zone_name(const char *v) { if (strcmp(s.zone, v ? v : "") != 0) { copy_text(s.zone, sizeof(s.zone), v); s.dirty = true; } }
+extern "C" void touch_ui_set_zone_name(const char *v) { if (strcmp(s.zone, v ? v : "") != 0) { copy_text(s.zone, sizeof(s.zone), v); zone_label_policy_feed_name_changed(&s_zone_policy, (uint32_t)platform_millis()); s.dirty = true; } }
+extern "C" void touch_ui_set_zone_count(int count) { zone_label_policy_feed_count(&s_zone_policy, count, (uint32_t)platform_millis()); }
 extern "C" void touch_ui_set_network_status(const char *v) { if (strcmp(s.network, v ? v : "") != 0) { copy_text(s.network, sizeof(s.network), v); s.dirty = true; } }
 extern "C" void touch_ui_post_zone_name(const char *v) { char *c = strdup(v ? v : ""); platform_task_post_to_ui([](void *p){ touch_ui_set_zone_name(static_cast<char *>(p)); free(p); }, c); }
 extern "C" void touch_ui_post_network_status(const char *v) { char *c = strdup(v ? v : ""); platform_task_post_to_ui([](void *p){ touch_ui_set_network_status(static_cast<char *>(p)); free(p); }, c); }

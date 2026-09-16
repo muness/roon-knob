@@ -19,6 +19,7 @@ void controller_presentation_update(const char *a, const char *b, const char *c,
 void controller_presentation_set_status(bool v) { touch_ui_set_status(v); }
 void controller_presentation_set_message(const char *v) { touch_ui_set_message(v); }
 void controller_presentation_set_zone_name(const char *v) { touch_ui_set_zone_name(v); }
+void controller_presentation_set_zone_count(int count) { touch_ui_set_zone_count(count); }
 void controller_presentation_set_network_status(const char *v) { touch_ui_set_network_status(warning() ? warning() : v); }
 void controller_presentation_set_artwork(const char *v) { touch_ui_post_artwork(v); }
 void controller_presentation_show_volume_change(float v, float s) { touch_ui_show_volume_change(v,s); }

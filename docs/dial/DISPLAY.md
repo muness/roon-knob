@@ -282,6 +282,40 @@ State transitions are timer-driven:
 
 Thread safety is handled via a FreeRTOS mutex - timer callbacks set pending flags that get processed in the main UI loop.
 
+## Zone Label Presence Policy
+
+The now-playing header shows the zone name (font_small, `0x777777` - a
+caption grey, demoted below the artist line's `0xaaaaaa`) above the tappable
+header used for zone picking (tap) and Settings (long-press). For a
+single-zone household this text is redundant, but hiding it outright removes
+the only visible hint of the Settings affordance and causes layout jumps when
+zones come and go. Instead, `common/zone_label_policy.c/.h` (no LVGL
+dependency, unit tested in `tests/test_zone_label_policy.c`) decides whether
+the label is visible or should fade to a small dim glyph (`ICON_MUSIC_NOTE`,
+`0x555555`) in its place:
+
+- A zone count that has ever been >= 2 in the session makes the label
+  sticky - always shown, forever.
+- A count of 0 is "unknown" (a flaky bridge poll) and never changes the
+  decision or resets any timer.
+- With count == 1, the label becomes eligible to auto-fade only after the
+  count has held at 1 continuously for `ZONE_LABEL_POLICY_STABLE_MS` (30s).
+- Once eligible, a zone-name change or "controls became visible" event (e.g.
+  leaving art mode) shows the name for `ZONE_LABEL_POLICY_REVEAL_MS` (5s)
+  before it fades again.
+
+`common/bridge_client.c` posts zone counts from `refresh_zone_label` via
+`controller_presentation_set_zone_count()` -> `ui_set_zone_count()`, following
+the same dirty-flag + mutex pattern as `ui_set_zone_name`. `ui.c`'s
+`poll_pending` timer feeds the policy and re-evaluates it every tick; on a
+change it animates the label's opacity to/from 0 over ~300ms with `lv_anim`
+and swaps the glyph in or out. The header itself (size, tap, long-press) is
+never touched, so both the zone picker and Settings remain reachable whether
+the name is shown or faded. `ui_set_controls_visible(true)` (art mode exit)
+feeds the policy's "controls visible" event rather than unconditionally
+showing the label - a long-stable single zone may still be faded again after
+its 5s reveal window.
+
 ## Pin Mapping
 
 | Signal | GPIO | Notes |

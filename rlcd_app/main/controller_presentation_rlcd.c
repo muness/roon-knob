@@ -14,6 +14,7 @@ void controller_presentation_update(const char *line1, const char *line2,
 void controller_presentation_set_status(bool online) { rlcd_ui_set_status(online); }
 void controller_presentation_set_message(const char *message) { rlcd_ui_set_message(message); }
 void controller_presentation_set_zone_name(const char *zone) { rlcd_ui_set_zone_name(zone); }
+void controller_presentation_set_zone_count(int count) { (void)count; }
 void controller_presentation_set_network_status(const char *status) { rlcd_ui_set_network_status(status); }
 void controller_presentation_set_artwork(const char *key) { rlcd_ui_set_artwork(key); }
 void controller_presentation_show_volume_change(float volume, float step) { rlcd_ui_show_volume_change(volume, step); }
