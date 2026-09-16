@@ -31,6 +31,7 @@ set(SRC_FILES
     "../../common/wifi_manager.c"
     "../../common/wifi_portal_form.c"
     "../../common/power_debug_web.c"
+    "../../common/portal_brand.c"
     "../../common/m5_terminal_power.c"
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_power.c"
@@ -38,18 +39,23 @@ set(SRC_FILES
     "../../common/platform/platform_task.c")
 
 set(_target_id 0)
+set(_portal_product "Controller")
 if(HIPHI_M5_TARGET STREQUAL "dial")
     set(_target_id 1)
     set(_slug "hiphi-dial-beta")
+    set(_portal_product "Dial Lab")
 elseif(HIPHI_M5_TARGET STREQUAL "sticks3")
     set(_target_id 2)
     set(_slug "hiphi-sticks3-beta")
+    set(_portal_product "Twist")
 elseif(HIPHI_M5_TARGET STREQUAL "stopwatch")
     set(_target_id 3)
     set(_slug "hiphi-stopwatch-beta")
+    set(_portal_product "Remote")
 elseif(HIPHI_M5_TARGET STREQUAL "stackchan")
     set(_target_id 4)
     set(_slug "hiphi-kizz-beta")
+    set(_portal_product "Kizz")
 endif()
 
 idf_component_register(SRCS ${SRC_FILES}
@@ -64,5 +70,6 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     HIPHI_M5_TARGET_ID=${_target_id}
     HIPHI_PRODUCT_NAME=\"${_slug}\"
     HIPHI_DEVICE_SLUG=\"${_slug}\"
-    HIPHI_PROVISIONING_SSID=\"${_slug}-setup\")
+    HIPHI_PROVISIONING_SSID=\"${_slug}-setup\"
+    PORTAL_BRAND_PRODUCT="${_portal_product}")
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)

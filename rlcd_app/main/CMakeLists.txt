@@ -31,6 +31,7 @@ set(SRC_FILES
     "../../common/wifi_portal_form.c"
     "../../common/wifi_manager.c"
     "../../common/power_debug_web.c"
+    "../../common/portal_brand.c"
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_mdns_endpoint.c"
     "../../common/platform/platform_power.c"
@@ -58,6 +59,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     PLATFORM_HOSTNAME_FROM_BRIDGE_NAME=0
     PLATFORM_PORTAL_PRODUCT_NAME="HiPhi RLCD"
     PLATFORM_PORTAL_PRODUCT_SLUG="hiphi rlcd"
+    PORTAL_BRAND_PRODUCT="Slate"
     PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS=0
 )
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)

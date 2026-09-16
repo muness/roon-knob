@@ -26,6 +26,7 @@ set(SRC_FILES
     "../../common/wifi_manager.c"
     "../../common/wifi_portal_form.c"
     "../../common/power_debug_web.c"
+    "../../common/portal_brand.c"
     "../../common/m5_terminal_power.c"
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_power.c"
@@ -39,5 +40,6 @@ idf_component_register(SRCS ${SRC_FILES}
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-joy\")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-joy\"
+    PORTAL_BRAND_PRODUCT="Joy")
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
