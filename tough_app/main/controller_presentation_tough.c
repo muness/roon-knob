@@ -44,7 +44,7 @@ void controller_presentation_set_zone_name(const char *zone_name) {
 }
 
 void controller_presentation_set_zone_count(int count) {
-    (void)count;  // Zone label presence policy is Dial-only for now.
+    touch_ui_set_zone_count(count);
 }
 
 void controller_presentation_set_network_status(const char *status) {

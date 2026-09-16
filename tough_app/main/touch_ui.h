@@ -40,6 +40,12 @@ void touch_ui_set_message(const char *msg);
 // Update zone name in header
 void touch_ui_set_zone_name(const char *zone_name);
 
+// Feed the zone label presence policy the latest zone count (0 == unknown).
+// Called from the UI task by controller_presentation_set_zone_count(); a
+// stable single zone lets the name fade to a dim glyph after a while, but a
+// household that has ever had 2+ zones always keeps the name shown.
+void touch_ui_set_zone_count(int count);
+
 // Set persistent network status banner (NULL clears it)
 void touch_ui_set_network_status(const char *status);
 

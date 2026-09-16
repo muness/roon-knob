@@ -9,7 +9,9 @@
 #include "platform/platform_http.h"
 #include "platform/platform_task.h"
 #include "platform/platform_identity.h"
+#include "platform/platform_time.h"
 #include "wifi_manager.h"
+#include "zone_label_policy.h"
 
 #include <M5Unified.h>
 
@@ -85,6 +87,13 @@ struct UiState {
 };
 
 UiState s_state;
+// Zone label presence policy - decides whether the zone name (drawn in
+// draw_main()) should be shown or faded to a small dim glyph. No LVGL/M5GFX
+// dependency in the policy itself; see common/zone_label_policy.h.
+zone_label_policy_t s_zone_policy;
+bool s_zone_label_faded = false;
+enum class MainScreen : uint8_t { Settings, Picker, Provisioning, Art, Main };
+MainScreen s_last_screen = MainScreen::Main;
 std::atomic_bool s_artwork_loading{false};
 std::atomic_bool s_display_sleeping{false};
 M5Canvas s_canvas(&M5.Display);
@@ -200,6 +209,26 @@ void draw_button(int x, int y, int w, int h, const char *label,
                 uint32_t color) {
     s_draw_target->fillRoundRect(x, y, w, h, 8, color);
     draw_center(label, x + w / 2, y + h / 2, 2, 0xffffff);
+}
+
+// Small dim music-note glyph drawn in place of the zone name once the
+// presence policy decides a long-stable single zone can fade. Built from
+// primitives (not a font glyph) so it renders identically regardless of
+// what fonts happen to be linked in.
+void draw_zone_glyph(int x, int y, uint32_t color) {
+    s_draw_target->fillRect(x + 9, y, 2, 11, color);
+    s_draw_target->fillCircle(x + 6, y + 12, 4, color);
+}
+
+// Re-evaluates the zone label presence policy and marks the UI dirty only
+// when the decision actually changes (framebuffer targets do a plain swap,
+// no animation).
+void refresh_zone_label_presence(uint32_t now_ms) {
+    const bool should_show = zone_label_policy_visible(&s_zone_policy, now_ms);
+    const bool currently_shown = !s_zone_label_faded;
+    if (should_show == currently_shown) return;
+    s_zone_label_faded = !should_show;
+    s_state.dirty = true;
 }
 
 struct ArtworkJob {
@@ -471,7 +500,13 @@ void draw_main(void) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x5a5a68);
     }
 
-    draw_scrolling_text(s_state.zone, 10, 7, w - 34, 2, 0xfafafa);
+    if (s_zone_label_faded) {
+        draw_zone_glyph(10, 7, 0x555555);
+    } else {
+        // Demoted a step below the track/artist tiers (was 0xfafafa, same as
+        // the track) so it reads as context, not content.
+        draw_scrolling_text(s_state.zone, 10, 7, w - 34, 2, 0x777777);
+    }
     s_draw_target->fillCircle(w - 15, 15, 5, s_state.online ? 0x00c853 : 0x666666);
     if (!s_state.artwork_pixels) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x3a3a48);
@@ -602,6 +637,21 @@ void draw_settings(void) {
 
 void redraw(void) {
     if (!s_state.dirty) return;
+    const MainScreen screen = s_state.settings ? MainScreen::Settings
+        : s_state.picker ? MainScreen::Picker
+        : wifi_mgr_is_ap_mode() ? MainScreen::Provisioning
+        : s_state.power_state == PowerState::Art ? MainScreen::Art
+        : MainScreen::Main;
+    if (screen == MainScreen::Main && s_last_screen != MainScreen::Main) {
+        // Re-entering the now-playing screen from the picker, settings, art
+        // mode, or provisioning counts as a reveal trigger for a faded zone
+        // label, mirroring Dial's ui_set_controls_visible(true).
+        const uint32_t now_ms = (uint32_t)platform_millis();
+        zone_label_policy_feed_controls_visible(&s_zone_policy, now_ms);
+        refresh_zone_label_presence(now_ms);
+    }
+    s_last_screen = screen;
+
     s_draw_target->startWrite();
     if (s_state.settings) draw_settings();
     else if (s_state.picker) draw_picker();
@@ -723,6 +773,7 @@ void handle_touch(const m5_platform_touch_event_t &event) {
 void set_zone_on_ui(void *arg) {
     char *value = static_cast<char *>(arg);
     copy_text(s_state.zone, sizeof(s_state.zone), value);
+    zone_label_policy_feed_name_changed(&s_zone_policy, (uint32_t)platform_millis());
     s_state.dirty = true;
     free(value);
 }
@@ -768,6 +819,9 @@ void post_text(const char *value, platform_task_fn_t fn) {
 
 extern "C" void touch_ui_init(void) {
     s_state = UiState{};
+    zone_label_policy_init(&s_zone_policy);
+    s_zone_label_faded = false;
+    s_last_screen = MainScreen::Main;
     s_display_sleeping.store(false);
     s_canvas.setColorDepth(16);
     s_canvas.setSwapBytes(true);
@@ -794,6 +848,7 @@ extern "C" void touch_ui_process(void) {
     if (s_state.track[0] || s_state.artist[0] || s_state.album[0]) {
         s_state.dirty = true;
     }
+    refresh_zone_label_presence((uint32_t)platform_millis());
     redraw();
 }
 
@@ -810,7 +865,12 @@ extern "C" void touch_ui_set_message(const char *msg) {
 
 extern "C" void touch_ui_set_zone_name(const char *name) {
     copy_text(s_state.zone, sizeof(s_state.zone), name && name[0] ? name : "No Zone");
+    zone_label_policy_feed_name_changed(&s_zone_policy, (uint32_t)platform_millis());
     s_state.dirty = true;
+}
+
+extern "C" void touch_ui_set_zone_count(int count) {
+    zone_label_policy_feed_count(&s_zone_policy, count, (uint32_t)platform_millis());
 }
 
 extern "C" void touch_ui_set_network_status(const char *status) {
