@@ -74,19 +74,6 @@
       "line_regex": "Container roon-knob-roon-knob-bridge"
     },
     {
-      "id": "historical-image-filename",
-      "category": "historical-provenance",
-      "owner": "#174",
-      "retirement": "Rename only when asset paths are migrated with redirects or all references.",
-      "path_globs": [
-        "README.md"
-      ],
-      "tokens": [
-        "roon-knob"
-      ],
-      "line_regex": "docs/images/roon-knob-photo\\.jpg"
-    },
-    {
       "id": "legacy-firmware-aliases",
       "category": "compatibility",
       "owner": "#162 and open-horizon-labs/unified-hifi-control#277",
@@ -264,7 +251,7 @@
       "contains": "cp dial-artifacts/idf_app/build/hiphi_dial.bin gh-pages-build/roon_knob.bin"
     },
     {
-      "path": "README.md",
+      "path": "docs/usage/DIAL.md",
       "contains": "click \"Flash Dial main controller\""
     },
     {
