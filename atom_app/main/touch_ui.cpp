@@ -27,6 +27,17 @@
 #include <cstring>
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// HiPhi brand accents (see docs/esp/DISPLAY.md "Brand colors").
+// M5GFX draw calls take a uint32_t as 24-bit RGB888, so these are the brand
+// hex values verbatim - no RGB565 conversion happens in application code.
+// ---------------------------------------------------------------------------
+constexpr uint32_t HIPHI_ACCENT = 0x00c8f0;       // Active indicator / selected row
+constexpr uint32_t HIPHI_ACCENT_SOFT = 0x9cefff;  // Section headers, progress, secondary
+constexpr uint32_t HIPHI_ATTENTION = 0xff654a;    // Offline / attention
+constexpr uint32_t HIPHI_SUCCESS = 0x10b981;      // Online
+
 constexpr const char *TAG = "atom_ui";
 constexpr int W = 128;
 constexpr int H = 128;
@@ -442,7 +453,7 @@ void draw_seek_indicator(int y) {
     const int filled = std::max(0, std::min(width,
         static_cast<int>((static_cast<int64_t>(position) * width) /
                          s.seek_length)));
-    if (filled > 0) s_draw_target->fillRect(4, y, filled, 2, 0x38bdf8);
+    if (filled > 0) s_draw_target->fillRect(4, y, filled, 2, HIPHI_ACCENT);
 }
 
 void draw_ellipsized_text(const char *text, int x, int y, int width, int size,
@@ -561,7 +572,7 @@ void draw_action_ack(int y_origin) {
         const int bar = std::max(0, std::min(120,
             static_cast<int>(fraction * 120.0f)));
         s_draw_target->fillRect(4, y_origin + 21, 120, 5, 0x1e293b);
-        s_draw_target->fillRect(4, y_origin + 21, bar, 5, 0x38bdf8);
+        s_draw_target->fillRect(4, y_origin + 21, bar, 5, HIPHI_ACCENT);
         char min_text[24] = {};
         snprintf(min_text, sizeof(min_text), "MIN %.1f", s.volume_min);
         draw_text(min_text, 4, y_origin + 29, 1, 0x94a3b8);
@@ -580,7 +591,7 @@ void draw_top_strip(void) {
             draw_zone_glyph(3, 7, 0x555555);
         } else {
             draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
-                                 s.online ? 0x7dd3fc : 0xf87171);
+                                 s.online ? HIPHI_SUCCESS : HIPHI_ATTENTION);
         }
         return;
     }
@@ -591,7 +602,7 @@ void draw_top_strip(void) {
         draw_zone_glyph(3, 7, 0x555555);
     } else {
         draw_ellipsized_text(s.zone, 3, 7, W - 6, 1,
-                             s.online ? 0x7dd3fc : 0xf87171);
+                             s.online ? HIPHI_SUCCESS : HIPHI_ATTENTION);
     }
     s_draw_target = previous;
     s_top_strip.pushSprite(&M5.Display, 0, 0);
@@ -624,10 +635,10 @@ void draw_metadata_band(void) {
 
 void draw_wifi_setup(void) {
     s_draw_target->fillScreen(0x08111d);
-    draw_text("WI-FI SETUP", 4, 6, 1, 0x7dd3fc);
-    draw_text("JOIN", 4, 28, 1, 0x94a3b8);
+    draw_text(platform_product_name(), 4, 6, 1, HIPHI_ACCENT_SOFT);
+    draw_text("JOIN WI-FI", 4, 28, 1, 0x94a3b8);
     draw_text(platform_provisioning_ssid(), 4, 42, 1, 0xf8fafc);
-    draw_text("192.168.4.1", 4, 62, 1, 0x38bdf8);
+    draw_text("192.168.4.1", 4, 62, 1, HIPHI_ACCENT);
     draw_text("Choose network on web", 4, 82, 1, 0x94a3b8);
     rk_wifi_network_t scan[2] = {};
     const rk_wifi_scan_state_t scan_state = wifi_mgr_scan_state();
@@ -706,17 +717,17 @@ void redraw(void) {
         draw_art_mode();
     } else if (s.picker) {
         s.artwork_visible = false;
-        draw_text("SELECT ZONE", 4, 3, 1, 0x7dd3fc);
+        draw_text("SELECT ZONE", 4, 3, 1, HIPHI_ACCENT_SOFT);
         for (int row = 0; row < 4; ++row) {
             int i = s.zone_offset + row;
             if (i >= s.zone_count) break;
-            uint32_t c = i == s.zone_selected ? 0x38bdf8 : 0x9ca3af;
+            uint32_t c = i == s.zone_selected ? HIPHI_ACCENT : 0x9ca3af;
             draw_text(s.zone_names[i], 6, 23 + row * 24, 1, c);
         }
         draw_text("A SELECT  B BACK", 3, 113, 1, 0x64748b);
     } else if (s.settings) {
         s.artwork_visible = false;
-        draw_text("SETTINGS", 5, 5, 2, 0x7dd3fc);
+        draw_text("SETTINGS", 5, 5, 2, HIPHI_ACCENT_SOFT);
         controller_config_snapshot_t snapshot = {};
         char ssid[33] = "(none)";
         char ip[32] = "(none)";
