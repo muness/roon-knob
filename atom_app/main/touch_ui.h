@@ -13,6 +13,8 @@ void touch_ui_process(void);
 void touch_ui_set_status(bool online);
 void touch_ui_set_message(const char *msg);
 void touch_ui_set_zone_name(const char *name);
+// Feed the zone label presence policy the latest zone count (0 == unknown).
+void touch_ui_set_zone_count(int count);
 void touch_ui_set_network_status(const char *status);
 void touch_ui_post_zone_name(const char *name);
 void touch_ui_post_network_status(const char *status);
