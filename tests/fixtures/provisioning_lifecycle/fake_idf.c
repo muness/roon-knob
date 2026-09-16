@@ -360,6 +360,7 @@ void vTaskDelay(unsigned ticks) {
 
 const char *platform_device_slug(void) { return "fixture"; }
 const char *platform_provisioning_ssid(void) { return "Fixture setup"; }
+const char *platform_product_name(void) { return "HiPhi Fixture"; }
 bool platform_provisioning_start(void) {
     s_provisioning_start_calls++;
     pthread_mutex_lock(&s_fixture_lock);

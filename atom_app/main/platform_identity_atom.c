@@ -2,3 +2,5 @@
 
 const char *platform_device_slug(void) { return "hiphi-joy"; }
 const char *platform_provisioning_ssid(void) { return "hiphi-joy-setup"; }
+
+const char *platform_product_name(void) { return "HiPhi Joy"; }
