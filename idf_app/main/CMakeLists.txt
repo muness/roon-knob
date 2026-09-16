@@ -46,6 +46,7 @@ set(SRC_FILES
     "../../common/power_debug_web.c"
     "../../common/ui.c"
     "../../common/ui_jpeg.c"
+    "../../common/zone_label_policy.c"
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_mdns_endpoint.c"
     "../../common/platform/platform_power.c"
