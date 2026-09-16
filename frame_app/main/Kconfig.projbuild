@@ -1,4 +1,4 @@
-menu "hiphi-frame Defaults"
+menu "HiPhi Frame Defaults"
 
 config RK_DEFAULT_SSID
     string "Default WiFi SSID"

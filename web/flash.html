@@ -12,7 +12,7 @@
 <body class="flash-shell" data-target-filter="{{TARGET_FILTER}}" data-channel="{{RELEASE_CHANNEL}}">
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header"><div class="container nav-wrap">
-    <a class="brand" href="https://hiphi.audio/"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
+    <a class="brand" href="https://hiphi.audio/"><img src="./assets/hiphi-logo.png" alt="" width="28" height="28"><strong>HiPhi</strong><span>by Open Horizon Labs</span></a>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span>Menu</span><span class="nav-face" aria-hidden="true">••</span></button>
     <nav class="site-nav" id="site-nav" aria-label="Firmware channels"><a data-channel-link="stable" href="/stable/">Stable</a><a data-channel-link="beta" href="/beta/">Beta</a><a data-channel-link="alpha" href="/alpha/">Alpha</a><a class="nav-flash" href="/">All channels</a></nav>
   </div></header>
@@ -45,12 +45,13 @@
     </div>
 
     <div class="requirements"><h2>{{RELEASE_CHANNEL_NAME}} install rules</h2><ul><li>Verify the exact SKU before connecting.</li><li>Use desktop Chrome, Edge, or Firefox and a data-capable USB cable.</li><li>Decline erase during updates to retain settings.</li><li>All controllers expose <code>/power-debug</code>; it records policy and sleep evidence, not amperage.</li></ul><p>{{RELEASE_LINK}}</p></div>
+    <footer class="flasher-footer"><p class="brand-mark"><img src="./assets/hiphi-logo.png" alt="" width="20" height="20">HiPhi by Open Horizon Labs</p><p>Free for personal, noncommercial use · Commercial use needs a license.<br><a href="https://hiphi.audio/">hiphi.audio</a> · <a href="https://github.com/muness/roon-knob/blob/master/COMMERCIAL-LICENSE.md">Commercial license</a></p></footer>
   </div></main>
 
   <script>
     const targetFilter = document.body.dataset.targetFilter;
     const channel = document.body.dataset.channel;
-    const targetNames = {dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate', joy: 'HiPhi Joy', tough: 'M5Stack Tough', m5dial: 'M5 Dial Lab', sticks3: 'HiPhi Twist', stopwatch: 'HiPhi Remote', stackchan: 'Kizz', knobaux: 'Waveshare Dial Auxiliary ESP32'};
+    const targetNames = {dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate', joy: 'HiPhi Joy', tough: 'HiPhi Tough', m5dial: 'HiPhi Dial Lab', sticks3: 'HiPhi Twist', stopwatch: 'HiPhi Remote', stackchan: 'Kizz', knobaux: 'Dial auxiliary parking image'};
     if (targetNames[targetFilter]) {
       const allowedCards = targetFilter === 'dial'
         ? new Set(['dial-card', 'knobaux-card'])

@@ -91,6 +91,7 @@ jobs:
           python3 scripts/check_release_hosting_contract.py
           python3 scripts/check_platform_power_and_wifi.py
           python3 scripts/check_dial_identity.py
+          python3 scripts/check_product_names.py
           python3 scripts/check_dial_power_copy.py
           python3 scripts/check_kizz_identity.py
           python3 scripts/check_controller_dependencies.py
