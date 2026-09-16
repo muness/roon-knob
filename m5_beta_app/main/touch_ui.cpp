@@ -40,8 +40,21 @@ constexpr int TARGET_STACKCHAN = 4;
 constexpr uint32_t BG = 0x080b12;
 constexpr uint32_t INK = 0xf4f1e8;
 constexpr uint32_t MUTED = 0x778397;
-constexpr uint32_t ACCENT = 0x35e0a1;
-constexpr uint32_t HOT = 0xff4f87;
+// ---------------------------------------------------------------------------
+// HiPhi brand accents (see docs/esp/DISPLAY.md "Brand colors").
+// M5GFX draw calls take a uint32_t as 24-bit RGB888, so these are the brand
+// hex values verbatim - no RGB565 conversion happens in application code.
+// These apply to the control chrome shared by Dial Lab, Twist and Remote, and
+// to Kizz's shared chrome only. Kizz's character palette (the STACK_* tokens
+// below, used by its face and animation layouts) is deliberately left alone.
+// ---------------------------------------------------------------------------
+constexpr uint32_t HIPHI_ACCENT = 0x00c8f0;       // Active indicator / selected row
+constexpr uint32_t HIPHI_ACCENT_SOFT = 0x9cefff;  // Progress and pressed states
+constexpr uint32_t HIPHI_ATTENTION = 0xff654a;    // Attention / armed / offline
+constexpr uint32_t HIPHI_SUCCESS = 0x10b981;      // Online dot
+
+constexpr uint32_t ACCENT = HIPHI_ACCENT;
+constexpr uint32_t HOT = HIPHI_ATTENTION;
 constexpr uint32_t STACK_BG = 0x07090d;
 constexpr uint32_t STACK_INK = 0xfff8e7;
 constexpr uint32_t STACK_SECONDARY = 0xd4dbe5;
@@ -1251,9 +1264,11 @@ void render_picker() {
                                &s_stackchan_marquees[0]);
     }
 
-    stackchan_draw_zone_line_left(target, 7, 7, 1, s.online ? ACCENT : HOT,
+    stackchan_draw_zone_line_left(target, 7, 7, 1,
+                                  s.online ? HIPHI_SUCCESS : HIPHI_ATTENTION,
                                   0x555555);
-    target->fillCircle(w - 49, 11, 3, s.online ? ACCENT : HOT);
+    target->fillCircle(w - 49, 11, 3,
+                       s.online ? HIPHI_SUCCESS : HIPHI_ATTENTION);
     if (s.battery >= 0) {
         char battery[12];
         std::snprintf(battery, sizeof(battery), "%d%%", s.battery);
@@ -1317,7 +1332,8 @@ void render_picker() {
                 static_cast<int>((static_cast<int64_t>(s.seek_position) * (w - 69)) /
                                  s.seek_length), 0, w - 69);
             target->fillRect(64, 162, w - 69, 2, 0x293446);
-            if (progress > 0) target->fillRect(64, 162, progress, 2, ACCENT);
+            if (progress > 0)
+                target->fillRect(64, 162, progress, 2, HIPHI_ACCENT_SOFT);
         }
     }
 
@@ -1675,8 +1691,10 @@ void render_provisioning() {
     M5.Display.fillEllipse(w / 2 - 62, 68, 26, 9, STACK_SECONDARY);
     M5.Display.fillEllipse(w / 2 + 62, 68, 26, 9, STACK_SECONDARY);
     M5.Display.drawArc(w / 2, 116, 34, 24, 210, 330, STACK_SECONDARY);
-    stackchan_draw_center(&M5.Display, "I WANT TO CONNECT", w / 2, 20, 1,
+    stackchan_draw_center(&M5.Display, platform_product_name(), w / 2, 20, 1,
                           STACK_HOT);
+    stackchan_draw_center(&M5.Display, "I WANT TO CONNECT", w / 2, 128, 1,
+                          STACK_SECONDARY);
     stackchan_draw_center(&M5.Display, platform_provisioning_ssid(), w / 2,
                           145, 1, STACK_INK);
     stackchan_draw_center(&M5.Display, "OPEN 192.168.4.1", w / 2, 166, 1,
@@ -1702,7 +1720,7 @@ void render_provisioning() {
                           STACK_INK);
 #else
     M5.Display.fillScreen(BG);
-    draw_centered("WI-FI SETUP", 28, 2, ACCENT);
+    draw_centered(platform_product_name(), 28, 2, ACCENT);
     draw_centered("JOIN THIS NETWORK", 66, 1, MUTED);
     draw_centered(platform_provisioning_ssid(), 94, 1, INK);
     draw_centered("OPEN 192.168.4.1", 136, 2, INK);
