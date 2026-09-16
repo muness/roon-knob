@@ -13,7 +13,9 @@
 #include "platform/platform_http.h"
 #include "platform/platform_identity.h"
 #include "platform/platform_task.h"
+#include "platform/platform_time.h"
 #include "wifi_manager.h"
+#include "zone_label_policy.h"
 
 #include <M5Unified.h>
 #include <algorithm>
@@ -146,6 +148,14 @@ struct State {
     uint8_t semantic_family = 0;
 } s;
 
+// Zone label presence policy - one instance shared by every StackChan-family
+// layout that draws the zone line (render_stackchan, render_semantic_family,
+// render_stackchan_delight). Dial Lab/Twist/Remote (render_dial/render_stick/
+// render_stopwatch) never draw the zone name at all, so they need no wiring.
+zone_label_policy_t s_zone_policy;
+bool s_zone_label_faded = false;
+bool s_last_main_screen = true;
+
 /* Private Kizz realization order.  The corresponding public ABI reports only
  * semantic fulfillment and never these names, tokens, or geometry. */
 enum class KizzSemanticFamily : uint8_t {
@@ -233,6 +243,59 @@ void stackchan_draw_center(lgfx::LovyanGFX *target, const char *text, int x, int
     stackchan_apply_font(target, size);
     target->setTextColor(color);
     target->drawString(text ? text : "", x, y);
+}
+
+// Small dim music-note glyph drawn in place of the zone name once the
+// presence policy decides a long-stable single zone can fade. Built from
+// primitives, not a font glyph, so it renders identically regardless of
+// what fonts happen to be linked in. (x, y) is the glyph's top-left.
+void stackchan_draw_zone_glyph(lgfx::LovyanGFX *target, int x, int y,
+                               uint32_t color) {
+    target->fillRect(x + 6, y, 2, 9, color);
+    target->fillCircle(x + 4, y + 9, 3, color);
+}
+
+// A zone name that is still unknown ("NO ROOM") is informative and always
+// shown; the presence policy only ever fades a *known* zone name.
+bool zone_line_should_fade() {
+    return s.zone[0] != '\0' && s_zone_label_faded;
+}
+
+// Shared "what to draw for the zone line" helper for every StackChan-family
+// layout (render_stackchan, render_semantic_family, render_stackchan_delight)
+// so the fade/glyph decision lives in one place. Two variants mirror the two
+// alignments those layouts already use.
+void stackchan_draw_zone_line_left(lgfx::LovyanGFX *target, int x, int y,
+                                   int size, uint32_t color,
+                                   uint32_t glyph_color) {
+    if (zone_line_should_fade()) {
+        stackchan_draw_zone_glyph(target, x, y, glyph_color);
+        return;
+    }
+    stackchan_draw_text(target, s.zone[0] ? s.zone : "NO ROOM", x, y, size,
+                        color);
+}
+
+void stackchan_draw_zone_line_center(lgfx::LovyanGFX *target, int x, int y,
+                                     int size, uint32_t color,
+                                     uint32_t glyph_color) {
+    if (zone_line_should_fade()) {
+        stackchan_draw_zone_glyph(target, x - 4, y - 4, glyph_color);
+        return;
+    }
+    stackchan_draw_center(target, s.zone[0] ? s.zone : "NO ROOM", x, y, size,
+                         color);
+}
+
+// Re-evaluates the zone label presence policy and marks the UI dirty only
+// when the decision actually changes (framebuffer targets do a plain swap,
+// no animation).
+void refresh_zone_label_presence(uint32_t now_ms) {
+    const bool should_show = zone_label_policy_visible(&s_zone_policy, now_ms);
+    const bool currently_shown = !s_zone_label_faded;
+    if (should_show == currently_shown) return;
+    s_zone_label_faded = !should_show;
+    s.dirty = true;
 }
 
 void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
@@ -1188,8 +1251,8 @@ void render_picker() {
                                &s_stackchan_marquees[0]);
     }
 
-    stackchan_draw_text(target, s.zone[0] ? s.zone : "NO ROOM", 7, 7, 1,
-                        s.online ? ACCENT : HOT);
+    stackchan_draw_zone_line_left(target, 7, 7, 1, s.online ? ACCENT : HOT,
+                                  0x555555);
     target->fillCircle(w - 49, 11, 3, s.online ? ACCENT : HOT);
     if (s.battery >= 0) {
         char battery[12];
@@ -1346,8 +1409,8 @@ void render_semantic_family() {
                                  : static_cast<lgfx::LovyanGFX *>(&M5.Display);
     const bool lost = !s.online && s.ever_online;
     target->fillScreen(lost ? 0x160d12 : STACK_BG);
-    stackchan_draw_text(target, s.zone[0] ? s.zone : "NO ROOM", 8, 7, 1,
-                        lost ? STACK_HOT : STACK_INK);
+    stackchan_draw_zone_line_left(target, 8, 7, 1, lost ? STACK_HOT : STACK_INK,
+                                  0x555555);
 
     switch (family) {
     case KizzSemanticFamily::ARTWORK_IMMERSIVE:
@@ -1506,8 +1569,8 @@ void render_stackchan_delight() {
     }
 
     target->fillRoundRect(6, 5, 142, 30, 15, STACK_BG);
-    stackchan_draw_center(target, s.zone[0] ? s.zone : "NO ROOM", 77, 20, 1,
-                          s.online ? STACK_INK : STACK_HOT);
+    stackchan_draw_zone_line_center(target, 77, 20, 1,
+                                    s.online ? STACK_INK : STACK_HOT, 0x555555);
     target->fillRoundRect(w - 70, 5, 64, 30, 15, STACK_BG);
     if (s.battery >= 0) {
         char battery[12];
@@ -2059,6 +2122,9 @@ extern "C" void touch_ui_init(void) {
              volume_ready);
 #endif
     s.setup_mode = wifi_mgr_is_ap_mode();
+    zone_label_policy_init(&s_zone_policy);
+    s_zone_label_faded = false;
+    s_last_main_screen = true;
     render();
 }
 extern "C" void touch_ui_process(void) {
@@ -2217,6 +2283,19 @@ extern "C" void touch_ui_process(void) {
 #endif
     if (s.sleeping && s.sleep_timeout_sec == 0) wake_display();
     apply_power_policy(now, artwork_transition_pending);
+    {
+        // Re-entering a screen that draws the zone line (leaving picker,
+        // settings, or provisioning) counts as a reveal trigger for a faded
+        // zone label, mirroring Dial's ui_set_controls_visible(true).
+        const bool zone_screen_active =
+            !s.picker && !s.settings && !wifi_mgr_is_ap_mode();
+        const uint32_t now_ms = (uint32_t)platform_millis();
+        if (zone_screen_active && !s_last_main_screen) {
+            zone_label_policy_feed_controls_visible(&s_zone_policy, now_ms);
+        }
+        s_last_main_screen = zone_screen_active;
+        refresh_zone_label_presence(now_ms);
+    }
     if (s.dirty && !s.sleeping) { s.dirty=false; render(); }
 }
 extern "C" void touch_ui_set_status(bool v){
@@ -2240,8 +2319,12 @@ extern "C" void touch_ui_set_zone_name(const char *v){
          * first playback snapshot has established a stable session. */
         copy_text(s.zone,sizeof(s.zone),zone);s.dirty=true;
         if(zone[0])s.zone_seen=true;
+        zone_label_policy_feed_name_changed(&s_zone_policy, (uint32_t)platform_millis());
         // Room changes are ambient state; do not announce them acoustically.
     }
+}
+extern "C" void touch_ui_set_zone_count(int count){
+    zone_label_policy_feed_count(&s_zone_policy, count, (uint32_t)platform_millis());
 }
 extern "C" void touch_ui_set_network_status(const char *v){if(std::strcmp(s.network,v?v:"")!=0){copy_text(s.network,sizeof(s.network),v);s.dirty=true;}}
 extern "C" void touch_ui_post_zone_name(const char *v){char *c=strdup(v?v:"");platform_task_post_to_ui([](void*p){touch_ui_set_zone_name(static_cast<char*>(p));free(p);},c);}
