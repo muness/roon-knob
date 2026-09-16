@@ -141,6 +141,20 @@
         "_roonknob"
       ],
       "line_regex": "of NAS2 observed `_roonknob\\._tcp\\.local`"
+    },
+    {
+      "id": "agent-guide-wire-contract-reference",
+      "category": "compatibility",
+      "owner": "#164",
+      "retirement": "Remove together with the retained wire-contract tokens it documents.",
+      "path_globs": [
+        "AGENTS.md"
+      ],
+      "tokens": [
+        "_roonknob",
+        "roon_knob"
+      ],
+      "line_regex": "Wire-contract strings|release aliases"
     }
   ],
   "required": [

@@ -1475,7 +1475,7 @@ jobs:
 
   # NOTE: Docker builds moved to unified-hifi-control repo
   # The muness/unified-hifi-control and muness/roon-extension-knob images
-  # are now built from https://github.com/cloud-atlas-ai/unified-hifi-control
+  # are now built from https://github.com/open-horizon-labs/unified-hifi-control
 
   deploy-pr-preview:
     name: Deploy All PR Firmware Previews

@@ -302,7 +302,7 @@ The device runs a captive portal that *should* pop up automatically, but some ph
 ### The device connected to WiFi but can't find the bridge
 
 - The bridge URL is optional — the device discovers it automatically via mDNS
-- Make sure the [bridge](https://github.com/cloud-atlas-ai/unified-hifi-control) is running on the same network as the knob
+- Make sure the [bridge](https://github.com/open-horizon-labs/unified-hifi-control) is running on the same network as the knob
 - If mDNS discovery isn't working, you can enter the bridge URL manually in settings
 
 ## Implementation Files
