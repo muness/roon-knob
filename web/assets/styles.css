@@ -59,7 +59,8 @@ p { text-wrap: pretty; }
 
 .site-header { position: sticky; top: 0; z-index: 30; color: var(--white); background: rgba(7, 26, 46, .96); border-bottom: 1px solid var(--line-dark); }
 .nav-wrap { min-height: 4.75rem; display: flex; align-items: center; justify-content: space-between; gap: 2rem; }
-.brand { display: inline-flex; align-items: baseline; gap: .7rem; color: var(--white); text-decoration: none; white-space: nowrap; }
+.brand { display: inline-flex; align-items: center; gap: .7rem; color: var(--white); text-decoration: none; white-space: nowrap; }
+.brand img { width: 28px; height: 28px; border-radius: 6px; }
 .brand strong { color: var(--cyan); font-family: "Familjen Grotesk", sans-serif; font-size: 1.65rem; letter-spacing: -.03em; }
 .brand span { color: var(--muted-dark); font-size: .82rem; }
 .site-nav { display: flex; align-items: center; justify-content: flex-end; gap: .2rem 1.2rem; flex-wrap: wrap; }
@@ -294,6 +295,11 @@ esp-web-install-button button:hover { background: var(--cyan-soft); }
 .footer-grid strong { color: var(--white); }
 .footer-links { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 .footer-note { max-width: 36rem; font-size: .9rem; }
+
+.flasher-footer { margin-top: 3rem; padding: 1.5rem 0; border-top: 1px solid var(--line-light); color: var(--body); font-size: .88rem; }
+.flasher-footer a { color: var(--cyan-dark); font-weight: 700; }
+.flasher-footer .brand-mark { display: inline-flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+.flasher-footer .brand-mark img { width: 20px; height: 20px; border-radius: 4px; }
 
 @media (max-width: 960px) {
   .hero-grid, .page-hero-inner, .flash-intro, .section-head, .mcp-proof, .proof-grid, .inquiry-alt, .inquiry-form .form-row { grid-template-columns: 1fr; }
