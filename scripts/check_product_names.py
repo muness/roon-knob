@@ -34,7 +34,17 @@ CANONICAL_NAMES = {
     "manifest-m5dial": "HiPhi Dial Lab",
     "manifest-sticks3": "HiPhi Twist",
     "manifest-stopwatch": "HiPhi Remote",
-    "manifest-stackchan": "Kizz",
+    "manifest-stackchan": "Kizz Playback Companion",
+}
+
+# flash.html targetNames key -> short form used there instead of the full
+# canonical name, for targets where the flasher's target-filter title and
+# button labels intentionally use a shorter form than the manifest/release
+# table (e.g. "Kizz" instead of "Kizz Playback Companion"; the full form is
+# pinned separately by scripts/check_kizz_identity.py). Every other target
+# is still checked against the full canonical name.
+TARGET_NAME_SHORT_FORMS = {
+    "stackchan": "Kizz",
 }
 
 # flash.html targetNames key -> manifest stem, so the same canonical table
@@ -62,7 +72,7 @@ RELEASE_TABLE_TO_MANIFEST = {
     "HiPhi Dial Lab": "manifest-m5dial",
     "HiPhi Twist": "manifest-sticks3",
     "HiPhi Remote": "manifest-stopwatch",
-    "Kizz": "manifest-stackchan",
+    "Kizz Playback Companion": "manifest-stackchan",
 }
 
 ALPHA_SUFFIX_RE = re.compile(r"\s*\((?:Alpha|Beta)\)\s*$")
@@ -100,7 +110,7 @@ def check_flash_html(errors: list[str]) -> None:
         re.findall(r"(\w+):\s*'([^']*)'", match.group(1))
     )
     for target, stem in TARGET_TO_MANIFEST.items():
-        expected = CANONICAL_NAMES[stem]
+        expected = TARGET_NAME_SHORT_FORMS.get(target, CANONICAL_NAMES[stem])
         actual = entries.get(target)
         if actual is None:
             errors.append(f"{flash_path.relative_to(ROOT)}: targetNames missing key {target!r}")

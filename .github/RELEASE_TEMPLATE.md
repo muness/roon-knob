@@ -209,7 +209,7 @@ a similarly named revision.
 | **HiPhi Dial Lab** | M5Stack Dial v1.1, SKU K130-V11 | [M5Stack](https://shop.m5stack.com/products/m5stack-dial-v1-1) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_m5dial_merged.bin) |
 | **HiPhi Twist** | M5StickS3, SKU K150 | [M5Stack](https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_sticks3_merged.bin) |
 | **HiPhi Remote** | M5Stack StopWatch, SKU C152 | [M5Stack](https://shop.m5stack.com/products/m5stack-stopwatch-dev-kit-esp32-s3) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stopwatch_merged.bin) |
-| **Kizz** | M5StackChan robot, SKU K151; no remote-control bundle required | [M5Stack](https://shop.m5stack.com/products/stackchan-kawaii-co-created-open-source-ai-desktop-robot) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stackchan_merged.bin) |
+| **Kizz Playback Companion** | M5StackChan robot, SKU K151; no remote-control bundle required | [M5Stack](https://shop.m5stack.com/products/stackchan-kawaii-co-created-open-source-ai-desktop-robot) | [Download](https://github.com/muness/roon-knob/releases/download/v{{VERSION}}/hiphi_stackchan_merged.bin) |
 
 The M5 Dial image is for the current Dial v1.1 (K130-V11), not the end-of-life
 original Dial (K130). The auxiliary parking image belongs to the Waveshare
