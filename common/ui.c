@@ -15,6 +15,7 @@
 #include "lvgl.h"
 #include "ui.h"
 #include "bridge_client.h"
+#include "zone_label_policy.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -63,6 +64,7 @@ static lv_timer_t *s_volume_emphasis_timer;  // Timer to reset volume emphasis a
 static lv_obj_t *s_status_dot;         // Online/offline indicator
 static lv_obj_t *s_battery_icon;       // Battery icon (Material Symbols)
 static lv_obj_t *s_zone_label;         // Zone name
+static lv_obj_t *s_zone_glyph;         // Dim glyph shown in place of the faded zone label
 static lv_obj_t *s_btn_prev;           // Previous track button
 static lv_obj_t *s_btn_play;           // Play/pause button (center, large)
 static lv_obj_t *s_btn_next;           // Next track button
@@ -143,6 +145,10 @@ static bool s_dirty = true;
 static char s_pending_message[128] = "";
 static bool s_message_dirty = false;
 static bool s_zone_name_dirty = false;
+static int s_pending_zone_count = 0;
+static bool s_zone_count_dirty = false;
+static zone_label_policy_t s_zone_label_policy;
+static bool s_zone_label_faded = false;  // current committed visual state (false == label shown)
 static char s_network_status[128] = "";   // Persistent network status (doesn't auto-clear)
 static bool s_network_status_dirty = false;
 static char s_last_image_key[128] = "";  // Track last loaded artwork
@@ -196,6 +202,7 @@ static void update_battery_display(void);
 static void battery_poll_timer_cb(lv_timer_t *timer);
 static void reset_volume_emphasis_timer_cb(lv_timer_t *timer);
 static void emphasize_volume_label(void);
+static void refresh_zone_label_presence(uint32_t now_ms);
 
 // ============================================================================
 // Volume Formatting Helper
@@ -239,6 +246,9 @@ void ui_init(void) {
     // We'll style everything manually for full control
 
     ESP_LOGI(UI_TAG, "Using ESP_NEW_JPEG software decoder for artwork");
+
+    zone_label_policy_init(&s_zone_label_policy);
+    s_zone_label_faded = false;
 
     build_layout();
 
@@ -420,10 +430,26 @@ static void build_layout(void) {
     s_zone_label = lv_label_create(header);
     lv_label_set_text(s_zone_label, s_pending.zone_name);
     lv_obj_set_style_text_font(s_zone_label, font_small(), 0);
-    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xbbbbbb), 0);
+    // Caption grey - demoted below the artist line (0xaaaaaa) so the zone
+    // name reads as context, not content.
+    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0x777777), 0);
     lv_obj_set_width(s_zone_label, SCREEN_SIZE - 120);
     lv_obj_set_style_text_align(s_zone_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_zone_label, LV_LABEL_LONG_DOT);
+
+    // Dim glyph shown in the zone label's place once the presence policy
+    // decides a stable single zone can fade. Keeps the header's Settings
+    // affordance hinted at without displaying zone-name text.
+    s_zone_glyph = lv_label_create(header);
+#if !TARGET_PC
+    lv_label_set_text(s_zone_glyph, ICON_MUSIC_NOTE);
+    lv_obj_set_style_text_font(s_zone_glyph, font_icon_small(), 0);
+#else
+    lv_label_set_text(s_zone_glyph, LV_SYMBOL_AUDIO);
+    lv_obj_set_style_text_font(s_zone_glyph, &lv_font_montserrat_20, 0);
+#endif
+    lv_obj_set_style_text_color(s_zone_glyph, lv_color_hex(0x555555), 0);
+    lv_obj_add_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
 
     // ========================================================================
     // Now Playing group - volume, artist, track, controls (flex column, centered)
@@ -712,6 +738,68 @@ static void set_status_dot(bool online) {
     }
 }
 
+// ============================================================================
+// Zone label presence (fade + glyph), driven by zone_label_policy
+// ============================================================================
+
+static void anim_set_zone_label_opa(void *var, int32_t value) {
+    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
+}
+
+static void zone_label_fade_out_ready_cb(lv_anim_t *a) {
+    (void)a;
+    if (s_zone_label) {
+        lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_zone_glyph) {
+        lv_obj_set_style_opa(s_zone_glyph, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Applies a shown/faded transition. The header itself is untouched (size,
+// tap and long-press handlers stay put) - only the label's opacity and the
+// glyph's visibility change.
+static void set_zone_label_presence(bool show) {
+    if (!s_zone_label) return;
+
+    lv_anim_delete(s_zone_label, anim_set_zone_label_opa);
+
+    if (show) {
+        if (s_zone_glyph) {
+            lv_obj_add_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_clear_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, s_zone_label);
+        lv_anim_set_exec_cb(&a, anim_set_zone_label_opa);
+        lv_anim_set_values(&a, lv_obj_get_style_opa(s_zone_label, 0), LV_OPA_COVER);
+        lv_anim_set_duration(&a, 300);
+        lv_anim_start(&a);
+    } else {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, s_zone_label);
+        lv_anim_set_exec_cb(&a, anim_set_zone_label_opa);
+        lv_anim_set_values(&a, lv_obj_get_style_opa(s_zone_label, 0), LV_OPA_TRANSP);
+        lv_anim_set_duration(&a, 300);
+        lv_anim_set_completed_cb(&a, zone_label_fade_out_ready_cb);
+        lv_anim_start(&a);
+    }
+}
+
+// Re-evaluates the policy's decision and, only on a change, drives the fade
+// animation and glyph swap. Safe to call every poll tick.
+static void refresh_zone_label_presence(uint32_t now_ms) {
+    if (!s_zone_label) return;
+    bool should_show = zone_label_policy_visible(&s_zone_label_policy, now_ms);
+    bool currently_shown = !s_zone_label_faded;
+    if (should_show == currently_shown) return;
+    s_zone_label_faded = !should_show;
+    set_zone_label_presence(should_show);
+}
+
 static void poll_pending(lv_timer_t *timer) {
     (void)timer;
 
@@ -736,6 +824,13 @@ static void poll_pending(lv_timer_t *timer) {
         s_zone_name_dirty = false;
     }
 
+    bool zone_count_changed = s_zone_count_dirty;
+    int zone_count = 0;
+    if (zone_count_changed) {
+        zone_count = s_pending_zone_count;
+        s_zone_count_dirty = false;
+    }
+
     bool network_status_changed = s_network_status_dirty;
     char net_status[128];
     if (network_status_changed) {
@@ -754,6 +849,15 @@ static void poll_pending(lv_timer_t *timer) {
     if (zone_name_changed && s_zone_label) {
         lv_label_set_text(s_zone_label, zone_name);
     }
+
+    uint32_t now_ms = (uint32_t)platform_millis();
+    if (zone_count_changed) {
+        zone_label_policy_feed_count(&s_zone_label_policy, zone_count, now_ms);
+    }
+    if (zone_name_changed) {
+        zone_label_policy_feed_name_changed(&s_zone_label_policy, now_ms);
+    }
+    refresh_zone_label_presence(now_ms);
     if (network_status_changed && s_status_bar) {
         // Set network status directly without auto-clear timer
         lv_label_set_text(s_status_bar, net_status);
@@ -1152,6 +1256,13 @@ void ui_set_zone_name(const char *zone_name) {
     os_mutex_unlock(&s_state_lock);
 }
 
+void ui_set_zone_count(int count) {
+    os_mutex_lock(&s_state_lock);
+    s_pending_zone_count = count;
+    s_zone_count_dirty = true;
+    os_mutex_unlock(&s_state_lock);
+}
+
 void ui_set_message(const char *message) {
     os_mutex_lock(&s_state_lock);
     strncpy(s_pending_message, message, sizeof(s_pending_message) - 1);
@@ -1504,7 +1615,14 @@ void ui_set_controls_visible(bool visible) {
         if (s_btn_next) lv_obj_clear_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
         if (s_track_label) lv_obj_clear_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         if (s_artist_label) lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_zone_label) lv_obj_clear_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        // Do not unconditionally unhide the zone label - let the presence
+        // policy decide (leaving art mode counts as a reveal trigger, but a
+        // long-stable single zone may still fade right back).
+        {
+            uint32_t now_ms = (uint32_t)platform_millis();
+            zone_label_policy_feed_controls_visible(&s_zone_label_policy, now_ms);
+            refresh_zone_label_presence(now_ms);
+        }
         if (s_volume_label_large) lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
         if (s_battery_icon) lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
@@ -1523,7 +1641,11 @@ void ui_set_controls_visible(bool visible) {
         if (s_btn_next) lv_obj_add_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
         if (s_track_label) lv_obj_add_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         if (s_artist_label) lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_zone_label) lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        if (s_zone_label) {
+            lv_anim_delete(s_zone_label, anim_set_zone_label_opa);
+            lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (s_zone_glyph) lv_obj_add_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
         if (s_volume_label_large) lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
         if (s_battery_icon) lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
