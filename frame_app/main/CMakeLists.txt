@@ -35,6 +35,7 @@ set(SRC_FILES
     "../../common/controller_utf8.c"
     "../../common/wifi_manager.c"
     "../../common/wifi_portal_form.c"
+    "../../common/portal_brand.c"
     "../../common/power_debug_web.c"
     "../../common/platform/platform_log.c"
     "../../common/platform/platform_mdns_endpoint.c"
@@ -72,7 +73,8 @@ idf_component_register(
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0
+    PORTAL_BRAND_PRODUCT="Frame")
 # Match the shipping Dial target until ESP-IDF 6.0/Picolibc removes the
 # aggressive GCC false positives in legacy bounded string copies.
 # TODO(#183): Remove after ESP-IDF 6.0 migration.

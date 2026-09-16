@@ -5,6 +5,11 @@
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
 #include "ui.h"
+#include "portal_brand.h"
+
+#ifndef PLATFORM_PORTAL_PRODUCT_SLUG
+#define PLATFORM_PORTAL_PRODUCT_SLUG "HiPhi Dial"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -106,35 +111,18 @@ static void apply_committed_wifi(bool reconnect) {
     }
 }
 
-// Simple HTML form for WiFi configuration
-static const char *HTML_FORM =
+// Simple HTML form for WiFi configuration. The shared brand stylesheet and
+// header are sent as their own chunks between HTML_FORM_HEAD and HTML_FORM.
+static const char *HTML_FORM_HEAD =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>HiPhi Dial Setup</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "p{color:#888;margin-top:0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:300px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=password],input[type=url]{width:100%;padding:10px;border:1px solid #333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{width:100%;padding:12px;margin-top:20px;background:#4fc3f7;color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".status{padding:10px;margin-top:15px;border-radius:5px;}"
-    ".success{background:#2e7d32;}"
-    ".error{background:#c62828;}"
-    ".hint{font-size:12px;color:#666;margin-top:4px;}"
-    ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;margin-top:20px;font-size:13px;}"
-    ".note a{color:#4fc3f7;}"
-    ".saved{background:#16213e;padding:12px 20px;border-radius:10px;max-width:300px;margin-top:20px;}"
-    ".wifi-entry{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #333;}"
-    ".wifi-entry:last-child{border-bottom:0;}"
-    ".btn-rm{background:#c62828;color:#fff;border:0;border-radius:5px;padding:7px 10px;cursor:pointer;}"
-    RK_WIFI_PORTAL_SELECT_CSS_LITERAL
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " Setup</title>"
+    "<style>";
+
+static const char *HTML_FORM =
     "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
-    "<p>WiFi Setup</p>"
+    "<h1>WiFi Setup</h1>"
     "<form method='GET' action='/configure'>"
     RK_WIFI_PORTAL_SELECT_OPEN
     "<!--WIFI_OPTIONS-->"
@@ -144,27 +132,22 @@ static const char *HTML_FORM =
     "<input type='submit' value='Connect'>"
     "</form>"
     "<div class='note'>"
-    "<strong>Note:</strong> HiPhi Dial requires Unified Hi-Fi Control on your network. "
+    "<strong>Note:</strong> " PLATFORM_PORTAL_PRODUCT_SLUG " requires Unified Hi-Fi Control on your network. "
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
     "</div>"
     "</body></html>";
 
-static const char *HTML_SUCCESS =
+static const char *HTML_SUCCESS_HEAD =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>HiPhi Dial - Saved</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;text-align:center;}"
-    "h1{color:#4fc3f7;}"
-    ".status{padding:20px;margin:20px auto;border-radius:10px;max-width:300px;background:#2e7d32;}"
-    ".next{padding:15px;margin:20px auto;border-radius:10px;max-width:300px;background:#16213e;text-align:left;}"
-    ".next li{margin:8px 0;}"
-    "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
-    "<div class='status'>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Saved</title>"
+    "<style>";
+
+static const char *HTML_SUCCESS_BODY =
+    "<div class='status success'>"
     "<p><strong>WiFi credentials saved!</strong></p>"
     "</div>"
     "<div class='next'>"
@@ -174,7 +157,7 @@ static const char *HTML_SUCCESS =
     "<li>Reconnect your phone to your home WiFi</li>"
     "<li>The HiPhi Dial will connect and start working</li>"
     "</ol>"
-    "</div></body></html>";
+    "</div>";
 
 // URL decode a string in place
 static void url_decode(char *str) {
@@ -291,15 +274,21 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     rk_wifi_portal_render_options(&scratch->scan, scratch->options, sizeof(scratch->options));
 
     httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr_chunk(req, HTML_FORM_HEAD);
+    httpd_resp_sendstr_chunk(req, PORTAL_BRAND_CSS);
     static const char options_marker[] = "<!--WIFI_OPTIONS-->";
+    static const char body_marker[] = "</style></head><body>";
+    const char *form_body = HTML_FORM + strlen(body_marker);
+    httpd_resp_sendstr_chunk(req, body_marker);
+    httpd_resp_sendstr_chunk(req, portal_brand_header_html());
     const char *options_at = strstr(HTML_FORM, options_marker);
     const char *closing = strstr(HTML_FORM, "</body></html>");
     const char *prefix_end = options_at ? options_at : closing;
     if (!prefix_end) {
         prefix_end = HTML_FORM + strlen(HTML_FORM);
     }
-    httpd_resp_send_chunk(req, HTML_FORM,
-                          (size_t)(prefix_end - HTML_FORM));
+    httpd_resp_send_chunk(req, form_body,
+                          (size_t)(prefix_end - form_body));
 
     if (options_at) {
         httpd_resp_sendstr_chunk(req,
@@ -339,6 +328,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         httpd_resp_sendstr_chunk(req, RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT);
     }
 
+    httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
     httpd_resp_sendstr_chunk(req, closing ? closing : "");
     httpd_resp_send_chunk(req, NULL, 0);
     free(scratch);
@@ -482,7 +472,14 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
 
     // Confirm success only after NVS write and read-back verification.
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, HTML_SUCCESS, strlen(HTML_SUCCESS));
+    httpd_resp_sendstr_chunk(req, HTML_SUCCESS_HEAD);
+    httpd_resp_sendstr_chunk(req, PORTAL_BRAND_CSS);
+    httpd_resp_sendstr_chunk(req, "</style></head><body>");
+    httpd_resp_sendstr_chunk(req, portal_brand_header_html());
+    httpd_resp_sendstr_chunk(req, HTML_SUCCESS_BODY);
+    httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
+    httpd_resp_sendstr_chunk(req, "</body></html>");
+    httpd_resp_send_chunk(req, NULL, 0);
 
     ESP_LOGI(TAG, "Credentials saved, scheduling countdown...");
     if (!schedule_setup_reboot(ssid)) {

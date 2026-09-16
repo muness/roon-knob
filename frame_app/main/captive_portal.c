@@ -1,4 +1,5 @@
 #include "captive_portal.h"
+#include "portal_brand.h"
 #include "dns_server.h"
 #include "controller_config.h"
 #include "eink_ui.h"
@@ -247,21 +248,11 @@ static const char *HTML_SUCCESS_HEAD =
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>";
 
+static const char *HTML_SUCCESS_TITLE =
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Saved</title><style>";
+
 static const char *HTML_SUCCESS_BODY =
-    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Saved</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
-    "text-align:center;}"
-    "h1{color:#4fc3f7;}"
-    ".status{padding:20px;margin:20px "
-    "auto;border-radius:10px;max-width:300px;background:#2e7d32;}"
-    ".next{padding:15px;margin:20px "
-    "auto;border-radius:10px;max-width:300px;background:#16213e;text-align:"
-    "left;}"
-    ".next li{margin:8px 0;}"
-    "</style></head><body>"
-    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
-    "<div class='status'>"
+    "<div class='status success'>"
     "<p><strong>WiFi credentials saved!</strong></p>"
     "</div>"
     "<div class='next'>"
@@ -271,7 +262,7 @@ static const char *HTML_SUCCESS_BODY =
     "<li>Reconnect your phone to your home WiFi</li>"
     "<li>The " PLATFORM_PORTAL_PRODUCT_SLUG " will connect and start displaying</li>"
     "</ol>"
-    "</div></body></html>";
+    "</div>";
 
 // URL decode a string in place
 static void url_decode(char *str) {
@@ -500,33 +491,13 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " Setup</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
-    "p{color:#888;margin-top:0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:300px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid "
-    "#333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{width:100%;padding:12px;margin-top:20px;background:#4fc3f7;"
-    "color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;"
-    "display:flex;justify-content:space-between;align-items:center;max-width:300px;}"
-    ".btn-rm{color:#ff7043;text-decoration:none;font-size:13px;}"
-    ".btn-rm:hover{color:#ff5722;}"
-    ".section{max-width:300px;}"
-    ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;"
-    "margin-top:20px;font-size:13px;}"
-    ".note a{color:#4fc3f7;}"
-    RK_WIFI_PORTAL_SELECT_CSS_LITERAL
-    "</style>");
+    "<style>");
+  SEND_SETUP_CHUNK(PORTAL_BRAND_CSS);
+  SEND_SETUP_CHUNK("</style>");
   SEND_SETUP_CHUNK(FAVICON_LINK);
-  SEND_SETUP_CHUNK(
-    "</head><body>"
-    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
-    "<p>WiFi Setup</p>");
+  SEND_SETUP_CHUNK("</head><body>");
+  SEND_SETUP_CHUNK(portal_brand_header_html());
+  SEND_SETUP_CHUNK("<h1>WiFi Setup</h1>");
   if (cfg->wifi_count > 0) {
     SEND_SETUP_CHUNK("<h2>Saved Networks</h2><div class='section'>");
   }
@@ -564,6 +535,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   if (rk_wifi_portal_scan_should_refresh(&scan)) {
     SEND_SETUP_CHUNK(RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT);
   }
+  SEND_SETUP_CHUNK(portal_brand_footer_html());
   SEND_SETUP_CHUNK("</body></html>");
   if (send_result == ESP_OK) {
     send_result = httpd_resp_send_chunk(req, NULL, 0);
@@ -641,15 +613,21 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
     ESP_LOGE(TAG, "Failed to save config");
-    httpd_resp_send(req,
+    httpd_resp_send_chunk(req,
       "<!DOCTYPE html><html><head>"
       "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-      "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;"
-      "text-align:center;}h1{color:#4fc3f7;}.error{padding:20px;margin:20px "
-      "auto;border-radius:10px;max-width:300px;background:#c62828;}</style></head><body>"
-      "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
-      "<p>Please try again.</p></div></body></html>",
+      "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Not saved</title><style>",
       HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, PORTAL_BRAND_CSS, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, "</style></head><body>", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, portal_brand_header_html(), HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req,
+      "<div class='error'><p><strong>Failed to save WiFi credentials.</strong></p>"
+      "<p>Please try again.</p></div>",
+      HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, portal_brand_footer_html(), HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, "</body></html>", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, NULL, 0);
     eink_ui_post_network_status("SAVE FAILED!");
     vTaskDelay(pdMS_TO_TICKS(5000));
     return ESP_FAIL;
@@ -680,7 +658,13 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 
   httpd_resp_send_chunk(req, HTML_SUCCESS_HEAD, HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, FAVICON_LINK, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, HTML_SUCCESS_TITLE, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, PORTAL_BRAND_CSS, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</style></head><body>", HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_header_html(), HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, HTML_SUCCESS_BODY, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_footer_html(), HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</body></html>", HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, NULL, 0);
 
   ESP_LOGI(TAG, "Credentials saved, scheduling reboot...");
@@ -783,36 +767,9 @@ fail:
   return false;
 }
 
-// ── Common CSS for STA-mode pages ──────────────────────────────────────────
+// ── Shared brand stylesheet for STA-mode pages ─────────────────────────────
 
-static const char *STA_CSS =
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
-    "a{color:#4fc3f7;}"
-    "nav{margin:10px 0 20px;}"
-    "nav a{margin-right:15px;text-decoration:none;}"
-    ".card{background:#16213e;padding:15px 20px;border-radius:10px;max-width:400px;margin:10px 0;}"
-    ".zone{display:flex;justify-content:space-between;align-items:center;"
-    "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;cursor:pointer;}"
-    ".zone:hover{background:#1e3a5f;}"
-    ".zone.active{border:1px solid #4fc3f7;}"
-    ".zone form{display:inline;margin:0;}"
-    ".btn{padding:8px 16px;background:#4fc3f7;color:#000;border:none;"
-    "border-radius:5px;font-weight:bold;cursor:pointer;}"
-    ".btn:hover{background:#29b6f6;}"
-    ".btn-danger{background:#ff7043;}"
-    ".btn-danger:hover{background:#ff5722;}"
-    ".status{color:#aaa;margin:10px 0;}"
-    ".device{display:flex;justify-content:space-between;align-items:center;"
-    "padding:10px;margin:5px 0;border-radius:5px;background:#0f0f1a;}"
-    ".device form{display:inline;margin:0;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text]{width:100%;padding:10px;border:1px solid #333;"
-    "border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    ".btn{padding:10px 14px;background:#4fc3f7;color:#000;border:0;"
-    "border-radius:5px;font-weight:bold;cursor:pointer;margin-top:14px;}"
-    ;
+#define STA_CSS PORTAL_BRAND_CSS
 
 // ── STA-mode Unified Hi-Fi Control settings (GET/POST /settings) ──────────
 
@@ -845,7 +802,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
 #else
   const char *ip_setting = "";
 #endif
-  const size_t html_size = 16384;
+  const size_t html_size = 24576;  /* room for the shared brand stylesheet */
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
@@ -856,7 +813,8 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<!DOCTYPE html><html><head>"
       "<meta name='viewport' content='width=device-width,initial-scale=1'>"
       "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Settings</title><style>%s</style>%s</head><body>"
-      "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
+      "%s"
+      "<h1>Settings</h1>"
       "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/settings'>Settings</a><a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Unified Hi-Fi Control</h2>"
@@ -877,9 +835,11 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<input type='number' name='art_mode_timeout_sec' min='0' max='86400' value='%lu'>"
       "%s"
       "<button type='submit' class='btn'>Save display setting</button>"
-      "</form></div><script>let busy=false;setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)return;const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);}}catch(e){}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>",
-      STA_CSS, FAVICON_LINK, escaped_summary, escaped_details, escaped_bridge_base,
-      (unsigned long)art_mode_timeout, ip_setting);
+      "</form></div><script>let busy=false;setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)return;const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);}}catch(e){}finally{clearTimeout(t);busy=false;}},5000);</script>%s</body></html>",
+      STA_CSS, FAVICON_LINK, portal_brand_header_html(),
+      escaped_summary, escaped_details, escaped_bridge_base,
+      (unsigned long)art_mode_timeout, ip_setting,
+      portal_brand_footer_html());
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
   httpd_resp_set_type(req, "text/html");
@@ -1014,7 +974,7 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
       break;
     }
   }
-  const size_t html_size = 12288;
+  const size_t html_size = 20480;  /* room for the shared brand stylesheet */
   char *html = heap_caps_malloc(html_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
     free(saved_html);
@@ -1025,8 +985,8 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
   int length = snprintf(html, html_size,
       "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
       "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Wi-Fi</title><style>%s"
-      RK_WIFI_PORTAL_SELECT_CSS_FORMAT "</style>%s</head><body>"
-      "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+      "</style>%s</head><body>"
+      "%s<h1>Wi-Fi</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
       "<a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Saved Wi-Fi networks</h2>%s</div>"
@@ -1036,11 +996,13 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
       "<label>Password</label><input type='password' name='pass' maxlength='64'>"
       "<button type='submit' class='btn'>Save network</button></form>"
       "<p class='status'><a href='/wifi?scan=again'>Scan again</a></p></div>"
-      "%s</body></html>",
-      STA_CSS, FAVICON_LINK, saved_html[0] ? saved_html : "<p class='status'>None saved.</p>",
+      "%s%s</body></html>",
+      STA_CSS, FAVICON_LINK, portal_brand_header_html(),
+      saved_html[0] ? saved_html : "<p class='status'>None saved.</p>",
       rk_wifi_portal_scan_placeholder(&scan), scan_options,
       rk_wifi_portal_scan_should_refresh(&scan)
-          ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
+          ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "",
+      portal_brand_footer_html());
   if (length < 0) length = 0;
   if (length >= (int)html_size) length = (int)html_size - 1;
   httpd_resp_set_type(req, "text/html");
@@ -1100,7 +1062,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
   char bridge_url[128] = "";
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
-  size_t html_size = 16384;  // Extra room for base64 favicon + zone list
+  size_t html_size = 24576;  // base64 favicon + zone list + brand stylesheet
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
@@ -1119,13 +1081,15 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Zones</title>"
     "<style>%s</style>%s</head><body>"
-    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
+    "%s"
+    "<h1>Zones</h1>"
     "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
     STA_CSS,
     FAVICON_LINK,
+    portal_brand_header_html(),
     esc_bridge_url[0] ? "<a href='" : "",
     esc_bridge_url[0] ? esc_bridge_url : "",
     esc_bridge_url[0] ? "' target='_blank'>Unified Hi-Fi Control</a>" : "");
@@ -1164,7 +1128,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<form method='POST' action='/api/restart'>"
     "<button type='submit' class='btn btn-danger'>Restart Device</button>"
     "</form></div>"
-    "</body></html>");
+    "%s</body></html>", portal_brand_footer_html());
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   httpd_resp_set_type(req, "text/html");
@@ -1236,7 +1200,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   char bridge_url[128] = "";
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
-  size_t html_size = 12288;  // Extra room for base64 favicon
+  size_t html_size = 20480;  // base64 favicon + brand stylesheet
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
@@ -1255,7 +1219,8 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - BLE Remote</title>"
     "<style>%s</style>%s%s</head><body>"
-    "<h1>" PLATFORM_PORTAL_PRODUCT_SLUG "</h1>"
+    "%s"
+    "<h1>BLE Remote</h1>"
     "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
@@ -1267,6 +1232,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
         "setTimeout(function(){if(!document.hidden)location.reload()},1000);"
         "document.addEventListener('visibilitychange',function(){if(!document.hidden)location.reload()});</script>"
       : "",
+    portal_brand_header_html(),
     esc_bridge_url[0] ? "<a href='" : "",
     esc_bridge_url[0] ? esc_bridge_url : "",
     esc_bridge_url[0] ? "' target='_blank'>Unified Hi-Fi Control</a>" : "");
@@ -1375,7 +1341,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<form method='POST' action='/api/restart'>"
     "<button type='submit' class='btn btn-danger'>Restart Device</button>"
     "</form></div>"
-    "</body></html>");
+    "%s</body></html>", portal_brand_footer_html());
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   httpd_resp_set_type(req, "text/html");
@@ -1501,14 +1467,20 @@ static esp_err_t sta_ble_enable_handler(httpd_req_t *req) {
 static esp_err_t sta_restart_handler(httpd_req_t *req) {
   ESP_LOGW(TAG, "Web UI: restart requested");
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req,
+  httpd_resp_send_chunk(req,
     "<!DOCTYPE html><html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<style>body{font-family:sans-serif;margin:40px;background:#1a1a2e;color:#eee;"
-    "text-align:center;}h1{color:#4fc3f7;}</style></head><body>"
-    "<h1>Restarting...</h1><p>The device will reconnect in a few seconds.</p>"
-    "</body></html>",
+    "<title>Restarting</title><style>",
     HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, PORTAL_BRAND_CSS, HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</style></head><body>", HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_header_html(), HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req,
+    "<h1>Restarting...</h1><p>The device will reconnect in a few seconds.</p>",
+    HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, portal_brand_footer_html(), HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, "</body></html>", HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req, NULL, 0);
   vTaskDelay(pdMS_TO_TICKS(1000));
   esp_restart();
   return ESP_OK;  // unreachable

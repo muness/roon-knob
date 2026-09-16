@@ -2,6 +2,11 @@
 // Access at http://<knob-ip>/ to set bridge URL
 
 #include "config_server.h"
+#include "portal_brand.h"
+
+#ifndef PLATFORM_PORTAL_PRODUCT_SLUG
+#define PLATFORM_PORTAL_PRODUCT_SLUG "HiPhi Dial"
+#endif
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
 #include "power_debug_web.h"
@@ -49,41 +54,18 @@ static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
 }
 
 // HTML page for config
-// Format args: current_bridge, status_class, status_text, wifi_html,
-// scan_placeholder, scan_options, bridge_value, scan_refresh_script
+// Format args: brand_css, brand_header, current_bridge, status_class,
+// status_text, wifi_html, scan_placeholder, scan_options, bridge_value,
+// scan_refresh_script, brand_footer
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>HiPhi Dial Config</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
-    ".info{color:#888;margin:10px 0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:400px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=url],input[type=password]{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{padding:12px 24px;margin-top:20px;background:#4fc3f7;color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".btn-clear{background:#ff7043;}"
-    ".btn-clear:hover{background:#ff5722;}"
-    ".btn-sm{padding:6px 12px;margin:0 0 0 10px;font-size:12px;}"
-    ".current{background:#0f0f1a;padding:10px;border-radius:5px;margin:10px 0;font-family:monospace;}"
-    ".status{padding:10px;border-radius:5px;margin:10px 0;}"
-    ".status-ok{background:#1b5e20;}"
-    ".status-warn{background:#e65100;}"
-    ".status-err{background:#b71c1c;}"
-    ".hint{font-size:12px;color:#666;margin-top:4px;}"
-    ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
-    ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
-    RK_WIFI_PORTAL_SELECT_CSS_FORMAT
-    ".section{max-width:400px;}"
-    "a{color:#4fc3f7;}"
-    ".device{background:#0f0f1a;padding:10px;border-radius:5px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;}"
-    "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
-    "<p class='info'>Configure your HiPhi Dial settings</p>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " Config</title>"
+    "<style>%s</style></head><body>"
+    "%s"
+    "<h1>Settings</h1>"
+    "<p class='info'>Configure your " PLATFORM_PORTAL_PRODUCT_SLUG " settings</p>"
     "<p><a href='/ble'>BLE Media Remote settings</a></p>"
     "<p><a href='/power-debug'>Power debug evidence</a></p>"
     "<div class='current'>"
@@ -110,22 +92,19 @@ static const char *HTML_CONFIG =
     "<p class='hint'>Leave empty to find your bridge automatically. Connection status appears above.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form>%s<script>let busy=false,lastUpdate=Date.now();function unavailable(){const o=document.getElementById('connection-status');if(o){o.className='status status-warn';o.textContent='Dial unavailable - reconnecting. Last update: '+Math.floor((Date.now()-lastUpdate)/1000)+' seconds ago.';}}setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('response');const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);lastUpdate=Date.now();}else throw new Error('status missing');}catch(e){unavailable();}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>";
+    "</form>%s%s<script>let busy=false,lastUpdate=Date.now();function unavailable(){const o=document.getElementById('connection-status');if(o){o.className='status status-warn';o.textContent='Dial unavailable - reconnecting. Last update: '+Math.floor((Date.now()-lastUpdate)/1000)+' seconds ago.';}}setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('response');const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);lastUpdate=Date.now();}else throw new Error('status missing');}catch(e){unavailable();}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>";
 
+// Format args: brand_css, brand_header, message, brand_footer
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>Saved</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;text-align:center;}"
-    "h1{color:#4fc3f7;}"
-    ".success{background:#2e7d32;padding:20px;border-radius:10px;max-width:300px;margin:20px auto;}"
-    ".info{background:#16213e;padding:15px;border-radius:10px;max-width:300px;margin:20px auto;}"
-    "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
+    "<style>%s</style></head><body>"
+    "%s"
     "<div class='success'>%s</div>"
-    "<div class='info'>Device will reboot automatically to apply changes...</div>"
+    "<div class='card'>Device will reboot automatically to apply changes...</div>"
+    "%s"
     "</body></html>";
 
 // URL decode a string in place
@@ -274,7 +253,9 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     rk_wifi_portal_render_options(&render->scan, render->scan_options, sizeof(render->scan_options));
 
     // Build HTML with current values, saved networks, and bridge status.
-    const size_t html_size = 16384;
+    /* Grown for the shared brand stylesheet (~4 KB) on top of the scan
+     * options, saved networks, and status blocks. */
+    const size_t html_size = 24576;
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
@@ -283,11 +264,13 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    snprintf(html, html_size, HTML_CONFIG, current, status_class, render->status,
+    snprintf(html, html_size, HTML_CONFIG, PORTAL_BRAND_CSS,
+             portal_brand_header_html(), current, status_class, render->status,
              render->wifi_html, rk_wifi_portal_scan_placeholder(&render->scan), render->scan_options,
              cfg->bridge_base,
              rk_wifi_portal_scan_should_refresh(&render->scan)
-                 ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "");
+                 ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "",
+             portal_brand_footer_html());
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
@@ -348,14 +331,16 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
     }
 
     // Send success response
-    char *html = heap_caps_malloc(1024,
+    const size_t success_size = 8192;
+    char *html = heap_caps_malloc(success_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 1024, HTML_SUCCESS, message);
+    snprintf(html, success_size, HTML_SUCCESS, PORTAL_BRAND_CSS,
+             portal_brand_header_html(), message, portal_brand_footer_html());
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
     free(html);
@@ -519,7 +504,7 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
     size_t result_count = rk_ble_hid_host_scan_results_copy(
         results, RK_BLE_HID_HOST_MAX_RESULTS, &scan_generation);
 
-    const size_t html_size = 16384;
+    const size_t html_size = 24576;  /* room for the shared brand stylesheet */
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
@@ -573,28 +558,24 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
         "<!DOCTYPE html><html><head>"
         "<meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>BLE Media Remote - HiPhi Dial</title>"
-        "<style>"
-        "*{box-sizing:border-box}body{font-family:sans-serif;margin:0;padding:24px;"
-        "background:#1a1a2e;color:#eee;line-height:1.45}main{max-width:480px;margin:0 auto}"
-        "a{color:#70d6ff}h1{color:#4fc3f7;margin:24px 0 6px;font-size:28px}"
-        "h2{font-size:18px;margin:28px 0 8px}.lede{color:#b9c3d8;margin:0 0 20px}"
-        ".connection{display:flex;gap:12px;align-items:flex-start;background:#0f0f1a;"
-        "padding:16px;border-radius:14px;margin:18px 0}.connection strong,.connection span{display:block}"
-        ".connection span:last-child{color:#b9c3d8;margin-top:2px;overflow-wrap:anywhere}"
-        ".dot{width:10px;height:10px;border-radius:50%%;background:#8a94a8;margin-top:6px;flex:none}"
-        ".connected .dot{background:#55d98b}.working .dot{background:#ffd166;animation:pulse 1.4s ease-in-out infinite}"
-        ".error .dot{background:#ff7043}.live{font-size:12px;color:#91a0bb;margin-top:8px}"
-        ".actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.actions form{margin:0}"
-        "button{padding:10px 16px;background:#4fc3f7;color:#07111a;border:0;border-radius:8px;"
-        "font-weight:700;cursor:pointer}button:hover{background:#70d6ff}button:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:3px}"
-        "button:disabled{background:#596275;color:#c7ccda;cursor:wait}.danger{background:#ff8a65}"
-        ".device{background:#0f0f1a;padding:12px 14px;border-radius:12px;margin:8px 0;"
-        "display:flex;gap:12px;justify-content:space-between;align-items:center}.device span{overflow-wrap:anywhere}"
-        ".empty,.hint{color:#b9c3d8}.technical{margin-top:28px;color:#91a0bb;font-size:13px}"
-        ".technical summary{cursor:pointer;color:#b9c3d8}@keyframes pulse{50%%{opacity:.35;transform:scale(.75)}}"
+        "<title>BLE Media Remote - " PLATFORM_PORTAL_PRODUCT_SLUG "</title>"
+        "<style>%s"
+        /* page-specific supplement on top of the shared brand stylesheet */
+        ".connection strong,.connection span{display:block}"
+        ".connection{align-items:flex-start}"
+        ".connection span:last-child{color:var(--pb-muted);margin-top:2px;"
+        "overflow-wrap:anywhere}"
+        ".dot{width:10px;height:10px;border-radius:50%%;background:var(--pb-muted);"
+        "margin-top:6px;flex:none}"
+        ".connected .dot{background:var(--pb-ok)}"
+        ".working .dot{background:var(--pb-warn);animation:pulse 1.4s ease-in-out infinite}"
+        ".error .dot{background:var(--pb-attention)}"
+        ".live{font-size:12px;color:var(--pb-muted);margin-top:8px}"
+        ".device span{overflow-wrap:anywhere}"
+        "@keyframes pulse{50%%{opacity:.35;transform:scale(.75)}}"
         "@media(prefers-reduced-motion:reduce){.working .dot{animation:none}}"
         "</style>%s</head><body><main>"
+        "%s"
         "<a href='/'>← Back to Dial settings</a>"
         "<h1>BLE Media Remote</h1>"
         "<p class='lede'>Connect one physical Bluetooth remote to control media on this Dial.</p>"
@@ -605,11 +586,13 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
         "<form method='POST' action='/ble-enable'>"
         "<input type='hidden' name='enabled' value='%d'>"
         "<button type='submit' class='%s'>%s</button></form>",
+        PORTAL_BRAND_CSS,
         auto_updates
             ? "<script>if(location.search)history.replaceState(null,'','/ble');"
               "setTimeout(function(){if(!document.hidden)location.reload()},1000);"
               "document.addEventListener('visibilitychange',function(){if(!document.hidden)location.reload()});</script>"
             : "",
+        portal_brand_header_html(),
         state_class, state_title, state_detail,
         auto_updates ? "<span class='live'>Updates automatically</span>" : "",
         status.enabled ? 0 : 1,
@@ -682,11 +665,12 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
         "<details class='technical'><summary>About this setting</summary>"
         "<p>The Dial connects to a separate Bluetooth media remote. The Dial itself "
         "does not appear as a remote to phones or computers.</p>%s%s%s</details>"
-        "</main></body></html>",
+        "%s</main></body></html>",
         status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "<p>Technical error: " : "",
         status.last_error != RK_BLE_HID_HOST_ERROR_NONE
             ? rk_ble_hid_host_error_name(status.last_error) : "",
-        status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "</p>" : "");
+        status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "</p>" : "",
+        portal_brand_footer_html());
     if (pos < 0 || pos >= (int)html_size) {
         pos = (int)html_size - 1;
     }

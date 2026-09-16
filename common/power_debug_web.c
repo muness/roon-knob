@@ -1,5 +1,7 @@
 #include "power_debug_web.h"
 
+#include "portal_brand.h"
+
 #include "platform/platform_identity.h"
 #include "platform/platform_log.h"
 #include "platform/platform_power.h"
@@ -310,15 +312,18 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             experiment.observer_effect ? "true" : "false");
     } else {
         httpd_resp_set_type(req, "text/html");
+        char head[160];
+        snprintf(head, sizeof(head),
+                 "<!DOCTYPE html><html><head><meta name='viewport' "
+                 "content='width=device-width,initial-scale=1'>"
+                 "<title>%s power debug</title><style>", device);
+        httpd_resp_sendstr_chunk(req, head);
+        httpd_resp_sendstr_chunk(req, PORTAL_BRAND_CSS);
+        httpd_resp_sendstr_chunk(req, "</style></head><body>");
+        httpd_resp_sendstr_chunk(req, portal_brand_header_html());
         snprintf(
             body, POWER_DEBUG_BODY_SIZE,
-            "<!DOCTYPE html><html><head><meta name='viewport' "
-            "content='width=device-width,initial-scale=1'><title>%s power debug</title>"
-            "<style>body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee}"
-            "h1,h2{color:#4fc3f7}table{border-collapse:collapse;max-width:720px;width:100%%}"
-            "td,th{border-bottom:1px solid #444;padding:7px;text-align:left}code{color:#b3e5fc}"
-            "button{padding:12px;background:#ffb300;border:0;border-radius:5px;font-weight:bold}"
-            "a{color:#4fc3f7}</style></head><body><h1>%s power debug</h1>"
+            "<h1>%s power debug</h1>"
             "<p>Firmware evidence only; this page does not measure current%s.</p>"
             "<p><a href='/'>Device UI</a> · <a href='/power-debug?format=json'>JSON</a></p>"
             "<h2>Current policy</h2><table><tr><th>State</th><td>%s</td></tr>"
@@ -344,8 +349,8 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
             "<tr><th>Entry battery</th><td>%d</td></tr>"
             "<tr><th>This boot</th><td>reset %s · wake %s · uptime %llums</td></tr></table>"
             "<h2>Persistent event tail</h2>%s"
-            "%s</body></html>",
-            device, device,
+            "%s",
+            device,
             (power.capabilities & PLATFORM_POWER_CAP_AUXILIARY_SOC)
                 ? " or prove the auxiliary processor's draw" : "",
             state_name(power.state), strategy_name(power.capabilities),
@@ -400,7 +405,14 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
                   "not yet implement the early, radio/UI-free voltage-sampling path.</p>");
     }
 
-    httpd_resp_send(req, body, strlen(body));
+    if (wants_json) {
+        httpd_resp_send(req, body, strlen(body));
+    } else {
+        httpd_resp_sendstr_chunk(req, body);
+        httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
+        httpd_resp_sendstr_chunk(req, "</body></html>");
+        httpd_resp_send_chunk(req, NULL, 0);
+    }
     free(body);
     free(trace);
     return ESP_OK;
@@ -578,14 +590,24 @@ static esp_err_t power_debug_sleep_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     char response[640];
     snprintf(response, sizeof(response),
-             "<!DOCTYPE html><meta name='viewport' content='width=device-width,initial-scale=1'>"
-             "<title>Power experiment armed</title><h1>Power experiment armed</h1>"
+             "<h1>Power experiment armed</h1>"
              "<p>Experiment <code>%016llx</code> starts its power-off path in 15 seconds. "
              "Results persist at <a href='/power-debug/sleep'>power experiment</a>. "
              "Software checkpoints change the measured drain; interval 0 is reserved "
              "for external-profiler runs.</p>",
              (unsigned long long)experiment_id);
-    httpd_resp_sendstr(req, response);
+    httpd_resp_sendstr_chunk(
+        req,
+        "<!DOCTYPE html><html><head><meta name='viewport' "
+        "content='width=device-width,initial-scale=1'>"
+        "<title>Power experiment armed</title><style>");
+    httpd_resp_sendstr_chunk(req, PORTAL_BRAND_CSS);
+    httpd_resp_sendstr_chunk(req, "</style></head><body>");
+    httpd_resp_sendstr_chunk(req, portal_brand_header_html());
+    httpd_resp_sendstr_chunk(req, response);
+    httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
+    httpd_resp_sendstr_chunk(req, "</body></html>");
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
