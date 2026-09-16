@@ -39,7 +39,7 @@ Existing discovered IP-only settings can adopt a bridge name while that IP still
 | **Tap the screen** | Play/pause |
 | **Swipe up** | Art mode (hide controls, show album art) |
 | **Swipe down** | Exit art mode |
-| **Long-press zone name** | Settings |
+| **Long-press the top of the screen (zone name or zone icon)** | Settings |
 
 Velocity-sensitive volume control means a slow turn adjusts finely and a fast turn jumps.
 
@@ -51,7 +51,7 @@ Velocity-sensitive volume control means a slow turn adjusts finely and a fast tu
 | "Extension: Searching..." | Looking for the bridge — make sure it's running |
 | "Extension: Connected" | Ready to use |
 
-If mDNS doesn't work on your network, enter the bridge URL manually in Settings (long-press zone name).
+If mDNS doesn't work on your network, enter the bridge URL manually in Settings (long-press the top of the screen, on the zone name or zone icon).
 
 ## Hardware and Internals
 

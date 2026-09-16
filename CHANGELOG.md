@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Features
+- Now-playing header: demote the zone label to a darker caption grey
+  (`0x777777`) and fade it to a dim glyph after ~35s in a stable single-zone
+  household, reappearing for 5s on zone-name changes or leaving art mode.
+  Multi-zone households never see it fade. See `docs/esp/DISPLAY.md` for the
+  presence-policy details.
+
 ## [v1.3.4] - 2024-12-14
 
 ### Bug Fixes
