@@ -1,4 +1,4 @@
-# HiPhi Dial Agent Guide
+# HiPhi ESP Firmware Agent Guide
 
 ## Open Horizons Framework
 
@@ -43,10 +43,53 @@ databases or Markdown TODO lists.
 
 ### Purpose
 
-HiPhi Dial turns commodity embedded hardware into approachable, dedicated hi-fi
-controllers. The product should let someone perform routine listening without
+This repository is the **HiPhi ESP firmware family**, not a single product. It
+turns commodity embedded hardware into approachable, dedicated hi-fi
+controllers. A controller should let someone perform routine listening without
 opening a general-purpose screen: see what is playing and control transport,
-volume, zones, playlists, and programs.
+volume, zones, playlists, and programs. Sources are Roon, Lyrion Music Server
+(LMS), and OpenHome/UPnP, reached through the
+[Unified Hi-Fi Control](https://github.com/open-horizon-labs/unified-hifi-control)
+bridge. The brand is **HiPhi by Open Horizon Labs**; the public site is
+[hiphi.audio](https://hiphi.audio/) and the flasher is
+[firmware.hiphi.audio](https://firmware.hiphi.audio/).
+
+### Targets
+
+Do not default to the Dial. Every change should name the targets it touches.
+
+| Target dir | Slug | Product name | Hardware |
+|---|---|---|---|
+| `idf_app` | `hiphi-dial` | HiPhi Dial | Waveshare ESP32-S3-Knob-Touch-LCD-1.8 |
+| `knob_aux_app` | n/a | Dial auxiliary parking image | Waveshare knob, second ESP32 |
+| `frame_app` | `hiphi-frame` | HiPhi Frame | Waveshare ESP32-S3-PhotoPainter |
+| `rlcd_app` | `hiphi-rlcd` | HiPhi Slate | Waveshare ESP32-S3-RLCD-4.2 |
+| `atom_app` | `hiphi-joy` | HiPhi Joy | M5Stack AtomS3 JoyStick K137 |
+| `tough_app` | `hiphi-tough` | HiPhi Tough | M5Stack Tough K034 |
+| `m5_beta_app` (dial) | `hiphi-dial-beta` | HiPhi Dial Lab | M5Stack Dial K130-V11 |
+| `m5_beta_app` (sticks3) | `hiphi-sticks3-beta` | HiPhi Twist | M5StickS3 K150 |
+| `m5_beta_app` (stopwatch) | `hiphi-stopwatch-beta` | HiPhi Remote | M5Stack StopWatch C152 |
+| `m5_beta_app` (stackchan) | `hiphi-kizz-beta` | Kizz | M5StackChan K151 |
+
+Slugs are device identity. Changing one costs testers a re-provision, so treat
+them as fixed. Wire-contract strings (`_roonknob`, `X-Knob-Version`, `knob_id`,
+`knob_name`, `rk_cfg`, and the `roon_knob*.bin` release aliases) are
+deliberately retained for compatibility and are enforced by
+`scripts/check_dial_identity.py` with `scripts/dial_identity_exceptions.json`.
+Run that script before opening a PR that touches identity, naming, or docs.
+
+### Licensing
+
+The firmware is under the PolyForm Noncommercial License 1.0.0, copyright
+Open Horizon Labs: free for individuals on their own systems, commercial
+license required for installers, integrators, dealers, and paid or hosted
+services. New **shared** source files should carry:
+
+```c
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+```
+
+Do not mass-edit existing files to add headers.
 
 ### Current Aims
 
