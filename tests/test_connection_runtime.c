@@ -67,6 +67,7 @@ controller_config_write_result_t controller_config_set_zone(const char *zone, co
     return CONTROLLER_CONFIG_COMMITTED_VERIFIED;
 }
 void controller_presentation_set_zone_name(const char *name) { (void)name; }
+void controller_presentation_set_zone_count(int count) { (void)count; }
 static unsigned controls;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));

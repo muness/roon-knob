@@ -202,6 +202,10 @@ void controller_presentation_set_zone_name(const char *zone_name) {
              zone_name ? zone_name : "");
 }
 
+void controller_presentation_set_zone_count(int count) {
+    (void)count;
+}
+
 void controller_presentation_set_network_status(const char *status) {
     assert(status == NULL);
     trace(TRACE_NETWORK_STATUS);
