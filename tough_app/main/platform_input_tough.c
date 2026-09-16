@@ -1,7 +1,7 @@
 // platform_input.h implementation for M5Stack Tough.
 //
 // Tough has no physical rotational control and no software-visible physical
-// buttons (see tough_capabilities.h / docs/esp/hw-reference/board-tough.md --
+// buttons (see tough_capabilities.h / docs/dial/hw-reference/board-tough.md --
 // power/reset are hardware-only per M5Stack docs, not GPIO-routable). The
 // only input surface is the M5Unified touchscreen, and touch is consumed
 // directly by touch_ui.cpp with M5GFX callbacks emitting controller actions

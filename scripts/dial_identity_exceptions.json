@@ -44,8 +44,8 @@
         "docs/meta/analysis/**",
         "docs/meta/decisions/2025-12-20_DECISION_ROTATION.md",
         "docs/dev/IMPLEMENTATION_NOTES.md",
-        "docs/esp/NETWORK_IDENTITY.md",
-        "docs/esp/BLE_HID.md"
+        "docs/dial/NETWORK_IDENTITY.md",
+        "docs/dial/BLE_HID.md"
       ],
       "tokens": [
         "Roon Knob",

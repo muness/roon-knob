@@ -1,12 +1,17 @@
 # Documentation
 
+Documentation for the **HiPhi ESP firmware family**. Start at
+[targets/README.md](targets/README.md) to find what exists for a particular
+controller.
+
 ## Quick Links
 
 | Area | Path | Description |
 |------|------|-------------|
 | [Usage](usage/) | `docs/usage/` | End-user guides: setup, WiFi, OTA |
 | [Dev](dev/) | `docs/dev/` | Developer reference: build, boot, FreeRTOS, storage |
-| [ESP](esp/) | `docs/esp/` | Hardware specifics: display, touch, encoder, battery |
+| [Targets](targets/) | `docs/targets/` | Per-controller index: what is documented where |
+| [Dial](dial/) | `docs/dial/` | Dial and shared ESP32 hardware: display, touch, encoder, battery |
 | [Meta](meta/) | `docs/meta/` | Project aims, roadmap, architectural decisions |
 | [Howto](howto/) | `docs/howto/` | Tutorials: porting, patterns for reuse |
 
@@ -14,8 +19,9 @@
 
 ## Usage
 
-Guides for setting up and using the device.
+Guides for setting up and using a controller.
 
+- [DIAL.md](usage/DIAL.md) - HiPhi Dial quick start, controls, troubleshooting
 - [GETTING_STARTED.md](usage/GETTING_STARTED.md) - First-time setup (Docker, flashing, WiFi)
 - [WIFI_PROVISIONING.md](usage/WIFI_PROVISIONING.md) - WiFi setup via captive portal
 - [OTA_UPDATES.md](usage/OTA_UPDATES.md) - Over-the-air firmware updates
@@ -37,31 +43,36 @@ Developer reference for building and extending the firmware.
 - [TEST_WIFI_ROON_MODE.md](dev/testing/TEST_WIFI_ROON_MODE.md) - WiFi + bridge integration tests
 - [CODE_REVIEW_FINDINGS.md](dev/testing/CODE_REVIEW_FINDINGS.md) - Code review notes
 
-## ESP
+## Targets
 
-ESP32 hardware-specific documentation.
+- [targets/README.md](targets/README.md) - What is documented for Dial, Frame, Slate, Joy, Tough, and the M5 betas
 
-- [DISPLAY.md](esp/DISPLAY.md) - SH8601 AMOLED setup, LVGL integration
-- [TOUCH_INPUT.md](esp/TOUCH_INPUT.md) - CST816 touch controller
-- [SWIPE_GESTURES.md](esp/SWIPE_GESTURES.md) - Gesture detection
-- [ROTARY_ENCODER.md](esp/ROTARY_ENCODER.md) - Quadrature encoder handling
-- [BATTERY_MONITORING.md](esp/BATTERY_MONITORING.md) - ADC-based battery level
-- [FONTS.md](esp/FONTS.md) - LVGL font configuration
+## Dial
+
+HiPhi Dial hardware and driver documentation. Much of it is shared ESP32
+material that other targets also rely on.
+
+- [DISPLAY.md](dial/DISPLAY.md) - SH8601 AMOLED setup, LVGL integration
+- [TOUCH_INPUT.md](dial/TOUCH_INPUT.md) - CST816 touch controller
+- [SWIPE_GESTURES.md](dial/SWIPE_GESTURES.md) - Gesture detection
+- [ROTARY_ENCODER.md](dial/ROTARY_ENCODER.md) - Quadrature encoder handling
+- [BATTERY_MONITORING.md](dial/BATTERY_MONITORING.md) - ADC-based battery level
+- [FONTS.md](dial/FONTS.md) - LVGL font configuration
 
 ### Hardware Reference
 
 Pin mappings, datasheets, component details.
 
-- [board.md](esp/hw-reference/board.md) - Board overview and specs
-- [HARDWARE_PINS.md](esp/hw-reference/HARDWARE_PINS.md) - GPIO assignments
-- [COLORTEST_HELLOWORLD.md](esp/hw-reference/COLORTEST_HELLOWORLD.md) - Display color format
-- [cst816d.md](esp/hw-reference/cst816d.md) - Touch controller details
-- [encoder.md](esp/hw-reference/encoder.md) - Rotary encoder interface
-- [battery.md](esp/hw-reference/battery.md) - Battery monitoring circuit
-- [drv2605.md](esp/hw-reference/drv2605.md) - Haptic motor driver
-- [image_render.md](esp/hw-reference/image_render.md) - JPEG decoding
-- [now_playing_image.md](esp/hw-reference/now_playing_image.md) - Artwork display
-- [touch.md](esp/hw-reference/touch.md) - Touch integration notes
+- [board.md](dial/hw-reference/board.md) - Board overview and specs
+- [HARDWARE_PINS.md](dial/hw-reference/HARDWARE_PINS.md) - GPIO assignments
+- [COLORTEST_HELLOWORLD.md](dial/hw-reference/COLORTEST_HELLOWORLD.md) - Display color format
+- [cst816d.md](dial/hw-reference/cst816d.md) - Touch controller details
+- [encoder.md](dial/hw-reference/encoder.md) - Rotary encoder interface
+- [battery.md](dial/hw-reference/battery.md) - Battery monitoring circuit
+- [drv2605.md](dial/hw-reference/drv2605.md) - Haptic motor driver
+- [image_render.md](dial/hw-reference/image_render.md) - JPEG decoding
+- [now_playing_image.md](dial/hw-reference/now_playing_image.md) - Artwork display
+- [touch.md](dial/hw-reference/touch.md) - Touch integration notes
 
 ## Meta
 
@@ -90,9 +101,9 @@ Competitor and alternative project analysis.
 Tutorials for porting and reusing patterns.
 
 - [PORTING.md](howto/PORTING.md) - Porting to other ESP32 boards or building different apps
-- [AtomS3 Joystick hardware](esp/hw-reference/board-atom-s3-joystick.md)
+- [AtomS3 Joystick hardware](dial/hw-reference/board-atom-s3-joystick.md)
 
 ## M5 hardware and Wi-Fi setup
 
-- [M5Stack Tough build, flash, and controls](esp/M5STACK.md)
-- [Wi-Fi scan behavior and troubleshooting](esp/WIFI_SCAN.md)
+- [M5Stack Tough build, flash, and controls](dial/M5STACK.md)
+- [Wi-Fi scan behavior and troubleshooting](dial/WIFI_SCAN.md)

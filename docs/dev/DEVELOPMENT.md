@@ -107,7 +107,7 @@ The [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/wiki/ESP32
 - Battery management (charging + voltage monitoring)
 - Vibration motor
 
-See [board overview](../esp/hw-reference/board.md) for pin mappings.
+See [board overview](../dial/hw-reference/board.md) for pin mappings.
 
 ## Task Management
 

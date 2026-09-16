@@ -10,18 +10,18 @@ See [AGENTS.md](AGENTS.md) for complete instructions on working with this projec
 |------|------|-------------|
 | **Usage** | `docs/usage/` | End-user guides: WiFi setup, OTA updates |
 | **Dev** | `docs/dev/` | Developer reference: build, boot sequence, FreeRTOS, NVS storage |
-| **ESP** | `docs/esp/` | Hardware specifics: display, touch, encoder, battery |
+| **ESP** | `docs/dial/` | Hardware specifics: display, touch, encoder, battery |
 | **Meta** | `docs/meta/` | Project aims, roadmap ideas, architectural decisions |
 | **Howto** | `docs/howto/` | Tutorials: porting to other boards, reusing patterns |
 
 **When working on:**
-- **UI changes** → `docs/esp/DISPLAY.md`, `docs/esp/TOUCH_INPUT.md`, `docs/esp/FONTS.md`
-- **Input handling** → `docs/esp/ROTARY_ENCODER.md`, `docs/esp/SWIPE_GESTURES.md`
+- **UI changes** → `docs/dial/DISPLAY.md`, `docs/dial/TOUCH_INPUT.md`, `docs/dial/FONTS.md`
+- **Input handling** → `docs/dial/ROTARY_ENCODER.md`, `docs/dial/SWIPE_GESTURES.md`
 - **WiFi/networking** → `docs/usage/WIFI_PROVISIONING.md`, `docs/dev/NVS_STORAGE.md`
 - **Build/config** → `docs/dev/KCONFIG.md`, `docs/dev/DEVELOPMENT.md`
 - **Architecture decisions** → `docs/meta/decisions/`
 
-**Keeping docs current:** When you learn something new about the hardware (pin mappings, component behavior, timing), update the relevant file in `docs/esp/hw-reference/`.
+**Keeping docs current:** When you learn something new about the hardware (pin mappings, component behavior, timing), update the relevant file in `docs/dial/hw-reference/`.
 
 ## Key Points
 
