@@ -1,4 +1,4 @@
-menu "hiphi-tough Defaults"
+menu "HiPhi Tough Defaults"
 
 config RK_DEFAULT_SSID
     string "Default WiFi SSID"
