@@ -31,6 +31,16 @@ static const char *TAG = "m5_ui";
 
 namespace {
 
+// ---------------------------------------------------------------------------
+// HiPhi brand accents (see docs/esp/DISPLAY.md "Brand colors").
+// M5GFX draw calls take a uint32_t as 24-bit RGB888, so these are the brand
+// hex values verbatim - no RGB565 conversion happens in application code.
+// ---------------------------------------------------------------------------
+constexpr uint32_t HIPHI_ACCENT = 0x00c8f0;       // Active indicator / selected row
+constexpr uint32_t HIPHI_ACCENT_SOFT = 0x9cefff;  // Progress, scrollbar, secondary
+constexpr uint32_t HIPHI_ATTENTION = 0xff654a;    // Attention / transient status
+constexpr uint32_t HIPHI_SUCCESS = 0x10b981;      // Online dot
+
 constexpr int kMaxZones = 32;
 constexpr int kMaxText = 128;
 constexpr int kMaxZoneId = 64;
@@ -507,7 +517,7 @@ void draw_main(void) {
         // the track) so it reads as context, not content.
         draw_scrolling_text(s_state.zone, 10, 7, w - 34, 2, 0x777777);
     }
-    s_draw_target->fillCircle(w - 15, 15, 5, s_state.online ? 0x00c853 : 0x666666);
+    s_draw_target->fillCircle(w - 15, 15, 5, s_state.online ? HIPHI_SUCCESS : 0x666666);
     if (!s_state.artwork_pixels) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x3a3a48);
         draw_center("No artwork", 64, 82, 1, 0x888888);
@@ -534,7 +544,7 @@ void draw_main(void) {
         draw_center(s_state.network, w / 2, h - 8, 1, 0xffb74d);
     }
     if (s_state.message[0] && esp_timer_get_time() < s_state.message_until_us) {
-        draw_center(s_state.message, w / 2, 108, 1, 0xffd54f);
+        draw_center(s_state.message, w / 2, 108, 1, HIPHI_ATTENTION);
     }
 }
 
@@ -552,9 +562,9 @@ void draw_provisioning(void) {
     const int w = static_cast<int>(m5_platform_display_width());
     const int h = static_cast<int>(m5_platform_display_height());
     s_draw_target->fillScreen(0x101018);
-    draw_center("WI-FI SETUP", w / 2, 16, 2, 0xfafafa);
-    draw_center("Connect to:", w / 2, 45, 1, 0xaaaaaa);
-    draw_center(platform_provisioning_ssid(), w / 2, 64, 2, 0x4fc3f7);
+    draw_center(platform_product_name(), w / 2, 16, 2, 0xfafafa);
+    draw_center("Join Wi-Fi:", w / 2, 45, 1, 0xaaaaaa);
+    draw_center(platform_provisioning_ssid(), w / 2, 64, 2, HIPHI_ACCENT);
     draw_center("Open 192.168.4.1", w / 2, 91, 1, 0xfafafa);
     draw_center("Choose a network + enter password", w / 2, 111, 1, 0xaaaaaa);
     rk_wifi_network_t scan[6] = {};
@@ -567,7 +577,7 @@ void draw_provisioning(void) {
                              : 0;
     int y = 135;
     if (count == 0) {
-        draw_center("Scanning...", w / 2, y, 1, 0xffd54f);
+        draw_center("Scanning...", w / 2, y, 1, HIPHI_ATTENTION);
     } else {
         for (size_t i = 0; i < count && y < h - 10; ++i, y += 16) {
             char line[224];
@@ -590,7 +600,7 @@ void draw_picker(void) {
         const int index = s_state.zone_offset + row;
         if (index >= s_state.zone_count) break;
         const int y = first_y + row * row_h;
-        const uint32_t bg = index == s_state.zone_selected ? 0x2a4a6a : 0x181818;
+        const uint32_t bg = index == s_state.zone_selected ? 0x0d4b5c : 0x181818;  // cyan-tinted selection
         s_draw_target->fillRoundRect(6, y, w - 18, row_h - 3, 5, bg);
         draw_scrolling_text(s_state.zone_names[index], 14, y + 7, w - 32, 1,
                             0xfafafa);
@@ -603,7 +613,7 @@ void draw_picker(void) {
         const int thumb_y = track_y +
             (track_h - thumb_h) * s_state.zone_offset / max_offset;
         s_draw_target->fillRoundRect(w - 9, track_y, 4, track_h, 2, 0x383848);
-        s_draw_target->fillRoundRect(w - 9, thumb_y, 4, thumb_h, 2, 0x9ecbff);
+        s_draw_target->fillRoundRect(w - 9, thumb_y, 4, thumb_h, 2, HIPHI_ACCENT_SOFT);
         draw_center("swipe", w / 2, h - 7, 1, 0x888888);
     }
 }
