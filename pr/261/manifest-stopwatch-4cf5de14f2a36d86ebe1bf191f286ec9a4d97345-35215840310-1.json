@@ -1,0 +1,11 @@
+{
+  "name": "M5Stack StopWatch Wrist Remote (PR #261 Hardware-Unverified Alpha)",
+  "version": "pr-261",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_stopwatch_bootloader-4cf5de14f2a36d86ebe1bf191f286ec9a4d97345-35215840310-1.bin", "offset": 0},
+    {"path": "hiphi_stopwatch_partition-table-4cf5de14f2a36d86ebe1bf191f286ec9a4d97345-35215840310-1.bin", "offset": 32768},
+    {"path": "hiphi_stopwatch_ota_data_initial-4cf5de14f2a36d86ebe1bf191f286ec9a4d97345-35215840310-1.bin", "offset": 53248},
+    {"path": "hiphi_stopwatch-4cf5de14f2a36d86ebe1bf191f286ec9a4d97345-35215840310-1.bin", "offset": 65536}
+  ]}]
+}
