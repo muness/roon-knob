@@ -5,6 +5,7 @@ set(SRC_FILES
     "rlcd_st7305_window.c"
     "rlcd_text.c"
     "rlcd_ui.c"
+    "../../common/assets/hiphi_logo_lvgl.c"
     "rlcd_power_manager.c"
     "rlcd_battery.c"
     "controller_presentation_rlcd.c"

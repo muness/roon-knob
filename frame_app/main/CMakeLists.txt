@@ -5,6 +5,7 @@ set(SRC_FILES
     "frame_display_preferences.c"
     "eink_display.c"
     "eink_ui.c"
+    "../../common/assets/hiphi_logo_mono.c"
     "eink_font.c"
     "controller_input_profile_frame.c"
     "controller_presentation_frame.c"

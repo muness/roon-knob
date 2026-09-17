@@ -68,6 +68,80 @@ Where they are declared:
 
 Neutral surfaces, text greys, and per-target background colors are unchanged.
 
+## Boot logo
+
+The HiPhi mark is drawn above the product-name title on each target's boot and
+Wi-Fi setup screen. It is always part of a frame the target already renders -
+no extra refresh, no timer, no added boot delay.
+
+**Where the asset lives.** `docs/images/hiphi-logo-512.png` is the master,
+copied from `open-horizon-labs/unified-hifi-control` @ `v4`
+`assets/icons/icon-512.png`. Neither that repo nor the hiphi site repo ships a
+vector wordmark (checked 2026-09-16), so the 512 px raster is the largest
+source available and every size is a LANCZOS downscale from it rather than from
+the 64 px `public/hifi-logo.png`, which would alias.
+
+**How to regenerate.** The C sources in `common/assets/` are generated and
+committed; the build never runs the generator.
+
+```bash
+export PATH="$HOME/.pyenv/versions/3.12.9/bin:$PATH"
+pip install pillow                                  # once
+python3 scripts/generate_boot_logo.py --preview
+```
+
+`--preview` decodes the committed C arrays back into PNGs under
+`docs/images/previews/`, so what you look at is the bytes that ship.
+
+**The three generated forms.**
+
+| File | Format | Used by |
+|---|---|---|
+| `common/assets/hiphi_logo_lvgl.c` | LVGL 9 `lv_image_dsc_t`, ARGB8888 at 64 and 48 px, plus a 64 px A8 ink mask | Dial (48 px ARGB8888), Slate (64 px A8) |
+| `common/assets/hiphi_logo_rgb565.c` | `uint16_t` RGB565 arrays + 1-bit alpha bitmaps at 64, 48, 32 px, with an inline draw helper | Tough (64), Dial Lab / Twist / Remote (48), Joy (32) |
+| `common/assets/hiphi_logo_mono.c` | 1-bit packed, MSB first, row padded to a byte | Frame's ACeP e-ink, as `EINK_BLACK` on white |
+
+**Two things worth knowing before changing any of this.**
+
+*RGB565 byte order.* The arrays are host order,
+`(R>>3)<<11 | (G>>2)<<5 | (B>>3)`. LovyanGFX picks its source format from
+`get_depth<T>`: a plain `uint16_t` resolves to `rgb565_2Byte`, which is the
+byte-**swapped** layout, while `lgfx::rgb565_t` is `rgb565_nonswapped`. The
+helper therefore casts to `const lgfx::rgb565_t*`; passing the raw `uint16_t*`
+would swap red and blue.
+
+*1-bit reduction.* Plain Floyd-Steinberg dithering of this mark is illegible at
+64 px - it is a glossy mid-tone disc whose only features are thin light
+strokes, so error diffusion yields an even noise field rather than a logo.
+The generator instead separates ink from detail with a high-pass: the disc
+becomes solid ink, the waveform and transport glyphs stay as paper. Run
+`--mono-mode dither --preview` to see the difference. Slate uses the same mask
+via A8 recolored black, so its panel's own Bayer threshold passes pure
+black/white straight through instead of re-dithering a gradient.
+
+**Per-target sizes and placement.** The brief was 64 px centered above the
+title; three targets could not take that without pushing the SSID or the
+network list off-screen, so:
+
+- **Dial** - 48 px, centered, top area of the setup screen. The setup state
+  reuses the now-playing layout, leaving roughly a 45 px band between the
+  header's zone label and the now-playing group.
+- **Tough** - 64 px, centered. The vertical rhythm below is tightened to pay
+  for it; the SSID keeps its size-2 prominence and the scan list still shows
+  five rows.
+- **Frame** - 64 px, centered in the artwork placeholder, drawn only when no
+  artwork has ever loaded, which is exactly the boot and setup state.
+- **Slate** - 64 px, left-aligned at the top of the stack, matching that
+  screen's left-aligned layout rather than centering one element on its own.
+- **Dial Lab, Twist, Remote** - 48 px, centered; text below shifts down 36 px.
+- **Joy** - 32 px, top-right badge. Its 128x128 panel already runs from y=6 to
+  y=115; nothing larger fits above the title without losing the SSID or the
+  scan rows.
+- **Kizz** - no mark. Its provisioning screen is a deliberate character
+  illustration and the mark would sit on the face. Kizz is also the one
+  product not branded "HiPhi" (see the product table in issue #164), so the
+  corporate mark is the wrong signal there.
+
 ## LVGL Integration
 
 [LVGL](https://lvgl.io/) is a graphics library designed for embedded systems. It provides widgets (buttons, labels, arcs, etc.) and handles rendering to a framebuffer. The firmware uses LVGL 9.x.

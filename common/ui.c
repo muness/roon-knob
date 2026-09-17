@@ -16,6 +16,7 @@
 #include "ui.h"
 #include "bridge_client.h"
 #include "zone_label_policy.h"
+#include "assets/hiphi_logo_lvgl.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -61,6 +62,8 @@ struct ui_state {
 
     int seek_position;
     int length;
+
+    bool setup_logo;  // Show the HiPhi mark (Wi-Fi setup screen only)
 };
 
 // UI widgets - Blue Knob inspired design
@@ -79,6 +82,14 @@ static lv_obj_t *s_btn_play;           // Play/pause button (center, large)
 static lv_obj_t *s_btn_next;           // Next track button
 static lv_obj_t *s_play_icon;          // Play/pause icon label
 static lv_obj_t *s_background;         // Light background container
+static lv_obj_t *s_setup_logo;         // HiPhi mark, shown only on the Wi-Fi setup screen
+
+/* The setup state reuses the now-playing layout, so the mark has to fit the
+ * band between the header's zone label and the top of the now-playing group.
+ * That band is about 45 px on the 360 px panel, so the Dial draws the mark at
+ * 48 px rather than 64. See docs/esp/DISPLAY.md "Boot logo". */
+#define HIPHI_SETUP_LOGO_SIZE 48
+#define HIPHI_SETUP_LOGO_Y    76
 
 // Artwork layers
 static lv_obj_t *s_artwork_container;  // Container for artwork layers
@@ -355,6 +366,15 @@ static void build_layout(void) {
 
     // Update background pointer to ui_container for widget creation
     s_background = s_ui_container;
+
+    // HiPhi mark for the Wi-Fi setup screen. Created hidden as part of the
+    // first layout so showing it costs nothing at AP time - no timer, no
+    // deferred load, no extra frame.
+    s_setup_logo = lv_image_create(s_ui_container);
+    lv_image_set_src(s_setup_logo, &hiphi_logo_48_argb8888);
+    lv_obj_align(s_setup_logo, LV_ALIGN_TOP_MID, 0, HIPHI_SETUP_LOGO_Y);
+    lv_obj_remove_flag(s_setup_logo, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
 
     // Outer volume arc - full circle ring around the display edge
     s_volume_arc = lv_arc_create(s_ui_container);
@@ -659,6 +679,16 @@ static void zone_list_item_event_cb(lv_event_t *e) {
 // ============================================================================
 
 static void apply_state(const struct ui_state *state) {
+    // HiPhi mark: setup screen only. Part of the same frame as the rest of the
+    // state, so it costs no extra render pass.
+    if (s_setup_logo) {
+        if (state->setup_logo) {
+            lv_obj_remove_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     // Update track/artist labels
     if (s_track_label && s_artist_label) {
         if (state->online) {
@@ -1251,6 +1281,15 @@ void ui_set_playing(bool playing) {
 void ui_set_online(bool online) {
     os_mutex_lock(&s_state_lock);
     s_pending.online = online;
+    s_dirty = true;
+    os_mutex_unlock(&s_state_lock);
+}
+
+void ui_set_setup_logo_visible(bool visible) {
+    /* Same actor discipline as every other setter here: record the intent and
+     * let the UI task apply it. Callers run on the network event task. */
+    os_mutex_lock(&s_state_lock);
+    s_pending.setup_logo = visible;
     s_dirty = true;
     os_mutex_unlock(&s_state_lock);
 }

@@ -45,6 +45,7 @@ set(SRC_FILES
     "../../common/portal_brand.c"
     "../../common/power_debug_web.c"
     "../../common/ui.c"
+    "../../common/assets/hiphi_logo_lvgl.c"
     "../../common/ui_jpeg.c"
     "../../common/zone_label_policy.c"
     "../../common/platform/platform_log.c"

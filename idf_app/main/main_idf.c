@@ -252,6 +252,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
                       100.0f, 1.0f, 0, 0);
         }
         ui_set_zone_name("WiFi Setup");
+        ui_set_setup_logo_visible(true);
         bridge_client_set_network_ready(false);
         atomic_store_explicit(&s_config_server_start_pending, false,
                               memory_order_release);
@@ -261,6 +262,7 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
 
     case RK_NET_EVT_AP_STOPPED:
         ESP_LOGI(TAG, "WiFi: AP mode stopped, connecting to network...");
+        ui_set_setup_logo_visible(false);
         ui_update("WiFi: Connecting...", "", false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
         break;
 

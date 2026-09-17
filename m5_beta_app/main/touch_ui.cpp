@@ -18,6 +18,9 @@
 #include "zone_label_policy.h"
 
 #include <M5Unified.h>
+
+#include "assets/hiphi_logo_rgb565.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -1720,11 +1723,17 @@ void render_provisioning() {
                           STACK_INK);
 #else
     M5.Display.fillScreen(BG);
-    draw_centered(platform_product_name(), 28, 2, ACCENT);
-    draw_centered("JOIN THIS NETWORK", 66, 1, MUTED);
-    draw_centered(platform_provisioning_ssid(), 94, 1, INK);
-    draw_centered("OPEN 192.168.4.1", 136, 2, INK);
-    draw_centered("TO CONFIGURE WI-FI", 168, 1, MUTED);
+    // HiPhi mark above the product title. 48 px rather than 64: Dial Lab,
+    // Twist and Remote share this layout and the narrowest of them cannot give
+    // up another 16 px without crowding the SSID line. The text below is
+    // shifted down by 36 px to make room; "THEN RESTART" stays anchored to the
+    // bottom edge. Drawn into the same frame as the rest of the screen.
+    hiphi_logo_draw_rgb565(M5.Display, w / 2 - 24, 6, 48, BG);
+    draw_centered(platform_product_name(), 64, 2, ACCENT);
+    draw_centered("JOIN THIS NETWORK", 102, 1, MUTED);
+    draw_centered(platform_provisioning_ssid(), 130, 1, INK);
+    draw_centered("OPEN 192.168.4.1", 172, 2, INK);
+    draw_centered("TO CONFIGURE WI-FI", 204, 1, MUTED);
     draw_centered("THEN RESTART", h - 24, 1, ACCENT);
 #endif
 }

@@ -14,6 +14,9 @@
 #include "zone_label_policy.h"
 
 #include <M5Unified.h>
+
+#include "assets/hiphi_logo_rgb565.h"
+
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <esp_app_desc.h>
@@ -635,6 +638,12 @@ void draw_metadata_band(void) {
 
 void draw_wifi_setup(void) {
     s_draw_target->fillScreen(0x08111d);
+    // Joy's panel is 128x128 and this screen already runs from y=6 to y=115.
+    // There is no band for a 64 or 48 px mark above the title without losing
+    // the SSID or the scan rows, so the mark sits as a 32 px badge in the top
+    // right instead - flush to the edge, clear of the longest SSID string,
+    // and drawn into the same frame as everything else.
+    hiphi_logo_draw_rgb565(*s_draw_target, W - 32, 4, 32, 0x08111d);
     draw_text(platform_product_name(), 4, 6, 1, HIPHI_ACCENT_SOFT);
     draw_text("JOIN WI-FI", 4, 28, 1, 0x94a3b8);
     draw_text(platform_provisioning_ssid(), 4, 42, 1, 0xf8fafc);

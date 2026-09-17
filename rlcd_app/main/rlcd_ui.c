@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "platform/platform_identity.h"
+#include "assets/hiphi_logo_lvgl.h"
 
 #define RLCD_REFRESH_DEBOUNCE_MS 300
 #define RLCD_PICKER_MAX_ZONES 18
@@ -68,6 +69,7 @@ static lv_obj_t *s_picker_controls;
 static lv_obj_t *s_picker_position;
 static lv_obj_t *s_play_control;
 static lv_obj_t *s_artwork;
+static lv_obj_t *s_setup_logo;
 static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_seek_bar;
 static uint8_t *s_draw_buffer;
@@ -228,6 +230,8 @@ static void apply_view(void) {
     char status[256];
     char volume[64];
     char secondary[260];
+    /* Setup screen only; the branch below re-shows it. */
+    lv_obj_add_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
     if (s_view.usage_key_visible) {
         lv_obj_add_flag(s_picker_controls, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_picker_position, LV_OBJ_FLAG_HIDDEN);
@@ -348,10 +352,14 @@ static void apply_view(void) {
         lv_obj_remove_flag(s_status, LV_OBJ_FLAG_HIDDEN);
         lv_obj_align(s_status, LV_ALIGN_BOTTOM_LEFT, 0, -2);
         lv_obj_set_style_text_align(s_track, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_set_pos(s_track, 0, 42);
+        /* Mark, then title, then instructions. Left-aligned with the rest of
+         * this screen rather than centered: Slate's setup layout is a
+         * left-aligned stack and a centered mark would read as detached. */
+        lv_obj_remove_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(s_track, 0, 74);
         lv_obj_set_height(s_track, LV_SIZE_CONTENT);
         lv_label_set_long_mode(s_track, LV_LABEL_LONG_WRAP);
-        lv_obj_set_pos(s_artist, 0, 130);
+        lv_obj_set_pos(s_artist, 0, 162);
         lv_obj_set_height(s_artist, LV_SIZE_CONTENT);
         lv_label_set_long_mode(s_artist, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_font(s_artist, &lv_font_montserrat_20, 0);
@@ -481,6 +489,17 @@ void rlcd_ui_init(void) {
     s_artwork = lv_image_create(screen);
     lv_obj_set_pos(s_artwork, 0, 0);
     lv_obj_add_flag(s_artwork, LV_OBJ_FLAG_HIDDEN);
+    /* HiPhi mark for the setup screen. The A8 asset is the 1-bit ink mask
+     * recolored black, so this panel's Bayer threshold passes it through
+     * unchanged rather than re-dithering a photographic gradient. Built as
+     * part of the first layout and only unhidden in the setup branch, so it
+     * costs no extra refresh. */
+    s_setup_logo = lv_image_create(screen);
+    lv_image_set_src(s_setup_logo, &hiphi_logo_mono_64_a8);
+    lv_obj_set_style_image_recolor(s_setup_logo, lv_color_black(), 0);
+    lv_obj_set_style_image_recolor_opa(s_setup_logo, LV_OPA_COVER, 0);
+    lv_obj_set_pos(s_setup_logo, 0, 0);
+    lv_obj_add_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
     s_track = lv_label_create(screen);
     lv_obj_set_width(s_track, RLCD_CONTENT_WIDTH);
     lv_label_set_long_mode(s_track, LV_LABEL_LONG_WRAP);
