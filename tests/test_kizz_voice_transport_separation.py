@@ -103,6 +103,9 @@ assert "CONFIG_LWIP_MAX_SOCKETS=16" in STACKCHAN_DEFAULTS
 assert "CONFIG_LWIP_TCP_MSL=5000" in STACKCHAN_DEFAULTS
 assert "CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y" in STACKCHAN_DEFAULTS
 assert "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2" in STACKCHAN_DEFAULTS
+# The production StackChan artifact must not keep an optional training socket
+# alive. Directed enrollment builds opt in with an explicit URI override.
+assert 'CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI=""' in STACKCHAN_DEFAULTS
 
 HTTP_SOURCE = (
     Path(__file__).parents[1] / "tough_app/main/platform_http_tough.c"
