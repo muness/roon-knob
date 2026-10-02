@@ -528,7 +528,8 @@
     "frame|frame_app/main/platform_provisioning_frame.c|frame_app/main/captive_portal.h",
     "frame|frame_app/main/platform_storage_frame.c|common/platform/platform_storage.h",
     "frame|frame_app/main/platform_storage_frame.c|common/rk_cfg.h",
-    "frame|frame_app/main/pmic_axp2101.c|frame_app/main/pmic_axp2101.h"
+    "frame|frame_app/main/pmic_axp2101.c|frame_app/main/pmic_axp2101.h",
+    "dial|idf_app/main/ota_update.c|common/platform/platform_identity.h"
   ],
   "grandfathered_edges": [
     {

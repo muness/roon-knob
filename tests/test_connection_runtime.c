@@ -40,7 +40,7 @@ bool platform_mdns_resolve_base_url(const char *base, char *out, size_t len,
 }
 uint64_t platform_millis(void) { return clock_ms; }
 int platform_http_get(const char *url, char **out, size_t *len) {
-    assert(strstr(url, "/zones?knob_id=")); ++http_calls;
+    assert(strstr(url, "/zones?knob_id=") || strstr(url, "/now_playing?zone_id=")); ++http_calls;
     if (race) { ++generation; strcpy(fixture.value.bridge_base, "http://manual:8088"); fixture.value.bridge_from_mdns = false; }
     *out = http_ok ? strdup(http_body) : NULL;
     *len = *out ? strlen(*out) : 0;
@@ -73,13 +73,15 @@ int platform_http_post_json(const char *url, const char *body, char **out, size_
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));
     ++controls; *out = strdup("{}"); *len = 2; return 0;
 }
-void controller_presentation_show_volume_change(float value, float step) { (void)value; (void)step; }
+static unsigned volume_overlays;
+void controller_presentation_show_volume_change(float value, float step) { (void)value; (void)step; ++volume_overlays; }
 static void reset(const char *url, bool automatic) {
     memset(&fixture, 0, sizeof(fixture)); memset(&s_connection,0,sizeof(s_connection));
     memset(&s_state,0,sizeof(s_state)); advertised = (platform_mdns_observation_t){0};
     strcpy(fixture.value.bridge_base,url); fixture.value.bridge_from_mdns = automatic;
     generation = 1; clock_ms = 1000; discovery_calls = resolve_calls = http_calls = writes = 0;
     queued = NULL; resolution_ok = http_ok = true; race = false;
+    s_last_known_volume_fixed = true; s_volume_capability_zone[0] = 0; controls=volume_overlays=0;
     http_body = "{\"zones\":[]}";
     atomic_store(&s_discovered_endpoint_commit_pending, false);
     atomic_store(&s_network_ready, true);
@@ -133,8 +135,73 @@ static void test_volume_uses_current_connection_evidence(void) {
     s_last_known_volume = 30; s_last_known_volume_min = 0; s_last_known_volume_max = 100; s_last_known_volume_step = 1;
     controller_command_t command = {.kind = CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS, .volume_steps = 1};
     controls = 0;
+    s_last_known_volume_fixed=false; strcpy(s_volume_capability_zone,"roon:room");
+    strcpy(s_volume_capability_bridge,fixture.value.bridge_base); s_volume_capability_generation=generation;
     assert(bridge_client_execute_command(&command));
     assert(controls == 1);
+}
+static void test_fixed_volume_response_and_zone_switch(void) {
+    test_volume_uses_current_connection_evidence();
+    struct now_playing_state state = {0};
+    platform_power_snapshot_t power = {.battery_level = -1};
+    controller_command_t command = controller_command_adjust_volume(3);
+    controls=volume_overlays=0;
+    http_body="{\"volume_type\":\"fixed\",\"volume\":40,\"volume_min\":0,\"volume_max\":100}";
+    assert(fetch_now_playing(&state,&power));
+    float prior = s_last_known_volume;
+    assert(bridge_client_execute_command(&command));
+    assert(controls==0 && volume_overlays==0 && s_last_known_volume==prior);
+    const char *types[]={"db","number"};
+    for(size_t i=0;i<2;i++) {
+        char body[64]; snprintf(body,sizeof(body),"{\"volume_type\":\"%s\"}",types[i]); http_body=body;
+        assert(fetch_now_playing(&state,&power));
+        assert(bridge_client_execute_command(&command));
+        assert(controls==i+1 && volume_overlays==i+1);
+    }
+    strcpy(fixture.value.zone_id,"roon:other");
+    assert(bridge_client_execute_command(&command)); /* prior-zone capability cannot authorize */
+    assert(controls==2 && volume_overlays==2);
+    const char *unknown[]={"{}","{\"volume_type\":null}","{\"volume_type\":\"surprise\"}",
+        "{\"line1\":\"volume_type db\",\"metadata\":{\"volume_type\":\"db\"}}"};
+    for(size_t i=0;i<4;i++) {
+        http_body=unknown[i]; assert(fetch_now_playing(&state,&power));
+        assert(bridge_client_execute_command(&command)); assert(controls==2 && volume_overlays==2);
+    }
+    http_body="{\"volume_type\":\"number\"}"; assert(fetch_now_playing(&state,&power));
+    assert(bridge_client_execute_command(&command)); assert(controls==3 && volume_overlays==3);
+    ++generation; strcpy(fixture.value.bridge_base,"http://newbridge:8088");
+    assert(bridge_client_execute_command(&command)); assert(controls==3 && volume_overlays==3);
+    assert(fetch_now_playing(&state,&power));
+    controller_connection_select(&s_connection,fixture.value.bridge_base,fixture.value.bridge_from_mdns,generation);
+    s_connection.resolved=true; strcpy(s_connection.endpoint,fixture.value.bridge_base);
+    controller_connection_api(&s_connection,true,1,true,clock_ms);
+    assert(bridge_client_execute_command(&command)); assert(controls==4 && volume_overlays==4);
+    /* A response issued before a manual endpoint change carries the old token. */
+    race=true; assert(fetch_now_playing(&state,&power)); race=false;
+    assert(bridge_client_execute_command(&command)); assert(controls==4 && volume_overlays==4);
+    http_body="{\"volume_type\":\"fixed\"}"; assert(fetch_now_playing(&state,&power));
+    assert(bridge_client_execute_command(&command)); assert(controls==4 && volume_overlays==4);
+}
+static void test_now_playing_json_strings(void) {
+    reset("http://192.168.1.2:8088",false); strcpy(fixture.value.zone_id,"roon:room");
+    struct now_playing_state state={0}; platform_power_snapshot_t power={.battery_level=-1};
+    http_body="{\"line1\":\"Maryama \\\"Terre battue\\\"\",\"line2\":\"Lee \\\"Scratch\\\" Perry\",\"line3\":\"C:\\\\Music \\u00e9 \\uD83C\\uDFB5\"}";
+    assert(fetch_now_playing(&state,&power));
+    assert(!strcmp(state.line1,"Maryama \"Terre battue\""));
+    assert(!strcmp(state.line2,"Lee \"Scratch\" Perry"));
+    assert(!strcmp(state.line3,"C:\\Music é 🎵"));
+    http_body="{\"line1\":null,\"line2\":false,\"line3\":42,\"image_key\":null,\"config_sha\":\"next\"}";
+    strcpy(state.image_key,"prior"); assert(fetch_now_playing(&state,&power));
+    assert(!state.line1[0] && !state.image_key[0]);
+    assert(!strcmp(state.line2,"Lee \"Scratch\" Perry") && !strcmp(state.line3,"C:\\Music é 🎵"));
+    http_body="{}"; assert(fetch_now_playing(&state,&power)); assert(!state.line1[0]);
+    char bounded[4]="old";
+    const char *json="\"line1\":\"éé\",\"line2\":\"later\"";
+    const char *end=extract_json_string(json,"\"line1\"",bounded,sizeof(bounded));
+    assert(!strcmp(bounded,"é") && end && *end==',');
+    assert(!extract_json_string(json,"\"line1\"",bounded,0));
+    assert(!extract_json_string("\"line1\":false,\"line2\":\"later\"","\"line1\"",bounded,sizeof(bounded)));
+    assert(!strcmp(bounded,"é"));
 }
 static void test_zone_refresh_invalidates_old_readiness(void) {
     reset("http://192.168.1.2:8088", true);
@@ -180,4 +247,4 @@ static void test_discovery_waits_for_initialization(void) {
  reset("http://192.168.1.2:8088",false);mdns_ready=false;
  update_connection();assert(http_calls==1);mdns_ready=true;
 }
-int main(void) { test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) { test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

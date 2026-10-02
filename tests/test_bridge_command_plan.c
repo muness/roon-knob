@@ -137,6 +137,12 @@ static void test_all_commands_share_readiness(void) {
     }
 }
 int main(void) {
+    bridge_command_context_t fixed = context(true);
+    fixed.volume_fixed = true;
+    bridge_command_plan_t inert;
+    controller_command_t change = controller_command_adjust_volume(12);
+    assert(bridge_command_plan_build(&change, &fixed, &inert));
+    assert(inert.accepted && inert.no_op && !inert.updates_volume && !inert.json[0]);
     test_all_commands_share_readiness();
     test_simple_commands();
     test_volume_readiness_noop_and_clamp();

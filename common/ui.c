@@ -1214,7 +1214,6 @@ bool ui_zone_picker_is_current_selection(void) {
 // ============================================================================
 
 void ui_loop_iter(void) {
-    lv_task_handler();
     lv_timer_handler();
 
     platform_task_run_pending();  // Process callbacks from bridge_client thread

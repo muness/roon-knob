@@ -21,6 +21,7 @@ typedef enum {
 
 typedef struct {
     bool ready;
+    bool volume_fixed;
     const char *zone_id;
     float volume;
     float volume_min;

@@ -114,7 +114,7 @@ bool display_is_touch_suppressed(void);
 
 /**
  * @brief Check if encoder input should be suppressed
- * @return true if within 500ms after deep sleep wake (the wake event itself)
+ * @return true if within 500ms after any wake (including the wake event itself)
  */
 bool display_is_encoder_suppressed(void);
 

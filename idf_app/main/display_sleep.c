@@ -111,7 +111,7 @@ static esp_timer_handle_t s_deep_sleep_timer = NULL;
 static SemaphoreHandle_t s_display_state_mutex = NULL;
 static display_state_t s_display_state = DISPLAY_STATE_NORMAL;
 static int64_t s_touch_suppress_until_ms = 0;  // Suppress widget touches after wake
-static int64_t s_encoder_suppress_until_ms = 0;  // Suppress encoder after deep sleep wake
+static int64_t s_encoder_suppress_until_ms = 0;  // Suppress encoder after any wake
 static bool s_woke_from_deep_sleep = false;  // Flag set on boot if woke from deep sleep
 
 // Current timeout values (in ms, 0 = disabled)
@@ -347,6 +347,7 @@ void display_wake(void) {
         s_display_state = DISPLAY_STATE_NORMAL;
         // Suppress widget touches after wake to prevent accidental activation
         s_touch_suppress_until_ms = esp_timer_get_time() / 1000 + TOUCH_SUPPRESS_AFTER_WAKE_MS;
+        s_encoder_suppress_until_ms = esp_timer_get_time() / 1000 + ENCODER_SUPPRESS_AFTER_WAKE_MS;
         ESP_LOGI(TAG, "Display awake (brightness: %d%%)", (BACKLIGHT_NORMAL * 100) / 255);
     }
 
@@ -810,7 +811,7 @@ bool display_is_touch_suppressed(void) {
     return now_ms < s_touch_suppress_until_ms;
 }
 
-// Check if encoder input should be suppressed (within 500ms after deep sleep wake)
+// Check if encoder input should be suppressed (within 500ms after any wake)
 bool display_is_encoder_suppressed(void) {
     int64_t now_ms = esp_timer_get_time() / 1000;
     return now_ms < s_encoder_suppress_until_ms;

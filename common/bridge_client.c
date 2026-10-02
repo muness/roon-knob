@@ -129,6 +129,12 @@ static float s_last_known_volume = 0.0f;   // Cached volume for optimistic UI up
 static float s_last_known_volume_min = -80.0f;  // Cached volume min for clamping
 static float s_last_known_volume_max = 0.0f;    // Cached volume max for clamping
 static float s_last_known_volume_step = 1.0f;  // Cached volume step
+/* Unknown capability is inert until this zone explicitly reports db/number.
+ * Keep its zone identity separate from numeric/optimistic presentation state. */
+static bool s_last_known_volume_fixed = true;
+static char s_volume_capability_zone[64];
+static char s_volume_capability_bridge[128];
+static uint32_t s_volume_capability_generation;
 static uint32_t s_artwork_generation;
 static bool s_last_charging_state = true;  // Track charging state for config reapply
 static bool s_last_is_playing = false;     // Track play state for extended sleep polling
@@ -728,6 +734,8 @@ static bool fetch_now_playing(struct now_playing_state *state,
     if (!state || !power) {
         return false;
     }
+    controller_config_endpoint_token_t volume_token;
+    if (!controller_config_capture_endpoint_token(&volume_token)) return false;
     char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
     char zone_id[sizeof(((rk_cfg_t *)0)->zone_id)] = {0};
     if (!bridge_endpoint_snapshot(bridge_base, sizeof(bridge_base), zone_id,
@@ -794,6 +802,19 @@ static bool fetch_now_playing(struct now_playing_state *state,
     /* Preserve the last good value if a transient/partial response omits the
      * field. Treating an incomplete payload as stopped makes the UI lie. */
     state->is_playing = json_bool_field(resp, "\"is_playing\"", state->is_playing);
+
+    cJSON *volume_response = cJSON_Parse(resp);
+    const cJSON *volume_type = cJSON_GetObjectItemCaseSensitive(volume_response, "volume_type");
+    bool adjustable = cJSON_IsString(volume_type) &&
+        (strcmp(volume_type->valuestring, "db") == 0 ||
+         strcmp(volume_type->valuestring, "number") == 0);
+    lock_state();
+    s_last_known_volume_fixed = !adjustable;
+    rk_strlcpy(s_volume_capability_zone, zone_id, sizeof(s_volume_capability_zone));
+    rk_strlcpy(s_volume_capability_bridge, bridge_base, sizeof(s_volume_capability_bridge));
+    s_volume_capability_generation = volume_token.generation;
+    unlock_state();
+    cJSON_Delete(volume_response);
 
     const char *vol_key = strstr(resp, "\"volume\"");
     if (vol_key) {
@@ -1022,30 +1043,38 @@ static void parse_zones_from_response(const char *resp) {
 }
 
 static const char *extract_json_string(const char *start, const char *key, char *out, size_t len) {
+    if (!start || !key || !out || len == 0) return NULL;
     const char *key_pos = strstr(start, key);
-    if (!key_pos) {
-        return NULL;
-    }
+    if (!key_pos) return NULL;
     const char *colon = strchr(key_pos, ':');
-    if (!colon) {
+    if (!colon) return NULL;
+    const char *value_start = colon + 1;
+    while (isspace((unsigned char)*value_start)) ++value_start;
+    /* A null/non-string value must never scan ahead into the next JSON field.
+     * cJSON owns escape and surrogate-pair decoding and leaves the cursor after
+     * this token, including when the output buffer truncates its text. */
+    if (*value_start != '"' && strncmp(value_start, "null", 4) != 0) return NULL;
+    const char *parse_end = NULL;
+    cJSON *value = cJSON_ParseWithOpts(value_start, &parse_end, false);
+    if (!value) return NULL;
+    if (cJSON_IsNull(value)) {
+        out[0] = '\0';
+    } else if (cJSON_IsString(value)) {
+        size_t source_len = strlen(value->valuestring);
+        size_t copy_len = source_len < len ? source_len : len - 1;
+        /* Do not split a UTF-8 code point when a valid string is truncated. */
+        if (copy_len < source_len) {
+            while (copy_len > 0 &&
+                   ((unsigned char)value->valuestring[copy_len] & 0xc0) == 0x80) --copy_len;
+        }
+        memcpy(out, value->valuestring, copy_len);
+        out[copy_len] = '\0';
+    } else {
+        cJSON_Delete(value);
         return NULL;
     }
-    const char *quote_start = strchr(colon, '"');
-    if (!quote_start) {
-        return NULL;
-    }
-    quote_start++;
-    const char *quote_end = strchr(quote_start, '"');
-    if (!quote_end) {
-        return NULL;
-    }
-    size_t copy_len = quote_end - quote_start;
-    if (copy_len >= len) {
-        copy_len = len - 1;
-    }
-    memcpy(out, quote_start, copy_len);
-    out[copy_len] = '\0';
-    return quote_end + 1;
+    cJSON_Delete(value);
+    return parse_end;
 }
 
 static bool send_control_json(const char *json) {
@@ -1228,11 +1257,18 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     }
     controller_connection_t connection;
     bridge_client_connection_snapshot(&connection);
-    char current_zone[64];
-    bridge_client_get_current_zone_id(current_zone, sizeof(current_zone));
+    controller_config_endpoint_token_t volume_token;
+    if (!controller_config_capture_endpoint_token(&volume_token)) return false;
+    char current_zone[64], current_bridge[128];
+    if (!bridge_endpoint_snapshot(current_bridge, sizeof(current_bridge),
+                                  current_zone, sizeof(current_zone))) return false;
     lock_state();
     context.ready = controller_connection_ready(&connection);
     context.zone_id = current_zone;
+    context.volume_fixed = s_last_known_volume_fixed ||
+        strcmp(s_volume_capability_zone, current_zone) != 0 ||
+        strcmp(s_volume_capability_bridge, current_bridge) != 0 ||
+        s_volume_capability_generation != volume_token.generation;
     context.volume = s_last_known_volume;
     context.volume_min = s_last_known_volume_min;
     context.volume_max = s_last_known_volume_max;

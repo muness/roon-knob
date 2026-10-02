@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 #pragma once
 
 #include <esp_err.h>
@@ -27,10 +28,10 @@ void portal_trace(char kind, const char *fmt, ...)
 /* Start a new timeline (called on each station join). */
 void portal_trace_reset(void);
 
-/* Log the recorded timeline. */
+/* Log the recorded timeline with bounded stack use; stop if a new join resets it. */
 void portal_trace_dump(const char *why);
 
-/* Record an HTTP request as "<Host><URI>". */
+/* Record "<Host><path>"; query values and fragments are never recorded. */
 void portal_trace_req(struct httpd_req *req);
 
 /* httpd open_fn/close_fn hooks.  close_fn owns closing the socket. */

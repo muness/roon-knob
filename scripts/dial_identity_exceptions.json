@@ -61,19 +61,6 @@
       "line_regex": ".*"
     },
     {
-      "id": "historical-docker-output",
-      "category": "historical-provenance",
-      "owner": "Documentation provenance",
-      "retirement": "Permanent while retained as an explicitly labelled historical command capture.",
-      "path_globs": [
-        "docs/usage/GETTING_STARTED.md"
-      ],
-      "tokens": [
-        "roon-knob"
-      ],
-      "line_regex": "Container roon-knob-roon-knob-bridge"
-    },
-    {
       "id": "legacy-firmware-aliases",
       "category": "compatibility",
       "owner": "#162 and open-horizon-labs/unified-hifi-control#277",
@@ -83,7 +70,8 @@
         ".github/RELEASE_TEMPLATE.md",
         "docs/usage/FIRMWARE_FLASHING.md",
         "docs/usage/GETTING_STARTED.md",
-        "docs/usage/OTA_UPDATES.md"
+        "docs/usage/OTA_UPDATES.md",
+        "docs/targets/README.md"
       ],
       "tokens": [
         "roon_knob"
@@ -155,6 +143,20 @@
         "roon_knob"
       ],
       "line_regex": "Wire-contract strings|release aliases"
+    },
+    {
+      "id": "legacy-dial-ota-project",
+      "category": "compatibility",
+      "owner": "#265 and #193",
+      "retirement": "Retain while supported Dial upgrade sources use the historical application project identity.",
+      "path_globs": [
+        "idf_app/main/ota_update.c",
+        "tests/test_ota_update.c"
+      ],
+      "tokens": [
+        "roon_knob"
+      ],
+      "line_regex": "(?:strcmp\\(app\\.project_name, \"roon_knob\"\\)|setup\\(\"roon_knob\",ESP_IMAGE_FLASH_SIZE_(?:8|16)MB\\))"
     }
   ],
   "required": [

@@ -34,7 +34,7 @@ bool bridge_command_plan_build(const controller_command_t *command,
         command->kind == CONTROLLER_COMMAND_PREVIOUS_TRACK ||
         command->kind == CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS;
     if (!supported) return false;
-    if (command->kind == CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS && command->volume_steps == 0) {
+    if (command->kind == CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS && (command->volume_steps == 0 || context->volume_fixed)) {
         plan->accepted = true; plan->no_op = true; return true;
     }
     if (!context->ready || !zone_id[0]) {
