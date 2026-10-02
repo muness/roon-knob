@@ -1,6 +1,10 @@
 idf_build_get_property(kizz_wake_word_enabled HIPHI_KIZZ_WAKE_WORD)
 if(NOT kizz_wake_word_enabled)
-    message(FATAL_ERROR "kizz_wake_word requires explicit HIPHI_KIZZ_WAKE_WORD=ON")
+    # IDF reads every discovered component during early requirements expansion,
+    # even when EXCLUDE_COMPONENTS later removes it from the actual build graph.
+    # Register no sources, includes, or requirements before returning.
+    idf_component_register()
+    return()
 endif()
 
 idf_component_register(

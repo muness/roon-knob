@@ -99,6 +99,7 @@ jobs:
           # evidence over the real generic snapshot/action boundary.
           python3 tests/test_kizz_semantic_voice_characterization.py
           python3 tests/test_kizz_disabled_build.py
+          python3 tests/test_kizz_component_discovery.py
           python3 tests/test_kizz_wake_disabled.py
           python3 tests/test_kizz_voice_transport_separation.py
           python3 tests/test_kizz_false_wake_capture_contract.py
