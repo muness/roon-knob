@@ -18,7 +18,7 @@
 #include "platform/platform_power.h"
 #include "power_debug_web.h"
 #include "os_mutex.h"
-#if HIPHI_M5_TARGET_ID == 4
+#if HIPHI_M5_TARGET_ID == 4 && HIPHI_KIZZ_WAKE_WORD
 #include "kizz_wake_word.h"
 #endif
 
@@ -766,7 +766,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "<p class='status'>These are on by default and persist across firmware updates.</p>"
     "<label>Body language <input type='checkbox' name='stackchan_body_enabled' %s></label>"
     "<label>Sounds <input type='checkbox' name='stackchan_sound_enabled' %s></label>"
-    "<label>Voice volume <select name='stackchan_voice_volume'>"
+    "<label>Sound volume <select name='stackchan_voice_volume'>"
     "<option value='0' %s>Low (current)</option>"
     "<option value='1' %s>Medium</option>"
     "<option value='2' %s>High</option>"
@@ -959,7 +959,7 @@ static esp_err_t sta_restart_handler(httpd_req_t *req) {
   return ESP_OK;  // unreachable
 }
 
-#if HIPHI_M5_TARGET_ID == 4
+#if HIPHI_M5_TARGET_ID == 4 && HIPHI_KIZZ_WAKE_WORD
 static esp_err_t sta_wake_config_get_handler(httpd_req_t *req) {
   float cutoff = 0.0f;
   size_t window = 0;
@@ -1033,10 +1033,9 @@ bool captive_portal_start_sta(void) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.max_uri_handlers = 10;
 #if HIPHI_M5_TARGET_ID == 4
-  /* Kizz also runs the AFE, wake model, and two WebSocket clients. Its
-   * STA handlers keep large response bodies on the heap, so a 6 KiB server stack
-   * is sufficient. Put that stack in PSRAM so the always-on detector does not
-   * fragment the internal heap needed by Wi-Fi DMA and socket control blocks. */
+  /* STA handlers keep large response bodies on the heap, so a 6 KiB server
+   * stack is sufficient. Keep it in PSRAM to preserve internal heap for Wi-Fi
+   * DMA and socket control blocks, including experimental voice builds. */
   config.stack_size = 6144;
   config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 #else
@@ -1071,7 +1070,7 @@ bool captive_portal_start_sta(void) {
   httpd_uri_t restart = {.uri = "/api/restart", .method = HTTP_POST, .handler = sta_restart_handler};
   if (!register_uri_handler(&restart)) goto fail;
 
-#if HIPHI_M5_TARGET_ID == 4
+#if HIPHI_M5_TARGET_ID == 4 && HIPHI_KIZZ_WAKE_WORD
   httpd_uri_t wake_config_get = {.uri = "/api/wake-config", .method = HTTP_GET, .handler = sta_wake_config_get_handler};
   if (!register_uri_handler(&wake_config_get)) goto fail;
 

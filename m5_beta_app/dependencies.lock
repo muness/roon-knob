@@ -1,12 +1,4 @@
 dependencies:
-  ESPMicroSpeechFeatures:
-    component_hash: c2f7dc1f2c78b05a4ab46bb10ef761ebeeb2c119ff38088547d5ba387dedc43f
-    dependencies: []
-    source:
-      git: https://github.com/open-horizon-labs/ESPMicroSpeechFeatures.git
-      path: .
-      type: git
-    version: c2a077454c24d71fc84be377bb6e28725f05c333
   chmorgan/esp-libhelix-mp3:
     component_hash: cbb76089dc2c5749f7b470e2e70aedc44c9da519e04eb9a67d4c7ec275229e53
     dependencies:
@@ -201,54 +193,6 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 0.6.1~4
-  espressif/cjson:
-    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    version: 1.7.19~2
-  espressif/dl_fft:
-    component_hash: a955ca29581de2177ddf25759273bd83f082b3c805e735fe6ee105858643989b
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    version: 0.6.0
-  espressif/esp-dl:
-    component_hash: f67408f364f2faa1178a5f0eb2f0fcdf504b68902fa4f3bcd6fa9f797e1ed623
-    dependencies:
-    - name: espressif/dl_fft
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=0.6.0'
-    - name: espressif/esp_new_jpeg
-      registry_url: https://components.espressif.com
-      require: private
-      version: ^1
-    - name: idf
-      require: private
-      version: '*'
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    targets:
-    - esp32
-    - esp32c2
-    - esp32c3
-    - esp32c5
-    - esp32c6
-    - esp32p4
-    - esp32s2
-    - esp32s3
-    - esp32s31
-    version: 3.3.10
   espressif/esp-dsp:
     component_hash: 12e44db246517a627bc0fe2b255b8335410c0215c98bfba2df5a8e3edea839ef
     dependencies:
@@ -269,56 +213,12 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 2.1.3
-  espressif/esp-nn:
-    component_hash: 003bfc494fd3faf73088b62dc5f565a3c61b9e36494d90e8cbf5f238ff2b98fe
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.1'
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    version: 1.3.1
   espressif/esp-sr:
-    component_hash: 4e94fb1fd2d47ac1127f16db25b229dc7ccff4f3f211e599692d624f4d0bfcf6
-    dependencies:
-    - name: espressif/cjson
-      registry_url: https://components.espressif.com
-      require: private
-      version: ^1.7.19
-    - name: espressif/dl_fft
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=0.6.0'
-    - name: espressif/esp-dl
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=3.3.10'
-    - name: espressif/esp-dsp
-      registry_url: https://components.espressif.com
-      require: private
-      version: 1.8.0
-    - name: idf
-      require: private
-      version: '>=5.0'
+    dependencies: []
     source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 2.5.2
-  espressif/esp-tflite-micro:
-    component_hash: 1ce00c44af2362d48b5c0eefc5fcc60fa54d84db332c80005ae324556f4df0db
-    dependencies:
-    - name: espressif/esp-nn
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.1.1'
-    - name: idf
-      require: private
-      version: '>=5.1'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.4.0
+      path: ${HIPHI_M5_PROJECT_DIR}/../optional_components/voice_disabled/espressif__esp-sr
+      type: local
+    version: 0.0.0
   espressif/esp-zboss-lib:
     component_hash: 321883d142421f65009972408287441794250057668a11abbdfd8bec77c3309a
     dependencies:
@@ -409,25 +309,6 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 2.1.0
-  espressif/esp_new_jpeg:
-    component_hash: e1e7e6991193c41ed6c9fc386702aa7821433319e7aa9c3147cd3236310cd69c
-    dependencies: []
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    targets:
-    - esp32
-    - esp32s2
-    - esp32s3
-    - esp32s31
-    - esp32p4
-    - esp32c2
-    - esp32c3
-    - esp32c5
-    - esp32c6
-    - esp32c61
-    - esp32h4
-    version: 1.0.2
   espressif/esp_rainmaker:
     component_hash: 74e70026b0cf06b1b56d5324667b431bd784d71bdfd20a9e6fb134698dfac129
     dependencies:
@@ -722,26 +603,12 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 0.2.19
-  micro_wake_word:
-    component_hash: 8135fc0d46d95348120d45c0785d5977b9d68c7a66d45c1eb755d408466fcf0f
-    dependencies:
-    - name: espressif/esp-tflite-micro
-      version: '*'
-    - git: https://github.com/open-horizon-labs/ESPMicroSpeechFeatures.git
-      name: ESPMicroSpeechFeatures
-    source:
-      git: https://github.com/open-horizon-labs/micro_wake_word_standalone.git
-      path: .
-      type: git
-    version: cc19120f2a363c14a7b1fef9850380abdcbe422f
 direct_dependencies:
 - espressif/arduino-esp32
-- espressif/esp-sr
 - espressif/esp_websocket_client
 - espressif/mdns
 - idf
 - m5stack/m5unified
-- micro_wake_word
-manifest_hash: 640c51e8fa18014a2fd2df4cb7a03112d3d06894bda595052fdf17b92f388457
+manifest_hash: 4831e9686a185ce1018ee47d5d8ce0c9e648455da831b285a54c8663ccb9d7d2
 target: esp32s3
 version: 2.0.0

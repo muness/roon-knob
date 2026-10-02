@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Component Manager cannot resolve a plain relative local source in a lock.
+# Bind its portable lock placeholder before loading IDF/project dependencies.
+set(ENV{HIPHI_M5_PROJECT_DIR} "${CMAKE_CURRENT_LIST_DIR}")
+
 set(HIPHI_M5_TARGET "sticks3" CACHE STRING
     "M5 beta target: dial, sticks3, stopwatch, or stackchan")
 option(HIPHI_KIZZ_WAKE_WORD
@@ -18,10 +22,17 @@ set(_sdkconfig_defaults
     "sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults")
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 if(NOT HIPHI_KIZZ_WAKE_WORD)
-    # Production has no voice endpoint. Keep models, AOT, TFLM and ESP-SR out
-    # of the component graph, including builds that retain old managed caches.
-    set(EXCLUDE_COMPONENTS kizz_wake_word micro_wake_word
-        espressif__esp-sr espressif__esp-nn)
+    # Production has no voice endpoint. Keep model, AOT, TFLM and ESP-SR
+    # runtime code out, including builds that retain old managed caches.
+    set(EXCLUDE_COMPONENTS kizz_wake_word micro_wake_word espressif__esp-nn)
+    # Arduino 3.3.11's manifest requires ESP-SR on every S3 build even when
+    # CONFIG_ARDUINO_SELECTIVE_ESP_SR is off. EXCLUDE_COMPONENTS only trims
+    # roots, not that transitive edge. Satisfy the unused edge with a source-
+    # and header-free interface; explicit wake ON resolves managed ESP-SR.
+    # Do not exclude the adapter: IDF would omit it from the local override
+    # list and the component manager would restore the managed implementation.
+    list(APPEND EXTRA_COMPONENT_DIRS
+        "${CMAKE_CURRENT_LIST_DIR}/../optional_components/voice_disabled/espressif__esp-sr")
 else()
     list(APPEND _sdkconfig_defaults "sdkconfig.stackchan.voice.defaults")
 endif()

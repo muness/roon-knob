@@ -94,8 +94,12 @@ struct State {
     bool dirty = true;
     bool dimmed = false;
     bool voice_listening = false;
-    bool voice_diagnostics = true;
+    bool voice_diagnostics = HIPHI_KIZZ_WAKE_WORD != 0;
+#if HIPHI_KIZZ_WAKE_WORD
     char voice_state[16] = "STARTING";
+#else
+    char voice_state[16] = "DISABLED";
+#endif
     uint8_t voice_score_percent = 0;
     uint8_t voice_cutoff_percent = 0;
     char voice_transcript[161] = {};
@@ -317,7 +321,7 @@ void refresh_zone_label_presence(uint32_t now_ms) {
 void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
                                       int height, int bubble_y_override = -1,
                                       int badge_y_override = -1) {
-#if HIPHI_M5_TARGET_ID == 4
+#if HIPHI_M5_TARGET_ID == 4 && HIPHI_KIZZ_WAKE_WORD
     if (!s.voice_diagnostics) return;
     // The face and state badge are Kizz's primary voice cues. Conversation
     // copies occupy a reserved lower band instead of painting over them.
@@ -417,6 +421,8 @@ void stackchan_draw_voice_diagnostics(lgfx::LovyanGFX *target, int width,
     (void)target;
     (void)width;
     (void)height;
+    (void)bubble_y_override;
+    (void)badge_y_override;
 #endif
 }
 
@@ -1022,13 +1028,13 @@ void set_voice_volume(m5_platform_stackchan_volume_t volume,
     if (volume < M5_PLATFORM_STACKCHAN_VOLUME_LOW ||
         volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return;
     if (!m5_platform_stackchan_sound_volume(volume)) {
-        body_notice("VOICE LEVEL FAILED");
+        body_notice("SOUND LEVEL FAILED");
         return;
     }
     s.voice_volume = volume;
     if (persist) save_voice_volume(volume);
-    static constexpr const char *NAMES[] = {"VOICE LOW", "VOICE MEDIUM",
-                                            "VOICE HIGH"};
+    static constexpr const char *NAMES[] = {"SOUND LOW", "SOUND MEDIUM",
+                                            "SOUND HIGH"};
     body_notice(NAMES[static_cast<size_t>(volume)]);
     if (preview && s.sound_enabled)
         m5_platform_stackchan_sound_trigger(M5_PLATFORM_STACKCHAN_SOUND_MORE);
@@ -1387,9 +1393,14 @@ void semantic_button(lgfx::LovyanGFX *target, uint8_t family_token,
 }
 
 bool semantic_voice_turn_active() {
+#if HIPHI_KIZZ_WAKE_WORD
     return s.voice_diagnostics || s.voice_listening ||
            (std::strcmp(s.voice_state, "ARMED") != 0 &&
-            std::strcmp(s.voice_state, "STARTING") != 0);
+            std::strcmp(s.voice_state, "STARTING") != 0 &&
+            std::strcmp(s.voice_state, "DISABLED") != 0);
+#else
+    return false;
+#endif
 }
 
 void render_semantic_voice_overlay(lgfx::LovyanGFX *target,
@@ -1758,7 +1769,7 @@ void render() {
                             s.sound_enabled ? "ON" : "OFF", w-79, 102, 1,
                             s.sound_enabled ? STACK_ACCENT : STACK_TERTIARY);
         M5.Display.fillRoundRect(24, 137, w-48, 40, 12, STACK_CONTROL);
-        stackchan_draw_text(&M5.Display, "VOICE", 36, 148, 1, STACK_INK);
+        stackchan_draw_text(&M5.Display, "LEVEL", 36, 148, 1, STACK_INK);
         static constexpr const char *VOLUME_LABELS[] = {"LOW", "MED", "HIGH"};
         for (int level = 0; level < 3; ++level) {
             const int x = 116 + level * 57;
@@ -2072,16 +2083,20 @@ extern "C" bool touch_ui_semantic_admit(const char *contract_json,
     context.metadata_overflow = std::strlen(s.title) > 64 ||
                                 std::strlen(s.artist) > 64 ||
                                 std::strlen(s.album) > 64;
+    context.recovery_active = !s.online && s.ever_online;
+    context.touch_input = true;
+#if HIPHI_KIZZ_WAKE_WORD
     context.voice_active = std::strcmp(s.voice_state, "ARMED") != 0 &&
-                           std::strcmp(s.voice_state, "STARTING") != 0;
+                           std::strcmp(s.voice_state, "STARTING") != 0 &&
+                           std::strcmp(s.voice_state, "DISABLED") != 0;
     context.review_active = std::strcmp(s.voice_state, "REVIEW") == 0 ||
                             std::strcmp(s.voice_state, "CONFIRMING") == 0 ||
                             std::strcmp(s.voice_state, "CORRECTION") == 0;
-    context.recovery_active = (!s.online && s.ever_online) ||
+    context.recovery_active = context.recovery_active ||
                               std::strcmp(s.voice_state, "FAULT") == 0 ||
                               std::strcmp(s.voice_state, "RECOVERING") == 0;
-    context.touch_input = true;
     context.voice_input = true;
+#endif
     context.button_input = true;
 #endif
     kizz_semantic_set_context(&context);
@@ -2185,6 +2200,7 @@ extern "C" void touch_ui_process(void) {
         body_notice("BODY SAFELY DISABLED");
     }
 #if HIPHI_M5_TARGET_ID == 4
+#if HIPHI_KIZZ_WAKE_WORD
     if (now >= s.voice_diagnostics_next) {
         s.voice_diagnostics_next = now + 100000;
         const char *voice_state = m5_platform_voice_state();
@@ -2277,6 +2293,7 @@ extern "C" void touch_ui_process(void) {
         }
         s.dirty = true;
     }
+#endif
     if (s.controls_mode && s.controls_until && now >= s.controls_until) {
         s.controls_mode = false;
         s.controls_until = 0;
@@ -2299,9 +2316,13 @@ extern "C" void touch_ui_process(void) {
         ESP_LOGI(TAG, "Kizz entered Art mode after %us",
                  static_cast<unsigned>(s.art_timeout_sec));
     }
+#if HIPHI_KIZZ_WAKE_WORD
     const bool voice_bubble_active =
         (s.voice_transcript[0] && now < s.voice_transcript_until) ||
         (s.voice_response[0] && now < s.voice_response_until);
+#else
+    const bool voice_bubble_active = false;
+#endif
     if (s.track_reveal_until || stackchan_marquee_needed() ||
         voice_bubble_active) s.dirty = true;
     const bool artwork_transition_pending = art_eligible && !s.art_mode;

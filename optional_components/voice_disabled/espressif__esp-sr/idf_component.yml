@@ -1,0 +1,4 @@
+# A manifest is required for Component Manager to recognize a local override.
+# This interface intentionally has no runtime dependencies.
+version: 0.0.0
+description: Empty ESP-SR dependency adapter for builds without a voice endpoint

@@ -61,15 +61,26 @@ elseif(HIPHI_M5_TARGET STREQUAL "stackchan")
     set(_portal_product "Kizz")
 endif()
 
+idf_build_get_property(_m5_target HIPHI_M5_TARGET)
+idf_build_get_property(_wake_word_enabled HIPHI_KIZZ_WAKE_WORD)
+set(_wake_word_compile_definition 0)
+set(_wake_word_requires)
+if(_m5_target STREQUAL "stackchan" AND _wake_word_enabled)
+    set(_wake_word_compile_definition 1)
+    # The shared portal includes the wake API only in the experimental build.
+    list(APPEND _wake_word_requires kizz_wake_word)
+endif()
+
 idf_component_register(SRCS ${SRC_FILES}
     INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main"
-    REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant esp_websocket_client m5_platform
+    REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant esp_websocket_client m5_platform ${_wake_word_requires}
     PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver json)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     TARGET_PC=0
+    HIPHI_KIZZ_WAKE_WORD=${_wake_word_compile_definition}
     HIPHI_M5_TARGET_ID=${_target_id}
     HIPHI_PRODUCT_NAME=\"${_slug}\"
     HIPHI_DEVICE_SLUG=\"${_slug}\"
