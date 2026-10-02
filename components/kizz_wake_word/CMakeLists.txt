@@ -1,4 +1,5 @@
-if(NOT HIPHI_KIZZ_WAKE_WORD)
+idf_build_get_property(kizz_wake_word_enabled HIPHI_KIZZ_WAKE_WORD)
+if(NOT kizz_wake_word_enabled)
     message(FATAL_ERROR "kizz_wake_word requires explicit HIPHI_KIZZ_WAKE_WORD=ON")
 endif()
 
