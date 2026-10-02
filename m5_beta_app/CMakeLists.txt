@@ -49,6 +49,16 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(HIPHI_M5_TARGET ${HIPHI_M5_TARGET})
 idf_build_set_property(HIPHI_KIZZ_WAKE_WORD ${HIPHI_KIZZ_WAKE_WORD})
 idf_build_set_property(MINIMAL_BUILD ON)
+if(HIPHI_M5_TARGET STREQUAL "sticks3" OR
+   HIPHI_M5_TARGET STREQUAL "stopwatch")
+    # These profiles use native IDF/M5Unified without Arduino's dependency
+    # graph. Keep their lock separate so switching boards preserves pins.
+    idf_build_set_property(DEPENDENCIES_LOCK
+        "${CMAKE_CURRENT_LIST_DIR}/dependencies.native.lock")
+else()
+    idf_build_set_property(DEPENDENCIES_LOCK
+        "${CMAKE_CURRENT_LIST_DIR}/dependencies.lock")
+endif()
 if(HIPHI_M5_TARGET STREQUAL "dial" OR
    HIPHI_M5_TARGET STREQUAL "stackchan")
     # Arduino's published ESP-IDF 5.5 dependency graph currently includes an

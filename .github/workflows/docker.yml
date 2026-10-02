@@ -1090,7 +1090,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: m5_beta_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-components-${{ hashFiles('m5_beta_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-${{ matrix.target }}-components-${{ hashFiles('m5_beta_app/dependencies*.lock') }}
       - name: Build exact M5 beta profile
         if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1

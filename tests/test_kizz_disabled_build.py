@@ -29,12 +29,10 @@ cmake_minimum_required(VERSION 3.16)
 set(ENV{IDF_PATH} "${FAKE_IDF}")
 set(HIPHI_M5_TARGET stackchan CACHE STRING "")
 function(idf_build_set_property name value)
-    if(name STREQUAL "HIPHI_KIZZ_WAKE_WORD")
-        set_property(GLOBAL PROPERTY wake_enabled "${value}")
-    endif()
+    set_property(GLOBAL PROPERTY "fake_${name}" "${value}")
 endfunction()
 function(idf_build_get_property output name)
-    get_property(value GLOBAL PROPERTY wake_enabled)
+    get_property(value GLOBAL PROPERTY "fake_${name}")
     set(${output} "${value}" PARENT_SCOPE)
 endfunction()
 macro(project)
@@ -46,8 +44,17 @@ function(idf_component_register)
     set_property(GLOBAL PROPERTY adapter_registered ON)
 endfunction()
 include("${REPO}/m5_beta_app/CMakeLists.txt")
+idf_build_get_property(DEPENDENCIES_LOCK DEPENDENCIES_LOCK)
 if(NOT "$ENV{HIPHI_M5_PROJECT_DIR}" STREQUAL "${REPO}/m5_beta_app")
     message(FATAL_ERROR "Portable dependency lock anchor was not initialized")
+endif()
+if(HIPHI_M5_TARGET STREQUAL "sticks3" OR HIPHI_M5_TARGET STREQUAL "stopwatch")
+    set(expected_lock "${REPO}/m5_beta_app/dependencies.native.lock")
+else()
+    set(expected_lock "${REPO}/m5_beta_app/dependencies.lock")
+endif()
+if(NOT DEPENDENCIES_LOCK STREQUAL expected_lock)
+    message(FATAL_ERROR "Wrong dependency lock for ${HIPHI_M5_TARGET}: ${DEPENDENCIES_LOCK}")
 endif()
 set(adapter "${REPO}/m5_beta_app/../optional_components/voice_disabled/espressif__esp-sr")
 if(HIPHI_KIZZ_WAKE_WORD)
@@ -74,9 +81,12 @@ else()
     endif()
 endif()
 ''')
-            for option, force, succeeds in [('OFF', False, True), ('ON', False, True), ('ON', True, False)]:
-                with self.subTest(option=option, force=force):
+            cases = [(target, 'OFF', False, True) for target in ('dial', 'sticks3', 'stopwatch', 'stackchan')]
+            cases += [('stackchan', 'ON', False, True), ('stackchan', 'ON', True, False)]
+            for target, option, force, succeeds in cases:
+                with self.subTest(target=target, option=option, force=force):
                     result = subprocess.run(['cmake', f'-DREPO={ROOT}', f'-DFAKE_IDF={root / "idf"}',
+                                             f'-DHIPHI_M5_TARGET={target}',
                                              f'-DHIPHI_KIZZ_WAKE_WORD={option}', f'-DFORCE_ADAPTER={"ON" if force else "OFF"}',
                                              '-P', str(fixture)], text=True, capture_output=True)
                     self.assertEqual(result.returncode == 0, succeeds, result.stderr)
