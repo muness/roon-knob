@@ -1,3 +1,7 @@
+if(NOT HIPHI_KIZZ_WAKE_WORD)
+    message(FATAL_ERROR "kizz_wake_word requires explicit HIPHI_KIZZ_WAKE_WORD=ON")
+endif()
+
 idf_component_register(
     SRCS "kizz_wake_word.cpp" "kizz_detector_aot.cpp" "kizz_verifier_aot.cpp"
     INCLUDE_DIRS "include"

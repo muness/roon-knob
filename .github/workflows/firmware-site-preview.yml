@@ -11,6 +11,9 @@ on:
       - 'scripts/check_alpha_release_notes.py'
       - 'scripts/classify_firmware_site_changes.py'
       - 'scripts/render_firmware_site_preview.py'
+      - 'scripts/version_firmware_site_assets.py'
+      - 'scripts/check_firmware_site.js'
+      - 'tests/test_firmware_site_assets.py'
       - '.github/workflows/docker.yml'
       - '.github/workflows/firmware-site-preview.yml'
 
@@ -63,6 +66,8 @@ jobs:
         run: |
           python3 scripts/check_alpha_release_notes.py
           python3 scripts/check_release_hosting_contract.py
+          python3 tests/test_firmware_site_assets.py
+          node scripts/check_firmware_site.js
           python3 scripts/classify_firmware_site_changes.py --self-test
 
       - name: Read the published alpha manifests
@@ -110,10 +115,15 @@ jobs:
             sleep 5
           done
           cmp site-preview/flash-frame.html deployed.html
-          curl --fail --silent --location \
-            "https://firmware.hiphi.audio/pr/${PR_NUM}/site/assets/styles.css" \
-            --output deployed.css
-          cmp site-preview/assets/styles.css deployed.css
+          while IFS= read -r source; do
+            asset="${source#site-preview/}"
+            mkdir -p "deployed-site/$(dirname "${asset}")"
+            curl --fail --silent --show-error --location \
+              --retry 24 --retry-all-errors --retry-delay 5 \
+              "https://firmware.hiphi.audio/pr/${PR_NUM}/site/${asset}" \
+              --output "deployed-site/${asset}"
+            cmp "$source" "deployed-site/${asset}"
+          done < <(find site-preview -type f | sort)
 
       - name: Post site preview URL to PR
         uses: actions/github-script@v8

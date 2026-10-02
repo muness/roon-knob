@@ -1,12 +1,25 @@
 # Kizz voice: wake word, transcription, and action
 
-Kizz is a music controller with voice support. A person says a wake phrase, then a
-music request such as “play Mulatu Astatke in the kitchen.” Kizz recognizes the
-wake phrase locally, listens for the request, sends one bounded audio turn to a
-LAN voice gateway, shows what it heard, and lets the gateway ask the existing
-music-control MCP tools to carry out the request.
+**Voice is currently disabled in shipped Kizz firmware because no voice endpoint is available.** The default StackChan build compiles out the wake detector, its three embedded models, AOT/TensorFlow runtime, microphone listener, and ESP-SR audio frontend. Playback touch controls, room selection, expressions, motion, and speaker cues remain available.
 
-This document explains the implementation and its current evidence. The separate [HiPhi Kizz training recipe](https://github.com/open-horizon-labs/microWakeWord/tree/codex/issue-231-kizz/recipes/kizz) explains how we build and evaluate the on-device wake-word model.
+The code and model evidence below describe the retained experimental path, not a feature enabled in the current release. Historical successful voice experiments do not make an endpoint available today.
+
+## Explicit Experimental Build
+
+The dependency gate is the default-OFF CMake option `HIPHI_KIZZ_WAKE_WORD`. Setting a voice or enrollment URI alone cannot enable it, including in a reused SDK configuration. Normal CI/release builds pass `-D HIPHI_KIZZ_WAKE_WORD=OFF` explicitly.
+
+For a directed experiment with a verified endpoint, opt in using a separate build directory and configure its URI:
+
+```bash
+idf.py -C m5_beta_app -B build-stackchan-voice \
+  -D HIPHI_M5_TARGET=stackchan -D HIPHI_KIZZ_WAKE_WORD=ON menuconfig
+idf.py -C m5_beta_app -B build-stackchan-voice \
+  -D HIPHI_M5_TARGET=stackchan -D HIPHI_KIZZ_WAKE_WORD=ON build
+```
+
+Under HiPhi M5 platform qualification, set the LAN voice WebSocket URI to the actual service. Keep the independent enrollment URI empty unless running a directed training experiment. The opt-in build adds `sdkconfig.stackchan.voice.defaults` and the wake component's managed dependencies. It still does not start microphone/AFE workers without an explicitly configured endpoint.
+
+The separate [HiPhi Kizz training recipe](https://github.com/open-horizon-labs/microWakeWord/tree/codex/issue-231-kizz/recipes/kizz) explains model training and evaluation.
 
 ## The path a voice request takes
 
@@ -37,7 +50,7 @@ speech recognition, App Server, or a music command.
 Kizz uses the supported M5Unified microphone path at 16 kHz. The microphone
 frames feed two consumers:
 
-- the local `microWakeWord` detector, which is always armed when Kizz is ready;
+- the local `microWakeWord` detector, armed when the experimental voice path is ready;
 - the ESP-SR audio frontend, which supplies voice activity detection (VAD) for
   the post-wake turn.
 
@@ -97,8 +110,7 @@ run reached a 16-byte internal-heap low-water mark, failed one socket
 allocation, and dropped enough queued detector audio to invalidate product
 qualification.
 
-The production StackChan profile now leaves the independent enrollment URI
-empty. Enrollment remains an explicit directed-training build option. The exact
+The historical voice-testing StackChan profile left the independent enrollment URI empty. The current default profile leaves both endpoints empty and compiles wake/AFE out. Enrollment remains an explicit directed-training build option. The exact
 replacement firmware binary (`91f8c6162628d1f3823800e35d52ba8f27a350e092c0f1e87e30452d958a0a59`)
 was built with ESP-IDF 5.5.5, flashed to ESP32-S3 MAC
 `7c:4f:ad:af:e7:38`, and exercised against a live UHC voice gateway. A

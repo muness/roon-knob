@@ -1,0 +1,8 @@
+# Applied only with -D HIPHI_KIZZ_WAKE_WORD=ON for directed experiments.
+# Keep the previously hardware-proven VAD-only AFE footprint. ESP-SR's newer
+# defaults select vadnet1_medium plus the HiStackChan WakeNet asset, which
+# consumes enough internal RAM before M5Unified starts I2S to starve its DMA
+# descriptors. WakeNet remains disabled in code; Mycroft is only the compact
+# model-partition selection accompanying the WebRTC VAD configuration.
+CONFIG_SR_VADN_WEBRTC=y
+CONFIG_SR_WN_WN9_MYCROFT_TTS=y

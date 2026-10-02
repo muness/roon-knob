@@ -9,6 +9,8 @@ import re
 import shutil
 from pathlib import Path
 
+from version_firmware_site_assets import version_assets
+
 
 TARGETS = (
     ("dial", "flash-dial.html"),
@@ -92,6 +94,7 @@ def main() -> None:
             render(template, {**common, "TARGET_FILTER": target})
         )
 
+    version_assets(output)
     unresolved = list(output.glob("*.html"))
     for page in unresolved:
         text = page.read_text()

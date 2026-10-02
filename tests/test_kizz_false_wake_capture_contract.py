@@ -11,6 +11,7 @@ WAKE_MANIFEST = (ROOT / "components/kizz_wake_word/idf_component.yml").read_text
 WAKE_CMAKE = (ROOT / "components/kizz_wake_word/CMakeLists.txt").read_text()
 APP_MANIFEST = (ROOT / "m5_beta_app/main/idf_component.yml").read_text()
 STACKCHAN_DEFAULTS = (ROOT / "m5_beta_app/sdkconfig.stackchan.defaults").read_text()
+VOICE_DEFAULTS = (ROOT / "m5_beta_app/sdkconfig.stackchan.voice.defaults").read_text()
 CAPTIVE_PORTAL = (ROOT / "tough_app/main/captive_portal.c").read_text()
 PROVENANCE_PATH = (
     ROOT
@@ -116,7 +117,9 @@ def test_three_stage_aot_cascade_is_the_runtime_decision():
 
 def test_external_forward_sum_runtime_cannot_be_shadowed_by_local_component():
     assert AOT_RUNTIME in WAKE_MANIFEST
-    assert AOT_RUNTIME in APP_MANIFEST
+    assert AOT_RUNTIME not in APP_MANIFEST
+    assert "micro_wake_word:" not in APP_MANIFEST
+    assert "espressif/esp-sr:" not in APP_MANIFEST
     assert not (ROOT / "components/micro_wake_word/CMakeLists.txt").exists()
 
 
@@ -185,10 +188,10 @@ def test_embedded_models_match_the_accepted_cascade_provenance():
     assert provenance["physical_hardware_evaluation"]["speaker_replay_attempts"] == 12
 
 
-def test_stackchan_profile_pins_hardware_proven_audio_resource_choices():
+def test_opt_in_voice_profile_pins_hardware_proven_audio_resource_choices():
     assert "CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y" in STACKCHAN_DEFAULTS
-    assert "CONFIG_SR_VADN_WEBRTC=y" in STACKCHAN_DEFAULTS
-    assert "CONFIG_SR_WN_WN9_MYCROFT_TTS=y" in STACKCHAN_DEFAULTS
+    assert "CONFIG_SR_VADN_WEBRTC=y" in VOICE_DEFAULTS
+    assert "CONFIG_SR_WN_WN9_MYCROFT_TTS=y" in VOICE_DEFAULTS
     assert "CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y" in STACKCHAN_DEFAULTS
     assert "config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;" in CAPTIVE_PORTAL
 
@@ -205,7 +208,7 @@ if __name__ == "__main__":
         test_cpu_boost_is_scoped_to_nn_invocations_not_the_armed_lifetime,
         test_boot_fails_closed_if_any_aot_executor_disagrees_with_reference,
         test_embedded_models_match_the_accepted_cascade_provenance,
-        test_stackchan_profile_pins_hardware_proven_audio_resource_choices,
+        test_opt_in_voice_profile_pins_hardware_proven_audio_resource_choices,
         test_capture_gate_is_enrollment_specific_and_busy_loss_is_measured,
         test_enrollment_only_full_buffer_capture_rearms_the_detector,
     ):

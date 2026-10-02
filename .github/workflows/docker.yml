@@ -16,6 +16,9 @@ on:
       - 'scripts/check_alpha_release_notes.py'
       - 'scripts/classify_firmware_site_changes.py'
       - 'scripts/render_firmware_site_preview.py'
+      - 'scripts/version_firmware_site_assets.py'
+      - 'scripts/check_firmware_site.js'
+      - 'tests/test_firmware_site_assets.py'
       - '.github/workflows/firmware-site-preview.yml'
 
 permissions:
@@ -43,6 +46,13 @@ jobs:
           /tmp/test-controller-connection
           scripts/test_connection_runtime.sh
           python3 tests/test_firmware_stack_audit.py
+          python3 tests/test_firmware_site_assets.py
+          node scripts/check_firmware_site.js
+          python3 tests/test_firmware_project_identity.py
+          python3 tests/test_release_firmware.py
+          bash scripts/test_ota_update.sh
+          sh tests/run_portal_trace.sh
+          python3 tests/test_dial_wake_dispatch.py
           python3 tests/test_firmware_artifact_cache.py
           python3 tests/test_prune_firmware_previews.py
           python3 tests/test_connection_web_status.py
@@ -88,6 +98,10 @@ jobs:
           # from #237 verification. #233/#236 must replace that gate with
           # evidence over the real generic snapshot/action boundary.
           python3 tests/test_kizz_semantic_voice_characterization.py
+          python3 tests/test_kizz_disabled_build.py
+          python3 tests/test_kizz_wake_disabled.py
+          python3 tests/test_kizz_voice_transport_separation.py
+          python3 tests/test_kizz_false_wake_capture_contract.py
           python3 scripts/check_alpha_release_notes.py
           python3 scripts/check_release_hosting_contract.py
           python3 scripts/check_platform_power_and_wifi.py
@@ -1007,18 +1021,22 @@ jobs:
       matrix:
         include:
           - target: dial
+            project: hiphi_m5dial
             flash_size: 8MB
             psram: false
             expected: DIAL
           - target: sticks3
+            project: hiphi_sticks3
             flash_size: 8MB
             psram: true
             expected: STICKS3
           - target: stopwatch
+            project: hiphi_stopwatch
             flash_size: 16MB
             psram: true
             expected: STOPWATCH
           - target: stackchan
+            project: hiphi_stackchan
             flash_size: 16MB
             psram: true
             expected: STACKCHAN
@@ -1086,8 +1104,10 @@ jobs:
             ccache --zero-stats;
             idf.py -B build-${{ matrix.target }}
             -D HIPHI_M5_TARGET=${{ matrix.target }}
+            -D HIPHI_KIZZ_WAKE_WORD=OFF
             -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig build;
-            python3 ../scripts/audit_firmware_stack.py build-${{ matrix.target }}/hiphi_${{ matrix.target }}.elf --output build-${{ matrix.target }}/stack-audit.json;
+            python3 ../scripts/check_kizz_disabled_build.py build-${{ matrix.target }} --project ${{ matrix.project }};
+            python3 ../scripts/audit_firmware_stack.py build-${{ matrix.target }}/${{ matrix.project }}.elf --output build-${{ matrix.target }}/stack-audit.json;
             grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" build-${{ matrix.target }}/sdkconfig;
             grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" build-${{ matrix.target }}/sdkconfig;
             grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_${{ matrix.flash_size }}=y" build-${{ matrix.target }}/sdkconfig;
@@ -1106,7 +1126,7 @@ jobs:
             0x0 build-${{ matrix.target }}/bootloader/bootloader.bin
             0x8000 build-${{ matrix.target }}/partition_table/partition-table.bin
             0xd000 build-${{ matrix.target }}/ota_data_initial.bin
-            0x10000 build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin;
+            0x10000 build-${{ matrix.target }}/${{ matrix.project }}.bin;
             esptool.py --chip esp32s3 image_info ../hiphi_${{ matrix.target }}_merged.bin;
             ccache --show-stats
       - name: Package verified firmware with provenance
@@ -1114,7 +1134,7 @@ jobs:
         env:
           FIRMWARE_FILES: |
             m5_beta_app/build-${{ matrix.target }}/stack-audit.json
-            m5_beta_app/build-${{ matrix.target }}/hiphi_${{ matrix.target }}.bin
+            m5_beta_app/build-${{ matrix.target }}/${{ matrix.project }}.bin
             m5_beta_app/build-${{ matrix.target }}/bootloader/bootloader.bin
             m5_beta_app/build-${{ matrix.target }}/partition_table/partition-table.bin
             m5_beta_app/build-${{ matrix.target }}/ota_data_initial.bin
@@ -1393,7 +1413,7 @@ jobs:
           prepare_m5_release() {
             local build_target="$1"
             local release_target="$2"
-            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" \
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target/dial/m5dial}.bin" \
               "release-assets/hiphi_${release_target}.bin"
             cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" \
               "release-assets/hiphi_${release_target}_bootloader.bin"
@@ -1660,7 +1680,7 @@ jobs:
             local ota="hiphi_${page_target}_ota_data_initial-${PREVIEW_ID}.bin"
             local merged="hiphi_${page_target}_merged-${PREVIEW_ID}.bin"
 
-            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" "pr-preview/${app}"
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target/dial/m5dial}.bin" "pr-preview/${app}"
             cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" "pr-preview/${boot}"
             cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/partition_table/partition-table.bin" "pr-preview/${partition}"
             cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/ota_data_initial.bin" "pr-preview/${ota}"
@@ -1809,6 +1829,7 @@ jobs:
           python3 scripts/check_flash_manifest.py "pr-preview/${AUX_MANIFEST_FILE}" --assets-dir pr-preview
           ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL|RELEASE_CHANNEL_NAME|RELEASE_CHANNEL_NOTICE|RELEASE_LINK)\}\}' pr-preview
           python3 scripts/build_pr_index.py pr-preview --pr "$PR_NUM" --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 scripts/version_firmware_site_assets.py pr-preview
           ls -la pr-preview/
 
       - name: Deploy PR preview to gh-pages
@@ -1847,12 +1868,14 @@ jobs:
             sleep 5
           done
 
-          for asset in $(find pr-preview -maxdepth 1 -type f -printf '%f\n'); do
+          while IFS= read -r source; do
+            asset="${source#pr-preview/}"
+            mkdir -p "deployed-preview/$(dirname "${asset}")"
             curl --fail --silent --show-error --location \
               --retry 36 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
               "${PREVIEW_BASE}/${asset}" --output "deployed-preview/${asset}"
             cmp "pr-preview/${asset}" "deployed-preview/${asset}"
-          done
+          done < <(find pr-preview -type f | sort)
           grep -F 'data-target-filter="dial"' "deployed-preview/flash-dial-${PREVIEW_ID}.html"
           grep -F "manifest-knob-aux-${PREVIEW_ID}.json" "deployed-preview/flash-dial-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="frame"' "deployed-preview/flash-frame-${PREVIEW_ID}.html"
@@ -2153,7 +2176,7 @@ jobs:
           prepare_m5_pages() {
             local build_target="$1"
             local page_target="$2"
-            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target}.bin" \
+            cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/hiphi_${build_target/dial/m5dial}.bin" \
               "gh-pages-build/hiphi_${page_target}.bin"
             cp "m5-beta-artifacts/m5_beta_app/build-${build_target}/bootloader/bootloader.bin" \
               "gh-pages-build/hiphi_${page_target}_bootloader.bin"
@@ -2186,10 +2209,12 @@ jobs:
               "gh-pages-build/${manifest}" --assets-dir gh-pages-build
           done
           ! grep -R -E '\{\{(VERSION|TARGET_FILTER|RELEASE_CHANNEL|RELEASE_CHANNEL_NAME|RELEASE_CHANNEL_NOTICE|RELEASE_LINK|REDIRECT_URL)\}\}' gh-pages-build
+          python3 scripts/version_firmware_site_assets.py gh-pages-build
           mkdir -p "publish-root/${CHANNEL}"
           cp -R gh-pages-build/. "publish-root/${CHANNEL}/"
           cp web/index.html publish-root/index.html
           cp -R web/assets publish-root/assets
+          python3 scripts/version_firmware_site_assets.py publish-root
           sed 's|{{REDIRECT_URL}}|./stable/|g' web/redirect.html \
             > publish-root/flash.html
           mkdir -p publish-root/flash

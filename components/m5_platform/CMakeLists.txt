@@ -1,11 +1,12 @@
 set(m5_platform_requires m5stack__m5unified)
 idf_build_get_property(m5_platform_target HIPHI_M5_TARGET)
+idf_build_get_property(m5_platform_wake_word HIPHI_KIZZ_WAKE_WORD)
 if(m5_platform_target STREQUAL "dial" OR
    m5_platform_target STREQUAL "stackchan" OR
    m5_platform_target STREQUAL "atom_joystick")
     list(APPEND m5_platform_requires m5_official)
 endif()
-if(m5_platform_target STREQUAL "stackchan")
+if(m5_platform_target STREQUAL "stackchan" AND m5_platform_wake_word)
     list(APPEND m5_platform_requires
         esp_websocket_client json espressif__esp-sr nvs_flash lwip kizz_wake_word)
 endif()
@@ -33,3 +34,11 @@ if(NOT hiphi_firmware_git_sha)
 endif()
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     HIPHI_FIRMWARE_GIT_SHA="${hiphi_firmware_git_sha}")
+
+# This gate is a preconfigure option so disabled wake dependencies never enter
+# the IDF component graph. The board/BSP gate remains independent in C++.
+if(m5_platform_target STREQUAL "stackchan" AND m5_platform_wake_word)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE HIPHI_KIZZ_WAKE_WORD=1)
+else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE HIPHI_KIZZ_WAKE_WORD=0)
+endif()

@@ -3,7 +3,7 @@
 #include "m5_stackchan_voice.h"
 #include <M5Unified.h>
 #include <atomic>
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
 /* Voice networking is deliberately separate from audio ownership: M5Unified
  * requires the StackChan microphone and speaker to take turns. */
 #include "esp_websocket_client.h"
@@ -35,7 +35,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/idf_additions.h>
 #include <freertos/semphr.h>
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
 #include <nvs.h>
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
@@ -92,6 +92,10 @@ struct StackChanVoiceState {
     bool enabled = true;
 } s_stackchan_voice;
 
+constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
+
+#if HIPHI_KIZZ_WAKE_WORD
+// The experimental listener/transport is separate from playback speaker cues.
 enum class VoiceTurnPhase : uint8_t {
     IDLE,
     CAPTURING,
@@ -99,7 +103,6 @@ enum class VoiceTurnPhase : uint8_t {
     TERMINAL,
 };
 
-constexpr uint8_t STACKCHAN_VOICE_GAINS[] = {96, 144, 192};
 esp_websocket_client_handle_t s_voice_ws = nullptr;
 esp_websocket_client_handle_t s_enrollment_ws = nullptr;
 SemaphoreHandle_t s_voice_audio_lock = nullptr;
@@ -1752,6 +1755,7 @@ void start_voice_transport() {
     }
 }
 #endif
+#endif  // HIPHI_KIZZ_WAKE_WORD
 #endif
 
 void stackchan_voice_note(uint8_t index) {
@@ -1891,7 +1895,7 @@ uint8_t joystick_adc12_to_u8(uint16_t value) {
 }
 
 extern "C" bool m5_platform_begin(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     // Reserve the latency-critical detector arena before the BSP, display,
     // microphone, WiFi, and endpointing frontend fragment internal SRAM.
     if (!kizz_wake_word_reserve_fast_arena()) return false;
@@ -2061,7 +2065,7 @@ extern "C" uint16_t m5_platform_display_height(void) {
 
 extern "C" void m5_platform_voice_set_zone_provider(
     m5_platform_voice_zone_provider_t provider) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     s_voice_zone_provider = provider;
 #else
     (void)provider;
@@ -2069,14 +2073,14 @@ extern "C" void m5_platform_voice_set_zone_provider(
 }
 
 extern "C" void m5_platform_voice_network_ready(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     s_voice_network_ready = true;
     start_voice_transport();
 #endif
 }
 
 extern "C" void m5_platform_voice_feedback(const char *state) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     if (!state || !s_started || s_board != M5_PLATFORM_BOARD_STACKCHAN) return;
     bool defer_terminal_rearm = false;
     if (strcmp(state, "success") == 0 || strcmp(state, "clarify") == 0 ||
@@ -2153,7 +2157,7 @@ extern "C" void m5_platform_voice_feedback(const char *state) {
 }
 
 extern "C" bool m5_platform_voice_is_listening(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     return s_voice_listening_visual;
 #else
     return false;
@@ -2161,7 +2165,7 @@ extern "C" bool m5_platform_voice_is_listening(void) {
 }
 
 extern "C" const char *m5_platform_voice_state(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     if (s_enrollment_active) return "CAPTURING";
     if (s_enrollment_sending) return "UPLOADING";
     if (s_voice_listening_visual) return "LISTENING";
@@ -2183,7 +2187,7 @@ extern "C" const char *m5_platform_voice_state(void) {
 extern "C" void m5_platform_voice_copy_transcript(char *out, size_t len) {
     if (!out || !len) return;
     out[0] = '\0';
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     if (s_voice_text_lock &&
         xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         snprintf(out, len, "%s", s_voice_transcript);
@@ -2195,7 +2199,7 @@ extern "C" void m5_platform_voice_copy_transcript(char *out, size_t len) {
 extern "C" void m5_platform_voice_copy_response(char *out, size_t len) {
     if (!out || !len) return;
     out[0] = '\0';
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     if (s_voice_text_lock &&
         xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         snprintf(out, len, "%s", s_voice_response);
@@ -2205,7 +2209,7 @@ extern "C" void m5_platform_voice_copy_response(char *out, size_t len) {
 }
 
 extern "C" void m5_platform_voice_clear_conversation(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     if (s_voice_text_lock &&
         xSemaphoreTake(s_voice_text_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         s_voice_transcript[0] = '\0';
@@ -2216,7 +2220,7 @@ extern "C" void m5_platform_voice_clear_conversation(void) {
 }
 
 extern "C" float m5_platform_voice_wake_probability(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     return kizz_wake_word_probability();
 #else
     return 0.0f;
@@ -2224,7 +2228,7 @@ extern "C" float m5_platform_voice_wake_probability(void) {
 }
 
 extern "C" float m5_platform_voice_wake_cutoff(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     float cutoff = 0.0f;
     kizz_wake_word_get_config(&cutoff, nullptr);
     return cutoff;
@@ -2234,7 +2238,7 @@ extern "C" float m5_platform_voice_wake_cutoff(void) {
 }
 
 extern "C" bool m5_platform_voice_diagnostics_enabled(void) {
-#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN
+#if CONFIG_M5_PLATFORM_EXPECT_STACKCHAN && HIPHI_KIZZ_WAKE_WORD
     return s_voice_diagnostics_enabled;
 #else
     return false;
@@ -2587,6 +2591,7 @@ extern "C" bool m5_platform_stackchan_sound_trigger(
     if (s_stackchan_voice.phrase &&
         selected->priority < s_stackchan_voice.phrase->priority) return false;
 
+#if HIPHI_KIZZ_WAKE_WORD
     if (s_voice_listener_enabled && s_voice_audio_lock) {
         if (xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(250)) != pdTRUE) {
             ESP_LOGW(TAG, "Kizz skipped sound: microphone handoff was busy");
@@ -2598,6 +2603,7 @@ extern "C" bool m5_platform_stackchan_sound_trigger(
         if (!speaker_ready) return false;
         if (resume_listening) s_voice_resume_after_sound = true;
     }
+#endif
     if (!M5.Speaker.isEnabled()) return false;
 
     s_stackchan_voice.phrase = selected;
@@ -2605,6 +2611,7 @@ extern "C" bool m5_platform_stackchan_sound_trigger(
     s_stackchan_voice.last_started[sound_index] = now;
     ESP_LOGI(TAG, "Kizz voice: %s", selected->name);
     stackchan_voice_note(0);
+#if HIPHI_KIZZ_WAKE_WORD
     if (!s_stackchan_voice.phrase && s_voice_resume_after_sound &&
         s_voice_audio_lock &&
         xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -2612,6 +2619,7 @@ extern "C" bool m5_platform_stackchan_sound_trigger(
         voice_take_microphone();
         xSemaphoreGive(s_voice_audio_lock);
     }
+#endif
     return true;
 #else
     (void)sound;
@@ -2626,6 +2634,7 @@ extern "C" void m5_platform_stackchan_sound_process(void) {
     ++s_stackchan_voice.note;
     if (s_stackchan_voice.note >= s_stackchan_voice.phrase->note_count) {
         s_stackchan_voice.phrase = nullptr;
+#if HIPHI_KIZZ_WAKE_WORD
         if (s_voice_resume_after_sound && s_voice_listener_enabled &&
             s_voice_audio_lock &&
             xSemaphoreTake(s_voice_audio_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -2634,6 +2643,7 @@ extern "C" void m5_platform_stackchan_sound_process(void) {
             voice_take_microphone();
             xSemaphoreGive(s_voice_audio_lock);
         }
+#endif
         return;
     }
     stackchan_voice_note(s_stackchan_voice.note);

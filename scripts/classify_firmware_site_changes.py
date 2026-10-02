@@ -14,6 +14,9 @@ SITE_FILES = {
     "scripts/check_alpha_release_notes.py",
     "scripts/classify_firmware_site_changes.py",
     "scripts/render_firmware_site_preview.py",
+    "scripts/version_firmware_site_assets.py",
+    "scripts/check_firmware_site.js",
+    "tests/test_firmware_site_assets.py",
     ".github/workflows/docker.yml",
     ".github/workflows/firmware-site-preview.yml",
 }
