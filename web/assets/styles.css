@@ -161,7 +161,7 @@ p { text-wrap: pretty; }
 .channel:first-child { background: var(--white); color: var(--ink); }
 .channel-mark { display: block; color: var(--cyan-soft); font-weight: 700; }
 .channel:first-child .channel-mark { color: var(--cyan-dark); }
-.channel h3 { margin: 2.8rem 0 .8rem; }
+.channel h3, .channel h2 { margin: 2.8rem 0 .8rem; font-size: clamp(1.45rem, 2.5vw, 2.2rem); }
 .channel p { color: #d0dce3; }
 .channel:first-child p { color: var(--body); }
 .channel .button { margin-top: auto; }
@@ -271,7 +271,7 @@ esp-web-install-button button:hover { background: var(--cyan-soft); }
 .flash-shell .channel-grid { color: var(--white); }
 .channel-grid-solo { grid-template-columns: minmax(0, 1.1fr); max-width: 26rem; }
 .channel-footnote { margin: 1.5rem 0 0; color: #b7c6d0; }
-.channel-footnote a { color: var(--cyan-soft); }
+.channel-footnote a, .requirements a { color: var(--cyan-soft); }
 
 .inquiry-form { display: grid; gap: 1.3rem; max-width: 40rem; margin: 0; }
 .inquiry-form .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.3rem; }
@@ -296,8 +296,8 @@ esp-web-install-button button:hover { background: var(--cyan-soft); }
 .footer-links { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 .footer-note { max-width: 36rem; font-size: .9rem; }
 
-.flasher-footer { margin-top: 3rem; padding: 1.5rem 0; border-top: 1px solid var(--line-light); color: var(--body); font-size: .88rem; }
-.flasher-footer a { color: var(--cyan-dark); font-weight: 700; }
+.flasher-footer { margin-top: 3rem; padding: 1.5rem 0; border-top: 1px solid var(--line-dark); color: var(--muted-dark); font-size: .88rem; }
+.flasher-footer a { color: var(--cyan-soft); font-weight: 700; }
 .flasher-footer .brand-mark { display: inline-flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
 .flasher-footer .brand-mark img { width: 20px; height: 20px; border-radius: 4px; }
 
@@ -368,7 +368,7 @@ esp-web-install-button button:hover { background: var(--cyan-soft); }
   .proof-links { grid-template-columns: 1fr; }
   .proof-links a { min-height: 10.5rem; }
   .channel { padding: 1.5rem; }
-  .channel h3 { margin: 1.6rem 0 .65rem; }
+  .channel h3, .channel h2 { margin: 1.6rem 0 .65rem; }
   .channel .button { width: 100%; margin-top: 1.2rem; }
   .browser-requirement { padding: 1.1rem; }
 }

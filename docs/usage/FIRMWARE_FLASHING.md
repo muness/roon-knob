@@ -1,6 +1,8 @@
 # Firmware Flashing
 
-This guide covers how to flash firmware to your HiPhi Dial hardware. There are two methods:
+Choose the exact controller and revision at the [firmware center](https://firmware.hiphi.audio/). Every target has its own installer; a shared ESP32 chip family does not make firmware interchangeable. The command-line examples below are for **HiPhi Dial on the Waveshare ESP32-S3-Knob-Touch-LCD-1.8**. See the [target notes](../targets/README.md) for other boards.
+
+There are two methods:
 1. **Web Flasher** (recommended) - No tools to install; use desktop Chrome, Edge, or Firefox
 2. **esptool.py** - Command-line tool for advanced users
 
@@ -11,16 +13,18 @@ The easiest way to flash firmware. Works directly in your browser using the Web 
 ### Requirements
 - **Browser**: A current desktop version of Chrome, Edge, or Firefox. Safari is not supported; iPhone, iPad, and Android cannot flash over USB.
 - **HTTPS**: Web Serial requires HTTPS. Choose a channel at [firmware.hiphi.audio](https://firmware.hiphi.audio/).
-- **USB cable**: Connect your ESP32 board to your computer
+- **USB cable**: Use a data-capable cable; charge-only cables cannot flash firmware.
 
 ### Steps
 
-1. Connect the ESP32-S3 board via USB-C
-2. Turn on the device (power slider towards USB-C port)
-3. Go to the **[Stable Web Flasher](https://firmware.hiphi.audio/stable/)**
-4. Click **"Flash Dial main controller"**
-5. Select the serial port when prompted
-6. Wait ~30 seconds for flashing to complete
+1. Choose a release channel and the exact controller. Check its release notes for physical-hardware status.
+2. Connect the board over USB. For Dial, turn on the power slider toward the USB-C port.
+3. Click the target’s **Flash** button and select its serial port. For Dial: Click **"Flash Dial main controller"**.
+4. Confirm the detected chip. Dial main firmware requires **ESP32-S3**; its auxiliary parking image requires **ESP32**. If the chip is wrong, cancel and flip the USB-C plug at the Dial end.
+5. Allow erase for a fresh install. Decline erase during an update on the same controller to retain Wi-Fi and settings.
+6. Wait for completion, then follow the setup instructions below.
+
+The browser installer writes individual components outside NVS when you decline erase. A downloaded **merged factory image** writes across NVS and removes settings even without a separate erase. Use the Flash button or the component command below for a settings-preserving update.
 
 ---
 
@@ -36,7 +40,7 @@ pip install esptool
 
 ### Download Firmware
 
-Download the four component files from [GitHub Releases](https://github.com/muness/roon-knob/releases/latest) for a settings-preserving update:
+Download all four component files **from the same release** for a complete first installation or a settings-preserving update. [Latest Stable](https://github.com/muness/roon-knob/releases/latest) excludes prereleases; use [all releases](https://github.com/muness/roon-knob/releases) when deliberately choosing Beta or Alpha:
 - `hiphi_dial_bootloader.bin`
 - `hiphi_dial_partition-table.bin`
 - `hiphi_dial_ota_data_initial.bin`
@@ -44,7 +48,7 @@ Download the four component files from [GitHub Releases](https://github.com/mune
 
 `roon_knob_merged.bin` is a byte-identical compatibility alias for `hiphi_dial_merged.bin`.
 
-### Update ESP32-S3 Without Erasing Settings
+### Install or Update ESP32-S3 Using Components
 
 ```bash
 # Put device in download mode first (BOOT + RST)
@@ -101,7 +105,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash \
   - [CH340 drivers](https://sparks.gogo.co.nz/ch340.html)
 
 ### "Failed to connect"
-- **Flip the USB-C cable 180°** - One orientation connects to the ESP32-S3, the other to an unpopulated ESP32 footprint. If you see the wrong chip or no response, flip the cable.
+- **Flip the USB-C cable 180°** - One orientation connects to the ESP32-S3, the other to the auxiliary ESP32. If you see the wrong chip or no response, flip the cable.
 - Ensure you're holding BOOT while pressing RST/EN
 - Try a different USB cable (some cables are charge-only)
 - Try a different USB port
@@ -125,7 +129,7 @@ After flashing a fresh device:
 4. Enter your WiFi credentials
 5. The device will restart and connect to your network
 
-See [WiFi Provisioning](WIFI_PROVISIONING.md) for more details.
+If the setup page does not appear, stay connected to the setup network and open **http://192.168.4.1**. Use a 2.4 GHz Wi-Fi network. An update that preserved settings normally reconnects without opening a setup network. See [WiFi Provisioning](WIFI_PROVISIONING.md) for more details.
 
 ---
 
@@ -152,8 +156,17 @@ ESP Web Tools uses JSON manifests to describe firmware:
   "builds": [{
     "chipFamily": "ESP32-S3",
     "parts": [{
-      "path": "https://example.com/firmware.bin",
+      "path": "hiphi_dial_bootloader.bin",
       "offset": 0
+    }, {
+      "path": "hiphi_dial_partition-table.bin",
+      "offset": 32768
+    }, {
+      "path": "hiphi_dial_ota_data_initial.bin",
+      "offset": 53248
+    }, {
+      "path": "hiphi_dial.bin",
+      "offset": 65536
     }]
   }]
 }
@@ -161,7 +174,7 @@ ESP Web Tools uses JSON manifests to describe firmware:
 
 Key fields:
 - `chipFamily`: Must match connected chip (ESP32, ESP32-S3, ESP32-C3, etc.)
-- `parts[].offset`: Flash address (use 0 for merged binaries)
+- `parts[].offset`: Flash address for each component. Keep all parts outside NVS to preserve settings; offset 0 merged factory images overwrite it.
 - `new_install_prompt_erase`: Ask user about erasing flash on new installs
 
 ### Creating Merged Binaries

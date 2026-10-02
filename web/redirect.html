@@ -4,6 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="refresh" content="0;url={{REDIRECT_URL}}">
+  <script>
+    // Preserve bookmarked controller selections through legacy firmware routes.
+    const targetAliases = {
+      dial: 'dial', frame: 'frame', slate: 'rlcd', rlcd: 'rlcd', joy: 'joy', tough: 'tough',
+      'dial-lab': 'm5dial', m5dial: 'm5dial', twist: 'sticks3', sticks3: 'sticks3',
+      remote: 'stopwatch', stopwatch: 'stopwatch', kizz: 'stackchan', stackchan: 'stackchan',
+      'dial-aux': 'knobaux', knobaux: 'knobaux'
+    };
+    const requested = new URLSearchParams(location.search).get('target');
+    const anchor = location.hash.slice(1);
+    const target = Object.hasOwn(targetAliases, requested) ? targetAliases[requested]
+      : Object.hasOwn(targetAliases, anchor) ? targetAliases[anchor] : null;
+    if (target) {
+      const destination = new URL('{{REDIRECT_URL}}', location.href);
+      destination.searchParams.set('target', target);
+      document.querySelector('meta[http-equiv="refresh"]').setAttribute('content', `0;url=${destination.href}`);
+      location.replace(destination.href);
+    }
+  </script>
   <link rel="canonical" href="{{REDIRECT_URL}}">
   <title>HiPhi firmware moved</title>
 </head>

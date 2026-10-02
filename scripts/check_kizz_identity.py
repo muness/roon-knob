@@ -18,9 +18,9 @@ REQUIRED = {
         "Kizz Playback Companion",
         "Named for Kismet",
         "Flash {{RELEASE_CHANNEL_NAME}} Kizz",
-        "stackchan: 'Kizz'",
         'manifest="manifest-stackchan.json"',
     ],
+    "web/assets/site.js": ["stackchan: 'Kizz'"],
     ".github/RELEASE_TEMPLATE.md": [
         "Kizz Playback Companion",
         "hiphi_stackchan_merged.bin",

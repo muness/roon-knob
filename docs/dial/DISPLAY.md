@@ -1,16 +1,16 @@
 # Display Subsystem
 
-This document covers how HiPhi Dial drives its 360×360 pixel AMOLED display using ESP-IDF and LVGL.
+This document covers how HiPhi Dial drives its 360×360 pixel LCD using ESP-IDF and LVGL. See the [board identity record](hw-reference/board.md) for vendor specifications and the distinction between the panel IC and the software driver.
 
 ## Hardware Overview
 
 | Component | Model | Interface | Notes |
 |-----------|-------|-----------|-------|
-| Display controller | SH8601 | QSPI (4-wire) | IPS LCD, 16-bit RGB565 |
+| Display software driver | `esp_lcd_sh8601` | QSPI (4-wire) | Project panel initialization, 16-bit RGB565 |
 | Resolution | 360×360 | - | Round display |
 | Backlight | PWM-controlled | GPIO 47 | 8-bit brightness (0-255) |
 
-The SH8601 is an LCD driver IC that accepts pixel data over Quad SPI, allowing faster transfers than standard SPI by using 4 data lines simultaneously.
+The firmware uses the `esp_lcd_sh8601` software component with a project-supplied initialization sequence. Waveshare declares the panel IC as ST77916; the software component name does not identify the fitted silicon. Quad SPI transfers pixel data using four data lines.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ The SH8601 is an LCD driver IC that accepts pixel data over Quad SPI, allowing f
 └───────────────────────────┬─────────────────────────────────┘
                             │ SPI DMA transfer
 ┌───────────────────────────▼─────────────────────────────────┐
-│                     SH8601 Display                           │
+│                     QSPI LCD Display                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -285,11 +285,11 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
 }
 ```
 
-The byte-swap is necessary because ESP32 is little-endian but the SH8601 expects big-endian RGB565 pixels.
+The flush callback byte-swaps the ESP32's little-endian RGB565 pixels for the panel transport. This repository-observed byte order does not establish the panel IC identity.
 
 ### Rounder Callback
 
-The SH8601 requires 2-pixel alignment for memory writes. LVGL's rounder callback adjusts dirty regions:
+The firmware's rounder callback applies 2-pixel alignment for memory writes through the panel driver:
 
 ```c
 static void lvgl_rounder_cb(lv_event_t *e) {
@@ -319,7 +319,7 @@ esp_lcd_panel_dev_config_t panel_config = {
 esp_lcd_new_panel_sh8601(io_handle, &panel_config, &panel_handle);
 ```
 
-The `vendor_config` contains SH8601-specific initialization commands - a sequence of register writes that configure the display's internal settings (gamma curves, timing, power, etc.).
+The `vendor_config` contains the project's panel initialization commands, supplied through the `esp_lcd_sh8601` software API. The sequence configures panel settings such as gamma, timing, and power.
 
 ### Drawing
 
@@ -436,7 +436,7 @@ its 5s reveal window.
 1. **Backlight PWM** - Configure LEDC timer and channel
 2. **SPI bus** - Initialize QSPI with DMA
 3. **Panel IO** - Create SPI panel IO handle
-4. **Panel driver** - Initialize SH8601 with vendor commands
+4. **Panel driver** - Initialize the LCD through `esp_lcd_sh8601` with the project panel commands
 5. **Panel reset** - Hardware reset via GPIO
 6. **I2C bus** - For touch controller (separate from display)
 7. **Touch controller** - CST816 initialization

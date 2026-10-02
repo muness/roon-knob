@@ -9,7 +9,7 @@ holds that list once and checks that:
   * every web/manifest-*.json "name" field uses the canonical product name
     (allowing a trailing "(Alpha)"/channel-suffix, which manifests already
     use and this check does not police beyond stripping it),
-  * web/flash.html's `targetNames` map agrees with the canonical names, and
+  * web/assets/site.js's `targetNames` map agrees with the canonical names, and
   * .github/RELEASE_TEMPLATE.md's hardware table first column uses the
     canonical names.
 """
@@ -37,7 +37,7 @@ CANONICAL_NAMES = {
     "manifest-stackchan": "Kizz Playback Companion",
 }
 
-# flash.html targetNames key -> short form used there instead of the full
+# site.js targetNames key -> short form used there instead of the full
 # canonical name, for targets where the flasher's target-filter title and
 # button labels intentionally use a shorter form than the manifest/release
 # table (e.g. "Kizz" instead of "Kizz Playback Companion"; the full form is
@@ -47,7 +47,7 @@ TARGET_NAME_SHORT_FORMS = {
     "stackchan": "Kizz",
 }
 
-# flash.html targetNames key -> manifest stem, so the same canonical table
+# site.js targetNames key -> manifest stem, so the same canonical table
 # can check both.
 TARGET_TO_MANIFEST = {
     "dial": "manifest-s3",
@@ -99,10 +99,10 @@ def check_manifests(errors: list[str]) -> None:
             )
 
 
-def check_flash_html(errors: list[str]) -> None:
-    flash_path = ROOT / "web" / "flash.html"
+def check_target_names(errors: list[str]) -> None:
+    flash_path = ROOT / "web" / "assets" / "site.js"
     text = flash_path.read_text(encoding="utf-8")
-    match = re.search(r"const targetNames = \{(.*?)\};", text)
+    match = re.search(r"const targetNames = \{(.*?)\};", text, re.DOTALL)
     if not match:
         errors.append(f"{flash_path.relative_to(ROOT)}: could not find targetNames map")
         return
@@ -151,7 +151,7 @@ def check_release_template(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     check_manifests(errors)
-    check_flash_html(errors)
+    check_target_names(errors)
     check_release_template(errors)
 
     if errors:
@@ -160,7 +160,7 @@ def main() -> int:
             print(f"  - {error}", file=sys.stderr)
         return 1
 
-    print("Product naming is consistent across manifests, flash.html, and the release template.")
+    print("Product naming is consistent across manifests, site.js, and the release template.")
     return 0
 
 

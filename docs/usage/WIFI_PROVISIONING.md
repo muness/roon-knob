@@ -85,14 +85,9 @@ After 5 consecutive failures (`STA_FAIL_THRESHOLD`), switches to AP mode for rep
 
 ### Power Management
 
-```c
-// Disable WiFi power save for reliable HTTP polling
-esp_wifi_set_ps(WIFI_PS_NONE);
+The shared Wi-Fi manager uses `WIFI_PS_MIN_MODEM`, allowing the radio to sleep between access-point beacons while keeping the connection. Targets may temporarily disable power save for a specific mode. Setup mode uses full transmit power so the provisioning network remains visible.
 
-// Reduce TX power for battery operation (11 dBm instead of 20 dBm)
-// Reduces peak current from ~500mA to ~200mA
-esp_wifi_set_max_tx_power(44);  // Units are 0.25 dBm
-```
+These settings describe radio policy. They do not establish measured current draw or battery runtime; those require tests on the exact board and firmware artifact.
 
 ### Network Events
 
@@ -130,7 +125,7 @@ Your router's client list will show the device as:
 
 1. **No credentials stored** - First boot or after factory reset
 2. **Too many STA failures** - 5 consecutive connection failures
-3. **Manual trigger** - Future: settings menu option
+3. **Manual trigger** - The target’s Forget Wi-Fi or setup action
 
 ### AP Configuration
 
