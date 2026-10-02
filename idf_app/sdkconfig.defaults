@@ -164,3 +164,9 @@ CONFIG_BT_NIMBLE_HR_SERVICE=n
 CONFIG_BT_NIMBLE_BAS_SERVICE=n
 CONFIG_BT_NIMBLE_DIS_SERVICE=n
 CONFIG_LWIP_NETIF_HOSTNAME=y
+
+# Network-assisted roaming: 802.11k/v lets a mesh controller steer the device
+# to a better AP. The parent option must be set or RRM/WNM are silently dropped.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_RRM_SUPPORT=y
+CONFIG_ESP_WIFI_WNM_SUPPORT=y

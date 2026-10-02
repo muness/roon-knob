@@ -394,6 +394,16 @@ static esp_err_t apply_wifi_config(const rk_wifi_entry_t *active) {
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     cfg.sta.pmf_cfg.capable = true;
     cfg.sta.pmf_cfg.required = false;
+    /* Join the strongest AP of the SSID, not the first beacon heard: the
+     * default fast scan can pick a far, weak mesh node. */
+    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    /* Network-assisted roaming: 802.11k neighbour reports and 802.11v BSS
+     * transition let a mesh controller steer us to a better AP.  There is no
+     * self-initiated RSSI roaming; it ping-ponged between similar-strength
+     * APs when tried on the T-Dongle. */
+    cfg.sta.rm_enabled = 1;
+    cfg.sta.btm_enabled = 1;
     return esp_wifi_set_config(WIFI_IF_STA, &cfg);
 }
 

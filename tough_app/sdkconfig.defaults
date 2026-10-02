@@ -100,3 +100,9 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 # CONFIG_RK_BLE_HID_HOST, CONFIG_BT_ENABLED, or any CONFIG_BT_NIMBLE_* lines
 # to this file, and do not add any BLE component references to
 # tough_app/main/CMakeLists.txt or idf_component.yml.
+
+# Network-assisted roaming: 802.11k/v lets a mesh controller steer the device
+# to a better AP. The parent option must be set or RRM/WNM are silently dropped.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_RRM_SUPPORT=y
+CONFIG_ESP_WIFI_WNM_SUPPORT=y

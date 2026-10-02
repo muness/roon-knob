@@ -79,6 +79,10 @@ typedef struct {
         uint8_t password[65];
         struct { int authmode; } threshold;
         struct { bool capable; bool required; } pmf_cfg;
+        int scan_method;
+        int sort_method;
+        unsigned rm_enabled : 1;
+        unsigned btm_enabled : 1;
     } sta;
     struct {
         uint8_t ssid[33];
@@ -115,6 +119,8 @@ typedef struct { struct { esp_ip4_addr_t ip; } ip_info; } ip_event_got_ip_t;
 
 #define WIFI_INIT_CONFIG_DEFAULT() ((wifi_init_config_t){0})
 #define WIFI_AUTH_WPA2_PSK 1
+#define WIFI_ALL_CHANNEL_SCAN 1
+#define WIFI_CONNECT_AP_BY_SIGNAL 0
 #define WIFI_AUTH_OPEN 0
 #define WIFI_MODE_STA 1
 #define WIFI_MODE_AP 2
