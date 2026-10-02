@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "portal_trace.h"
 
 #include <esp_err.h>
 #include <esp_event.h>
@@ -688,6 +689,25 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
         uint8_t reason = disconn ? disconn->reason : 0;
         schedule_retry_with_reason(reason);
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
+        const wifi_event_ap_staconnected_t *join = (const wifi_event_ap_staconnected_t *)event_data;
+        portal_trace_reset();  /* keep the latest join's sequence whole */
+        if (join) {
+            portal_trace('J', MACSTR, MAC2STR(join->mac));
+        }
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        const wifi_event_ap_stadisconnected_t *leave = (const wifi_event_ap_stadisconnected_t *)event_data;
+        portal_trace('L', "reason %u", leave ? (unsigned)leave->reason : 0u);
+        portal_trace_dump("station left");
+    }
+}
+
+static void ap_ip_event_handler(void *arg, esp_event_base_t event_base,
+                                int32_t event_id, void *event_data) {
+    (void)arg;
+    if (event_base == IP_EVENT && event_id == IP_EVENT_AP_STAIPASSIGNED && event_data) {
+        const ip_event_ap_staipassigned_t *lease = (const ip_event_ap_staipassigned_t *)event_data;
+        portal_trace('I', IPSTR, IP2STR(&lease->ip));
     }
 }
 
@@ -989,6 +1009,8 @@ void wifi_mgr_start(void) {
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,
                                                 &wifi_scan_done_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED,
+                                                &ap_ip_event_handler, NULL));
 
     const esp_timer_create_args_t retry_args = {
         .callback = &retry_timer_cb,
@@ -1201,6 +1223,7 @@ void wifi_mgr_stop(void) {
     esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,
                                  &wifi_scan_done_handler);
     esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &ap_ip_event_handler);
 
     // Stop retry timer
     if (retry_timer) {

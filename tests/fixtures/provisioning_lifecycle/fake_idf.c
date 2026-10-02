@@ -208,6 +208,11 @@ const char *esp_err_to_name(esp_err_t err) {
     return "fake";
 }
 
+/* The setup-timeline hooks are diagnostics only; the lifecycle tests ignore them. */
+void portal_trace(char kind, const char *fmt, ...) { (void)kind; (void)fmt; }
+void portal_trace_reset(void) {}
+void portal_trace_dump(const char *why) { (void)why; }
+
 esp_err_t esp_event_loop_create_default(void) { return ESP_OK; }
 esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id,
                                      esp_event_handler_t handler, void *arg) {
@@ -218,7 +223,7 @@ esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id,
             s_wifi_handlers[s_wifi_handler_count].handler = handler;
             ++s_wifi_handler_count;
         }
-    } else if (base == IP_EVENT) {
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_ip_handler = handler;
     }
     return ESP_OK;
@@ -235,10 +240,9 @@ esp_err_t esp_event_handler_unregister(esp_event_base_t base, int32_t id,
                 break;
             }
         }
-    } else if (base == IP_EVENT) {
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_ip_handler = NULL;
     }
-    (void)id;
     (void)handler;
     return ESP_OK;
 }

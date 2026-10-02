@@ -1,4 +1,5 @@
 #include "captive_portal.h"
+#include "portal_trace.h"
 #include "portal_brand.h"
 #include "dns_server.h"
 #include "controller_config.h"
@@ -372,6 +373,7 @@ static bool is_safe_url(const char *url) {
 
 // Handler for POST /wifi-remove
 static esp_err_t wifi_remove_handler(httpd_req_t *req) {
+    portal_trace_req(req);
   char buf[64] = {0};
   int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
   if (received <= 0) {
@@ -421,6 +423,7 @@ static esp_err_t wifi_remove_handler(httpd_req_t *req) {
 
 // Handler for GET / - serve the config form with saved networks
 static esp_err_t root_get_handler(httpd_req_t *req) {
+    portal_trace_req(req);
   ESP_LOGI(TAG, "Serving config form");
   ESP_LOGI(TAG, "Portal stack headroom at request start: %u bytes",
            (unsigned)uxTaskGetStackHighWaterMark(NULL));
@@ -552,6 +555,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 
 // Handler for POST /configure - save credentials
 static esp_err_t configure_post_handler(httpd_req_t *req) {
+    portal_trace_req(req);
   char buf[768] = {0};
   int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
   if (received <= 0) {
@@ -677,6 +681,7 @@ static esp_err_t configure_post_handler(httpd_req_t *req) {
 
 // Captive portal redirect
 static esp_err_t captive_redirect_handler(httpd_req_t *req) {
+    portal_trace_req(req);
   ESP_LOGI(TAG, "Redirect request: %s", req->uri);
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
@@ -685,6 +690,7 @@ static esp_err_t captive_redirect_handler(httpd_req_t *req) {
 }
 
 static esp_err_t ios_captive_handler(httpd_req_t *req) {
+    portal_trace_req(req);
   ESP_LOGI(TAG, "iOS captive portal detection: %s", req->uri);
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
@@ -693,6 +699,7 @@ static esp_err_t ios_captive_handler(httpd_req_t *req) {
 }
 
 static esp_err_t android_captive_handler(httpd_req_t *req) {
+    portal_trace_req(req);
   ESP_LOGI(TAG, "Android captive portal detection: %s", req->uri);
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
@@ -718,6 +725,8 @@ bool captive_portal_start(void) {
   config.uri_match_fn = httpd_uri_match_wildcard;
   config.max_uri_handlers = 12;
   config.stack_size = PORTAL_HTTPD_STACK_SIZE;
+  config.open_fn = portal_trace_open;
+  config.close_fn = portal_trace_close;
 
   ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);
 

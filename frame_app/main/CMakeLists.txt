@@ -35,6 +35,7 @@ set(SRC_FILES
     "../../common/controller_view_compat.c"
     "../../common/controller_utf8.c"
     "../../common/wifi_manager.c"
+    "../../common/portal_trace.c"
     "../../common/wifi_portal_form.c"
     "../../common/portal_brand.c"
     "../../common/power_debug_web.c"

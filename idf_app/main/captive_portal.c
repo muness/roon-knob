@@ -1,4 +1,5 @@
 #include "captive_portal.h"
+#include "portal_trace.h"
 #include "dns_server.h"
 #include "wifi_manager.h"
 #include "wifi_portal_form.h"
@@ -244,6 +245,7 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
 
 // Handler for GET / - serve the config form and recovery removals.
 static esp_err_t root_get_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "Serving config form");
 
     struct request_scratch {
@@ -336,6 +338,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t wifi_remove_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     char buf[64] = {0};
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
@@ -388,6 +391,7 @@ static esp_err_t wifi_remove_handler(httpd_req_t *req) {
 
 // Handler for GET /configure - save credentials (GET works better in mobile captive portals)
 static esp_err_t configure_get_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     // Extract query string from URI (after the '?')
     const char *query = strchr(req->uri, '?');
     if (!query || !query[1]) {
@@ -491,6 +495,7 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
 
 // Captive portal redirect - send all unknown requests to root
 static esp_err_t captive_redirect_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "Redirect request: %s", req->uri);
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
@@ -500,6 +505,7 @@ static esp_err_t captive_redirect_handler(httpd_req_t *req) {
 
 // iOS captive portal detection - must NOT return "Success"
 static esp_err_t ios_captive_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "iOS captive portal detection: %s", req->uri);
     // Return a redirect to trigger captive portal popup
     httpd_resp_set_status(req, "302 Found");
@@ -510,6 +516,7 @@ static esp_err_t ios_captive_handler(httpd_req_t *req) {
 
 // Android captive portal detection - must NOT return 204
 static esp_err_t android_captive_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "Android captive portal detection: %s", req->uri);
     // Return a redirect to trigger captive portal popup
     httpd_resp_set_status(req, "302 Found");
@@ -534,6 +541,8 @@ bool captive_portal_start_locked(void) {
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 12;  // root, configure, 4 captive detection, wildcard
     config.stack_size = 8192;  // Increased from default 4096 for NVS + UI operations
+    config.open_fn = portal_trace_open;
+    config.close_fn = portal_trace_close;
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
     ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);

@@ -1,4 +1,5 @@
 #include "dns_server.h"
+#include "portal_trace.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -135,6 +136,10 @@ static void dns_server_task(void *arg) {
                 }
             }
             ESP_LOGI(TAG, "DNS query: %s -> 192.168.4.1", domain);
+            const unsigned qtype = qpos + 2 < len
+                ? (unsigned)((rx_buf[qpos + 1] << 8) | rx_buf[qpos + 2])
+                : 0;
+            portal_trace('D', "t%u %.36s", qtype, domain);
         }
 
         int resp_len = build_dns_response(rx_buf, len, tx_buf);
