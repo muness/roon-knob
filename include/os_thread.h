@@ -45,6 +45,27 @@ static inline int os_thread_create_external_stack(os_thread_t *thread,
     return ret == pdPASS ? 0 : -1;
 }
 
+/* NVS and SPI-flash operations disable the external-memory cache.  Any task
+ * which can reach either path therefore needs a stack that is explicitly
+ * allocated from internal RAM; xTaskCreate() is not a sufficient guarantee
+ * when CONFIG_SPIRAM_USE_MALLOC is enabled. */
+static inline int os_thread_create_internal_stack(os_thread_t *thread,
+                                                   os_thread_func_t func,
+                                                   void *arg,
+                                                   const char *name,
+                                                   uint32_t stack_size) {
+    BaseType_t ret = xTaskCreateWithCaps(
+        (TaskFunction_t)func,
+        name,
+        stack_size,
+        arg,
+        5,
+        thread,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
+    );
+    return ret == pdPASS ? 0 : -1;
+}
+
 static inline int os_thread_create(os_thread_t *thread, os_thread_func_t func,
                                    void *arg) {
     return os_thread_create_configured(thread, func, arg, "task", 8192);
@@ -115,6 +136,14 @@ static inline int os_thread_create_configured(os_thread_t *thread,
 
 
 static inline int os_thread_create_external_stack(os_thread_t *thread,
+                                                   os_thread_func_t func,
+                                                   void *arg,
+                                                   const char *name,
+                                                   uint32_t stack_size) {
+    return os_thread_create_configured(thread, func, arg, name, stack_size);
+}
+
+static inline int os_thread_create_internal_stack(os_thread_t *thread,
                                                    os_thread_func_t func,
                                                    void *arg,
                                                    const char *name,

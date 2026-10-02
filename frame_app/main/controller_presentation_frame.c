@@ -40,6 +40,10 @@ void controller_presentation_set_zone_name(const char *zone_name) {
     eink_ui_set_zone_name(zone_name);
 }
 
+void controller_presentation_set_zone_count(int count) {
+    (void)count;  // Zone label presence policy is Dial-only for now.
+}
+
 void controller_presentation_set_network_status(const char *status) {
     const char *warning = config_durability_warning();
     eink_ui_set_network_status(warning ? warning : status);

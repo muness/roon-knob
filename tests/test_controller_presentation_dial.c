@@ -21,6 +21,8 @@ static int s_length;
 static int s_status_calls;
 static int s_message_calls;
 static int s_zone_calls;
+static int s_zone_count_calls;
+static int s_last_zone_count;
 static int s_network_calls;
 static char s_network_status[128];
 static bool s_network_status_is_null;
@@ -63,6 +65,10 @@ void ui_set_message(const char *msg) {
 void ui_set_zone_name(const char *zone_name) {
     assert(strcmp(zone_name, "zone") == 0);
     ++s_zone_calls;
+}
+void ui_set_zone_count(int count) {
+    s_last_zone_count = count;
+    ++s_zone_count_calls;
 }
 void ui_show_zone_picker(const char **zone_names, const char **zone_ids,
                          int zone_count, int selected_idx) {
@@ -142,6 +148,9 @@ int main(void) {
     controller_presentation_set_status(true);
     controller_presentation_set_message("message");
     controller_presentation_set_zone_name("zone");
+    controller_presentation_set_zone_count(2);
+    assert(s_zone_count_calls == 1);
+    assert(s_last_zone_count == 2);
     controller_presentation_set_network_status("network");
     assert(strcmp(s_network_status, "network") == 0);
     s_config_durability = CONTROLLER_CONFIG_DURABILITY_DEGRADED_COMMIT;

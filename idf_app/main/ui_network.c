@@ -44,6 +44,7 @@ struct ui_net_widgets {
     lv_obj_t *panel;
     lv_obj_t *name_value;
     lv_obj_t *bridge_value;
+    lv_obj_t *bridge_details;
     lv_obj_t *ssid_value;
     lv_obj_t *ip_value;
     lv_obj_t *version_label;
@@ -180,20 +181,29 @@ static void refresh_labels(void) {
     }
 
     if (s_widgets.bridge_value) {
-        char bridge_url[128];
-        if (bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url))) {
-            // Extract host:port from URL (skip http://)
-            const char *host = bridge_url;
-            if (strncmp(host, "http://", 7) == 0) {
-                host += 7;
-            }
-            // Show with discovery method
-            const char *source = bridge_client_is_bridge_mdns() ? " (mDNS)" : "";
-            lv_label_set_text_fmt(s_widgets.bridge_value, "%s%s", host, source);
-        } else {
-            lv_label_set_text(s_widgets.bridge_value, "(discovering...)");
-        }
+        char bridge_url[128] = {0}, summary[128], details[512];
+        bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
+        bridge_client_connection_status(summary, sizeof(summary), details, sizeof(details));
+        char display[272];
+        snprintf(display, sizeof(display), "%s\n%s", bridge_url, summary);
+        if (strcmp(lv_label_get_text(s_widgets.bridge_value), display) != 0)
+            lv_label_set_text(s_widgets.bridge_value, display);
+        if (s_widgets.bridge_details && !lv_obj_has_flag(s_widgets.bridge_details, LV_OBJ_FLAG_HIDDEN))
+            lv_label_set_text(s_widgets.bridge_details, details);
     }
+}
+
+static void toggle_connection_details(lv_event_t *event) {
+    (void)event;
+    if (lv_obj_has_flag(s_widgets.bridge_details, LV_OBJ_FLAG_HIDDEN))
+        lv_obj_clear_flag(s_widgets.bridge_details, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(s_widgets.bridge_details, LV_OBJ_FLAG_HIDDEN);
+    refresh_labels();
+}
+
+static void refresh_connection_timer(lv_timer_t *timer) {
+    (void)timer;
+    if (s_widgets.panel && !lv_obj_has_flag(s_widgets.panel, LV_OBJ_FLAG_HIDDEN)) refresh_labels();
 }
 
 static void set_ip_text(const char *text) {
@@ -378,16 +388,23 @@ static void ensure_panel(void) {
     lv_label_set_text(lv_label_create(ip_row), "IP:");
     s_widgets.ip_value = lv_label_create(ip_row);
 
-    // Bridge row (with horizontal scroll for long URLs)
+    // Connection summary and optional details share the web Settings snapshot.
     lv_obj_t *bridge_row = lv_obj_create(s_widgets.panel);
     lv_obj_set_size(bridge_row, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(bridge_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_flow(bridge_row, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(bridge_row, 4, 0);
     lv_obj_clear_flag(bridge_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_label_set_text(lv_label_create(bridge_row), "Hi-Fi Control:");
     s_widgets.bridge_value = lv_label_create(bridge_row);
-    lv_obj_set_width(s_widgets.bridge_value, 120);  // Constrain width to enable scroll
-    lv_label_set_long_mode(s_widgets.bridge_value, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(s_widgets.bridge_value, lv_pct(100));
+    lv_label_set_long_mode(s_widgets.bridge_value, LV_LABEL_LONG_WRAP);
+    lv_obj_t *details_button = lv_button_create(bridge_row);
+    lv_label_set_text(lv_label_create(details_button), "Connection details");
+    lv_obj_add_event_cb(details_button, toggle_connection_details, LV_EVENT_CLICKED, NULL);
+    s_widgets.bridge_details = lv_label_create(bridge_row);
+    lv_obj_set_width(s_widgets.bridge_details, lv_pct(100));
+    lv_label_set_long_mode(s_widgets.bridge_details, LV_LABEL_LONG_WRAP);
+    lv_obj_add_flag(s_widgets.bridge_details, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *ble_row = lv_obj_create(s_widgets.panel);
     lv_obj_set_size(ble_row, lv_pct(100), LV_SIZE_CONTENT);
@@ -488,6 +505,8 @@ static void apply_evt_async(void *data) {
 
 void ui_network_register_menu(void) {
     ensure_panel();
+    static lv_timer_t *connection_timer;
+    if (!connection_timer) connection_timer = lv_timer_create(refresh_connection_timer, 1000, NULL);
     refresh_labels();
     char ip[16] = {0};
     if (wifi_mgr_get_ip(ip, sizeof(ip))) {

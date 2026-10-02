@@ -12,5 +12,6 @@ static inline void platform_log_impl(const char *level, const char *fmt, ...) {
 }
 
 #define LOGI(...) platform_log_impl("I", __VA_ARGS__)
+#define LOGD(...) platform_log_impl("D", __VA_ARGS__)
 #define LOGW(...) platform_log_impl("W", __VA_ARGS__)
 #define LOGE(...) platform_log_impl("E", __VA_ARGS__)

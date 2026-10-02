@@ -1,9 +1,16 @@
 #include "captive_portal.h"
+#include "portal_trace.h"
 #include "dns_server.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
 #include "ui.h"
+#include "portal_brand.h"
+
+#ifndef PLATFORM_PORTAL_PRODUCT_SLUG
+#define PLATFORM_PORTAL_PRODUCT_SLUG "HiPhi Dial"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -105,63 +112,43 @@ static void apply_committed_wifi(bool reconnect) {
     }
 }
 
-// Simple HTML form for WiFi configuration
-static const char *HTML_FORM =
+// Simple HTML form for WiFi configuration. The shared brand stylesheet and
+// header are sent as their own chunks between HTML_FORM_HEAD and HTML_FORM.
+static const char *HTML_FORM_HEAD =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>HiPhi Dial Setup</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "p{color:#888;margin-top:0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:300px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=password],input[type=url]{width:100%;padding:10px;border:1px solid #333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{width:100%;padding:12px;margin-top:20px;background:#4fc3f7;color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".status{padding:10px;margin-top:15px;border-radius:5px;}"
-    ".success{background:#2e7d32;}"
-    ".error{background:#c62828;}"
-    ".hint{font-size:12px;color:#666;margin-top:4px;}"
-    ".note{background:#1e3a5f;padding:15px;border-radius:10px;max-width:300px;margin-top:20px;font-size:13px;}"
-    ".note a{color:#4fc3f7;}"
-    ".saved{background:#16213e;padding:12px 20px;border-radius:10px;max-width:300px;margin-top:20px;}"
-    ".wifi-entry{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #333;}"
-    ".wifi-entry:last-child{border-bottom:0;}"
-    ".btn-rm{background:#c62828;color:#fff;border:0;border-radius:5px;padding:7px 10px;cursor:pointer;}"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " Setup</title>"
+    "<style>";
+
+static const char *HTML_FORM =
     "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
-    "<p>WiFi Setup</p>"
+    "<h1>WiFi Setup</h1>"
     "<form method='GET' action='/configure'>"
-    "<label>WiFi Network (SSID)</label>"
-    "<input type='text' name='ssid' required maxlength='32' placeholder='Your WiFi name'>"
+    RK_WIFI_PORTAL_SELECT_OPEN
+    "<!--WIFI_OPTIONS-->"
+    RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
     "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
     "<input type='submit' value='Connect'>"
     "</form>"
     "<div class='note'>"
-    "<strong>Note:</strong> HiPhi Dial requires Unified Hi-Fi Control on your network. "
+    "<strong>Note:</strong> " PLATFORM_PORTAL_PRODUCT_SLUG " requires Unified Hi-Fi Control on your network. "
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
     "</div>"
     "</body></html>";
 
-static const char *HTML_SUCCESS =
+static const char *HTML_SUCCESS_HEAD =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>HiPhi Dial - Saved</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;text-align:center;}"
-    "h1{color:#4fc3f7;}"
-    ".status{padding:20px;margin:20px auto;border-radius:10px;max-width:300px;background:#2e7d32;}"
-    ".next{padding:15px;margin:20px auto;border-radius:10px;max-width:300px;background:#16213e;text-align:left;}"
-    ".next li{margin:8px 0;}"
-    "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
-    "<div class='status'>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Saved</title>"
+    "<style>";
+
+static const char *HTML_SUCCESS_BODY =
+    "<div class='status success'>"
     "<p><strong>WiFi credentials saved!</strong></p>"
     "</div>"
     "<div class='next'>"
@@ -171,7 +158,7 @@ static const char *HTML_SUCCESS =
     "<li>Reconnect your phone to your home WiFi</li>"
     "<li>The HiPhi Dial will connect and start working</li>"
     "</ol>"
-    "</div></body></html>";
+    "</div>";
 
 // URL decode a string in place
 static void url_decode(char *str) {
@@ -258,21 +245,67 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
 
 // Handler for GET / - serve the config form and recovery removals.
 static esp_err_t root_get_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "Serving config form");
 
-    controller_config_snapshot_t snapshot = {0};
-    if (!config_snapshot(&snapshot)) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Settings are unavailable");
+    struct request_scratch {
+        controller_config_snapshot_t snapshot;
+        rk_wifi_portal_scan_t scan;
+        char options[4096];
+    } *scratch = calloc(1, sizeof(*scratch));
+    if (!scratch) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
-    const rk_cfg_t *cfg = &snapshot.value;
+    if (!config_snapshot(&scratch->snapshot)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Settings are unavailable");
+        free(scratch);
+        return ESP_FAIL;
+    }
+    const rk_cfg_t *cfg = &scratch->snapshot.value;
+
+    char query[32] = {0};
+    char scan_value[8] = {0};
+    const bool scan_again_requested =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value)) == ESP_OK &&
+        strcmp(scan_value, "again") == 0;
+    rk_wifi_portal_scan_prepare(&scratch->scan, scan_again_requested);
+    rk_wifi_portal_render_options(&scratch->scan, scratch->options, sizeof(scratch->options));
 
     httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr_chunk(req, HTML_FORM_HEAD);
+    httpd_resp_sendstr_chunk(req, PORTAL_BRAND_CSS);
+    static const char options_marker[] = "<!--WIFI_OPTIONS-->";
+    static const char body_marker[] = "</style></head><body>";
+    const char *form_body = HTML_FORM + strlen(body_marker);
+    httpd_resp_sendstr_chunk(req, body_marker);
+    httpd_resp_sendstr_chunk(req, portal_brand_header_html());
+    const char *options_at = strstr(HTML_FORM, options_marker);
     const char *closing = strstr(HTML_FORM, "</body></html>");
-    size_t prefix_len = closing ? (size_t)(closing - HTML_FORM)
-                                : strlen(HTML_FORM);
-    httpd_resp_send_chunk(req, HTML_FORM, prefix_len);
+    const char *prefix_end = options_at ? options_at : closing;
+    if (!prefix_end) {
+        prefix_end = HTML_FORM + strlen(HTML_FORM);
+    }
+    httpd_resp_send_chunk(req, form_body,
+                          (size_t)(prefix_end - form_body));
+
+    if (options_at) {
+        httpd_resp_sendstr_chunk(req,
+                                 rk_wifi_portal_scan_placeholder(&scratch->scan));
+        httpd_resp_sendstr_chunk(req, "</option>");
+        httpd_resp_sendstr_chunk(req, scratch->options);
+    }
+
+    const char *after_scan = options_at
+        ? options_at + strlen(options_marker) : prefix_end;
+    const char *content_end = closing ? closing : HTML_FORM + strlen(HTML_FORM);
+    if (after_scan < content_end) {
+        httpd_resp_send_chunk(req, after_scan,
+                              (size_t)(content_end - after_scan));
+    }
 
     if (cfg->wifi_count > 0) {
         httpd_resp_sendstr_chunk(req,
@@ -293,12 +326,19 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
         httpd_resp_sendstr_chunk(req, "</div>");
     }
 
+    if (rk_wifi_portal_scan_should_refresh(&scratch->scan)) {
+        httpd_resp_sendstr_chunk(req, RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT);
+    }
+
+    httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
     httpd_resp_sendstr_chunk(req, closing ? closing : "");
     httpd_resp_send_chunk(req, NULL, 0);
+    free(scratch);
     return ESP_OK;
 }
 
 static esp_err_t wifi_remove_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     char buf[64] = {0};
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
@@ -351,6 +391,7 @@ static esp_err_t wifi_remove_handler(httpd_req_t *req) {
 
 // Handler for GET /configure - save credentials (GET works better in mobile captive portals)
 static esp_err_t configure_get_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     // Extract query string from URI (after the '?')
     const char *query = strchr(req->uri, '?');
     if (!query || !query[1]) {
@@ -365,10 +406,15 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
     strncpy(buf, query, sizeof(buf) - 1);
     ESP_LOGI(TAG, "Received config: %s", buf);
 
+    char selected_ssid[33] = {0};
+    char manual_ssid[33] = {0};
     char ssid[33] = {0};
     char pass[65] = {0};
 
-    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid))) {
+    (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+    (void)get_form_field(buf, "ssid_manual", manual_ssid, sizeof(manual_ssid));
+    if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                     ssid, sizeof(ssid))) {
         ESP_LOGE(TAG, "Missing SSID");
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
@@ -430,7 +476,14 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
 
     // Confirm success only after NVS write and read-back verification.
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, HTML_SUCCESS, strlen(HTML_SUCCESS));
+    httpd_resp_sendstr_chunk(req, HTML_SUCCESS_HEAD);
+    httpd_resp_sendstr_chunk(req, PORTAL_BRAND_CSS);
+    httpd_resp_sendstr_chunk(req, "</style></head><body>");
+    httpd_resp_sendstr_chunk(req, portal_brand_header_html());
+    httpd_resp_sendstr_chunk(req, HTML_SUCCESS_BODY);
+    httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
+    httpd_resp_sendstr_chunk(req, "</body></html>");
+    httpd_resp_send_chunk(req, NULL, 0);
 
     ESP_LOGI(TAG, "Credentials saved, scheduling countdown...");
     if (!schedule_setup_reboot(ssid)) {
@@ -442,6 +495,7 @@ static esp_err_t configure_get_handler(httpd_req_t *req) {
 
 // Captive portal redirect - send all unknown requests to root
 static esp_err_t captive_redirect_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "Redirect request: %s", req->uri);
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
@@ -451,6 +505,7 @@ static esp_err_t captive_redirect_handler(httpd_req_t *req) {
 
 // iOS captive portal detection - must NOT return "Success"
 static esp_err_t ios_captive_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "iOS captive portal detection: %s", req->uri);
     // Return a redirect to trigger captive portal popup
     httpd_resp_set_status(req, "302 Found");
@@ -461,6 +516,7 @@ static esp_err_t ios_captive_handler(httpd_req_t *req) {
 
 // Android captive portal detection - must NOT return 204
 static esp_err_t android_captive_handler(httpd_req_t *req) {
+    portal_trace_req(req);
     ESP_LOGI(TAG, "Android captive portal detection: %s", req->uri);
     // Return a redirect to trigger captive portal popup
     httpd_resp_set_status(req, "302 Found");
@@ -485,6 +541,8 @@ bool captive_portal_start_locked(void) {
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 12;  // root, configure, 4 captive detection, wildcard
     config.stack_size = 8192;  // Increased from default 4096 for NVS + UI operations
+    config.open_fn = portal_trace_open;
+    config.close_fn = portal_trace_close;
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
     ESP_LOGI(TAG, "Starting captive portal on port %d", config.server_port);

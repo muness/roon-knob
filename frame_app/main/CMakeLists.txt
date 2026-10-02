@@ -1,8 +1,11 @@
 set(SRC_FILES
     "main_frame.c"
+    "frame_power_manager.c"
+    "frame_power_policy.c"
+    "frame_display_preferences.c"
     "eink_display.c"
-    "eink_dither.c"
     "eink_ui.c"
+    "../../common/assets/hiphi_logo_mono.c"
     "eink_font.c"
     "controller_input_profile_frame.c"
     "controller_presentation_frame.c"
@@ -12,7 +15,7 @@ set(SRC_FILES
     "platform_input_frame.c"
     "platform_http_frame.c"
     "platform_storage_frame.c"
-    "platform_mdns_frame.c"
+    "../../common/platform/platform_mdns_esp.c"
     "platform_log_frame.c"
     "platform_identity_frame.c"
     "platform_provisioning_frame.c"
@@ -22,6 +25,7 @@ set(SRC_FILES
     "../../common/app_main.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
+    "../../common/controller_connection.c"
     "../../common/controller_action_router.c"
     "../../common/controller_config.c"
     "../../common/controller_ble_input.c"
@@ -29,8 +33,15 @@ set(SRC_FILES
     "../../common/controller_input_mailbox.c"
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
+    "../../common/controller_utf8.c"
     "../../common/wifi_manager.c"
+    "../../common/portal_trace.c"
+    "../../common/wifi_portal_form.c"
+    "../../common/portal_brand.c"
+    "../../common/power_debug_web.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_mdns_endpoint.c"
+    "../../common/platform/platform_power.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
 )
@@ -64,7 +75,8 @@ idf_component_register(
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0
+    PORTAL_BRAND_PRODUCT="Frame")
 # Match the shipping Dial target until ESP-IDF 6.0/Picolibc removes the
 # aggressive GCC false positives in legacy bounded string copies.
 # TODO(#183): Remove after ESP-IDF 6.0 migration.

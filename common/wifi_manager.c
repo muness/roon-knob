@@ -1,26 +1,64 @@
 #include "wifi_manager.h"
+#include "portal_trace.h"
 
 #include <esp_err.h>
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_netif.h>
+#include <esp_netif_sntp.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <nvs_flash.h>
+#include <sdkconfig.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if CONFIG_PM_ENABLE
+#include <esp_pm.h>
+#endif
 
 #include "controller_config.h"
 #include "os_mutex.h"
 #include "platform/platform_identity.h"
+#include "platform/platform_power.h"
 #include "platform/platform_provisioning.h"
+#include "platform/platform_time.h"
 
 static const char *TAG = "wifi_mgr";
 static const uint32_t s_backoff_ms[] = {500, 1000, 2000, 4000, 8000, 16000, 30000};
 static const uint32_t s_provisioning_retry_ms[] = {500, 1000, 2000, 4000, 8000, 16000, 30000};
 static const char *s_last_error = NULL;  // Last disconnect reason for UI display
+
+/*
+ * All supported ESP targets already enable tickless idle in sdkconfig. Keep
+ * any target-owned DFS range intact, but let ESP-IDF enter automatic
+ * Light-sleep whenever every task and radio driver is idle. Target defaults
+ * enable ESP-IDF's startup DFS range (XTAL to the configured maximum); a
+ * target such as the Waveshare Dial may deliberately narrow that range before
+ * Wi-Fi starts, and this function preserves the effective values.
+ */
+static void configure_connected_idle_power(void) {
+#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
+    esp_pm_config_t config = {0};
+    esp_err_t err = esp_pm_get_configuration(&config);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Connected-idle PM state unavailable: %s",
+                 esp_err_to_name(err));
+        return;
+    }
+    config.light_sleep_enable = true;
+    err = esp_pm_configure(&config);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Connected-idle Light-sleep enabled (%d-%d MHz)",
+                 config.min_freq_mhz, config.max_freq_mhz);
+    } else {
+        ESP_LOGW(TAG, "Connected-idle Light-sleep unavailable: %s",
+                 esp_err_to_name(err));
+    }
+#endif
+}
 
 // Map WiFi disconnect reason to human-readable string and event type
 static const char *get_disconnect_reason_str(uint8_t reason, rk_net_evt_t *out_evt) {
@@ -111,6 +149,27 @@ static int s_wifi_idx;           // index into this device's saved WiFi list
 static rk_wifi_scan_state_t s_scan_state = RK_WIFI_SCAN_IDLE;
 static rk_wifi_network_t s_scan_results[RK_WIFI_SCAN_MAX_NETWORKS];
 static size_t s_scan_count;
+static bool s_sntp_initialized;
+
+static void time_sync_cb(struct timeval *tv) {
+    if (!tv || tv->tv_sec < 1704067200) return;
+    const int64_t unix_time_ms = (int64_t)tv->tv_sec * 1000 +
+                                 tv->tv_usec / 1000;
+    platform_power_evidence_note_time_sync(unix_time_ms, platform_millis());
+    ESP_LOGI(TAG, "UTC clock synchronized for durable power timestamps");
+}
+
+static void ensure_time_sync_started(void) {
+    if (s_sntp_initialized) return;
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    config.sync_cb = time_sync_cb;
+    const esp_err_t err = esp_netif_sntp_init(&config);
+    if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+        s_sntp_initialized = true;
+    } else {
+        ESP_LOGW(TAG, "Could not start UTC clock sync: %s", esp_err_to_name(err));
+    }
+}
 
 #ifdef ESP_PLATFORM
 /* os_mutex_lock() provides convenient lazy allocation on ESP, but that
@@ -336,6 +395,16 @@ static esp_err_t apply_wifi_config(const rk_wifi_entry_t *active) {
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     cfg.sta.pmf_cfg.capable = true;
     cfg.sta.pmf_cfg.required = false;
+    /* Join the strongest AP of the SSID, not the first beacon heard: the
+     * default fast scan can pick a far, weak mesh node. */
+    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    /* Network-assisted roaming: 802.11k neighbour reports and 802.11v BSS
+     * transition let a mesh controller steer us to a better AP.  There is no
+     * self-initiated RSSI roaming; it ping-ponged between similar-strength
+     * APs when tried on the T-Dongle. */
+    cfg.sta.rm_enabled = 1;
+    cfg.sta.btm_enabled = 1;
     return esp_wifi_set_config(WIFI_IF_STA, &cfg);
 }
 
@@ -620,6 +689,25 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
         uint8_t reason = disconn ? disconn->reason : 0;
         schedule_retry_with_reason(reason);
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
+        const wifi_event_ap_staconnected_t *join = (const wifi_event_ap_staconnected_t *)event_data;
+        portal_trace_reset();  /* keep the latest join's sequence whole */
+        if (join) {
+            portal_trace('J', MACSTR, MAC2STR(join->mac));
+        }
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        const wifi_event_ap_stadisconnected_t *leave = (const wifi_event_ap_stadisconnected_t *)event_data;
+        portal_trace('L', "reason %u", leave ? (unsigned)leave->reason : 0u);
+        portal_trace_dump("station left");
+    }
+}
+
+static void ap_ip_event_handler(void *arg, esp_event_base_t event_base,
+                                int32_t event_id, void *event_data) {
+    (void)arg;
+    if (event_base == IP_EVENT && event_id == IP_EVENT_AP_STAIPASSIGNED && event_data) {
+        const ip_event_ap_staipassigned_t *lease = (const ip_event_ap_staipassigned_t *)event_data;
+        portal_trace('I', IPSTR, IP2STR(&lease->ip));
     }
 }
 
@@ -870,6 +958,8 @@ void wifi_mgr_start(void) {
 
     ensure_wifi_loaded();
 
+    configure_connected_idle_power();
+
     esp_err_t err = esp_netif_init();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
@@ -892,6 +982,7 @@ void wifi_mgr_start(void) {
         unlock_wifi_effect();
         return;
     }
+    ensure_time_sync_started();
     if (!s_sta_netif) {
         s_sta_netif = esp_netif_create_default_wifi_sta();
 
@@ -908,13 +999,18 @@ void wifi_mgr_start(void) {
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_cfg));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    // Disable WiFi power save for reliable HTTP polling
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    /* WIFI_PS_MIN_MODEM is ESP-IDF's documented default.  Outgoing HTTP
+     * requests wake the station; between requests it wakes for each DTIM and
+     * remains associated.  The previous unconditional WIFI_PS_NONE kept the
+     * radio awake on every target, including targets whose panel was asleep. */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,
                                                 &wifi_scan_done_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED,
+                                                &ap_ip_event_handler, NULL));
 
     const esp_timer_create_args_t retry_args = {
         .callback = &retry_timer_cb,
@@ -1127,6 +1223,7 @@ void wifi_mgr_stop(void) {
     esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE,
                                  &wifi_scan_done_handler);
     esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &ap_ip_event_handler);
 
     // Stop retry timer
     if (retry_timer) {

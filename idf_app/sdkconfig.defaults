@@ -1,3 +1,12 @@
+# HiPhi Dial (Waveshare ESP32-S3-Knob-Touch-LCD-1.8) sdkconfig defaults
+#
+# Target: ESP32-S3. Pinning it here makes a fresh checkout configure for the
+# right chip on the first `idf.py build`, matching the `target: esp32s3` input
+# CI passes to espressif/esp-idf-ci-action. Without it, ESP-IDF falls back to
+# classic esp32 and the build fails in display_sleep.c / battery.c.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_IDF_TARGET_ESP32S3=y
+
 CONFIG_WIFI_SSID="HIPHI_DIAL_AP"
 CONFIG_WIFI_PASSWORD="rotary123"
 CONFIG_EXAMPLE_IPV6=0
@@ -100,6 +109,7 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 # When enabled in bridge config, allows CPU to scale down when idle to save power
 # Trade-off: adds 0.2-40us interrupt latency
 CONFIG_PM_ENABLE=y
+CONFIG_PM_DFS_INIT_AUTO=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 
 # BLE HID host for pairing a separate media remote. ESP32-S3 supports BLE,
@@ -154,3 +164,9 @@ CONFIG_BT_NIMBLE_HR_SERVICE=n
 CONFIG_BT_NIMBLE_BAS_SERVICE=n
 CONFIG_BT_NIMBLE_DIS_SERVICE=n
 CONFIG_LWIP_NETIF_HOSTNAME=y
+
+# Network-assisted roaming: 802.11k/v lets a mesh controller steer the device
+# to a better AP. The parent option must be set or RRM/WNM are silently dropped.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_RRM_SUPPORT=y
+CONFIG_ESP_WIFI_WNM_SUPPORT=y

@@ -22,6 +22,8 @@ static bool s_provisioning_ready;
 static int s_provisioning_start_calls;
 static int s_provisioning_stop_calls;
 static int s_wifi_connect_calls;
+static int s_sntp_init_calls;
+static wifi_ps_type_t s_wifi_power_save;
 static wifi_config_t s_last_sta_config;
 static struct {
     int32_t event_id;
@@ -48,6 +50,8 @@ void fixture_reset(void) {
     s_provisioning_start_calls = 0;
     s_provisioning_stop_calls = 0;
     s_wifi_connect_calls = 0;
+    s_sntp_init_calls = 0;
+    s_wifi_power_save = WIFI_PS_NONE;
     memset(&s_last_sta_config, 0, sizeof(s_last_sta_config));
     memset(s_wifi_handlers, 0, sizeof(s_wifi_handlers));
     s_wifi_handler_count = 0;
@@ -80,6 +84,9 @@ int fixture_provisioning_stop_calls(void) {
 }
 
 int fixture_wifi_connect_calls(void) { return s_wifi_connect_calls; }
+int fixture_sntp_init_calls(void) { return s_sntp_init_calls; }
+
+wifi_ps_type_t fixture_wifi_power_save(void) { return s_wifi_power_save; }
 
 const char *fixture_wifi_ssid(void) {
     return (const char *)s_last_sta_config.sta.ssid;
@@ -201,6 +208,11 @@ const char *esp_err_to_name(esp_err_t err) {
     return "fake";
 }
 
+/* The setup-timeline hooks are diagnostics only; the lifecycle tests ignore them. */
+void portal_trace(char kind, const char *fmt, ...) { (void)kind; (void)fmt; }
+void portal_trace_reset(void) {}
+void portal_trace_dump(const char *why) { (void)why; }
+
 esp_err_t esp_event_loop_create_default(void) { return ESP_OK; }
 esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id,
                                      esp_event_handler_t handler, void *arg) {
@@ -211,7 +223,7 @@ esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id,
             s_wifi_handlers[s_wifi_handler_count].handler = handler;
             ++s_wifi_handler_count;
         }
-    } else if (base == IP_EVENT) {
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_ip_handler = handler;
     }
     return ESP_OK;
@@ -228,10 +240,9 @@ esp_err_t esp_event_handler_unregister(esp_event_base_t base, int32_t id,
                 break;
             }
         }
-    } else if (base == IP_EVENT) {
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_ip_handler = NULL;
     }
-    (void)id;
     (void)handler;
     return ESP_OK;
 }
@@ -249,6 +260,11 @@ esp_err_t esp_netif_set_hostname(esp_netif_t *netif, const char *hostname) {
 }
 esp_err_t esp_netif_get_hostname(esp_netif_t *netif, const char **hostname) {
     *hostname = netif->hostname;
+    return ESP_OK;
+}
+esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *config) {
+    (void)config;
+    s_sntp_init_calls++;
     return ESP_OK;
 }
 char *esp_ip4addr_ntoa(const esp_ip4_addr_t *addr, char *buf, size_t size) {
@@ -291,7 +307,10 @@ esp_err_t esp_wifi_set_mode(int mode) {
     }
     return ESP_OK;
 }
-esp_err_t esp_wifi_set_ps(wifi_ps_type_t type) { (void)type; return ESP_OK; }
+esp_err_t esp_wifi_set_ps(wifi_ps_type_t type) {
+    s_wifi_power_save = type;
+    return ESP_OK;
+}
 esp_err_t esp_wifi_set_config(int interface, const wifi_config_t *cfg) {
     if (interface == WIFI_IF_STA) {
         s_last_sta_config = *cfg;
@@ -345,6 +364,7 @@ void vTaskDelay(unsigned ticks) {
 
 const char *platform_device_slug(void) { return "fixture"; }
 const char *platform_provisioning_ssid(void) { return "Fixture setup"; }
+const char *platform_product_name(void) { return "HiPhi Fixture"; }
 bool platform_provisioning_start(void) {
     s_provisioning_start_calls++;
     pthread_mutex_lock(&s_fixture_lock);
@@ -368,6 +388,12 @@ void platform_provisioning_stop(void) {
     }
     pthread_mutex_unlock(&s_fixture_lock);
     s_provisioning_stop_calls++;
+}
+uint32_t platform_millis(void) { return 0; }
+void platform_power_evidence_note_time_sync(int64_t unix_time_ms,
+                                            uint32_t uptime_ms) {
+    (void)unix_time_ms;
+    (void)uptime_ms;
 }
 bool controller_config_snapshot(controller_config_snapshot_t *out) {
     if (!out) {

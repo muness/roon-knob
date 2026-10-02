@@ -1,4 +1,5 @@
 #include "dns_server.h"
+#include "portal_trace.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -52,6 +53,16 @@ static int build_dns_response(const uint8_t *query, int query_len, uint8_t *resp
 
     if (pos > query_len) {
         return -1;  // Malformed query
+    }
+
+    // Only A queries get the AP address.  For AAAA/HTTPS/etc. reply with an
+    // empty NOERROR so dual-stack clients stop waiting on a mismatched answer.
+    const uint16_t qtype = (uint16_t)((query[pos - 4] << 8) | query[pos - 3]);
+    if (qtype != 1) {
+        response[6] = response[7] = 0;    // ANCOUNT
+        response[8] = response[9] = 0;    // NSCOUNT
+        response[10] = response[11] = 0;  // ARCOUNT (we truncate at pos)
+        return pos;
     }
 
     // Add answer section
@@ -125,6 +136,10 @@ static void dns_server_task(void *arg) {
                 }
             }
             ESP_LOGI(TAG, "DNS query: %s -> 192.168.4.1", domain);
+            const unsigned qtype = qpos + 2 < len
+                ? (unsigned)((rx_buf[qpos + 1] << 8) | rx_buf[qpos + 2])
+                : 0;
+            portal_trace('D', "t%u %.36s", qtype, domain);
         }
 
         int resp_len = build_dns_response(rx_buf, len, tx_buf);
