@@ -41,7 +41,7 @@ final workflow and generated broker/cache/access artifacts. Do not regenerate fr
 an obsolete source snapshot after unrelated workflow edits: update the canonical
 unconverted source first and verify all non-adapted steps remain identical.
 
-The deployed broker policy permits only this repository, with 8 CPUs/12 GiB per
+The deployed broker policy permits only this repository, with 4 CPUs/8 GiB per
 job, and polls this exact repository. Existing approvals/leases are preserved.
 Per-board Actions ccache and managed-components caches remain unchanged; mutable
 build state is isolated per ephemeral job. Different hosted/fleet checkout paths

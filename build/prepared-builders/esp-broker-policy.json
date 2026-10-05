@@ -6,8 +6,8 @@
         "muness/roon-knob"
       ],
       "capability": "linux-general",
-      "cpu": 8,
-      "memory": "12g"
+      "cpu": 4,
+      "memory": "8g"
     }
   }
 }
