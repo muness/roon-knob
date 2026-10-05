@@ -1,0 +1,9 @@
+{
+  "tools_package": "espressif/idf@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2",
+  "fleet_registry": "192.168.1.36:5443",
+  "broker_poll_repository": "muness/roon-knob",
+  "hosted_fallback": "original public Espressif Docker action; private NAS registry not required",
+  "verification": [
+    "https://github.com/muness/roon-knob/issues/267"
+  ]
+}

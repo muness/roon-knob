@@ -1,0 +1,7 @@
+{
+  "repository": "muness/roon-knob",
+  "builder_identity": "d14d43a864db3537e8e93439520e6022d85c4be4204fa80e74750686fa8cb5b7",
+  "compiler_cache": "existing per-board Actions ccache preserved",
+  "mutable_state": "isolated per ephemeral job",
+  "image_storage": "shared NAS registry, local Docker working cache on each host"
+}
