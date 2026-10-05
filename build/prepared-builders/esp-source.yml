@@ -288,313 +288,328 @@ jobs:
 
   build-idf:
     name: build-idf
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-      || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]')
-      || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-      with:
-        persist-credentials: false
-    - name: Get version from tag or CMakeLists
-      id: version
-      run: |
-        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/v}
-        else
-          VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
-        fi
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "Building firmware version: $VERSION"
-    - name: Inject version into CMakeLists.txt
-      run: |
-        sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.version.outputs.version }}")/' idf_app/CMakeLists.txt
-        grep PROJECT_VER idf_app/CMakeLists.txt
-    - name: Restore ESP-IDF compiler cache
-      uses: actions/cache@v5
-      with:
-        path: .ci/ccache
-        key: ${{ runner.os }}-esp-idf-v5.5.5-ccache-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-esp-idf-v5.5.5-ccache-
-    - name: Restore Dial managed components
-      uses: actions/cache@v5
-      with:
-        path: idf_app/managed_components
-        key: ${{ runner.os }}-esp-idf-v5.5.5-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
-    - name: Build with ESP-IDF
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.5.5
-        target: esp32s3
-        path: idf_app
-        extra_docker_args: -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache -e CCACHE_MAXSIZE=500M -e CCACHE_COMPRESS=1
-        command: set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; ! grep
-          -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep
-          -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y"
-          sdkconfig; grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig; grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y"
-          sdkconfig; grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig; grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72"
-          sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y"
-          sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep
-          -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/"
-          build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj"
-          build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$"
-          build/hiphi_dial.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map; cp build/hiphi_dial.bin build/roon_knob.bin;
-          cmp build/hiphi_dial.bin build/roon_knob.bin; esptool.py --chip esp32s3 merge_bin -o ../hiphi_dial_merged.bin --flash_mode
-          dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin
-          0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_dial.bin; ccache --show-stats
-      if: ${{ !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository)) }}
-    - name: Build with ESP-IDF (local image)
-      if: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository) }}
-      shell: bash
-      working-directory: ${{ github.workspace }}/idf_app
-      env:
-        CCACHE_DIR: ${{ github.workspace }}/.ci/ccache
-        CCACHE_MAXSIZE: 500M
-        CCACHE_COMPRESS: '1'
-        IDF_TARGET: esp32s3
-      run: |
-        set -e
-        git config --global --add safe.directory /opt/esp/idf
-        # Tools are in the approved runner; no Docker socket or image pull.
-        . /opt/esp/idf/export.sh
-        idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-        set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig; grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig; grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" sdkconfig; grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig; grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/" build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map; cp build/hiphi_dial.bin build/roon_knob.bin; cmp build/hiphi_dial.bin build/roon_knob.bin; esptool.py --chip esp32s3 merge_bin -o ../hiphi_dial_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_dial.bin; ccache --show-stats
-    - name: Verify merged Dial flash image
-      run: |
-        # Compatibility aliases remain byte-identical while bridge/release
-        # consumers migrate to the HiPhi Dial artifact names.
-        cp hiphi_dial_merged.bin roon_knob_merged.bin
-        cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin
-        cmp hiphi_dial_merged.bin roon_knob_merged.bin
-        ls -la idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin \
-          hiphi_dial_merged.bin roon_knob_merged.bin
-    - name: Upload ESP32-S3 artifact
-      uses: actions/upload-artifact@v6
-      with:
-        name: esp32s3-firmware
-        path: |
-          idf_app/build/hiphi_dial.bin
-          idf_app/build/roon_knob.bin
-          idf_app/build/bootloader/bootloader.bin
-          idf_app/build/partition_table/partition-table.bin
-          idf_app/build/ota_data_initial.bin
-          hiphi_dial_merged.bin
-          roon_knob_merged.bin
-        retention-days: 30
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get version from tag or CMakeLists
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building firmware version: $VERSION"
+
+      - name: Inject version into CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.version.outputs.version }}")/' idf_app/CMakeLists.txt
+          grep PROJECT_VER idf_app/CMakeLists.txt
+
+      # Do not cache build/: it contains generated sdkconfig, CMake state, and
+      # firmware that must be regenerated for the checked-out SHA. The IDF image
+      # enables ccache; restoring it by prefix lets source
+      # changes reuse prior object compilation while a distinct SHA key saves the
+      # updated cache after each successful build.
+      - name: Restore ESP-IDF compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache
+          key: ${{ runner.os }}-esp-idf-v5.5.5-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-ccache-
+
+      - name: Restore Dial managed components
+        uses: actions/cache@v5
+        with:
+          path: idf_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
+
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: idf_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
+            grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
+            grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" sdkconfig;
+            grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig;
+            grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72" sdkconfig;
+            grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig;
+            grep -F "/components/esp_hid/" build/compile_commands.json;
+            grep -F "/generated/nimble_hidh.c" build/compile_commands.json;
+            grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
+            ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
+            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map;
+            ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map;
+            cp build/hiphi_dial.bin build/roon_knob.bin;
+            cmp build/hiphi_dial.bin build/roon_knob.bin;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_dial_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size 16MB
+            0x0 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_dial.bin;
+            ccache --show-stats
+
+      - name: Verify merged Dial flash image
+        run: |
+          # Compatibility aliases remain byte-identical while bridge/release
+          # consumers migrate to the HiPhi Dial artifact names.
+          cp hiphi_dial_merged.bin roon_knob_merged.bin
+          cmp idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin
+          cmp hiphi_dial_merged.bin roon_knob_merged.bin
+          ls -la idf_app/build/hiphi_dial.bin idf_app/build/roon_knob.bin \
+            hiphi_dial_merged.bin roon_knob_merged.bin
+
+      - name: Upload ESP32-S3 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: esp32s3-firmware
+          path: |
+            idf_app/build/hiphi_dial.bin
+            idf_app/build/roon_knob.bin
+            idf_app/build/bootloader/bootloader.bin
+            idf_app/build/partition_table/partition-table.bin
+            idf_app/build/ota_data_initial.bin
+            hiphi_dial_merged.bin
+            roon_knob_merged.bin
+          retention-days: 30
 
   build-frame:
     name: build-frame
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-      || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]')
-      || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-      with:
-        persist-credentials: false
-    - name: Get firmware version
-      id: frame-version
-      run: |
-        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/v}
-        else
-          VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
-        fi
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "Building HiPhi Frame firmware version: $VERSION"
-    - name: Inject version into Frame CMakeLists.txt
-      run: |
-        sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.frame-version.outputs.version }}")/' frame_app/CMakeLists.txt
-        grep PROJECT_VER frame_app/CMakeLists.txt
-    - name: Restore Frame compiler cache
-      uses: actions/cache@v5
-      with:
-        path: .ci/ccache-frame
-        key: ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-
-    - name: Restore Frame managed components
-      uses: actions/cache@v5
-      with:
-        path: frame_app/managed_components
-        key: ${{ runner.os }}-esp-idf-v5.5.5-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
-    - name: Build HiPhi Frame with ESP-IDF
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.5.5
-        target: esp32s3
-        path: frame_app
-        extra_docker_args: -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-frame -e CCACHE_MAXSIZE=500M -e CCACHE_COMPRESS=1
-        command: set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; ! grep
-          -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep
-          -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y"
-          sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y"
-          sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep
-          -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/"
-          build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj"
-          build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$"
-          build/hiphi_frame.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y"
-          sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig; esptool.py --chip esp32s3 merge_bin -o ../hiphi_frame_merged.bin
-          --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin
-          0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_frame.bin; esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin;
-          ccache --show-stats
-      if: ${{ !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository)) }}
-    - name: Build HiPhi Frame with ESP-IDF (local image)
-      if: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository) }}
-      shell: bash
-      working-directory: ${{ github.workspace }}/frame_app
-      env:
-        CCACHE_DIR: ${{ github.workspace }}/.ci/ccache-frame
-        CCACHE_MAXSIZE: 500M
-        CCACHE_COMPRESS: '1'
-        IDF_TARGET: esp32s3
-      run: |
-        set -e
-        git config --global --add safe.directory /opt/esp/idf
-        # Tools are in the approved runner; no Docker socket or image pull.
-        . /opt/esp/idf/export.sh
-        idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-        set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/" build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_frame.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig; esptool.py --chip esp32s3 merge_bin -o ../hiphi_frame_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_frame.bin; esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin; ccache --show-stats
-    - name: Verify merged HiPhi Frame image
-      run: |
-        # ESP-IDF boots QIO configurations from a DIO image header, then the
-        # second-stage bootloader enables quad mode.
-        test "$(od -An -tu1 -j2 -N1 hiphi_frame_merged.bin | tr -d ' ')" = "2"
-        ls -la frame_app/build/hiphi_frame.bin hiphi_frame_merged.bin
-    - name: Upload HiPhi Frame artifact
-      uses: actions/upload-artifact@v6
-      with:
-        name: hiphi-frame-firmware
-        path: |
-          frame_app/build/hiphi_frame.bin
-          frame_app/build/bootloader/bootloader.bin
-          frame_app/build/partition_table/partition-table.bin
-          frame_app/build/ota_data_initial.bin
-          hiphi_frame_merged.bin
-        retention-days: 30
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: frame-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep 'set(PROJECT_VER' idf_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building HiPhi Frame firmware version: $VERSION"
+
+      - name: Inject version into Frame CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.frame-version.outputs.version }}")/' frame_app/CMakeLists.txt
+          grep PROJECT_VER frame_app/CMakeLists.txt
+
+      - name: Restore Frame compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache-frame
+          key: ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-
+
+      - name: Restore Frame managed components
+        uses: actions/cache@v5
+        with:
+          path: frame_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
+
+      - name: Build HiPhi Frame with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: frame_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-frame
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig;
+            grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig;
+            grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig;
+            grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig;
+            grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig;
+            grep -F "/components/esp_hid/" build/compile_commands.json;
+            grep -F "/generated/nimble_hidh.c" build/compile_commands.json;
+            grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
+            ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
+            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_frame.map;
+            ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_frame_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size 16MB
+            0x0 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_frame.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin;
+            ccache --show-stats
+
+      - name: Verify merged HiPhi Frame image
+        run: |
+          # ESP-IDF boots QIO configurations from a DIO image header, then the
+          # second-stage bootloader enables quad mode.
+          test "$(od -An -tu1 -j2 -N1 hiphi_frame_merged.bin | tr -d ' ')" = "2"
+          ls -la frame_app/build/hiphi_frame.bin hiphi_frame_merged.bin
+
+      - name: Upload HiPhi Frame artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-frame-firmware
+          path: |
+            frame_app/build/hiphi_frame.bin
+            frame_app/build/bootloader/bootloader.bin
+            frame_app/build/partition_table/partition-table.bin
+            frame_app/build/ota_data_initial.bin
+            hiphi_frame_merged.bin
+          retention-days: 30
 
   build-rlcd:
     name: build-rlcd
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-      || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]')
-      || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-      with:
-        persist-credentials: false
-    - name: Get firmware version
-      id: rlcd-version
-      run: |
-        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/v}
-        else
-          VERSION=$(grep 'set(PROJECT_VER' rlcd_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
-        fi
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-    - name: Inject version into RLCD CMakeLists.txt
-      run: |
-        sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.rlcd-version.outputs.version }}")/' rlcd_app/CMakeLists.txt
-        grep PROJECT_VER rlcd_app/CMakeLists.txt
-    - name: Restore RLCD compiler cache
-      uses: actions/cache@v5
-      with:
-        path: .ci/ccache-rlcd
-        key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-
-    - name: Restore RLCD managed components
-      uses: actions/cache@v5
-      with:
-        path: rlcd_app/managed_components
-        key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
-    - name: Build HiPhi RLCD with ESP-IDF
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.5.5
-        target: esp32s3
-        path: rlcd_app
-        extra_docker_args: -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-rlcd -e CCACHE_MAXSIZE=500M -e CCACHE_COMPRESS=1
-        command: set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx
-          "CONFIG_SPIRAM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
-          grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; cp build/hiphi_rlcd_42.bin ../hiphi_rlcd.bin; esptool.py --chip
-          esp32s3 merge_bin -o ../hiphi_rlcd_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin
-          0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_rlcd_42.bin;
-          esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin; ccache --show-stats
-      if: ${{ !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository)) }}
-    - name: Build HiPhi RLCD with ESP-IDF (local image)
-      if: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository) }}
-      shell: bash
-      working-directory: ${{ github.workspace }}/rlcd_app
-      env:
-        CCACHE_DIR: ${{ github.workspace }}/.ci/ccache-rlcd
-        CCACHE_MAXSIZE: 500M
-        CCACHE_COMPRESS: '1'
-        IDF_TARGET: esp32s3
-      run: |
-        set -e
-        git config --global --add safe.directory /opt/esp/idf
-        # Tools are in the approved runner; no Docker socket or image pull.
-        . /opt/esp/idf/export.sh
-        idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-        set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_SPIRAM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; cp build/hiphi_rlcd_42.bin ../hiphi_rlcd.bin; esptool.py --chip esp32s3 merge_bin -o ../hiphi_rlcd_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_rlcd_42.bin; esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin; ccache --show-stats
-    - name: Verify merged HiPhi RLCD image
-      run: |
-        test "$(od -An -tu1 -j2 -N1 hiphi_rlcd_merged.bin | tr -d ' ')" = "2"
-        ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd.bin hiphi_rlcd_merged.bin
-    - name: Upload HiPhi RLCD artifact
-      uses: actions/upload-artifact@v6
-      with:
-        name: hiphi-rlcd-firmware
-        path: |
-          rlcd_app/build/hiphi_rlcd_42.bin
-          rlcd_app/build/bootloader/bootloader.bin
-          rlcd_app/build/partition_table/partition-table.bin
-          rlcd_app/build/ota_data_initial.bin
-          hiphi_rlcd.bin
-          hiphi_rlcd_merged.bin
-        retention-days: 30
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get firmware version
+        id: rlcd-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep 'set(PROJECT_VER' rlcd_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Inject version into RLCD CMakeLists.txt
+        run: |
+          sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.rlcd-version.outputs.version }}")/' rlcd_app/CMakeLists.txt
+          grep PROJECT_VER rlcd_app/CMakeLists.txt
+
+      - name: Restore RLCD compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache-rlcd
+          key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-
+
+      - name: Restore RLCD managed components
+        uses: actions/cache@v5
+        with:
+          path: rlcd_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
+
+      - name: Build HiPhi RLCD with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: rlcd_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-rlcd
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_SPIRAM=y" sdkconfig;
+            grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig;
+            cp build/hiphi_rlcd_42.bin ../hiphi_rlcd.bin;
+            esptool.py --chip esp32s3 merge_bin
+            -o ../hiphi_rlcd_merged.bin
+            --flash_mode dio --flash_freq 80m --flash_size 16MB
+            0x0 build/bootloader/bootloader.bin
+            0x8000 build/partition_table/partition-table.bin
+            0xd000 build/ota_data_initial.bin
+            0x10000 build/hiphi_rlcd_42.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin;
+            ccache --show-stats
+
+      - name: Verify merged HiPhi RLCD image
+        run: |
+          test "$(od -An -tu1 -j2 -N1 hiphi_rlcd_merged.bin | tr -d ' ')" = "2"
+          ls -la rlcd_app/build/hiphi_rlcd_42.bin hiphi_rlcd.bin hiphi_rlcd_merged.bin
+
+      - name: Upload HiPhi RLCD artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-rlcd-firmware
+          path: |
+            rlcd_app/build/hiphi_rlcd_42.bin
+            rlcd_app/build/bootloader/bootloader.bin
+            rlcd_app/build/partition_table/partition-table.bin
+            rlcd_app/build/ota_data_initial.bin
+            hiphi_rlcd.bin
+            hiphi_rlcd_merged.bin
+          retention-days: 30
 
   build-ble-off:
     name: build-ble-off
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-      || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]')
-      || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-      with:
-        persist-credentials: false
-    - name: Build ESP32-S3 capability-disabled fixture
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.5.5
-        target: esp32s3
-        path: tests/fixtures/rk_ble_hid_off
-        command: set -e; idf.py build; ! grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; ! grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
-          grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; ! grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
-          grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host_stub/librk_ble_hid_host_stub[.]a[(]rk_ble_hid_host_stub[.]c[.]obj[)][[:space:]]*$"
-          build/rk_ble_hid_off.map; ! grep -F "rk_ble_hid_host.c.obj" build/rk_ble_hid_off.map; ! grep -E "nimble_hidh.c.obj|esp_hidh.c.obj"
-          build/compile_commands.json
-      if: ${{ !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository)) }}
-    - name: Build ESP32-S3 capability-disabled fixture (local image)
-      if: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request'
-        || github.event.pull_request.head.repo.full_name == github.repository) }}
-      shell: bash
-      working-directory: ${{ github.workspace }}/tests/fixtures/rk_ble_hid_off
-      env:
-        IDF_TARGET: esp32s3
-      run: |
-        set -e
-        git config --global --add safe.directory /opt/esp/idf
-        # Tools are in the approved runner; no Docker socket or image pull.
-        . /opt/esp/idf/export.sh
-        idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-        set -e; idf.py build; ! grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; ! grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; ! grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host_stub/librk_ble_hid_host_stub[.]a[(]rk_ble_hid_host_stub[.]c[.]obj[)][[:space:]]*$" build/rk_ble_hid_off.map; ! grep -F "rk_ble_hid_host.c.obj" build/rk_ble_hid_off.map; ! grep -E "nimble_hidh.c.obj|esp_hidh.c.obj" build/compile_commands.json
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build ESP32-S3 capability-disabled fixture
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: tests/fixtures/rk_ble_hid_off
+          command: >-
+            set -e;
+            idf.py build;
+            ! grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
+            ! grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
+            grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json;
+            ! grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json;
+            grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host_stub/librk_ble_hid_host_stub[.]a[(]rk_ble_hid_host_stub[.]c[.]obj[)][[:space:]]*$" build/rk_ble_hid_off.map;
+            ! grep -F "rk_ble_hid_host.c.obj" build/rk_ble_hid_off.map;
+            ! grep -E "nimble_hidh.c.obj|esp_hidh.c.obj" build/compile_commands.json
 
   release:
     name: Create GitHub Release

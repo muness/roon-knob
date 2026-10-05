@@ -1,0 +1,13 @@
+{
+  "builderImages": {
+    "builder:d14d43a864db3537e8e9": {
+      "image": "192.168.1.36:5443/fleet/esp-idf-5-5-5@sha256:74f969a7c61fbd79e0206b30790df888833a7ca49fe1ea69ddc66ecc9d4a9599",
+      "repositories": [
+        "muness/roon-knob"
+      ],
+      "capability": "linux-general",
+      "cpu": 4,
+      "memory": "8g"
+    }
+  }
+}
