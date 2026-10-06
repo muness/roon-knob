@@ -129,7 +129,7 @@ static const char *HTML_FORM =
     "<!--WIFI_OPTIONS-->"
     RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
-    "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
+    RK_WIFI_PORTAL_PASSWORD_INPUT("WiFi password")
     "<input type='submit' value='Connect'>"
     "</form>"
     "<div class='note'>"
@@ -243,6 +243,23 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
     dst[j] = '\0';
 }
 
+/* "Couldn't join X: reason" notice for the setup page, or "" when the last
+ * network has not failed.  Mirrors the Tough-family portal. */
+static void render_wifi_failure_notice(char *out, size_t out_len) {
+  out[0] = '\0';
+  char failed_ssid[33];
+  const char *failed_reason = NULL;
+  if (!wifi_mgr_get_last_failure(failed_ssid, sizeof(failed_ssid), &failed_reason)) {
+    return;
+  }
+  char esc_ssid[128];
+  html_escape(failed_ssid, esc_ssid, sizeof(esc_ssid));
+  snprintf(out, out_len,
+           "<div class='section' style='border-color:#c0392b;color:#ff8a80'>"
+           "Couldn't join <strong>%s</strong>: %s. Check the password and try again."
+           "</div>", esc_ssid, failed_reason);
+}
+
 // Handler for GET / - serve the config form and recovery removals.
 static esp_err_t root_get_handler(httpd_req_t *req) {
     portal_trace_req(req);
@@ -283,6 +300,11 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     const char *form_body = HTML_FORM + strlen(body_marker);
     httpd_resp_sendstr_chunk(req, body_marker);
     httpd_resp_sendstr_chunk(req, portal_brand_header_html());
+    {
+        char failure_notice[384];
+        render_wifi_failure_notice(failure_notice, sizeof(failure_notice));
+        if (failure_notice[0]) httpd_resp_sendstr_chunk(req, failure_notice);
+    }
     const char *options_at = strstr(HTML_FORM, options_marker);
     const char *closing = strstr(HTML_FORM, "</body></html>");
     const char *prefix_end = options_at ? options_at : closing;

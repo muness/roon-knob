@@ -48,6 +48,17 @@ bool rk_wifi_portal_resolve_ssid(const char *selected, const char *manual,
     "select{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;" \
     "background:#0f0f1a;color:#fff;box-sizing:border-box;}"
 
+/* Password field with a "Show password" toggle. Self-contained (inline handler,
+ * no '%'), so it is safe both as a literal and inside an snprintf format. The
+ * checkbox has no name, so it is never submitted with the form. */
+#define RK_WIFI_PORTAL_PASSWORD_INPUT(placeholder)                           \
+    "<input type='password' id='pass' name='pass' maxlength='64' "          \
+    "autocomplete='current-password' placeholder='" placeholder "'>"        \
+    "<label style='display:flex;align-items:center;gap:8px;margin:6px 0 0;" \
+    "font-weight:normal'><input type='checkbox' style='width:auto;margin:0' " \
+    "onchange=\"document.getElementById('pass').type="                      \
+    "this.checked?'text':'password'\">Show password</label>"
+
 #define RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT                                   \
     "<script>setTimeout(function(){location.reload();},1200);</script>"
 

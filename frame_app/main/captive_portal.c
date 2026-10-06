@@ -352,6 +352,23 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
   dst[j] = '\0';
 }
 
+/* "Couldn't join X: reason" notice for the setup page, or "" when the last
+ * network has not failed.  Mirrors the Tough-family portal. */
+static void render_wifi_failure_notice(char *out, size_t out_len) {
+  out[0] = '\0';
+  char failed_ssid[33];
+  const char *failed_reason = NULL;
+  if (!wifi_mgr_get_last_failure(failed_ssid, sizeof(failed_ssid), &failed_reason)) {
+    return;
+  }
+  char esc_ssid[128];
+  html_escape(failed_ssid, esc_ssid, sizeof(esc_ssid));
+  snprintf(out, out_len,
+           "<div class='section' style='border-color:#c0392b;color:#ff8a80'>"
+           "Couldn't join <strong>%s</strong>: %s. Check the password and try again."
+           "</div>", esc_ssid, failed_reason);
+}
+
 // Validate URL is safe for href embedding (must start with http:// or https://)
 static bool is_safe_url(const char *url) {
   if (!url || !(strncmp(url, "http://", 7) == 0 ||
@@ -501,6 +518,11 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   SEND_SETUP_CHUNK("</head><body>");
   SEND_SETUP_CHUNK(portal_brand_header_html());
   SEND_SETUP_CHUNK("<h1>WiFi Setup</h1>");
+  {
+    char failure_notice[384];
+    render_wifi_failure_notice(failure_notice, sizeof(failure_notice));
+    SEND_SETUP_CHUNK(failure_notice);
+  }
   if (cfg->wifi_count > 0) {
     SEND_SETUP_CHUNK("<h2>Saved Networks</h2><div class='section'>");
   }
@@ -518,7 +540,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
   SEND_SETUP_CHUNK(
     RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
-    "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
+    RK_WIFI_PORTAL_PASSWORD_INPUT("WiFi password")
     "<h2>Unified Hi-Fi Control</h2>"
     "<label>Server address (optional)</label>"
     "<input type='text' name='bridge_base' maxlength='127' value='");
@@ -1002,7 +1024,7 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
       "<div class='card'><h2>Add a Wi-Fi network</h2>"
       "<form method='POST' action='/api/wifi'>"
       RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
-      "<label>Password</label><input type='password' name='pass' maxlength='64'>"
+      "<label>Password</label>" RK_WIFI_PORTAL_PASSWORD_INPUT("WiFi password")
       "<button type='submit' class='btn'>Save network</button></form>"
       "<p class='status'><a href='/wifi?scan=again'>Scan again</a></p></div>"
       "%s%s</body></html>",
