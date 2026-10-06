@@ -1,0 +1,45 @@
+set(SRC_FILES
+    "main_halo.c"
+    "halo_ui_headless.c"
+    "halo_input.c"
+    "controller_presentation_halo.c"
+    "platform_input_halo.c"
+    "platform_identity_halo.c"
+    "platform_display_halo.c"
+    "../../tough_app/main/platform_http_tough.c"
+    "../../tough_app/main/platform_storage_tough.c"
+    "../../common/platform/platform_mdns_esp.c"
+    "../../tough_app/main/platform_log_tough.c"
+    "../../tough_app/main/platform_provisioning_tough.c"
+    "../../tough_app/main/captive_portal.c"
+    "../../tough_app/main/dns_server.c"
+    "../../common/app_main.c"
+    "../../common/bridge_command_plan.c"
+    "../../common/bridge_client.c"
+    "../../common/controller_connection.c"
+    "../../common/platform/platform_mdns_endpoint.c"
+    "../../common/controller_action_router.c"
+    "../../common/controller_config.c"
+    "../../common/controller_input.c"
+    "../../common/controller_input_mailbox.c"
+    "../../common/controller_view.c"
+    "../../common/controller_view_compat.c"
+    "../../common/wifi_manager.c"
+    "../../common/portal_trace.c"
+    "../../common/wifi_portal_form.c"
+    "../../common/power_debug_web.c"
+    "../../common/portal_brand.c"
+    "../../common/zone_label_policy.c"
+    "../../common/platform/platform_log.c"
+    "../../common/platform/platform_power.c"
+    "../../common/platform/platform_time.c"
+    "../../common/platform/platform_task.c")
+
+idf_component_register(SRCS ${SRC_FILES}
+    INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main"
+    REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant driver
+    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format json)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-halo\"
+    PORTAL_BRAND_PRODUCT="HALO")
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
