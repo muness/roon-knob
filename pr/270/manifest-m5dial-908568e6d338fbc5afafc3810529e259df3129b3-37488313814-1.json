@@ -1,0 +1,11 @@
+{
+  "name": "M5 Dial Form-Native (PR #270 Hardware-Unverified Alpha)",
+  "version": "pr-270",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_m5dial_bootloader-908568e6d338fbc5afafc3810529e259df3129b3-37488313814-1.bin", "offset": 0},
+    {"path": "hiphi_m5dial_partition-table-908568e6d338fbc5afafc3810529e259df3129b3-37488313814-1.bin", "offset": 32768},
+    {"path": "hiphi_m5dial_ota_data_initial-908568e6d338fbc5afafc3810529e259df3129b3-37488313814-1.bin", "offset": 53248},
+    {"path": "hiphi_m5dial-908568e6d338fbc5afafc3810529e259df3129b3-37488313814-1.bin", "offset": 65536}
+  ]}]
+}
