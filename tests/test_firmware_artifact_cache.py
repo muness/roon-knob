@@ -31,8 +31,13 @@ class CacheTests(unittest.TestCase):
             restore=next(x for x in steps if x.get('id')=='firmware-cache')
             self.assertEqual(restore['if'], "github.event_name == 'pull_request'")
             self.assertNotIn('restore-keys',restore['with'])
-            build=next(x for x in steps if x.get('uses','').startswith('espressif/esp-idf-ci-action'))
-            self.assertEqual(build['if'], "steps.reuse.outputs.reused != 'true'")
+            # Docker action builds, plus the fleet runner's local-image build where present.
+            builds=[x for x in steps if x.get('uses','').startswith('espressif/esp-idf-ci-action')
+                    or 'idf.py build' in x.get('run','')]
+            self.assertTrue(builds)
+            for build in builds:
+                gate=build['if'].removeprefix('${{').removesuffix('}}').strip()
+                self.assertTrue(gate.startswith("steps.reuse.outputs.reused != 'true'"), build.get('name'))
             upload=next(x for x in steps if x.get('uses','').startswith('actions/upload-artifact'))
             self.assertTrue(upload['with']['path'].startswith('firmware-cache/'))
 
