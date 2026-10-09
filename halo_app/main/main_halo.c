@@ -1,5 +1,5 @@
 // main_halo.c -- HiPhi HALO entry point (derived from main_tough.c)
-// Boot sequence: NVS -> headless UI -> controller -> input -> UI loop -> app_entry -> WiFi
+// Boot sequence: NVS -> display/LVGL/ui_init -> controller -> input -> UI loop -> app_entry -> WiFi
 
 #include "app.h"
 #include "bridge_client.h"
@@ -11,6 +11,11 @@
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "touch_ui.h"
+#include "ui.h"
+#include "font_manager.h"
+#include "platform_display_halo.h"
+#include "lvgl.h"
+#include <esp_heap_caps.h>
 #include "wifi_manager.h"
 
 #include <esp_err.h>
@@ -26,6 +31,7 @@ static const char *TAG = "main";
 /* Config persistence and synchronous control dispatch run on this task
  * (same budget as Tough, where 16 KiB overflowed during volume/zone commands). */
 #define UI_LOOP_STACK_SIZE 32768
+#define LVGL_PSRAM_POOL_SIZE (72 * 1024)
 
 static volatile bool s_mdns_init_pending = false;
 /* The event loop produces this request; the UI task is the sole consumer
@@ -101,14 +107,16 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt) {
     char msg[96];
     snprintf(msg, sizeof(msg), "Connect to %s\nto configure WiFi",
              platform_provisioning_ssid());
-    touch_ui_post_network_status(msg);
-    touch_ui_post_zone_name("WiFi Setup");
+    ui_update(platform_product_name(), msg, false, 0.0f, 0.0f, 100.0f, 1.0f, 0, 0);
+    ui_set_zone_name("WiFi Setup");
+    ui_set_setup_logo_visible(true);
     bridge_client_set_network_ready(false);
     atomic_store_explicit(&s_sta_server_pending, false, memory_order_release);
     break;
 
   case RK_NET_EVT_AP_STOPPED:
     ESP_LOGI(TAG, "WiFi: AP mode stopped, connecting to network...");
+    ui_set_setup_logo_visible(false);
     post_runtime_network_status("WiFi: Connecting...");
     atomic_store_explicit(&s_sta_server_pending, false, memory_order_release);
     break;
@@ -125,7 +133,8 @@ static void ui_loop_task(void *arg) {
   while (true) {
     platform_task_run_pending();
     platform_input_process_events();
-    touch_ui_process();
+    platform_display_process_pending();
+    ui_loop_iter();
 
     static bool s_mdns_initialized = false;
     if (s_mdns_init_pending) {
@@ -147,11 +156,31 @@ static void ui_loop_task(void *arg) {
       }
     }
 
-    /* The sleeping display has no animation work. Poll input at 20 Hz so a
-     * touch/button still wakes promptly while allowing five times longer
-     * tickless-idle windows for the SoC and WiFi driver. */
-    vTaskDelay(pdMS_TO_TICKS(touch_ui_is_display_sleeping() ? 50 : 10));
+    /* Always-on display: 10 ms cadence keeps LVGL animation and touch smooth. */
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
+}
+
+static void *s_lvgl_psram_pool_memory = NULL;
+
+/* Same expansion pool as the Dial: small internal LVGL heap plus 72 KiB of PSRAM. */
+static bool add_lvgl_psram_pool(void) {
+  s_lvgl_psram_pool_memory = heap_caps_aligned_alloc(
+      16, LVGL_PSRAM_POOL_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!s_lvgl_psram_pool_memory) {
+    ESP_LOGE(TAG, "Could not allocate %u-byte LVGL PSRAM pool",
+             (unsigned)LVGL_PSRAM_POOL_SIZE);
+    return false;
+  }
+  if (!lv_mem_add_pool(s_lvgl_psram_pool_memory, LVGL_PSRAM_POOL_SIZE)) {
+    ESP_LOGE(TAG, "Could not register LVGL PSRAM pool");
+    heap_caps_free(s_lvgl_psram_pool_memory);
+    s_lvgl_psram_pool_memory = NULL;
+    return false;
+  }
+  ESP_LOGI(TAG, "Added %u-byte LVGL PSRAM expansion pool",
+           (unsigned)LVGL_PSRAM_POOL_SIZE);
+  return true;
 }
 
 void app_main(void) {
@@ -168,8 +197,23 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(err);
 
+  ESP_LOGI(TAG, "Initializing display hardware...");
+  if (!platform_display_init()) {
+    ESP_LOGE(TAG, "Display hardware init failed!");
+    return;
+  }
+
+  lv_init();
+  if (!add_lvgl_psram_pool()) {
+    return;
+  }
+  if (!platform_display_register_lvgl_driver()) {
+    ESP_LOGE(TAG, "Display driver registration failed!");
+    return;
+  }
+  font_manager_init();
   ESP_LOGI(TAG, "Initializing UI...");
-  touch_ui_init();
+  ui_init();
 
   // Install the controller action handler before touch/input can dispatch.
   app_controller_init();

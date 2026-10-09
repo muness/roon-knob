@@ -1,6 +1,19 @@
 set(SRC_FILES
     "main_halo.c"
     "halo_ui_headless.c"
+    "halo_ui_stubs.c"
+    "../../idf_app/main/controller_input_profile_dial.c"
+    "../../idf_app/main/font_manager.c"
+    "../../idf_app/main/fonts/lato_22.c"
+    "../../idf_app/main/fonts/notosans_28.c"
+    "../../idf_app/main/fonts/material_icons_22.c"
+    "../../idf_app/main/fonts/material_icons_28.c"
+    "../../idf_app/main/fonts/material_icons_44.c"
+    "../../idf_app/main/fonts/material_icons_60.c"
+    "../../idf_app/main/fonts/lucide_battery_22.c"
+    "../../common/ui.c"
+    "../../common/ui_jpeg.c"
+    "../../common/assets/hiphi_logo_lvgl.c"
     "halo_input.c"
     "controller_presentation_halo.c"
     "platform_input_halo.c"
@@ -36,9 +49,9 @@ set(SRC_FILES
     "../../common/platform/platform_task.c")
 
 idf_component_register(SRCS ${SRC_FILES}
-    INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main"
-    REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant driver
-    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format json)
+    INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main" "../../idf_app/main"
+    REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant driver esp_lcd lvgl__lvgl espressif__esp_lcd_st77916
+    PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_i2c nvs_flash esp_http_client esp_http_server esp_app_format json)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-halo\"
     PORTAL_BRAND_PRODUCT="HALO")

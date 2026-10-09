@@ -3,3 +3,7 @@ dependencies:
     version: '>=5.0'
   espressif/mdns:
     version: '>=1.2.0'
+  lvgl/lvgl:
+    version: ^9.4.0
+  espressif/esp_lcd_st77916:
+    version: '==1.0.1'
