@@ -72,6 +72,7 @@ static lv_obj_t *s_artist_label;       // Artist/album
 static lv_obj_t *s_volume_arc;         // Outer arc for volume
 static lv_obj_t *s_progress_arc;       // Inner arc for track progress
 static lv_obj_t *s_volume_label_large; // Volume display (large, prominent) - primary display
+static bool s_controls_visible = true;  // false in art mode; state updates must not unhide controls
 static lv_timer_t *s_volume_emphasis_timer;  // Timer to reset volume emphasis after adjustment
 static lv_obj_t *s_status_dot;         // Online/offline indicator
 static lv_obj_t *s_battery_icon;       // Battery icon (Material Symbols)
@@ -692,7 +693,7 @@ static void apply_state(const struct ui_state *state) {
     // Update track/artist labels
     if (s_track_label && s_artist_label) {
         if (state->online) {
-            lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+            if (s_controls_visible) lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_to_index(s_artist_label, 1);
             lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
             set_marquee_text(s_track_label, state->line1);
@@ -949,7 +950,7 @@ static void update_battery_display(void) {
     s_last_battery_charging = charging;
 
     // Update battery icon based on state (Lucide horizontal icons)
-    lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    if (s_controls_visible) lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
     if (charging) {
         lv_label_set_text(s_battery_icon, ICON_BATTERY_CHARGING);
     } else {
@@ -1662,6 +1663,7 @@ void ui_trigger_update(void) {
 // ============================================================================
 
 void ui_set_controls_visible(bool visible) {
+    s_controls_visible = visible;
     if (visible) {
         // Show all controls
         if (s_btn_prev) lv_obj_clear_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
