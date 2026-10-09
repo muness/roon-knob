@@ -15,7 +15,7 @@
 ## Confirmed Problem
 
 Users need onboard and attached controls to behave consistently on Dial, Frame,
-AtomS3 Joystick, M5Stack Chan, and later verified ESP32-S3 target profiles
+AtomS3 Joystick, Kizz on M5StackChan K151, and later verified ESP32-S3 target profiles
 while remaining bindable to playback, navigation, selection, and Home Assistant
 actions. Today the same `controller_input_action_t` mixes physical input,
 semantic commands, picker navigation, and presentation queries:

@@ -1,6 +1,6 @@
 {
-  "name": "HiPhi RLCD (Alpha)",
-  "version": "latest",
+  "name": "HiPhi Slate (Alpha)",
+  "version": "{{VERSION}}",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",

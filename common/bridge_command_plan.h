@@ -12,7 +12,7 @@ extern "C" {
 
 typedef enum {
     BRIDGE_COMMAND_FEEDBACK_NONE = 0,
-    BRIDGE_COMMAND_FEEDBACK_CONNECTING,
+    BRIDGE_COMMAND_FEEDBACK_NOT_READY,
     BRIDGE_COMMAND_FEEDBACK_PLAYBACK_FAILED,
     BRIDGE_COMMAND_FEEDBACK_NEXT_FAILED,
     BRIDGE_COMMAND_FEEDBACK_PREVIOUS_FAILED,
@@ -20,7 +20,8 @@ typedef enum {
 } bridge_command_feedback_t;
 
 typedef struct {
-    bool operational;
+    bool ready;
+    bool volume_fixed;
     const char *zone_id;
     float volume;
     float volume_min;

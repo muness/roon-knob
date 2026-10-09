@@ -1,0 +1,20 @@
+idf_build_get_property(kizz_wake_word_enabled HIPHI_KIZZ_WAKE_WORD)
+if(NOT kizz_wake_word_enabled)
+    # IDF reads every discovered component during early requirements expansion,
+    # even when EXCLUDE_COMPONENTS later removes it from the actual build graph.
+    # Register no sources, includes, or requirements before returning.
+    idf_component_register()
+    return()
+endif()
+
+idf_component_register(
+    SRCS "kizz_wake_word.cpp" "kizz_detector_aot.cpp" "kizz_verifier_aot.cpp"
+    INCLUDE_DIRS "include"
+    REQUIRES esp_pm espressif__esp-nn micro_wake_word nvs_flash
+)
+
+target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_detector.tflite" BINARY)
+target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_compact_verifier_int8_v15.tflite" BINARY)
+target_add_binary_data(${COMPONENT_LIB} "models/kizz_control_ordered_verifier_int8.tflite" BINARY)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
+set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)

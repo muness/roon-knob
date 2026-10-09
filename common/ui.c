@@ -10,14 +10,16 @@
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 #include "platform/platform_http.h"
+#include "platform/platform_power.h"
 #include "controller_input.h"
 #include "lvgl.h"
 #include "ui.h"
 #include "bridge_client.h"
+#include "zone_label_policy.h"
+#include "assets/hiphi_logo_lvgl.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
-#include "battery.h"
 #include "ui_jpeg.h"  // JPEG decoder helper
 #define UI_TAG "ui"
 #else
@@ -38,6 +40,15 @@
 #define COLOR_GREY          lv_color_hex(0x5a5a5a)
 #define COLOR_DARK_GREY     lv_color_hex(0x3c3c3c)
 
+// ---------------------------------------------------------------------------
+// HiPhi brand accents (see docs/esp/DISPLAY.md "Brand colors")
+// Shared across every HiPhi target; keep literals out of the widget code.
+// ---------------------------------------------------------------------------
+#define HIPHI_ACCENT        0x00c8f0  // Active indicator: volume arc, primary border, focus
+#define HIPHI_ACCENT_SOFT   0x9cefff  // Progress, pressed states, transient emphasis
+#define HIPHI_ATTENTION     0xff654a  // Low battery and other attention states
+#define HIPHI_SUCCESS       0x10b981  // Online / success indicator
+
 struct ui_state {
     char line1[128];
     char line2[128];
@@ -51,6 +62,8 @@ struct ui_state {
 
     int seek_position;
     int length;
+
+    bool setup_logo;  // Show the HiPhi mark (Wi-Fi setup screen only)
 };
 
 // UI widgets - Blue Knob inspired design
@@ -63,16 +76,50 @@ static lv_timer_t *s_volume_emphasis_timer;  // Timer to reset volume emphasis a
 static lv_obj_t *s_status_dot;         // Online/offline indicator
 static lv_obj_t *s_battery_icon;       // Battery icon (Material Symbols)
 static lv_obj_t *s_zone_label;         // Zone name
+static lv_obj_t *s_zone_glyph;         // Dim glyph shown in place of the faded zone label
 static lv_obj_t *s_btn_prev;           // Previous track button
 static lv_obj_t *s_btn_play;           // Play/pause button (center, large)
 static lv_obj_t *s_btn_next;           // Next track button
 static lv_obj_t *s_play_icon;          // Play/pause icon label
 static lv_obj_t *s_background;         // Light background container
+static lv_obj_t *s_setup_logo;         // HiPhi mark, shown only on the Wi-Fi setup screen
+
+/* The setup state reuses the now-playing layout, so the mark has to fit the
+ * band between the header's zone label and the top of the now-playing group.
+ * That band is about 45 px on the 360 px panel, so the Dial draws the mark at
+ * 48 px rather than 64. See docs/esp/DISPLAY.md "Boot logo". */
+#define HIPHI_SETUP_LOGO_SIZE 48
+#define HIPHI_SETUP_LOGO_Y    76
 
 // Artwork layers
 static lv_obj_t *s_artwork_container;  // Container for artwork layers
 static lv_obj_t *s_artwork_image;      // Album art image
 static lv_obj_t *s_ui_container;       // Container for all UI widgets
+static lv_anim_t s_marquee_anim;
+static bool s_marquee_anim_ready = false;
+
+static void configure_marquee(lv_obj_t *label)
+{
+    if(!s_marquee_anim_ready) {
+        lv_anim_init(&s_marquee_anim);
+        lv_anim_set_repeat_delay(&s_marquee_anim, 700);
+        s_marquee_anim_ready = true;
+    }
+    lv_obj_set_style_anim(label, &s_marquee_anim, LV_PART_MAIN);
+}
+
+/* LVGL preserves a label's scroll offset when its text changes. Reset the
+ * scroll mode around new phrases so a new track always starts at offset zero. */
+static void set_marquee_text(lv_obj_t *label, const char *text)
+{
+    const char *next = text ? text : "";
+    const char *current = lv_label_get_text(label);
+    if(current && strcmp(current, next) == 0) return;
+
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
+    lv_label_set_text(label, next);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+}
 
 // Reusable styles - smart-knob inspired
 static lv_style_t style_button_primary;    // Center play/pause button
@@ -118,6 +165,10 @@ static bool s_dirty = true;
 static char s_pending_message[128] = "";
 static bool s_message_dirty = false;
 static bool s_zone_name_dirty = false;
+static int s_pending_zone_count = 0;
+static bool s_zone_count_dirty = false;
+static zone_label_policy_t s_zone_label_policy;
+static bool s_zone_label_faded = false;  // current committed visual state (false == label shown)
 static char s_network_status[128] = "";   // Persistent network status (doesn't auto-clear)
 static bool s_network_status_dirty = false;
 static char s_last_image_key[128] = "";  // Track last loaded artwork
@@ -171,6 +222,7 @@ static void update_battery_display(void);
 static void battery_poll_timer_cb(lv_timer_t *timer);
 static void reset_volume_emphasis_timer_cb(lv_timer_t *timer);
 static void emphasize_volume_label(void);
+static void refresh_zone_label_presence(uint32_t now_ms);
 
 // ============================================================================
 // Volume Formatting Helper
@@ -215,6 +267,9 @@ void ui_init(void) {
 
     ESP_LOGI(UI_TAG, "Using ESP_NEW_JPEG software decoder for artwork");
 
+    zone_label_policy_init(&s_zone_label_policy);
+    s_zone_label_faded = false;
+
     build_layout();
 
     // Poll for state updates every 50ms
@@ -245,7 +300,7 @@ static void create_styles(void) {
     lv_style_set_bg_color(&style_button_primary, lv_color_hex(0x2c2c2c));  // Dark grey
     lv_style_set_bg_opa(&style_button_primary, LV_OPA_COVER);
     lv_style_set_border_width(&style_button_primary, 3);
-    lv_style_set_border_color(&style_button_primary, lv_color_hex(0x5a9fd4));  // Light blue
+    lv_style_set_border_color(&style_button_primary, lv_color_hex(HIPHI_ACCENT));  // HiPhi cyan
     lv_style_set_border_opa(&style_button_primary, LV_OPA_COVER);
     lv_style_set_shadow_width(&style_button_primary, 0);
 
@@ -312,6 +367,15 @@ static void build_layout(void) {
     // Update background pointer to ui_container for widget creation
     s_background = s_ui_container;
 
+    // HiPhi mark for the Wi-Fi setup screen. Created hidden as part of the
+    // first layout so showing it costs nothing at AP time - no timer, no
+    // deferred load, no extra frame.
+    s_setup_logo = lv_image_create(s_ui_container);
+    lv_image_set_src(s_setup_logo, &hiphi_logo_48_argb8888);
+    lv_obj_align(s_setup_logo, LV_ALIGN_TOP_MID, 0, HIPHI_SETUP_LOGO_Y);
+    lv_obj_remove_flag(s_setup_logo, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
+
     // Outer volume arc - full circle ring around the display edge
     s_volume_arc = lv_arc_create(s_ui_container);
     lv_obj_set_size(s_volume_arc, SCREEN_SIZE - 10, SCREEN_SIZE - 10);
@@ -329,7 +393,7 @@ static void build_layout(void) {
 
     // Arc colors - dark grey background track, blue indicator
     lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x3a3a3a), LV_PART_MAIN);  // Lighter grey for visibility
-    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(0x5a9fd4), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_volume_arc, lv_color_hex(HIPHI_ACCENT), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_volume_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
@@ -350,7 +414,7 @@ static void build_layout(void) {
 
     // Progress arc colors - subtle grey track, lighter blue indicator
     lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x2a2a2a), LV_PART_MAIN);  // Slightly lighter
-    lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(0x7bb9e8), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_progress_arc, lv_color_hex(HIPHI_ACCENT_SOFT), LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(s_progress_arc, LV_OPA_COVER, LV_PART_INDICATOR);
 
@@ -395,10 +459,26 @@ static void build_layout(void) {
     s_zone_label = lv_label_create(header);
     lv_label_set_text(s_zone_label, s_pending.zone_name);
     lv_obj_set_style_text_font(s_zone_label, font_small(), 0);
-    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0xbbbbbb), 0);
+    // Caption grey - demoted below the artist line (0xaaaaaa) so the zone
+    // name reads as context, not content.
+    lv_obj_set_style_text_color(s_zone_label, lv_color_hex(0x777777), 0);
     lv_obj_set_width(s_zone_label, SCREEN_SIZE - 120);
     lv_obj_set_style_text_align(s_zone_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_zone_label, LV_LABEL_LONG_DOT);
+
+    // Dim glyph shown in the zone label's place once the presence policy
+    // decides a stable single zone can fade. Keeps the header's Settings
+    // affordance hinted at without displaying zone-name text.
+    s_zone_glyph = lv_label_create(header);
+#if !TARGET_PC
+    lv_label_set_text(s_zone_glyph, ICON_MUSIC_NOTE);
+    lv_obj_set_style_text_font(s_zone_glyph, font_icon_small(), 0);
+#else
+    lv_label_set_text(s_zone_glyph, LV_SYMBOL_AUDIO);
+    lv_obj_set_style_text_font(s_zone_glyph, &lv_font_montserrat_20, 0);
+#endif
+    lv_obj_set_style_text_color(s_zone_glyph, lv_color_hex(0x555555), 0);
+    lv_obj_add_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
 
     // ========================================================================
     // Now Playing group - volume, artist, track, controls (flex column, centered)
@@ -427,9 +507,10 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_artist_label, font_small(), 0);
     lv_obj_set_style_text_align(s_artist_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_artist_label, lv_color_hex(0xaaaaaa), 0);
-    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_anim_time(s_artist_label, 25000, LV_PART_MAIN);
-    lv_label_set_text(s_artist_label, s_pending.line2);
+    configure_marquee(s_artist_label);
+    set_marquee_text(s_artist_label, s_pending.line2);
 
     // Track label - larger font, primary text
     s_track_label = lv_label_create(now_playing);
@@ -437,9 +518,10 @@ static void build_layout(void) {
     lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
     lv_obj_set_style_text_align(s_track_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_track_label, lv_color_hex(0xfafafa), 0);
-    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_anim_time(s_track_label, 25000, LV_PART_MAIN);
-    lv_label_set_text(s_track_label, s_pending.line1);
+    configure_marquee(s_track_label);
+    set_marquee_text(s_track_label, s_pending.line1);
 
     // Controls row - flex row for transport buttons
     lv_obj_t *controls = lv_obj_create(now_playing);
@@ -461,7 +543,7 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_btn_prev, lv_color_hex(0x1a1a1a), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_prev, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_prev, COLOR_GREY, LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_btn_prev, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_btn_prev, lv_color_hex(HIPHI_ACCENT_SOFT), LV_STATE_PRESSED);
 
     lv_obj_t *prev_label = lv_label_create(s_btn_prev);
 #if !TARGET_PC
@@ -481,8 +563,8 @@ static void build_layout(void) {
     lv_obj_add_event_cb(s_btn_play, btn_play_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_style_bg_color(s_btn_play, lv_color_hex(0x2c2c2c), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_play, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(0x5a9fd4), LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(0x7bb9e8), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(HIPHI_ACCENT), LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_btn_play, lv_color_hex(HIPHI_ACCENT_SOFT), LV_STATE_PRESSED);
 
     s_play_icon = lv_label_create(s_btn_play);
 #if !TARGET_PC
@@ -503,7 +585,7 @@ static void build_layout(void) {
     lv_obj_set_style_bg_color(s_btn_next, lv_color_hex(0x1a1a1a), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_btn_next, lv_color_hex(0x3c3c3c), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(s_btn_next, COLOR_GREY, LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(s_btn_next, lv_color_hex(0x5a9fd4), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(s_btn_next, lv_color_hex(HIPHI_ACCENT_SOFT), LV_STATE_PRESSED);
 
     lv_obj_t *next_label = lv_label_create(s_btn_next);
 #if !TARGET_PC
@@ -597,12 +679,37 @@ static void zone_list_item_event_cb(lv_event_t *e) {
 // ============================================================================
 
 static void apply_state(const struct ui_state *state) {
+    // HiPhi mark: setup screen only. Part of the same frame as the rest of the
+    // state, so it costs no extra render pass.
+    if (s_setup_logo) {
+        if (state->setup_logo) {
+            lv_obj_remove_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_setup_logo, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     // Update track/artist labels
     if (s_track_label && s_artist_label) {
-        lv_label_set_text(s_track_label, state->line1);
+        if (state->online) {
+            lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_to_index(s_artist_label, 1);
+            lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+            set_marquee_text(s_track_label, state->line1);
+            set_marquee_text(s_artist_label, state->line2);
+            /* Restore scrolling even if the text did not change at recovery. */
+            lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+            lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+        } else {
+            lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_to_index(s_track_label, 1);
+            lv_obj_set_style_text_font(s_track_label, font_small(), 0);
+            lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_WRAP);
+            lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_WRAP);
+            lv_label_set_text(s_track_label, state->line1);
+            lv_label_set_text(s_artist_label, state->line2);
+        }
         lv_obj_invalidate(s_track_label);
-
-        lv_label_set_text(s_artist_label, state->line2);
         lv_obj_invalidate(s_artist_label);
     } else {
         ESP_LOGE(UI_TAG, "Label pointers are NULL! track=%p artist=%p", s_track_label, s_artist_label);
@@ -664,10 +771,72 @@ static void apply_state(const struct ui_state *state) {
 
 static void set_status_dot(bool online) {
     if (online) {
-        lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(0x00ff00), 0);  // Green
+        lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(HIPHI_SUCCESS), 0);  // HiPhi success green
     } else {
         lv_obj_set_style_bg_color(s_status_dot, COLOR_GREY, 0);
     }
+}
+
+// ============================================================================
+// Zone label presence (fade + glyph), driven by zone_label_policy
+// ============================================================================
+
+static void anim_set_zone_label_opa(void *var, int32_t value) {
+    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
+}
+
+static void zone_label_fade_out_ready_cb(lv_anim_t *a) {
+    (void)a;
+    if (s_zone_label) {
+        lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_zone_glyph) {
+        lv_obj_set_style_opa(s_zone_glyph, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Applies a shown/faded transition. The header itself is untouched (size,
+// tap and long-press handlers stay put) - only the label's opacity and the
+// glyph's visibility change.
+static void set_zone_label_presence(bool show) {
+    if (!s_zone_label) return;
+
+    lv_anim_delete(s_zone_label, anim_set_zone_label_opa);
+
+    if (show) {
+        if (s_zone_glyph) {
+            lv_obj_add_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_clear_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, s_zone_label);
+        lv_anim_set_exec_cb(&a, anim_set_zone_label_opa);
+        lv_anim_set_values(&a, lv_obj_get_style_opa(s_zone_label, 0), LV_OPA_COVER);
+        lv_anim_set_duration(&a, 300);
+        lv_anim_start(&a);
+    } else {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, s_zone_label);
+        lv_anim_set_exec_cb(&a, anim_set_zone_label_opa);
+        lv_anim_set_values(&a, lv_obj_get_style_opa(s_zone_label, 0), LV_OPA_TRANSP);
+        lv_anim_set_duration(&a, 300);
+        lv_anim_set_completed_cb(&a, zone_label_fade_out_ready_cb);
+        lv_anim_start(&a);
+    }
+}
+
+// Re-evaluates the policy's decision and, only on a change, drives the fade
+// animation and glyph swap. Safe to call every poll tick.
+static void refresh_zone_label_presence(uint32_t now_ms) {
+    if (!s_zone_label) return;
+    bool should_show = zone_label_policy_visible(&s_zone_label_policy, now_ms);
+    bool currently_shown = !s_zone_label_faded;
+    if (should_show == currently_shown) return;
+    s_zone_label_faded = !should_show;
+    set_zone_label_presence(should_show);
 }
 
 static void poll_pending(lv_timer_t *timer) {
@@ -694,6 +863,13 @@ static void poll_pending(lv_timer_t *timer) {
         s_zone_name_dirty = false;
     }
 
+    bool zone_count_changed = s_zone_count_dirty;
+    int zone_count = 0;
+    if (zone_count_changed) {
+        zone_count = s_pending_zone_count;
+        s_zone_count_dirty = false;
+    }
+
     bool network_status_changed = s_network_status_dirty;
     char net_status[128];
     if (network_status_changed) {
@@ -712,6 +888,15 @@ static void poll_pending(lv_timer_t *timer) {
     if (zone_name_changed && s_zone_label) {
         lv_label_set_text(s_zone_label, zone_name);
     }
+
+    uint32_t now_ms = (uint32_t)platform_millis();
+    if (zone_count_changed) {
+        zone_label_policy_feed_count(&s_zone_label_policy, zone_count, now_ms);
+    }
+    if (zone_name_changed) {
+        zone_label_policy_feed_name_changed(&s_zone_label_policy, now_ms);
+    }
+    refresh_zone_label_presence(now_ms);
     if (network_status_changed && s_status_bar) {
         // Set network status directly without auto-clear timer
         lv_label_set_text(s_status_bar, net_status);
@@ -732,8 +917,20 @@ static void update_battery_display(void) {
 #ifdef ESP_PLATFORM
     if (!s_battery_icon) return;
 
-    int percent = battery_get_percentage();
-    bool charging = battery_is_charging();
+    platform_power_snapshot_t power = {
+        .battery_level = -1,
+        .external_power = false,
+    };
+    platform_power_snapshot(&power);
+    const int percent = power.battery_level;
+    const bool charging = power.external_power;
+
+    // Targets without a battery gauge report -1: keep the indicator hidden.
+    if (percent < 0) {
+        lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+        s_last_battery_level = -1;
+        return;
+    }
 
     // Convert to 4 discrete levels for stability (precision matches fidelity)
     // Critical: ≤10%, Low: 11-25%, Medium: 26-60%, High: ≥61%
@@ -766,7 +963,7 @@ static void update_battery_display(void) {
 
     // Warning color for critical/low battery, neutral grey otherwise
     if (level <= 1 && !charging) {
-        lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0xff0000), 0);
+        lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(HIPHI_ATTENTION), 0);
     } else {
         lv_obj_set_style_text_color(s_battery_icon, lv_color_hex(0x888888), 0);
     }
@@ -833,8 +1030,8 @@ static void emphasize_volume_label(void) {
         return;
     }
 
-    // Emphasize with bright blue
-    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(0x7bb9e8), 0);
+    // Emphasize with the soft HiPhi accent
+    lv_obj_set_style_text_color(s_volume_label_large, lv_color_hex(HIPHI_ACCENT_SOFT), 0);
 
     // Reset/create timer to remove emphasis after 1.5 seconds
     if (s_volume_emphasis_timer) {
@@ -1024,7 +1221,6 @@ bool ui_zone_picker_is_current_selection(void) {
 // ============================================================================
 
 void ui_loop_iter(void) {
-    lv_task_handler();
     lv_timer_handler();
 
     platform_task_run_pending();  // Process callbacks from bridge_client thread
@@ -1095,6 +1291,15 @@ void ui_set_online(bool online) {
     os_mutex_unlock(&s_state_lock);
 }
 
+void ui_set_setup_logo_visible(bool visible) {
+    /* Same actor discipline as every other setter here: record the intent and
+     * let the UI task apply it. Callers run on the network event task. */
+    os_mutex_lock(&s_state_lock);
+    s_pending.setup_logo = visible;
+    s_dirty = true;
+    os_mutex_unlock(&s_state_lock);
+}
+
 void ui_set_zone_name(const char *zone_name) {
     os_mutex_lock(&s_state_lock);
     if (zone_name) {
@@ -1102,6 +1307,13 @@ void ui_set_zone_name(const char *zone_name) {
         s_pending.zone_name[sizeof(s_pending.zone_name) - 1] = '\0';
         s_zone_name_dirty = true;
     }
+    os_mutex_unlock(&s_state_lock);
+}
+
+void ui_set_zone_count(int count) {
+    os_mutex_lock(&s_state_lock);
+    s_pending_zone_count = count;
+    s_zone_count_dirty = true;
     os_mutex_unlock(&s_state_lock);
 }
 
@@ -1166,8 +1378,7 @@ void ui_test_pattern(void) {
     size_t sz = w * h * 2;
 
     if (!test_buf) {
-        test_buf = heap_caps_aligned_calloc(16, 1, sz,
-                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        test_buf = heap_caps_aligned_calloc(16, 1, sz, MALLOC_CAP_8BIT);
     }
     if (!test_buf) {
         ESP_LOGE(UI_TAG, "Failed to allocate test pattern buffer");
@@ -1458,7 +1669,14 @@ void ui_set_controls_visible(bool visible) {
         if (s_btn_next) lv_obj_clear_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
         if (s_track_label) lv_obj_clear_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         if (s_artist_label) lv_obj_clear_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_zone_label) lv_obj_clear_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        // Do not unconditionally unhide the zone label - let the presence
+        // policy decide (leaving art mode counts as a reveal trigger, but a
+        // long-stable single zone may still fade right back).
+        {
+            uint32_t now_ms = (uint32_t)platform_millis();
+            zone_label_policy_feed_controls_visible(&s_zone_label_policy, now_ms);
+            refresh_zone_label_presence(now_ms);
+        }
         if (s_volume_label_large) lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
         if (s_battery_icon) lv_obj_clear_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_clear_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);
@@ -1477,7 +1695,11 @@ void ui_set_controls_visible(bool visible) {
         if (s_btn_next) lv_obj_add_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
         if (s_track_label) lv_obj_add_flag(s_track_label, LV_OBJ_FLAG_HIDDEN);
         if (s_artist_label) lv_obj_add_flag(s_artist_label, LV_OBJ_FLAG_HIDDEN);
-        if (s_zone_label) lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        if (s_zone_label) {
+            lv_anim_delete(s_zone_label, anim_set_zone_label_opa);
+            lv_obj_add_flag(s_zone_label, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (s_zone_glyph) lv_obj_add_flag(s_zone_glyph, LV_OBJ_FLAG_HIDDEN);
         if (s_volume_label_large) lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
         if (s_battery_icon) lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
         if (s_status_dot) lv_obj_add_flag(s_status_dot, LV_OBJ_FLAG_HIDDEN);

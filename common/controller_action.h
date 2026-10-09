@@ -41,45 +41,40 @@ typedef struct {
 } controller_action_t;
 
 static inline controller_action_t controller_action_none(void) {
-    controller_action_t action = {
-        .kind = CONTROLLER_ACTION_NONE,
-        .value.command = controller_command_make(CONTROLLER_COMMAND_NONE),
-    };
+    controller_action_t action;
+    action.kind = CONTROLLER_ACTION_NONE;
+    action.value.command = controller_command_make(CONTROLLER_COMMAND_NONE);
     return action;
 }
 
 static inline controller_action_t controller_action_command(
     controller_command_t command) {
-    controller_action_t action = {
-        .kind = CONTROLLER_ACTION_COMMAND,
-        .value.command = command,
-    };
+    controller_action_t action;
+    action.kind = CONTROLLER_ACTION_COMMAND;
+    action.value.command = command;
     return action;
 }
 
 static inline controller_action_t controller_action_simple(
     controller_action_kind_t kind) {
-    controller_action_t action = {
-        .kind = kind,
-        .value.picker_delta = 0,
-    };
+    controller_action_t action;
+    action.kind = kind;
+    action.value.picker_delta = 0;
     return action;
 }
 
 static inline controller_action_t controller_action_picker_scroll(int delta) {
-    controller_action_t action = {
-        .kind = CONTROLLER_ACTION_SCROLL_ZONE_PICKER,
-        .value.picker_delta = delta,
-    };
+    controller_action_t action;
+    action.kind = CONTROLLER_ACTION_SCROLL_ZONE_PICKER;
+    action.value.picker_delta = delta;
     return action;
 }
 
 static inline controller_action_t controller_action_system(
     controller_system_action_t system) {
-    controller_action_t action = {
-        .kind = CONTROLLER_ACTION_SYSTEM,
-        .value.system = system,
-    };
+    controller_action_t action;
+    action.kind = CONTROLLER_ACTION_SYSTEM;
+    action.value.system = system;
     return action;
 }
 

@@ -1,0 +1,11 @@
+dependencies:
+  idf:
+    version: '>=5.0'
+  espressif/mdns:
+    version: '>=1.2.0'
+  lvgl/lvgl:
+    # Same LVGL as the Dial (idf_app/dependencies.lock): 9.6 deprecates the
+    # KB memory options and lv_mem_add_pool then rejects the PSRAM pool.
+    version: '==9.5.0'
+  espressif/esp_lcd_st77916:
+    version: '==1.0.1'

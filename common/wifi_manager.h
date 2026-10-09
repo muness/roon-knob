@@ -5,6 +5,10 @@
 
 #include "controller_config.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     RK_NET_EVT_CONNECTING,   // Attempting STA connection
     RK_NET_EVT_GOT_IP,       // STA connected with IP
@@ -45,9 +49,15 @@ bool wifi_mgr_start_provisioning(void);       // true only when setup AP mode ca
 const char *wifi_mgr_get_hostname(void);     // get device hostname (for mDNS, logs)
 void wifi_mgr_stop_ap(void);                 // stop AP mode, attempt STA connection
 const char *wifi_mgr_get_last_error(void);   // get last disconnect reason string
+/* Network that failed before the most recent fall-back to setup mode, and why
+ * (e.g. "Wrong password").  False when there is none or a connection has since
+ * succeeded.  For the setup page. */
+bool wifi_mgr_get_last_failure(char *ssid_out, size_t ssid_len, const char **reason_out);
 int wifi_mgr_get_retry_count(void);          // get current retry attempt count (0 = connected)
 int wifi_mgr_get_retry_max(void);            // get max retries before AP mode
-void wifi_mgr_set_power_save(bool enable);   // enable/disable WiFi modem sleep
+/* Temporary target override. The shared STA baseline is MIN_MODEM; callers
+ * should normally leave it enabled, including while the display is awake. */
+void wifi_mgr_set_power_save(bool enable);
 /* Start a non-blocking scan for visible 2.4 GHz networks. Results are
  * collected from WIFI_EVENT_SCAN_DONE so web-server tasks never block or put
  * the scan record buffer on their (small) stacks. */
@@ -57,3 +67,7 @@ size_t wifi_mgr_scan_results_copy(rk_wifi_network_t *out, size_t capacity);
 
 // weak callback the UI can override (or register separately)
 void rk_net_evt_cb(rk_net_evt_t evt, const char *ip_opt);
+
+#ifdef __cplusplus
+}
+#endif

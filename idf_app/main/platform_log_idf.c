@@ -5,7 +5,9 @@
 
 void platform_log_backend(const char *level, const char *fmt, va_list args) {
     esp_log_level_t lvl = ESP_LOG_INFO;
-    if (level && level[0] == 'W') {
+    if (level && level[0] == 'D') {
+        lvl = ESP_LOG_DEBUG;
+    } else if (level && level[0] == 'W') {
         lvl = ESP_LOG_WARN;
     } else if (level && level[0] == 'E') {
         lvl = ESP_LOG_ERROR;

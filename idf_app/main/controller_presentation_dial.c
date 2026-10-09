@@ -40,6 +40,10 @@ void controller_presentation_set_zone_name(const char *zone_name) {
     ui_set_zone_name(zone_name);
 }
 
+void controller_presentation_set_zone_count(int count) {
+    ui_set_zone_count(count);
+}
+
 void controller_presentation_set_network_status(const char *status) {
     const char *warning = config_durability_warning();
     ui_set_network_status(warning ? warning : status);

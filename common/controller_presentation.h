@@ -19,6 +19,7 @@ void controller_presentation_update(const char *line1, const char *line2, const 
 void controller_presentation_set_status(bool online);
 void controller_presentation_set_message(const char *msg);
 void controller_presentation_set_zone_name(const char *zone_name);
+void controller_presentation_set_zone_count(int count);  // 0 == unknown/transient
 void controller_presentation_set_network_status(const char *status);  // NULL clears the banner
 void controller_presentation_set_artwork(const char *image_key);
 void controller_presentation_show_volume_change(float volume, float volume_step);

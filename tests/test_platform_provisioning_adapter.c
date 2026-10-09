@@ -3,13 +3,14 @@
 
 #include "platform/platform_provisioning.h"
 
-#if !defined(TEST_DIAL_ADAPTER) && !defined(TEST_FRAME_ADAPTER)
+#if !defined(TEST_DIAL_ADAPTER) && !defined(TEST_FRAME_ADAPTER) && \
+    !defined(TEST_TOUGH_ADAPTER)
 #error "Select the adapter under test"
 #endif
 
 static bool s_portal_start_succeeds;
 static bool s_portal_running;
-#if defined(TEST_FRAME_ADAPTER)
+#if defined(TEST_FRAME_ADAPTER) || defined(TEST_TOUGH_ADAPTER)
 static bool s_sta_server_running;
 #else
 static bool s_config_server_running;

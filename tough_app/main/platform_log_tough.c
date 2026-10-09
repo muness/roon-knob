@@ -1,0 +1,22 @@
+// ESP-IDF backend for platform_log.h
+// Overrides the weak default in common/platform/platform_log.c
+// Identical to frame_app/main/platform_log_frame.c -- this backend is
+// target-generic (ESP-IDF logging), not Frame-specific.
+
+#include "platform/platform_log.h"
+
+#include <esp_log.h>
+#include <stdio.h>
+
+void platform_log_backend(const char *level, const char *fmt, va_list args) {
+    // Route shared controller logging through the target's ESP-IDF filter.
+    esp_log_level_t esp_level = ESP_LOG_INFO;
+    if (level && level[0] == 'D') {
+        esp_level = ESP_LOG_DEBUG;
+    } else if (level && level[0] == 'E') {
+        esp_level = ESP_LOG_ERROR;
+    } else if (level && level[0] == 'W') {
+        esp_level = ESP_LOG_WARN;
+    }
+    esp_log_writev(esp_level, "rk", fmt, args);
+}

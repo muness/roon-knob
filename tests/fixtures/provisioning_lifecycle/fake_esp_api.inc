@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 typedef int esp_err_t;
 
@@ -24,6 +25,11 @@ typedef void (*esp_event_handler_t)(void *, esp_event_base_t, int32_t, void *);
 #define WIFI_EVENT_STA_DISCONNECTED 2
 #define WIFI_EVENT_SCAN_DONE 3
 #define IP_EVENT_STA_GOT_IP 1
+#define IP_EVENT_AP_STAIPASSIGNED 2
+#define WIFI_EVENT_AP_STACONNECTED 4
+#define WIFI_EVENT_AP_STADISCONNECTED 5
+#define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
+#define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
 #define ESP_EVENT_ANY_ID (-1)
 
 esp_err_t esp_event_loop_create_default(void);
@@ -48,6 +54,14 @@ esp_netif_t *esp_netif_create_default_wifi_ap(void);
 esp_err_t esp_netif_set_hostname(esp_netif_t *netif, const char *hostname);
 esp_err_t esp_netif_get_hostname(esp_netif_t *netif, const char **hostname);
 
+typedef struct {
+    const char *server;
+    void (*sync_cb)(struct timeval *tv);
+} esp_sntp_config_t;
+#define ESP_NETIF_SNTP_DEFAULT_CONFIG(server_name) \
+    ((esp_sntp_config_t){.server = (server_name), .sync_cb = NULL})
+esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *config);
+
 typedef uint32_t esp_ip4_addr_t;
 char *esp_ip4addr_ntoa(const esp_ip4_addr_t *addr, char *buf, size_t size);
 
@@ -70,6 +84,10 @@ typedef struct {
         uint8_t password[65];
         struct { int authmode; } threshold;
         struct { bool capable; bool required; } pmf_cfg;
+        int scan_method;
+        int sort_method;
+        unsigned rm_enabled : 1;
+        unsigned btm_enabled : 1;
     } sta;
     struct {
         uint8_t ssid[33];
@@ -102,10 +120,18 @@ typedef struct {
 
 typedef struct { int unused; } wifi_init_config_t;
 typedef struct { uint8_t reason; } wifi_event_sta_disconnected_t;
+typedef struct { uint8_t mac[6]; } wifi_event_ap_staconnected_t;
+typedef struct { uint8_t reason; } wifi_event_ap_stadisconnected_t;
 typedef struct { struct { esp_ip4_addr_t ip; } ip_info; } ip_event_got_ip_t;
+typedef struct { esp_ip4_addr_t ip; } ip_event_ap_staipassigned_t;
+#define IPSTR "%u.%u.%u.%u"
+#define IP2STR(a) (unsigned)(*(a) & 0xff), (unsigned)((*(a) >> 8) & 0xff), \
+    (unsigned)((*(a) >> 16) & 0xff), (unsigned)((*(a) >> 24) & 0xff)
 
 #define WIFI_INIT_CONFIG_DEFAULT() ((wifi_init_config_t){0})
 #define WIFI_AUTH_WPA2_PSK 1
+#define WIFI_ALL_CHANNEL_SCAN 1
+#define WIFI_CONNECT_AP_BY_SIGNAL 0
 #define WIFI_AUTH_OPEN 0
 #define WIFI_MODE_STA 1
 #define WIFI_MODE_AP 2
@@ -155,6 +181,8 @@ void fixture_set_provisioning_ready(bool ready);
 int fixture_provisioning_start_calls(void);
 int fixture_provisioning_stop_calls(void);
 int fixture_wifi_connect_calls(void);
+int fixture_sntp_init_calls(void);
+wifi_ps_type_t fixture_wifi_power_save(void);
 const char *fixture_wifi_ssid(void);
 const char *fixture_wifi_pass(void);
 bool fixture_timer_active(const char *name);

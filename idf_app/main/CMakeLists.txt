@@ -9,7 +9,7 @@ set(SRC_FILES
     "display_sleep.c"
     "platform_storage_idf.c"
     "platform_http_idf.c"
-    "platform_mdns_idf.c"
+    "../../common/platform/platform_mdns_esp.c"
     "platform_log_idf.c"
     "platform_input_idf.c"
     "platform_identity_idf.c"
@@ -32,6 +32,7 @@ set(SRC_FILES
     "../../common/app_main.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
+    "../../common/controller_connection.c"
     "../../common/controller_action_router.c"
     "../../common/controller_config.c"
     "../../common/controller_ble_input.c"
@@ -40,9 +41,17 @@ set(SRC_FILES
     "../../common/controller_view.c"
     "../../common/controller_view_compat.c"
     "../../common/wifi_manager.c"
+    "../../common/portal_trace.c"
+    "../../common/wifi_portal_form.c"
+    "../../common/portal_brand.c"
+    "../../common/power_debug_web.c"
     "../../common/ui.c"
+    "../../common/assets/hiphi_logo_lvgl.c"
     "../../common/ui_jpeg.c"
+    "../../common/zone_label_policy.c"
     "../../common/platform/platform_log.c"
+    "../../common/platform/platform_mdns_endpoint.c"
+    "../../common/platform/platform_power.c"
     "../../common/platform/platform_time.c"
     "../../common/platform/platform_task.c"
 )
@@ -83,6 +92,8 @@ idf_component_register(
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0
+    PLATFORM_PORTAL_PRODUCT_SLUG="HiPhi Dial"
+    PORTAL_BRAND_PRODUCT="Dial")
 # TODO(#183): Remove after ESP-IDF 6.0 migration (Picolibc has proper strlcpy)
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)

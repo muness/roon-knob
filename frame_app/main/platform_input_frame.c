@@ -7,6 +7,7 @@
 #include "controller_input.h"
 #include "controller_input_mailbox.h"
 #include "controller_system_frame.h"
+#include "platform_input_frame.h"
 
 #include <driver/gpio.h>
 #include <esp_log.h>
@@ -23,6 +24,7 @@ static const char *TAG = "input";
 static esp_timer_handle_t s_btn_poll_timer = NULL;
 static portMUX_TYPE s_latch_lock = portMUX_INITIALIZER_UNLOCKED;
 static controller_input_safety_latch_t s_safety_latch;
+static uint64_t s_last_activity_ms;
 
 #define FRAME_PENDING_PROVISIONING (1u << 0)
 #define FRAME_PENDING_RESTART      (1u << 1)
@@ -72,9 +74,15 @@ static void poll_button(button_state_t *btn, uint32_t long_press_bit) {
         // Button just pressed
         btn->pressed = true;
         btn->press_time = now;
+        taskENTER_CRITICAL(&s_latch_lock);
+        s_last_activity_ms = now;
+        taskEXIT_CRITICAL(&s_latch_lock);
     } else if (!now_pressed && btn->pressed) {
         // Button released
         btn->pressed = false;
+        taskENTER_CRITICAL(&s_latch_lock);
+        s_last_activity_ms = now;
+        taskEXIT_CRITICAL(&s_latch_lock);
         uint64_t held = now - btn->press_time;
         if (held >= LONG_PRESS_MS && long_press_bit != 0) {
             /*
@@ -114,6 +122,7 @@ void platform_input_init(void) {
     controller_input_safety_latch_reset(&s_safety_latch);
     taskEXIT_CRITICAL(&s_latch_lock);
     s_restart_pending = false;
+    s_last_activity_ms = (uint64_t)esp_timer_get_time() / 1000ULL;
     s_boot = (button_state_t){BOOT_PIN, 1, 0, false};
     s_gp4 = (button_state_t){GP4_PIN, 1, 0, false};
     s_pwr = (button_state_t){PWR_PIN, 0, 0, false};
@@ -139,7 +148,8 @@ void platform_input_init(void) {
     };
     gpio_config(&pwr_conf);
 
-    // Timer to poll buttons every 10ms
+    // These controls only act on one-second holds. A 100 ms poll preserves that
+    // contract without waking the SoC one hundred times per second.
     esp_timer_create_args_t timer_args = {
         .callback = button_poll_cb,
         .name = "btn_poll",
@@ -148,7 +158,7 @@ void platform_input_init(void) {
         ESP_LOGE(TAG, "Failed to create button poll timer");
         return;
     }
-    if (esp_timer_start_periodic(s_btn_poll_timer, 10 * 1000) != ESP_OK) {
+    if (esp_timer_start_periodic(s_btn_poll_timer, 100 * 1000) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start button poll timer");
         esp_timer_delete(s_btn_poll_timer);
         s_btn_poll_timer = NULL;
@@ -157,6 +167,17 @@ void platform_input_init(void) {
 
     ESP_LOGI(TAG, "Button input initialized (BOOT=%d, GP4=%d, PWR=%d)",
              BOOT_PIN, GP4_PIN, PWR_PIN);
+}
+
+uint64_t frame_input_last_activity_ms(void) {
+    taskENTER_CRITICAL(&s_latch_lock);
+    uint64_t value = s_last_activity_ms;
+    taskEXIT_CRITICAL(&s_latch_lock);
+    return value;
+}
+
+bool frame_input_wake_button_released(void) {
+    return gpio_get_level(GP4_PIN) != 0;
 }
 
 void platform_input_process_events(void) {

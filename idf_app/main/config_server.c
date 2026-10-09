@@ -2,12 +2,19 @@
 // Access at http://<knob-ip>/ to set bridge URL
 
 #include "config_server.h"
+#include "portal_brand.h"
+
+#ifndef PLATFORM_PORTAL_PRODUCT_SLUG
+#define PLATFORM_PORTAL_PRODUCT_SLUG "HiPhi Dial"
+#endif
 #include "controller_config.h"
 #include "http_server_lifecycle.h"
+#include "power_debug_web.h"
 #include "platform/platform_mdns.h"
 #include "bridge_client.h"
 #include "rk_ble_hid_host.h"
 #include "wifi_manager.h"
+#include "wifi_portal_form.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -47,44 +54,24 @@ static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
 }
 
 // HTML page for config
-// Format args: current_bridge, status_class, status_text, wifi_html, bridge_value
+// Format args: brand_css, brand_header, current_bridge, status_class,
+// status_text, wifi_html, scan_placeholder, scan_options, bridge_value,
+// scan_refresh_script, brand_footer
 static const char *HTML_CONFIG =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>HiPhi Dial Config</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;}"
-    "h1{color:#4fc3f7;margin-bottom:5px;}"
-    "h2{color:#aaa;font-size:16px;margin-top:20px;}"
-    ".info{color:#888;margin:10px 0;}"
-    "form{background:#16213e;padding:20px;border-radius:10px;max-width:400px;}"
-    "label{display:block;margin:15px 0 5px;color:#aaa;}"
-    "input[type=text],input[type=url],input[type=password]{width:100%%;padding:10px;border:1px solid #333;border-radius:5px;background:#0f0f1a;color:#fff;box-sizing:border-box;}"
-    "input[type=submit]{padding:12px 24px;margin-top:20px;background:#4fc3f7;color:#000;border:none;border-radius:5px;font-weight:bold;cursor:pointer;}"
-    "input[type=submit]:hover{background:#29b6f6;}"
-    ".btn-clear{background:#ff7043;}"
-    ".btn-clear:hover{background:#ff5722;}"
-    ".btn-sm{padding:6px 12px;margin:0 0 0 10px;font-size:12px;}"
-    ".current{background:#0f0f1a;padding:10px;border-radius:5px;margin:10px 0;font-family:monospace;}"
-    ".status{padding:10px;border-radius:5px;margin:10px 0;}"
-    ".status-ok{background:#1b5e20;}"
-    ".status-warn{background:#e65100;}"
-    ".status-err{background:#b71c1c;}"
-    ".hint{font-size:12px;color:#666;margin-top:4px;}"
-    ".success{background:#2e7d32;padding:15px;border-radius:5px;margin:15px 0;}"
-    ".wifi-entry{background:#0f0f1a;padding:8px 12px;border-radius:5px;margin:4px 0;display:flex;justify-content:space-between;align-items:center;max-width:400px;}"
-    ".section{max-width:400px;}"
-    "a{color:#4fc3f7;}"
-    ".device{background:#0f0f1a;padding:10px;border-radius:5px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;}"
-    "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
-    "<p class='info'>Configure your HiPhi Dial settings</p>"
+    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " Config</title>"
+    "<style>%s</style></head><body>"
+    "%s"
+    "<h1>Settings</h1>"
+    "<p class='info'>Configure your " PLATFORM_PORTAL_PRODUCT_SLUG " settings</p>"
     "<p><a href='/ble'>BLE Media Remote settings</a></p>"
+    "<p><a href='/power-debug'>Power debug evidence</a></p>"
     "<div class='current'>"
     "<strong>Current Unified Hi-Fi Control:</strong> %s"
     "</div>"
-    "<div class='status %s'>"
+    "<div id='connection-status' class='status %s'>"
     "<strong>Status:</strong> %s"
     "</div>"
         "<h2>Saved WiFi Networks</h2>"
@@ -92,10 +79,9 @@ static const char *HTML_CONFIG =
         "<p class='hint'>Saved-network changes take effect after restart.</p>"
     "<form method='POST' action='/wifi-add'>"
     "<h2>Add WiFi Network</h2>"
-    "<label>SSID</label>"
-    "<input type='text' name='ssid' maxlength='32' placeholder='Network name' required>"
+    RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
-        "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
+        RK_WIFI_PORTAL_PASSWORD_INPUT("Password (optional)")
         "<p class='hint'>Up to two networks. Remove one before replacing it.</p>"
     "<input type='submit' value='Add Network'>"
     "</form>"
@@ -103,25 +89,22 @@ static const char *HTML_CONFIG =
     "<h2>Unified Hi-Fi Control Override</h2>"
     "<label>Unified Hi-Fi Control URL</label>"
     "<input type='url' name='bridge' maxlength='128' placeholder='http://192.168.1.x:8088' value='%s'>"
-    "<p class='hint'>Leave empty for mDNS auto-discovery. Check the HiPhi Dial display for connection progress.</p>"
+    "<p class='hint'>Leave empty to find your bridge automatically. Connection status appears above.</p>"
     "<input type='submit' value='Save'>"
     "<input type='submit' name='action' value='Clear' class='btn-clear' formnovalidate>"
-    "</form></body></html>";
+    "</form>%s%s<script>let busy=false,lastUpdate=Date.now();function unavailable(){const o=document.getElementById('connection-status');if(o){o.className='status status-warn';o.textContent='Dial unavailable - reconnecting. Last update: '+Math.floor((Date.now()-lastUpdate)/1000)+' seconds ago.';}}setInterval(async()=>{if(document.hidden||busy)return;busy=true;const c=new AbortController(),t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(location.pathname,{cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('response');const d=new DOMParser().parseFromString(await r.text(),'text/html');const n=d.getElementById('connection-status'),o=document.getElementById('connection-status');if(n&&o){const a=o.querySelector('details'),b=n.querySelector('details');if(a&&b)b.open=a.open;o.replaceWith(n);lastUpdate=Date.now();}else throw new Error('status missing');}catch(e){unavailable();}finally{clearTimeout(t);busy=false;}},5000);</script></body></html>";
 
+// Format args: brand_css, brand_header, message, brand_footer
 static const char *HTML_SUCCESS =
     "<!DOCTYPE html>"
     "<html><head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>Saved</title>"
-    "<style>"
-    "body{font-family:sans-serif;margin:20px;background:#1a1a2e;color:#eee;text-align:center;}"
-    "h1{color:#4fc3f7;}"
-    ".success{background:#2e7d32;padding:20px;border-radius:10px;max-width:300px;margin:20px auto;}"
-    ".info{background:#16213e;padding:15px;border-radius:10px;max-width:300px;margin:20px auto;}"
-    "</style></head><body>"
-    "<h1>HiPhi Dial</h1>"
+    "<style>%s</style></head><body>"
+    "%s"
     "<div class='success'>%s</div>"
-    "<div class='info'>Device will reboot automatically to apply changes...</div>"
+    "<div class='card'>Device will reboot automatically to apply changes...</div>"
+    "%s"
     "</body></html>";
 
 // URL decode a string in place
@@ -207,131 +190,92 @@ static void html_escape(const char *src, char *dst, size_t dst_len) {
     dst[pos] = '\0';
 }
 
-// Resolve .local hostname in URL to IP address via mDNS
-// Modifies url in place if resolution succeeds
-static void resolve_local_in_url(char *url, size_t url_len) {
-    if (!url || !url[0]) return;
-
-    // Check if URL contains .local
-    char *local_pos = strstr(url, ".local");
-    if (!local_pos) return;
-
-    // Make sure it's actually the hostname suffix (followed by : or / or end)
-    char after = local_pos[6];
-    if (after != ':' && after != '/' && after != '\0') return;
-
-    // Extract hostname: skip http://
-    const char *host_start = strstr(url, "://");
-    if (!host_start) return;
-    host_start += 3;
-
-    // Find end of hostname
-    const char *host_end = host_start;
-    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
-
-    // Extract hostname
-    size_t host_len = host_end - host_start;
-    if (host_len == 0 || host_len >= 64) return;
-
-    char hostname[64];
-    memcpy(hostname, host_start, host_len);
-    hostname[host_len] = '\0';
-
-    // Resolve via mDNS
-    char ip[16];
-    if (!platform_mdns_resolve_local(hostname, ip, sizeof(ip))) {
-        ESP_LOGW(TAG, "Could not resolve %s via mDNS", hostname);
-        return;
-    }
-
-    // Build new URL with IP instead of hostname
-    char new_url[128];
-    size_t scheme_len = host_start - url;
-    snprintf(new_url, sizeof(new_url), "%.*s%s%s", (int)scheme_len, url, ip, host_end);
-
-    // Copy back if it fits
-    if (strlen(new_url) < url_len) {
-        strcpy(url, new_url);
-        ESP_LOGI(TAG, "Resolved .local URL to: %s", url);
-    }
-}
-
-// Handler for GET / - serve the config form
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Serving config page");
 
-    controller_config_snapshot_t snapshot = {0};
-    if (!controller_config_snapshot(&snapshot)) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Settings are unavailable");
+    /* Keep request scratch storage off the small HTTP server task stack. */
+    struct connection_render {
+        controller_config_snapshot_t snapshot;
+        controller_connection_t connection;
+        rk_wifi_portal_scan_t scan;
+        char wifi_html[1024], scan_options[4096];
+        char summary[96], details[384], escaped_details[2304], escaped_summary[576], status[3072];
+    } *render = heap_caps_calloc(1, sizeof(*render), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!render) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
-    const rk_cfg_t *cfg = &snapshot.value;
-
-    const char *current = cfg->bridge_base[0] ? cfg->bridge_base : "(mDNS auto-discovery)";
-
-    // Get bridge connection status
-    const char *status_class;
-    char status_text[64];
-    bool bridge_connected = bridge_client_is_bridge_connected();
-    int retry_count = bridge_client_get_bridge_retry_count();
-    int retry_max = bridge_client_get_bridge_retry_max();
-
-    if (bridge_connected) {
-        status_class = "status-ok";
-        snprintf(status_text, sizeof(status_text), "Connected");
-    } else if (!cfg->bridge_base[0]) {
-        status_class = "status-warn";
-        snprintf(status_text, sizeof(status_text), "Searching via mDNS...");
-    } else if (retry_count >= retry_max) {
-        status_class = "status-err";
-        snprintf(status_text, sizeof(status_text),
-                 "Unreachable - check Unified Hi-Fi Control");
-    } else if (retry_count > 0) {
-        status_class = "status-warn";
-        snprintf(status_text, sizeof(status_text), "Connecting... (%d/%d)", retry_count, retry_max);
-    } else {
-        status_class = "status-warn";
-        snprintf(status_text, sizeof(status_text), "Connecting...");
+    if (!controller_config_snapshot(&render->snapshot)) {
+        free(render);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Settings are unavailable");
+        return ESP_FAIL;
     }
+    const rk_cfg_t *cfg = &render->snapshot.value;
+    const char *current = cfg->bridge_base[0] ? cfg->bridge_base : "(mDNS auto-discovery)";
+    bridge_client_connection_snapshot(&render->connection);
+    const char *status_class = controller_connection_ready(&render->connection) ? "status-ok" : "status-warn";
+    bridge_client_connection_status(render->summary, sizeof(render->summary), render->details, sizeof(render->details));
+    html_escape(render->summary, render->escaped_summary, sizeof(render->escaped_summary));
+    html_escape(render->details, render->escaped_details, sizeof(render->escaped_details));
+    snprintf(render->status, sizeof(render->status), "%s<details><summary>Connection details</summary><div style='white-space:pre-line'>%s</div></details>",
+             render->escaped_summary, render->escaped_details);
 
-    char wifi_html[1024] = "";
     size_t wifi_pos = 0;
     for (int i = 0; i < cfg->wifi_count && i < RK_MAX_WIFI; i++) {
         char escaped_ssid[192];
         html_escape(cfg->wifi[i].ssid, escaped_ssid, sizeof(escaped_ssid));
         int written = snprintf(
-            wifi_html + wifi_pos, sizeof(wifi_html) - wifi_pos,
+            render->wifi_html + wifi_pos, sizeof(render->wifi_html) - wifi_pos,
             "<div class='wifi-entry'><span>%d. %s</span>"
             "<form method='POST' action='/wifi-remove' style='display:inline;margin:0;padding:0;'>"
             "<input type='hidden' name='idx' value='%d'>"
             "<input type='submit' value='Remove' class='btn-sm btn-clear'>"
             "</form></div>",
             i + 1, escaped_ssid, i);
-        if (written < 0 || (size_t)written >= sizeof(wifi_html) - wifi_pos) {
+        if (written < 0 || (size_t)written >= sizeof(render->wifi_html) - wifi_pos) {
             break;
         }
         wifi_pos += (size_t)written;
     }
     if (wifi_pos == 0) {
-        snprintf(wifi_html, sizeof(wifi_html),
+        snprintf(render->wifi_html, sizeof(render->wifi_html),
                  "<div class='wifi-entry'><em>No saved networks</em></div>");
     }
 
+    char query[32] = {0};
+    char scan_value[8] = {0};
+    const bool scan_again_requested =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "scan", scan_value,
+                              sizeof(scan_value)) == ESP_OK &&
+        strcmp(scan_value, "again") == 0;
+    rk_wifi_portal_scan_prepare(&render->scan, scan_again_requested);
+    rk_wifi_portal_render_options(&render->scan, render->scan_options, sizeof(render->scan_options));
+
     // Build HTML with current values, saved networks, and bridge status.
-    char *html = heap_caps_malloc(4096,
+    /* Grown for the shared brand stylesheet (~4 KB) on top of the scan
+     * options, saved networks, and status blocks. */
+    const size_t html_size = 24576;
+    char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
+        free(render);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 4096, HTML_CONFIG, current, status_class, status_text,
-             wifi_html, cfg->bridge_base);
+    snprintf(html, html_size, HTML_CONFIG, PORTAL_BRAND_CSS,
+             portal_brand_header_html(), current, status_class, render->status,
+             render->wifi_html, rk_wifi_portal_scan_placeholder(&render->scan), render->scan_options,
+             cfg->bridge_base,
+             rk_wifi_portal_scan_should_refresh(&render->scan)
+                 ? RK_WIFI_PORTAL_AUTO_REFRESH_SCRIPT : "",
+             portal_brand_footer_html());
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
     free(html);
+    free(render);
     return ESP_OK;
 }
 
@@ -370,11 +314,6 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
 
         rk_strlcpy(bridge_base, bridge, sizeof(bridge_base));
 
-        // Resolve .local hostnames to IPs (ESP32 lwIP has issues with .local DNS)
-        if (bridge[0]) {
-            resolve_local_in_url(bridge_base, sizeof(bridge_base));
-        }
-
         message = bridge_base[0] ? "Unified Hi-Fi Control URL saved!"
                                  : "Unified Hi-Fi Control cleared! Will use mDNS.";
         ESP_LOGI(TAG, "Bridge URL set to: %s", bridge_base[0] ? bridge_base : "(mDNS)");
@@ -392,14 +331,16 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
     }
 
     // Send success response
-    char *html = heap_caps_malloc(1024,
+    const size_t success_size = 8192;
+    char *html = heap_caps_malloc(success_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
 
-    snprintf(html, 1024, HTML_SUCCESS, message);
+    snprintf(html, success_size, HTML_SUCCESS, PORTAL_BRAND_CSS,
+             portal_brand_header_html(), message, portal_brand_footer_html());
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html, strlen(html));
     free(html);
@@ -421,9 +362,15 @@ static esp_err_t wifi_add_handler(httpd_req_t *req) {
     }
     buf[received] = '\0';
 
+    char selected_ssid[33] = {0};
+    char manual_ssid[33] = {0};
     char ssid[33] = {0};
     char pass[65] = {0};
-    if (!get_form_field(buf, "ssid", ssid, sizeof(ssid)) || !ssid[0]) {
+    (void)get_form_field(buf, "ssid", selected_ssid, sizeof(selected_ssid));
+    (void)get_form_field(buf, "ssid_manual", manual_ssid,
+                         sizeof(manual_ssid));
+    if (!rk_wifi_portal_resolve_ssid(selected_ssid, manual_ssid,
+                                     ssid, sizeof(ssid))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
     }
@@ -557,7 +504,7 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
     size_t result_count = rk_ble_hid_host_scan_results_copy(
         results, RK_BLE_HID_HOST_MAX_RESULTS, &scan_generation);
 
-    const size_t html_size = 12288;
+    const size_t html_size = 24576;  /* room for the shared brand stylesheet */
     char *html = heap_caps_malloc(html_size,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!html) {
@@ -611,28 +558,24 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
         "<!DOCTYPE html><html><head>"
         "<meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>BLE Media Remote - HiPhi Dial</title>"
-        "<style>"
-        "*{box-sizing:border-box}body{font-family:sans-serif;margin:0;padding:24px;"
-        "background:#1a1a2e;color:#eee;line-height:1.45}main{max-width:480px;margin:0 auto}"
-        "a{color:#70d6ff}h1{color:#4fc3f7;margin:24px 0 6px;font-size:28px}"
-        "h2{font-size:18px;margin:28px 0 8px}.lede{color:#b9c3d8;margin:0 0 20px}"
-        ".connection{display:flex;gap:12px;align-items:flex-start;background:#0f0f1a;"
-        "padding:16px;border-radius:14px;margin:18px 0}.connection strong,.connection span{display:block}"
-        ".connection span:last-child{color:#b9c3d8;margin-top:2px;overflow-wrap:anywhere}"
-        ".dot{width:10px;height:10px;border-radius:50%%;background:#8a94a8;margin-top:6px;flex:none}"
-        ".connected .dot{background:#55d98b}.working .dot{background:#ffd166;animation:pulse 1.4s ease-in-out infinite}"
-        ".error .dot{background:#ff7043}.live{font-size:12px;color:#91a0bb;margin-top:8px}"
-        ".actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.actions form{margin:0}"
-        "button{padding:10px 16px;background:#4fc3f7;color:#07111a;border:0;border-radius:8px;"
-        "font-weight:700;cursor:pointer}button:hover{background:#70d6ff}button:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:3px}"
-        "button:disabled{background:#596275;color:#c7ccda;cursor:wait}.danger{background:#ff8a65}"
-        ".device{background:#0f0f1a;padding:12px 14px;border-radius:12px;margin:8px 0;"
-        "display:flex;gap:12px;justify-content:space-between;align-items:center}.device span{overflow-wrap:anywhere}"
-        ".empty,.hint{color:#b9c3d8}.technical{margin-top:28px;color:#91a0bb;font-size:13px}"
-        ".technical summary{cursor:pointer;color:#b9c3d8}@keyframes pulse{50%%{opacity:.35;transform:scale(.75)}}"
+        "<title>BLE Media Remote - " PLATFORM_PORTAL_PRODUCT_SLUG "</title>"
+        "<style>%s"
+        /* page-specific supplement on top of the shared brand stylesheet */
+        ".connection strong,.connection span{display:block}"
+        ".connection{align-items:flex-start}"
+        ".connection span:last-child{color:var(--pb-muted);margin-top:2px;"
+        "overflow-wrap:anywhere}"
+        ".dot{width:10px;height:10px;border-radius:50%%;background:var(--pb-muted);"
+        "margin-top:6px;flex:none}"
+        ".connected .dot{background:var(--pb-ok)}"
+        ".working .dot{background:var(--pb-warn);animation:pulse 1.4s ease-in-out infinite}"
+        ".error .dot{background:var(--pb-attention)}"
+        ".live{font-size:12px;color:var(--pb-muted);margin-top:8px}"
+        ".device span{overflow-wrap:anywhere}"
+        "@keyframes pulse{50%%{opacity:.35;transform:scale(.75)}}"
         "@media(prefers-reduced-motion:reduce){.working .dot{animation:none}}"
         "</style>%s</head><body><main>"
+        "%s"
         "<a href='/'>← Back to Dial settings</a>"
         "<h1>BLE Media Remote</h1>"
         "<p class='lede'>Connect one physical Bluetooth remote to control media on this Dial.</p>"
@@ -643,11 +586,13 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
         "<form method='POST' action='/ble-enable'>"
         "<input type='hidden' name='enabled' value='%d'>"
         "<button type='submit' class='%s'>%s</button></form>",
+        PORTAL_BRAND_CSS,
         auto_updates
             ? "<script>if(location.search)history.replaceState(null,'','/ble');"
               "setTimeout(function(){if(!document.hidden)location.reload()},1000);"
               "document.addEventListener('visibilitychange',function(){if(!document.hidden)location.reload()});</script>"
             : "",
+        portal_brand_header_html(),
         state_class, state_title, state_detail,
         auto_updates ? "<span class='live'>Updates automatically</span>" : "",
         status.enabled ? 0 : 1,
@@ -720,11 +665,12 @@ static esp_err_t ble_get_handler(httpd_req_t *req) {
         "<details class='technical'><summary>About this setting</summary>"
         "<p>The Dial connects to a separate Bluetooth media remote. The Dial itself "
         "does not appear as a remote to phones or computers.</p>%s%s%s</details>"
-        "</main></body></html>",
+        "%s</main></body></html>",
         status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "<p>Technical error: " : "",
         status.last_error != RK_BLE_HID_HOST_ERROR_NONE
             ? rk_ble_hid_host_error_name(status.last_error) : "",
-        status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "</p>" : "");
+        status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "</p>" : "",
+        portal_brand_footer_html());
     if (pos < 0 || pos >= (int)html_size) {
         pos = (int)html_size - 1;
     }
@@ -920,6 +866,10 @@ void config_server_start(void) {
         .handler = ble_forget_handler,
     };
     httpd_register_uri_handler(s_server, &ble_forget);
+
+    if (!power_debug_web_register(s_server)) {
+        ESP_LOGE(TAG, "Shared power-debug routes unavailable");
+    }
 
     ESP_LOGI(TAG, "Config server started");
     http_server_lifecycle_unlock();

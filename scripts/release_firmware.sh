@@ -9,10 +9,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-CMAKE_FILE="$ROOT_DIR/idf_app/CMakeLists.txt"
+CMAKE_FILES=(
+    "$ROOT_DIR/idf_app/CMakeLists.txt"
+    "$ROOT_DIR/frame_app/CMakeLists.txt"
+    "$ROOT_DIR/rlcd_app/CMakeLists.txt"
+    "$ROOT_DIR/atom_app/CMakeLists.txt"
+    "$ROOT_DIR/halo_app/CMakeLists.txt"
+    "$ROOT_DIR/tough_app/CMakeLists.txt"
+    "$ROOT_DIR/m5_beta_app/CMakeLists.txt"
+    "$ROOT_DIR/knob_aux_app/CMakeLists.txt"
+)
 
 show_usage() {
-    CURRENT=$(grep 'set(PROJECT_VER' "$CMAKE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+    CURRENT=$(grep 'set(PROJECT_VER' "${CMAKE_FILES[0]}" | sed 's/.*"\(.*\)".*/\1/')
     echo "Current version: $CURRENT"
     echo ""
     echo "Usage: $0 <version>"
@@ -28,15 +37,15 @@ show_usage() {
     exit 1
 }
 
-if [ $# -lt 1 ]; then
+if [ $# -ne 1 ]; then
     show_usage
 fi
 
 NEW_VERSION="$1"
 
-# Validate version format (semver with optional pre-release)
-if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-    echo "Error: Version must be semver format (e.g., 1.2.3 or 1.2.3-beta.1)"
+# Match the channels accepted by the release workflow before changing files.
+if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)\.[0-9]+)?$'; then
+    echo "Error: Version must be stable, alpha.N, or beta.N (e.g., 1.2.3 or 1.2.3-beta.1)"
     exit 1
 fi
 
@@ -56,23 +65,38 @@ if git -C "$ROOT_DIR" tag -l "v$NEW_VERSION" | grep -q "v$NEW_VERSION"; then
 fi
 
 # Get current version
-CURRENT_VERSION=$(grep 'set(PROJECT_VER' "$CMAKE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+CURRENT_VERSION=$(grep 'set(PROJECT_VER' "${CMAKE_FILES[0]}" | sed 's/.*"\(.*\)".*/\1/')
 
 echo "=== Releasing v$NEW_VERSION ==="
 
 # Step 1: Update version in CMakeLists.txt
-echo "[1/4] Updating version in CMakeLists.txt..."
+echo "[1/4] Updating every firmware version..."
+python3 - "$NEW_VERSION" "${CMAKE_FILES[@]}" <<'PYTHON'
+from pathlib import Path
+import re
+import sys
+
+version = sys.argv[1]
+updates = []
+for name in sys.argv[2:]:
+    path = Path(name)
+    content, count = re.subn(r'set\(PROJECT_VER "[^"\n]*"\)', f'set(PROJECT_VER "{version}")', path.read_text())
+    if count != 1:
+        raise SystemExit(f"Expected exactly one PROJECT_VER in {path}, found {count}")
+    updates.append((path, content))
+for path, content in updates:
+    path.write_text(content)
+PYTHON
 if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
-    echo "      Version already set to $NEW_VERSION"
+    echo "      Every firmware already set to $NEW_VERSION"
 else
-    sed -i '' "s/set(PROJECT_VER \".*\")/set(PROJECT_VER \"$NEW_VERSION\")/" "$CMAKE_FILE"
     echo "      Version updated: $CURRENT_VERSION -> $NEW_VERSION"
 fi
 
 # Step 2: Commit (only if there are changes)
 echo "[2/4] Committing..."
 cd "$ROOT_DIR"
-git add "$CMAKE_FILE"
+git add "${CMAKE_FILES[@]}"
 if git diff --cached --quiet; then
     echo "      No changes to commit (version was already $NEW_VERSION)"
 else
@@ -87,7 +111,8 @@ echo "      Tag created"
 
 # Step 4: Push
 echo "[4/4] Pushing to GitHub..."
-git push && git push --tags
+git push
+git push origin "v$NEW_VERSION"
 
 echo ""
 echo "=== Done! ==="
@@ -95,6 +120,6 @@ echo ""
 echo "GitHub Actions will now:"
 echo "  - Build the firmware"
 echo "  - Create the release at: https://github.com/muness/roon-knob/releases/tag/v$NEW_VERSION"
-echo "  - Build and push the Docker image"
+echo "  - Publish the matching stable, beta, or alpha firmware channel"
 echo ""
 echo "Monitor progress at: https://github.com/muness/roon-knob/actions"

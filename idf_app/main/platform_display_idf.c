@@ -1,4 +1,5 @@
 #include "platform_display_idf.h"
+#include "platform/platform_power.h"
 #include "platform/platform_display.h"
 #include "display_sleep.h"
 #include "bridge_client.h"
@@ -63,6 +64,7 @@ static esp_timer_handle_t s_lvgl_tick_timer = NULL;
 #define PIN_NUM_LCD_DATA3   ((gpio_num_t)18)
 #define PIN_NUM_LCD_RST     ((gpio_num_t)21)
 #define PIN_NUM_BK_LIGHT    ((gpio_num_t)47)
+#define PIN_NUM_TOUCH_RST   ((gpio_num_t)10)
 
 // LCD initialization commands for SH8601 (from reference example)
 static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
@@ -456,6 +458,21 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 bool platform_display_init(void) {
     ESP_LOGI(TAG, "Initializing display hardware");
 
+    /* Deep-sleep holds survive the reset boundary. Establish each awake level
+     * before releasing its hold so neither peripheral sees a power-on glitch. */
+    gpio_deep_sleep_hold_dis();
+    gpio_hold_dis(PIN_NUM_BK_LIGHT);
+    const gpio_config_t touch_reset_config = {
+        .pin_bit_mask = 1ULL << PIN_NUM_TOUCH_RST,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&touch_reset_config));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_NUM_TOUCH_RST, 1));
+    ESP_ERROR_CHECK(gpio_hold_dis(PIN_NUM_TOUCH_RST));
+
     // Initialize backlight with PWM at reduced brightness (50%)
     ledc_timer_config_t ledc_timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -618,7 +635,7 @@ void platform_display_init_sleep(TaskHandle_t lvgl_task_handle) {
         ESP_LOGW(TAG, "Cannot init display sleep - panel not initialized");
         return;
     }
-    display_sleep_init(s_panel_handle, lvgl_task_handle);
+    display_sleep_init(s_panel_handle, s_io_handle, lvgl_task_handle);
 }
 
 bool platform_display_is_sleeping(void) {
@@ -675,10 +692,99 @@ void platform_display_apply_config(const rk_cfg_t *cfg, bool is_charging) {
     display_update_power_settings(cfg);
 }
 
-bool platform_battery_is_charging(void) {
-    return battery_is_charging();
+void platform_power_snapshot(platform_power_snapshot_t *out) {
+    if (!out) {
+        return;
+    }
+    /* battery.c caches one voltage sample, so these derived fields are from
+     * the same ADC reading rather than two independent 16-sample bursts. */
+    out->battery_level = battery_get_percentage();
+    /* This board exposes battery voltage but no true VBUS signal. Keep the
+     * observed source honest while retaining the calibrated threshold as the
+     * effective policy projection. */
+    out->source = PLATFORM_POWER_SOURCE_UNKNOWN;
+    out->external_power = battery_is_charging();
 }
 
-int platform_battery_get_level(void) {
-    return battery_get_percentage();
+void platform_power_diagnostics_enrich(platform_power_diagnostics_t *out) {
+    if (!out) {
+        return;
+    }
+    display_power_debug_snapshot_t dial = {0};
+    display_power_debug_snapshot(&dial);
+    out->capabilities = PLATFORM_POWER_CAP_DISPLAY_SLEEP |
+        PLATFORM_POWER_CAP_SOC_DEEP_SLEEP |
+        PLATFORM_POWER_CAP_RTC_EVIDENCE |
+        PLATFORM_POWER_CAP_FORCED_TEST |
+        PLATFORM_POWER_CAP_AUXILIARY_SOC |
+        PLATFORM_POWER_CAP_VOLTAGE_EXPERIMENT;
+    switch (dial.display_state) {
+    case DISPLAY_STATE_ART_MODE:
+        out->state = PLATFORM_POWER_STATE_ART;
+        break;
+    case DISPLAY_STATE_DIM:
+        out->state = PLATFORM_POWER_STATE_DIM;
+        break;
+    case DISPLAY_STATE_SLEEP:
+        out->state = PLATFORM_POWER_STATE_DISPLAY_SLEEP;
+        break;
+    case DISPLAY_STATE_NORMAL:
+    default:
+        out->state = PLATFORM_POWER_STATE_ACTIVE;
+        break;
+    }
+    out->policy_known = dial.power_policy_known;
+    out->deep_sleep_timer_active = dial.deep_sleep_timer_active;
+    out->debug_sleep_override_armed = dial.debug_sleep_override_armed;
+    out->art_timeout_sec = dial.art_timeout_sec;
+    out->dim_timeout_sec = dial.dim_timeout_sec;
+    out->display_sleep_timeout_sec = dial.panel_sleep_timeout_sec;
+    out->power_off_timeout_sec = dial.deep_sleep_timeout_sec;
+    out->art_transitions = dial.art_transitions;
+    out->dim_transitions = dial.dim_transitions;
+    out->display_sleep_transitions = dial.panel_sleep_transitions;
+    out->runtime_wakes = dial.runtime_wakes;
+    out->debug_sleep_arms = dial.debug_sleep_arms;
+    out->power_off_attempts = dial.deep_sleep_attempts;
+    out->preflight_completions = dial.preflight_completions;
+    out->power_off_entries = dial.deep_sleep_entries;
+    out->hardware_wakes = dial.encoder_wakes;
+    out->last_preflight_flags = dial.last_preflight_flags;
+    switch (dial.last_preflight_error) {
+    case 0:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_NONE;
+        break;
+    case 1:
+    case 3:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_CONFIG;
+        break;
+    case 2:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WAKE_ACTIVE;
+        break;
+    case 4:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_BLE;
+        break;
+    case 5:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_OUTPUTS;
+        break;
+    case 6:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_WIFI;
+        break;
+    case 7:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_DISPLAY;
+        break;
+    default:
+        out->last_preflight_error = PLATFORM_POWER_PREFLIGHT_ERROR_POLICY;
+        break;
+    }
+    out->reset_reason = dial.reset_reason;
+    out->wakeup_cause = dial.wakeup_cause;
+}
+
+bool platform_power_debug_arm_sleep(uint32_t delay_sec) {
+    return display_power_debug_arm_deep_sleep(delay_sec);
+}
+
+bool platform_power_experiment_supported(void) {
+    return true;
 }

@@ -1,4 +1,5 @@
 #include "dns_server.h"
+#include "portal_trace.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -52,6 +53,24 @@ static int build_dns_response(const uint8_t *query, int query_len, uint8_t *resp
 
     if (pos > query_len) {
         return -1;  // Malformed query
+    }
+
+    // The reply is the header plus the question section only: anything after
+    // the question in the query (an EDNS0 OPT record, which iOS/macOS and most
+    // modern resolvers always send) is dropped or overwritten below, so the
+    // header must not claim it.  A copied ARCOUNT=1 made every reply malformed;
+    // iOS discards it, captive.apple.com never resolves, and no setup sheet pops.
+    response[4] = 0;                  // QDCOUNT = 1 (we answer the first question)
+    response[5] = 1;
+    response[8] = response[9] = 0;    // NSCOUNT
+    response[10] = response[11] = 0;  // ARCOUNT
+
+    // Only A queries get the AP address.  For AAAA/HTTPS/etc. reply with an
+    // empty NOERROR so dual-stack clients stop waiting on a mismatched answer.
+    const uint16_t qtype = (uint16_t)((query[pos - 4] << 8) | query[pos - 3]);
+    if (qtype != 1) {
+        response[6] = response[7] = 0;    // ANCOUNT
+        return pos;
     }
 
     // Add answer section
@@ -124,6 +143,10 @@ static void dns_server_task(void *arg) {
                 if (qpos < len && rx_buf[qpos] != 0) domain[dpos++] = '.';
             }
             ESP_LOGI(TAG, "DNS query: %s -> 192.168.4.1", domain);
+            const unsigned qtype = qpos + 2 < len
+                ? (unsigned)((rx_buf[qpos + 1] << 8) | rx_buf[qpos + 2])
+                : 0;
+            portal_trace('D', "t%u %.36s", qtype, domain);
         }
 
         int resp_len = build_dns_response(rx_buf, len, tx_buf);

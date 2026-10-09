@@ -1,0 +1,48 @@
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_SPIRAM=y
+# Kizz runs on M5StackChan K151's factory profile: ESP32-S3 quad PSRAM.
+# OPI/octal mode makes the ROM abort before app_main() on this board.
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# ESP-IDF recommends static TX buffers when PSRAM is enabled. Kizz otherwise
+# allocates radio buffers while enrollment and now-playing traffic overlap,
+# which can starve the Wi-Fi transmit path under its full voice workload.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
+# Two buffers reserve enough radio progress for the sequential enrollment
+# upload without consuming the internal DMA heap needed by M5Unified's mic.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2
+CONFIG_LWIP_LOCAL_HOSTNAME="hiphi-kizz-beta"
+# Voice, enrollment, now-playing, DNS, and reconnect overlap can exceed IDF's
+# default budget of ten. Keep headroom so one stalled LAN connection cannot
+# starve the independent voice and training transports.
+CONFIG_LWIP_MAX_SOCKETS=16
+# Kizz polls now-playing every two seconds while charging. The lwIP default
+# retains an actively closed socket for two minutes, enough to starve voice and
+# enrollment despite the expanded socket table. Five-second MSL preserves a
+# bounded stale-packet window while letting one-shot LAN requests age out.
+CONFIG_LWIP_TCP_MSL=5000
+# Keep service discovery available alongside the AFE, wake cascade, and voice
+# transports without consuming another scarce internal-RAM task stack.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
+# CONFIG_MDNS_TASK_CREATE_FROM_INTERNAL is not set
+CONFIG_M5_PLATFORM_EXPECT_STACKCHAN=y
+# No voice endpoint is currently available. The wake/AFE pipeline is compiled
+# out by default; setting a URI alone does not enable it.
+CONFIG_M5_PLATFORM_STACKCHAN_VOICE_WS_URI=""
+# Enrollment is an independent, directed-training deployment. Keep it disabled
+# in the production StackChan profile so an absent training service cannot
+# consume a socket, task bookkeeping, or reconnect-time internal heap while
+# wake detection and command streaming are active. Directed enrollment builds
+# can still opt in by overriding this empty URI explicitly.
+CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI=""
+CONFIG_M5_PLATFORM_DEVICE_ID="kizz-1"
+CONFIG_M5_PLATFORM_DEVICE_PROFILE="m5stack_stackchan_k151_cores3_room_scale_v2"
+# Retain the existing StackChan CPU profile. The optional voice build uses
+# this profile too; wake/AFE resource settings are in its separate defaults.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.stackchan.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.stackchan.csv"

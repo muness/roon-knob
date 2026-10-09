@@ -1,5 +1,6 @@
 #include "ota_update.h"
-#include "controller_config.h"
+#include "bridge_client.h"
+#include "platform/platform_identity.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -10,22 +11,45 @@
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
 #include "esp_app_desc.h"
+#include "esp_app_format.h"
 
 static const char *TAG = "ota";
 
 static ota_info_t s_ota_info = {0};
 static TaskHandle_t s_ota_task = NULL;
 
-// Get bridge base URL from storage
-static bool get_bridge_url(char *url, size_t len) {
-    controller_config_snapshot_t snapshot = {0};
-    if (controller_config_snapshot(&snapshot)) {
-        if (snapshot.value.bridge_base[0]) {
-            rk_strlcpy(url, snapshot.value.bridge_base, len);
-            return true;
-        }
-    }
-    return false;
+/* The bridge firmware routes are still Dial-only. Do not let their generic
+ * filenames admit another ESP32-S3 product. Historical Dial project identity
+ * is retained only with the current verified 16 MB target geometry. */
+#define OTA_IMAGE_PREFIX_SIZE (sizeof(esp_image_header_t) + \
+                               sizeof(esp_image_segment_header_t) + \
+                               sizeof(esp_app_desc_t))
+
+static void ota_set_identity_headers(esp_http_client_handle_t client) {
+    char knob_id[16];
+    platform_http_get_knob_id(knob_id, sizeof(knob_id));
+    esp_http_client_set_header(client, "X-Knob-Id", knob_id);
+    esp_http_client_set_header(client, "X-Knob-Version", ota_get_current_version());
+    esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
+}
+
+static bool ota_image_matches_dial(const void *prefix) {
+    esp_image_header_t image;
+    esp_image_segment_header_t segment;
+    esp_app_desc_t app;
+    const unsigned char *bytes = prefix;
+    memcpy(&image, bytes, sizeof(image));
+    memcpy(&segment, bytes + sizeof(image), sizeof(segment));
+    memcpy(&app, bytes + sizeof(image) + sizeof(segment), sizeof(app));
+    return image.magic == ESP_IMAGE_HEADER_MAGIC &&
+           image.segment_count > 0 && image.segment_count <= ESP_IMAGE_MAX_SEGMENTS &&
+           image.chip_id == ESP_CHIP_ID_ESP32S3 &&
+           image.spi_size == ESP_IMAGE_FLASH_SIZE_16MB &&
+           segment.data_len >= sizeof(app) &&
+           app.magic_word == ESP_APP_DESC_MAGIC_WORD &&
+           memchr(app.project_name, '\0', sizeof(app.project_name)) != NULL &&
+           (strcmp(app.project_name, "hiphi_dial") == 0 ||
+            strcmp(app.project_name, "roon_knob") == 0);
 }
 
 const char* ota_get_current_version(void) {
@@ -70,7 +94,7 @@ static void check_update_task(void *arg) {
     s_ota_info.status = OTA_STATUS_CHECKING;
     strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
 
-    if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
+    if (!bridge_client_get_request_base(bridge_url, sizeof(bridge_url))) {
         ESP_LOGE(TAG, "No Unified Hi-Fi Control URL configured");
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
@@ -89,6 +113,7 @@ static void check_update_task(void *arg) {
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
+    ota_set_identity_headers(client);
     esp_err_t err = esp_http_client_open(client, 0);
 
     if (err != ESP_OK) {
@@ -196,7 +221,7 @@ static void do_update_task(void *arg) {
     s_ota_info.status = OTA_STATUS_DOWNLOADING;
     s_ota_info.progress_percent = 0;
 
-    if (!get_bridge_url(bridge_url, sizeof(bridge_url))) {
+    if (!bridge_client_get_request_base(bridge_url, sizeof(bridge_url))) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
                 sizeof(s_ota_info.error_msg));
@@ -228,6 +253,7 @@ static void do_update_task(void *arg) {
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
+    ota_set_identity_headers(client);
     esp_err_t err = esp_http_client_open(client, 0);
 
     if (err != ESP_OK) {
@@ -241,8 +267,10 @@ static void do_update_task(void *arg) {
     }
 
     int content_length = esp_http_client_fetch_headers(client);
-    if (content_length <= 0) {
-        ESP_LOGE(TAG, "Invalid content length: %d", content_length);
+    int status_code = esp_http_client_get_status_code(client);
+    if (status_code != 200 || content_length < (int)OTA_IMAGE_PREFIX_SIZE ||
+        (size_t)content_length > update_partition->size) {
+        ESP_LOGE(TAG, "Invalid firmware response: status=%d length=%d", status_code, content_length);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid firmware", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
@@ -252,22 +280,8 @@ static void do_update_task(void *arg) {
     }
 
     s_ota_info.firmware_size = content_length;
-
-    esp_ota_handle_t ota_handle;
-    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
-        s_ota_info.status = OTA_STATUS_ERROR;
-        strncpy(s_ota_info.error_msg, "OTA begin failed", sizeof(s_ota_info.error_msg));
-        esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-
     char *buf = malloc(4096);
     if (!buf) {
-        esp_ota_abort(ota_handle);
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Out of memory", sizeof(s_ota_info.error_msg));
@@ -276,10 +290,63 @@ static void do_update_task(void *arg) {
         return;
     }
 
-    int total_read = 0;
+    /* HTTP reads can split the descriptor at any byte. Accumulate the complete
+     * prefix and validate it before esp_ota_begin erases any flash. */
+    size_t prefix_read = 0;
+    while (prefix_read < OTA_IMAGE_PREFIX_SIZE) {
+        int count = esp_http_client_read(client, buf + prefix_read,
+                                        OTA_IMAGE_PREFIX_SIZE - prefix_read);
+        if (count <= 0) break;
+        prefix_read += (size_t)count;
+    }
+    if (prefix_read != OTA_IMAGE_PREFIX_SIZE || !ota_image_matches_dial(buf)) {
+        free(buf);
+        esp_http_client_cleanup(client);
+        s_ota_info.status = OTA_STATUS_ERROR;
+        strncpy(s_ota_info.error_msg, "Firmware target mismatch", sizeof(s_ota_info.error_msg));
+        s_ota_task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    esp_ota_handle_t ota_handle;
+    err = esp_ota_begin(update_partition, content_length, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        free(buf);
+        esp_http_client_cleanup(client);
+        s_ota_info.status = OTA_STATUS_ERROR;
+        strncpy(s_ota_info.error_msg, "OTA begin failed", sizeof(s_ota_info.error_msg));
+        s_ota_task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+    err = esp_ota_write(ota_handle, buf, prefix_read);
+    if (err != ESP_OK) {
+        free(buf);
+        esp_ota_abort(ota_handle);
+        esp_http_client_cleanup(client);
+        s_ota_info.status = OTA_STATUS_ERROR;
+        strncpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
+        s_ota_task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int total_read = (int)prefix_read;
     int read_len;
 
     while ((read_len = esp_http_client_read(client, buf, 4096)) > 0) {
+        if (read_len > content_length - total_read) {
+            free(buf);
+            esp_ota_abort(ota_handle);
+            esp_http_client_cleanup(client);
+            s_ota_info.status = OTA_STATUS_ERROR;
+            strncpy(s_ota_info.error_msg, "Invalid firmware length", sizeof(s_ota_info.error_msg));
+            s_ota_task = NULL;
+            vTaskDelete(NULL);
+            return;
+        }
         err = esp_ota_write(ota_handle, buf, read_len);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));

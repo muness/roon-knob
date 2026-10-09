@@ -1,380 +1,106 @@
 # Getting Started from Scratch
 
-This guide walks you through setting up HiPhi Dial step-by-step, assuming no prior experience with Docker or embedded devices.
+HiPhi has two parts: a physical controller and [Unified Hi-Fi Control](https://github.com/open-horizon-labs/unified-hifi-control) (UHC), the bridge that connects it to your music system. Run the bridge on your home network, flash the correct controller over USB, then connect its Wi-Fi and choose a room.
 
-## What You're Setting Up
+## Choose the Exact Hardware
 
-HiPhi Dial has two parts that work together:
+Start with the [controller comparison](https://hiphi.audio/controllers.html) or the [firmware target list](../../README.md#the-family). Match the manufacturer model and revision before buying or flashing. Each controller needs its own firmware even when two boards use the same ESP32 chip.
 
-1. **The Knob** - A small physical device ([Waveshare ESP32-S3 Knob](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm)) that sits on your desk. You'll install custom firmware on it.
+The example below uses **HiPhi Dial on the Waveshare ESP32-S3-Knob-Touch-LCD-1.8**. Other controllers use the same bridge and channel chooser; their [target notes](../targets/README.md) describe the hardware and controls.
 
-2. **The Bridge** - A small program that runs on your network (on a Raspberry Pi, NAS, or any always-on computer). It talks to Roon and tells the knob what's playing.
+You need a supported board, a data-capable USB cable, a computer with a current **Chrome, Edge, or Firefox** browser, and a nearby 2.4 GHz Wi-Fi network. iPhone, iPad, and Android can browse releases and configure Wi-Fi, but cannot perform USB flashing.
 
-```
-┌──────────┐      WiFi       ┌──────────┐     Roon API    ┌──────────┐
-│   Knob   │ ◄────────────► │  Bridge  │ ◄──────────────► │   Roon   │
-│ (device) │                 │ (Docker) │                  │  (Core)  │
-└──────────┘                 └──────────┘                  └──────────┘
-```
+## Part 1: Run the Control Service
 
----
+Install UHC on an always-on computer or NAS on the same network as your music system and controller. Use the [UHC setup documentation](https://github.com/open-horizon-labs/unified-hifi-control#quick-start-docker) for the current Docker, native, NAS, and LMS options.
 
-## Part 1: Flash the Firmware onto the Knob
-
-"Flashing" means copying software onto the device. Unlike a Raspberry Pi (which uses an SD card), the ESP32 chips store their software internally. You flash once over USB, then future updates happen automatically over WiFi.
-
-### What You Need
-
-- The Waveshare ESP32-S3 Knob
-- A USB-C cable (data-capable, not charge-only)
-- A computer with **Chrome or Edge** browser (for web flasher)
-
-### Method 1: Web Flasher (Recommended)
-
-The easiest way to flash—no software to install.
-
-1. **Turn on the knob** (power slider towards the USB-C port)
-2. **Connect via USB-C** to your computer
-3. **Open the [Web Flasher](https://roon-knob.muness.com/flash.html)** in Chrome or Edge
-4. **Click "Flash HiPhi Dial"** and select the serial port when prompted
-5. **Wait ~30 seconds** for flashing to complete
-
-The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
-
-**Which serial port?** Look for:
-- macOS: `cu.usbmodem...`
-- Windows: `COM3` or similar
-- Linux: `ttyACM0`
-
-**Troubleshooting:**
-
-| Problem | Solution |
-|---------|----------|
-| No serial port appears | Try a different USB cable (some only charge). |
-| "Browser not supported" | Use Chrome or Edge. Safari and Firefox don't support Web Serial. |
-
----
-
-### Method 2: Command Line (esptool)
-
-For advanced users who prefer command-line tools. This requires Python.
-
-### Step 1: Install Python and esptool
-
-**esptool** is a program that sends firmware to ESP32 devices. It's written in Python.
-
-#### On Mac:
+For a Linux Docker host, create a folder and a Compose file:
 
 ```bash
-# Check if Python is installed
-python3 --version
-
-# If not installed, install it via Homebrew:
-brew install python
-
-# Install esptool
-pip3 install esptool
+mkdir -p ~/hiphi
+cd ~/hiphi
 ```
 
-#### On Windows:
+Save this as `docker-compose.yml`:
 
-1. Download Python from [python.org](https://www.python.org/downloads/)
-2. **Important**: During installation, check "Add Python to PATH"
-3. Open Command Prompt and run:
-   ```cmd
-   pip install esptool
-   ```
+```yaml
+services:
+  unified-hifi-control:
+    image: muness/unified-hifi-control:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - unified-hifi-control-data:/data
+    environment:
+      - CONFIG_DIR=/data
 
-#### On Linux:
-
-```bash
-sudo apt update
-sudo apt install python3 python3-pip
-pip3 install esptool
+volumes:
+  unified-hifi-control-data:
 ```
 
-### Step 2: Download the Firmware
-
-Go to the [latest release](https://github.com/muness/roon-knob/releases/latest) and download **`hiphi_dial.bin`**. `roon_knob.bin` is a byte-identical compatibility alias.
-
-Save it somewhere easy to find (like your Downloads folder).
-
-### Step 3: Connect the Knob
-
-1. Plug the USB-C cable into the knob
-2. Plug the other end into your computer
-3. The knob might turn on and show something on screen—that's fine
-
-### Step 4: Find the USB Port
-
-When you plug in the knob, your computer assigns it a "port" name.
-
-#### On Mac:
-
-```bash
-ls /dev/tty.usb*
-```
-
-Look for `/dev/tty.usbmodem*`. If nothing appears, try flipping the USB-C cable 180° or use a different cable (some only charge).
-
-#### On Windows:
-
-1. Open Device Manager (search for it in the Start menu)
-2. Expand "Ports (COM & LPT)"
-3. Look for "USB Serial Device (COMx)"
-4. Note the COM number (e.g., `COM3`)
-
-#### On Linux:
-
-```bash
-ls /dev/ttyACM*
-```
-
-Look for `/dev/ttyACM0`.
-
-### Step 5: Flash the Main Firmware (ESP32-S3)
-
-Open a terminal/command prompt and navigate to where you downloaded the firmware:
-
-```bash
-cd ~/Downloads   # or wherever you saved it
-```
-
-Make sure you're connected to the **ESP32-S3** (see Step 4), then run:
-
-#### On Mac/Linux:
-
-```bash
-esptool.py --chip esp32s3 -p YOUR_PORT -b 460800 \
-  --before default-reset --after hard-reset \
-  write_flash 0x10000 hiphi_dial.bin
-```
-
-Example with a real port:
-```bash
-esptool.py --chip esp32s3 -p /dev/tty.usbmodem101 -b 460800 \
-  --before default-reset --after hard-reset \
-  write_flash 0x10000 hiphi_dial.bin
-```
-
-#### On Windows:
-
-```cmd
-esptool.py --chip esp32s3 -p COM3 -b 460800 --before default-reset --after hard-reset write_flash 0x10000 hiphi_dial.bin
-```
-
-### What Success Looks Like
-
-You should see output like:
-```
-esptool.py v4.x.x
-Serial port /dev/tty.usbmodem101
-Connecting...
-Chip is ESP32-S3
-...
-Writing at 0x00010000... (100 %)
-Wrote 1234567 bytes at 0x00010000 in 12.3 seconds
-Hard resetting via RTS pin...
-```
-
-The knob will restart and show "WiFi: Setup Mode" on its screen. That's perfect!
-
-### Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| "Port not found" | Try a different USB cable or flip the USB-C cable 180°. Some cables only charge, they don't transmit data. |
-| "Permission denied" (Linux) | Add yourself to the dialout group: `sudo usermod -a -G dialout $USER` then log out and back in |
-| Nothing happens when plugging in | Try a different USB port on your computer |
-| esptool command not found | Make sure Python's Scripts folder is in your PATH. Try `python -m esptool` instead of `esptool.py` |
-
----
-
-## Part 2: Run the Control Service
-
-The control service (Unified Hi-Fi Control) connects your music source to your knob. It supports Roon, Lyrion Music Server (LMS), and OpenHome renderers. It needs to run on an always-on device (NAS, Raspberry Pi, etc.) on your network.
-
-**Already have the [Roon Extension Manager](https://github.com/TheAppgineer/roon-extension-manager)?** Just find "Unified Hi-Fi Control" in the extension list and install it (Roon-only mode). Skip to [Part 3](#part-3-connect-everything).
-
-For everyone else, we'll use Docker.
-
-### What is Docker?
-
-Think of Docker as a shipping container for software. Instead of installing programs directly on your computer (and dealing with dependencies, versions, etc.), Docker packages everything into a container that "just works."
-
-### Step 1: Install Docker
-
-#### On Raspberry Pi:
-
-```bash
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
-```
-
-**Important**: Log out and log back in after running these commands.
-
-#### On Mac:
-
-Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/).
-
-#### On Windows:
-
-Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
-
-#### On a NAS (Synology, QNAP, etc.):
-
-Most modern NAS devices have Docker support built in. Check your NAS's package center for "Docker" or "Container Station."
-
-### Step 2: Create the Configuration File
-
-Docker Compose uses a configuration file to know what to run. You need to create this file.
-
-1. Create a folder for your HiPhi Dial configuration:
-   ```bash
-   mkdir -p ~/hiphi-dial
-   cd ~/hiphi-dial
-   ```
-
-2. Create a file called `docker-compose.yml` (you can use any text editor):
-
-   **On Mac/Linux:**
-   ```bash
-   nano docker-compose.yml
-   ```
-
-   **On Windows (PowerShell):**
-   ```powershell
-   notepad docker-compose.yml
-   ```
-
-3. Paste the following content into the file:
-
-   ```yaml
-   # Unified Hi-Fi Control - supports Roon, Lyrion (LMS), and OpenHome
-   services:
-     unified-hifi-control:
-       image: muness/unified-hifi-control:latest
-       restart: unless-stopped
-       network_mode: host
-       volumes:
-         - unified-hifi-control-data:/home/node/app/data
-
-   volumes:
-     unified-hifi-control-data:
-   ```
-
-   > **Note:** The legacy image name `muness/roon-extension-knob` still works.
-
-4. Save and close the file
-   - In nano: Press `Ctrl+O` to save, then `Ctrl+X` to exit
-   - In Notepad: File → Save
-
-### Step 3: Start the Control Service
-
-In the same folder where you created `docker-compose.yml`, run:
+Then start the bridge:
 
 ```bash
 docker compose up -d
 ```
 
-This downloads the bridge image (first time only) and starts it running in the background.
+Open `http://<bridge-host>:8088`, using your host's LAN address, and confirm that your playback rooms appear. This Compose example needs host networking for music-system discovery. On macOS or Windows, follow the native installation or Docker networking instructions in the UHC documentation.
 
-### What Success Looks Like
+**Roon users:** open Roon → Settings → Extensions and enable **Unified Hi-Fi Control**. Users of LMS or OpenHome do not need Roon authorization.
 
-Historical Docker Compose output (legacy project/container name):
+If the bridge will not start, run `docker compose logs` in the folder containing the Compose file. Fix bridge discovery before setting up the controller.
 
-```
-[+] Running 1/1
- ✔ Container roon-knob-roon-knob-bridge-1  Started
-```
+## Part 2: Flash the Firmware
 
-To check if it's running:
-```bash
-docker compose ps
-```
+Open the [firmware center](https://firmware.hiphi.audio/) and choose Stable, Beta, or Alpha. The channel page and release notes identify the exact hardware and its validation status. Beta and Alpha are opt-in USB installations; they are not delivered automatically to Stable devices.
 
-To see the logs:
-```bash
-docker compose logs -f
-```
+For the Waveshare Dial:
 
-(Press `Ctrl+C` to stop watching logs)
+1. Turn on the device with the power slider toward the USB-C port.
+2. Connect a data-capable USB-C cable to your computer.
+3. Open the chosen channel’s **Dial** installer. **Click "Flash Dial main controller"**.
+4. Select the serial port. Continue only when the installer identifies **ESP32-S3**. If it identifies **ESP32**, cancel, unplug the cable at the Dial end, rotate the plug 180°, and reconnect.
+5. On a first installation, allow erase. During an update on the same controller, decline erase to keep Wi-Fi and controller settings.
+6. Wait for the installer to finish. The time depends on the image, USB connection, and computer.
 
----
+The Dial's second processor uses a separate one-time **auxiliary parking image**. If the channel includes it, follow its chip check: flip the USB-C plug at the Dial end and continue only when the installer identifies **ESP32**, not ESP32-S3. Then return the plug to the main-controller orientation.
+
+**Command-line installation:** follow [Firmware Flashing](FIRMWARE_FLASHING.md) for the complete bootloader, partition table, OTA-data, and application commands. A fresh board needs all of these parts; writing only `hiphi_dial.bin` at `0x10000` does not install the full firmware. A downloaded merged factory image overwrites saved settings even without a separate erase command.
 
 ## Part 3: Connect Everything
 
-### Step 1: Authorize the Bridge in Roon
+On a fresh installation, the Dial creates the **hiphi-dial-setup** Wi-Fi network. Other targets use their own setup-network names.
 
-1. Open the Roon app on your phone, tablet, or computer
-2. Go to **Settings** (gear icon)
-3. Go to **Extensions**
-4. Find **"Unified Hi-Fi Control"** and click **Enable**
+1. Join the controller's setup Wi-Fi network with a phone or computer. Stay connected even if it reports no internet.
+2. If the setup page does not appear, open **http://192.168.4.1** in a browser.
+3. Select your nearby **2.4 GHz** home network and enter its password.
+4. Reconnect your phone or computer to your home network after saving.
+5. The controller discovers UHC through mDNS. Select the bridge and playback room when prompted.
 
-### Step 2: Connect the Knob to WiFi
+An update that preserves settings should reconnect to its existing network instead of opening setup mode. See [Wi-Fi Provisioning](WIFI_PROVISIONING.md) if setup or reconnection fails.
 
-1. The knob should show "WiFi: Setup Mode" on its screen
-2. On your phone or computer, look for a WiFi network called **"hiphi-dial-setup"**
-3. Connect to that network
-4. A setup page should appear automatically (if not, open a browser and go to `192.168.4.1`)
-5. Enter your home WiFi name and password
-6. The knob will restart and connect to your WiFi
-
-### Step 3: Done!
-
-The knob will automatically find the bridge on your network using mDNS. After a few seconds, you should see "Extension: Connected" and then your now-playing information.
-
----
+Check what is playing, transport, volume, room selection, and reconnection after a reboot. Artwork depends on the controller's display and the music source. A successful flash alone does not confirm that all hardware functions work.
 
 ## Troubleshooting
 
-### Knob shows "Extension: Searching..."
-
-The knob can't find the bridge. Check:
-- Is the bridge running? (`docker compose ps`)
-- Is the bridge authorized in Roon?
-- Are the knob and bridge on the same network?
-- Some networks block mDNS. Try entering the bridge URL manually (long-press the zone name on the knob to access Settings)
-
-### Bridge won't start
-
-Check the logs for errors:
-```bash
-docker compose logs
-```
-
-### Knob won't connect to WiFi
-
-- Make sure you're entering the correct password
-- Try moving the knob closer to your router during initial setup
-- If the knob gets stuck, you can reset it by re-flashing the firmware
-
-### Nothing shows in Roon Extensions
-
-- Make sure Docker is running
-- Make sure you ran `docker compose up -d` in the correct folder
-- Try restarting: `docker compose restart`
-
----
+| Problem | Next step |
+|---------|-----------|
+| No USB serial port appears | Try a data-capable cable, another USB port, and the target's download-mode procedure. On Dial, flip the plug at the controller end. |
+| Wrong chip detected | Cancel. Confirm the board, selected installer, and Dial USB-C orientation. |
+| Browser cannot flash | Open the channel page in a current desktop version of Chrome, Edge, or Firefox. Use the HTTPS firmware site. |
+| Setup page does not appear | Stay on the controller's setup network and open `http://192.168.4.1`; temporarily disable mobile data if the phone routes around it. |
+| Controller cannot find UHC | Confirm the bridge is running, authorized where required, and on the same network. Use the bridge's LAN address in controller settings if mDNS is blocked. |
+| Wi-Fi fails | Check the password and 2.4 GHz network. Use the target's Forget Wi-Fi action to return to provisioning. |
 
 ## Updating
 
-### Updating the Knob Firmware
+**Controller:** use the same exact target in the firmware center and decline erase for a settings-preserving browser update. HiPhi Dial also checks for Stable updates through the bridge and lets you start an available update in Settings. Beta and Alpha skip automatic checks; other targets require USB unless their own guide documents OTA. See [OTA Updates](OTA_UPDATES.md).
 
-After the initial setup, firmware updates happen automatically. When a new version is available, the knob will download and install it over WiFi.
-
-### Updating the Bridge
+**Bridge:** in the Compose folder, run:
 
 ```bash
-cd ~/hiphi-dial
 docker compose pull
 docker compose up -d
 ```
 
----
-
-## Getting Help
-
-- [GitHub Issues](https://github.com/muness/roon-knob/issues) - Report bugs or ask questions
-- [Roon Community Discussion](https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363) - Chat with other users
+For help, [open a firmware issue](https://github.com/muness/roon-knob/issues) with the controller model, firmware version, and what you observed, or visit the [Roon Community discussion](https://community.roonlabs.com/t/50-diy-roon-desk-controller/311363).

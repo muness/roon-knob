@@ -79,6 +79,8 @@ void rk_net_evt_cb(rk_net_evt_t evt, const char *detail) {
 int main(void) {
     fixture_reset();
     wifi_mgr_start();
+    assert(fixture_sntp_init_calls() == 1);
+    assert(fixture_wifi_power_save() == WIFI_PS_MIN_MODEM);
 
     controller_config_wifi_snapshot_t wifi = {
         .count = 1,
