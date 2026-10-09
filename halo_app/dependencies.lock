@@ -38,41 +38,17 @@ dependencies:
       type: idf
     version: 5.5.5
   lvgl/lvgl:
-    component_hash: 7d82410747bbfb319531449749e940f440f8414f041f9eaba13f0d1dd7f58cdd
-    dependencies:
-    - name: espressif/freetype
-      registry_url: https://components.espressif.com
-      require: private
-      rules:
-      - if: idf_version >=5.5 && $CONFIG{LV_USE_FREETYPE} == True
-      version: ^2.14.3
-    - name: espressif/libjpeg-turbo
-      registry_url: https://components.espressif.com
-      require: private
-      rules:
-      - if: idf_version >=5.5 && $CONFIG{LV_USE_LIBJPEG_TURBO} == True
-      version: ^3.1.1
-    - name: espressif/libpng
-      registry_url: https://components.espressif.com
-      require: private
-      rules:
-      - if: idf_version >=5.5 && $CONFIG{LV_USE_LIBPNG} == True
-      version: ^1.6.58
-    - name: espressif/lz4
-      registry_url: https://components.espressif.com
-      require: private
-      rules:
-      - if: idf_version >=5.5 && $CONFIG{LV_USE_LZ4} == True && $CONFIG{LV_USE_LZ4_INTERNAL} == False
-      version: ^1.10.0
+    component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
+    dependencies: []
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 9.6.0~1
+    version: 9.5.0
 direct_dependencies:
 - espressif/esp_lcd_st77916
 - espressif/mdns
 - idf
 - lvgl/lvgl
-manifest_hash: 2ff21c454ac1ea4e0cef247c4b9d171e285c788cee61465270417a08f6a6e1ae
+manifest_hash: d793c6093c200e99e05c44d94ae2c1f6ad33c2ed2956e1b1602bb7275e68138f
 target: esp32s3
 version: 2.0.0
