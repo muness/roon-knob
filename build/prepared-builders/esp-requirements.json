@@ -1,0 +1,12 @@
+{
+  "tools": {
+    "esp-idf": "v5.5.5"
+  },
+  "targets": [
+    "esp32s3"
+  ],
+  "execution": {
+    "os": "linux",
+    "arch": "amd64"
+  }
+}

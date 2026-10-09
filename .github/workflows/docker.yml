@@ -383,7 +383,7 @@ jobs:
   build-idf:
     name: build-idf
     needs: test-shared
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -449,7 +449,7 @@ jobs:
           key: ${{ runner.os }}-esp-idf-v5.5.5-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
 
       - name: Build with ESP-IDF
-        if: steps.reuse.outputs.reused != 'true'
+        if: ${{ steps.reuse.outputs.reused != 'true' && !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -496,6 +496,23 @@ jobs:
             0x10000 build/hiphi_dial.bin;
             ccache --show-stats
 
+      - name: Build with ESP-IDF (local image)
+        if: ${{ steps.reuse.outputs.reused != 'true' && vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        shell: bash
+        working-directory: ${{ github.workspace }}/idf_app
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ci/ccache
+          CCACHE_MAXSIZE: 500M
+          CCACHE_COMPRESS: '1'
+          IDF_TARGET: esp32s3
+        run: |
+          set -e
+          git config --global --add safe.directory /opt/esp/idf
+          # Tools are in the approved runner; no Docker socket or image pull.
+          . /opt/esp/idf/export.sh
+          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
+          set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig; ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig; grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig; grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" sdkconfig; grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig; grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; python3 ../scripts/audit_firmware_stack.py build/hiphi_dial.elf --output build/stack-audit.json --enforce-dial; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/" build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map; esptool.py --chip esp32s3 merge_bin -o ../hiphi_dial_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_dial.bin; ccache --show-stats
+
       - name: Verify merged Dial flash image
         if: steps.reuse.outputs.reused != 'true'
         run: |
@@ -530,7 +547,7 @@ jobs:
   build-frame:
     name: build-frame
     needs: test-shared
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -591,7 +608,7 @@ jobs:
           key: ${{ runner.os }}-esp-idf-v5.5.5-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
 
       - name: Build HiPhi Frame with ESP-IDF
-        if: steps.reuse.outputs.reused != 'true'
+        if: ${{ steps.reuse.outputs.reused != 'true' && !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -641,6 +658,23 @@ jobs:
             esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin;
             ccache --show-stats
 
+      - name: Build HiPhi Frame with ESP-IDF (local image)
+        if: ${{ steps.reuse.outputs.reused != 'true' && vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        shell: bash
+        working-directory: ${{ github.workspace }}/frame_app
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ci/ccache-frame
+          CCACHE_MAXSIZE: 500M
+          CCACHE_COMPRESS: '1'
+          IDF_TARGET: esp32s3
+        run: |
+          set -e
+          git config --global --add safe.directory /opt/esp/idf
+          # Tools are in the approved runner; no Docker socket or image pull.
+          . /opt/esp/idf/export.sh
+          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
+          set -e; ccache --zero-stats; idf.py build; python3 ../scripts/audit_firmware_stack.py build/hiphi_frame.elf --output build/stack-audit.json; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig; ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/" build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_frame.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map; grep -Fx "CONFIG_RK_FRAME_DEEP_SLEEP=y" sdkconfig; grep -F "esp_sleep_enable_ext1_wakeup_io" main/frame_power_manager.c; ! grep -F "esp_sleep_enable_timer_wakeup" main/frame_power_manager.c; grep -F "pmic_power_source()" main/frame_power_manager.c; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig; esptool.py --chip esp32s3 merge_bin -o ../hiphi_frame_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_frame.bin; esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin; ccache --show-stats
+
       - name: Verify merged HiPhi Frame image
         if: steps.reuse.outputs.reused != 'true'
         run: |
@@ -678,7 +712,7 @@ jobs:
   build-rlcd:
     name: build-rlcd
     needs: test-shared
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -738,7 +772,7 @@ jobs:
           key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
 
       - name: Build HiPhi RLCD with ESP-IDF
-        if: steps.reuse.outputs.reused != 'true'
+        if: ${{ steps.reuse.outputs.reused != 'true' && !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
@@ -768,6 +802,23 @@ jobs:
             0x10000 build/hiphi_rlcd_42.bin;
             esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin;
             ccache --show-stats
+
+      - name: Build HiPhi RLCD with ESP-IDF (local image)
+        if: ${{ steps.reuse.outputs.reused != 'true' && vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        shell: bash
+        working-directory: ${{ github.workspace }}/rlcd_app
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ci/ccache-rlcd
+          CCACHE_MAXSIZE: 500M
+          CCACHE_COMPRESS: '1'
+          IDF_TARGET: esp32s3
+        run: |
+          set -e
+          git config --global --add safe.directory /opt/esp/idf
+          # Tools are in the approved runner; no Docker socket or image pull.
+          . /opt/esp/idf/export.sh
+          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
+          set -e; ccache --zero-stats; idf.py build; python3 ../scripts/audit_firmware_stack.py build/hiphi_rlcd_42.elf --output build/stack-audit.json; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig; grep -Fx "CONFIG_SPIRAM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; esptool.py --chip esp32s3 merge_bin -o ../hiphi_rlcd_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_rlcd_42.bin; esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin; ccache --show-stats
 
       - name: Verify merged HiPhi RLCD image
         if: steps.reuse.outputs.reused != 'true'

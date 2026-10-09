@@ -1,0 +1,14 @@
+{
+  "builder": "esp-idf-5-5-5",
+  "repository": "muness/roon-knob",
+  "jobs": [
+    "build-idf",
+    "build-frame",
+    "build-rlcd",
+    "build-ble-off"
+  ],
+  "tools_image": "espressif/idf@sha256:a9231d0697ab8f7517cc072e93b7c83e04907bfbfba80b6440d7dbbf90665cf2",
+  "esp_idf_version": "v5.5.5",
+  "runner_version": "2.337.0",
+  "runner_repository": "192.168.1.36:5443/fleet/esp-idf-5-5-5"
+}
