@@ -6,7 +6,7 @@ import pathlib
 import re
 
 LABELS = {'dial':'HiPhi Dial (Waveshare)', 'frame':'HiPhi Frame', 'rlcd':'HiPhi RLCD',
-          'joy':'HiPhi Joy (AtomS3 + Joystick)', 'tough':'HiPhi Tough (M5Stack)',
+          'joy':'HiPhi Joy (AtomS3 + Joystick)', 'halo':'HiPhi HALO (innoelement HALO TOUCH)', 'tough':'HiPhi Tough (M5Stack)',
           'm5dial':'Dial Lab (M5Stack Dial)', 'sticks3':'Twist (M5StickS3)',
           'stopwatch':'Remote (M5Stack StopWatch)', 'stackchan':'Kizz (M5Stack StackChan)'}
 PATTERN = re.compile(r'flash-([a-z0-9]+)-([a-f0-9]{40})-(\d+)-(\d+)\.html$')

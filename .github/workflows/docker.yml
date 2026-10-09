@@ -908,6 +908,106 @@ jobs:
           path: firmware-cache/atom/
           retention-days: 30
 
+  build-halo:
+    name: build-halo
+    needs: test-shared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Fingerprint firmware inputs
+        id: firmware-key
+        run: python3 scripts/firmware_artifact_cache.py key --target halo --directory firmware-cache/halo
+
+      - name: Restore exact firmware artifact
+        id: firmware-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: firmware-cache/halo
+          key: firmware-v1-halo-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Verify reusable firmware
+        id: reuse
+        if: steps.firmware-cache.outputs.cache-hit == 'true'
+        run: |
+          if python3 scripts/firmware_artifact_cache.py verify --target halo --directory firmware-cache/halo; then
+            echo 'reused=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get firmware version
+        if: steps.reuse.outputs.reused != 'true'
+        id: halo-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF#refs/tags/v}; else VERSION=$(grep 'set(PROJECT_VER' halo_app/CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/'); fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Inject version into HALO CMakeLists.txt
+        if: steps.reuse.outputs.reused != 'true'
+        run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.halo-version.outputs.version }}")/' halo_app/CMakeLists.txt
+      - name: Restore HALO compiler cache
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/cache@v5
+        with:
+          path: .ci/ccache-halo
+          key: ${{ runner.os }}-esp-idf-v5.5.5-halo-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp-idf-v5.5.5-halo-ccache-
+      - name: Restore HALO managed components
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/cache@v5
+        with:
+          path: halo_app/managed_components
+          key: ${{ runner.os }}-esp-idf-v5.5.5-halo-components-${{ hashFiles('halo_app/dependencies.lock') }}
+      - name: Build HALOS3 Joystick with ESP-IDF
+        if: steps.reuse.outputs.reused != 'true'
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: halo_app
+          extra_docker_args: >-
+            -e CCACHE_DIR=/app/${{ github.repository }}/.ci/ccache-halo
+            -e CCACHE_MAXSIZE=500M
+            -e CCACHE_COMPRESS=1
+          command: >-
+            set -e;
+            ccache --zero-stats;
+            idf.py build;
+            python3 ../scripts/audit_firmware_stack.py build/hiphi_halo.elf --output build/stack-audit.json;
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig;
+            grep -Fx "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y" sdkconfig;
+            grep -Fx "CONFIG_FREERTOS_HZ=1000" sdkconfig;
+            esptool.py --chip esp32s3 merge_bin -o ../hiphi_halo_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_halo.bin;
+            esptool.py --chip esp32s3 image_info ../hiphi_halo_merged.bin;
+            ccache --show-stats
+      - name: Package verified firmware with provenance
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          FIRMWARE_FILES: |
+            halo_app/build/stack-audit.json
+            halo_app/build/hiphi_halo.bin
+            halo_app/build/bootloader/bootloader.bin
+            halo_app/build/partition_table/partition-table.bin
+            halo_app/build/ota_data_initial.bin
+            hiphi_halo_merged.bin
+        run: python3 scripts/firmware_artifact_cache.py stage --target halo --directory firmware-cache/halo
+
+      - name: Save exact firmware artifact
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: firmware-cache/halo
+          key: firmware-v1-halo-${{ steps.firmware-key.outputs.fingerprint }}
+
+      - name: Upload HALOS3 Joystick artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hiphi-halo-firmware
+          path: firmware-cache/halo/
+          retention-days: 30
+
   build-tough:
     name: build-m5-tough
     needs: test-shared
@@ -1270,7 +1370,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-halo, build-tough, build-m5-betas, build-knob-aux]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -1302,6 +1402,12 @@ jobs:
         with:
           name: hiphi-joy-firmware
           path: joy-artifacts
+
+      - name: Download HiPhi HALO firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-halo-firmware
+          path: halo-artifacts
 
       - name: Download M5Stack Tough firmware
         uses: actions/download-artifact@v7
@@ -1403,6 +1509,14 @@ jobs:
           cp joy-artifacts/atom_app/build/ota_data_initial.bin \
             release-assets/hiphi_joy_ota_data_initial.bin
           cp joy-artifacts/hiphi_joy_merged.bin release-assets/
+          cp halo-artifacts/halo_app/build/hiphi_halo.bin release-assets/
+          cp halo-artifacts/halo_app/build/bootloader/bootloader.bin \
+            release-assets/hiphi_halo_bootloader.bin
+          cp halo-artifacts/halo_app/build/partition_table/partition-table.bin \
+            release-assets/hiphi_halo_partition-table.bin
+          cp halo-artifacts/halo_app/build/ota_data_initial.bin \
+            release-assets/hiphi_halo_ota_data_initial.bin
+          cp halo-artifacts/hiphi_halo_merged.bin release-assets/
 
           cp tough-artifacts/tough_app/build/hiphi_tough.bin release-assets/
           cp tough-artifacts/tough_app/build/bootloader/bootloader.bin \
@@ -1508,7 +1622,7 @@ jobs:
     concurrency:
       group: firmware-pages
       cancel-in-progress: false
-    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux]
+    needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-halo, build-tough, build-m5-betas, build-knob-aux]
     if: github.event_name == 'pull_request'
     permissions:
       contents: write
@@ -1541,6 +1655,12 @@ jobs:
         with:
           name: hiphi-joy-firmware
           path: joy-artifacts
+
+      - name: Download HiPhi HALO firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-halo-firmware
+          path: halo-artifacts
 
       - name: Download M5Stack Tough firmware
         uses: actions/download-artifact@v7
@@ -1623,6 +1743,13 @@ jobs:
           JOY_OTA_DATA_FILE="hiphi_joy_ota_data_initial-${PREVIEW_ID}.bin"
           JOY_FIRMWARE_FILE="hiphi_joy_merged-${PREVIEW_ID}.bin"
           JOY_FLASH_PAGE="flash-joy-${PREVIEW_ID}.html"
+          HALO_MANIFEST_FILE="manifest-halo-${PREVIEW_ID}.json"
+          HALO_APPLICATION_FILE="hiphi_halo-${PREVIEW_ID}.bin"
+          HALO_BOOTLOADER_FILE="hiphi_halo_bootloader-${PREVIEW_ID}.bin"
+          HALO_PARTITION_FILE="hiphi_halo_partition-table-${PREVIEW_ID}.bin"
+          HALO_OTA_DATA_FILE="hiphi_halo_ota_data_initial-${PREVIEW_ID}.bin"
+          HALO_FIRMWARE_FILE="hiphi_halo_merged-${PREVIEW_ID}.bin"
+          HALO_FLASH_PAGE="flash-halo-${PREVIEW_ID}.html"
 
           TOUGH_MANIFEST_FILE="manifest-tough-${PREVIEW_ID}.json"
           TOUGH_APPLICATION_FILE="hiphi_tough-${PREVIEW_ID}.bin"
@@ -1665,6 +1792,11 @@ jobs:
           cp joy-artifacts/atom_app/build/partition_table/partition-table.bin "pr-preview/${JOY_PARTITION_FILE}"
           cp joy-artifacts/atom_app/build/ota_data_initial.bin "pr-preview/${JOY_OTA_DATA_FILE}"
           cp joy-artifacts/hiphi_joy_merged.bin "pr-preview/${JOY_FIRMWARE_FILE}"
+          cp halo-artifacts/halo_app/build/hiphi_halo.bin "pr-preview/${HALO_APPLICATION_FILE}"
+          cp halo-artifacts/halo_app/build/bootloader/bootloader.bin "pr-preview/${HALO_BOOTLOADER_FILE}"
+          cp halo-artifacts/halo_app/build/partition_table/partition-table.bin "pr-preview/${HALO_PARTITION_FILE}"
+          cp halo-artifacts/halo_app/build/ota_data_initial.bin "pr-preview/${HALO_OTA_DATA_FILE}"
+          cp halo-artifacts/hiphi_halo_merged.bin "pr-preview/${HALO_FIRMWARE_FILE}"
 
           cp tough-artifacts/tough_app/build/hiphi_tough.bin "pr-preview/${TOUGH_APPLICATION_FILE}"
           cp tough-artifacts/tough_app/build/bootloader/bootloader.bin "pr-preview/${TOUGH_BOOTLOADER_FILE}"
@@ -1775,6 +1907,20 @@ jobs:
           }
           EOF
 
+          cat > "pr-preview/${HALO_MANIFEST_FILE}" << EOF
+          {
+            "name": "HiPhi HALO Alpha (PR #${PR_NUM} Preview)",
+            "version": "pr-${PR_NUM}",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [
+              {"path": "${HALO_BOOTLOADER_FILE}", "offset": 0},
+              {"path": "${HALO_PARTITION_FILE}", "offset": 32768},
+              {"path": "${HALO_OTA_DATA_FILE}", "offset": 53248},
+              {"path": "${HALO_APPLICATION_FILE}", "offset": 65536}
+            ]}]
+          }
+          EOF
+
           cat > "pr-preview/${TOUGH_MANIFEST_FILE}" << EOF
           {
             "name": "M5Stack Tough Alpha (PR #${PR_NUM} Preview)",
@@ -1789,12 +1935,13 @@ jobs:
           }
           EOF
 
-          for target in dial frame rlcd joy tough m5dial sticks3 stopwatch stackchan; do
+          for target in dial frame rlcd joy halo tough m5dial sticks3 stopwatch stackchan; do
             case "$target" in
               dial) page="$DIAL_FLASH_PAGE"; manifest="$DIAL_MANIFEST_FILE" ;;
               frame) page="$FRAME_FLASH_PAGE"; manifest="$FRAME_MANIFEST_FILE" ;;
               rlcd) page="$RLCD_FLASH_PAGE"; manifest="$RLCD_MANIFEST_FILE" ;;
               joy) page="$JOY_FLASH_PAGE"; manifest="$JOY_MANIFEST_FILE" ;;
+              halo) page="$HALO_FLASH_PAGE"; manifest="$HALO_MANIFEST_FILE" ;;
               tough) page="$TOUGH_FLASH_PAGE"; manifest="$TOUGH_MANIFEST_FILE" ;;
               *) page="flash-${target}-${PREVIEW_ID}.html"; manifest="manifest-${target}-${PREVIEW_ID}.json" ;;
             esac
@@ -1810,6 +1957,7 @@ jobs:
               -e "s|manifest-frame.json|${FRAME_MANIFEST_FILE}|g" \
               -e "s|manifest-rlcd.json|${RLCD_MANIFEST_FILE}|g" \
               -e "s|manifest-joy.json|${JOY_MANIFEST_FILE}|g" \
+              -e "s|manifest-halo.json|${HALO_MANIFEST_FILE}|g" \
               -e "s|manifest-tough.json|${TOUGH_MANIFEST_FILE}|g" \
               -e "s|manifest-m5dial.json|manifest-m5dial-${PREVIEW_ID}.json|g" \
               -e "s|manifest-sticks3.json|manifest-sticks3-${PREVIEW_ID}.json|g" \
@@ -1821,6 +1969,7 @@ jobs:
               -e "s|hiphi_frame_merged.bin|${FRAME_FIRMWARE_FILE}|g" \
               -e "s|hiphi_rlcd_merged.bin|${RLCD_FIRMWARE_FILE}|g" \
               -e "s|hiphi_joy_merged.bin|${JOY_FIRMWARE_FILE}|g" \
+              -e "s|hiphi_halo_merged.bin|${HALO_FIRMWARE_FILE}|g" \
               -e "s|hiphi_tough_merged.bin|${TOUGH_FIRMWARE_FILE}|g" \
               -e "s|hiphi_m5dial_merged.bin|hiphi_m5dial_merged-${PREVIEW_ID}.bin|g" \
               -e "s|hiphi_sticks3_merged.bin|hiphi_sticks3_merged-${PREVIEW_ID}.bin|g" \
@@ -1884,11 +2033,12 @@ jobs:
           grep -F 'data-target-filter="frame"' "deployed-preview/flash-frame-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="rlcd"' "deployed-preview/flash-rlcd-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="joy"' "deployed-preview/flash-joy-${PREVIEW_ID}.html"
+          grep -F 'data-target-filter="halo"' "deployed-preview/flash-halo-${PREVIEW_ID}.html"
           grep -F 'data-target-filter="tough"' "deployed-preview/flash-tough-${PREVIEW_ID}.html"
           for target in m5dial sticks3 stopwatch stackchan; do
             grep -F "data-target-filter=\"${target}\"" "deployed-preview/flash-${target}-${PREVIEW_ID}.html"
           done
-          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-knob-aux-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-joy-${PREVIEW_ID}.json manifest-tough-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
+          for manifest in manifest-s3-${PREVIEW_ID}.json manifest-knob-aux-${PREVIEW_ID}.json manifest-frame-${PREVIEW_ID}.json manifest-rlcd-${PREVIEW_ID}.json manifest-joy-${PREVIEW_ID}.json manifest-halo-${PREVIEW_ID}.json manifest-tough-${PREVIEW_ID}.json manifest-m5dial-${PREVIEW_ID}.json manifest-sticks3-${PREVIEW_ID}.json manifest-stopwatch-${PREVIEW_ID}.json manifest-stackchan-${PREVIEW_ID}.json; do
             python3 scripts/check_flash_manifest.py "deployed-preview/${manifest}" --assets-dir deployed-preview
           done
 
@@ -1899,6 +2049,7 @@ jobs:
             echo "frame_page_url=${PREVIEW_BASE}/flash-frame-${PREVIEW_ID}.html"
             echo "rlcd_page_url=${PREVIEW_BASE}/flash-rlcd-${PREVIEW_ID}.html"
             echo "joy_page_url=${PREVIEW_BASE}/flash-joy-${PREVIEW_ID}.html"
+            echo "halo_page_url=${PREVIEW_BASE}/flash-halo-${PREVIEW_ID}.html"
             echo "tough_page_url=${PREVIEW_BASE}/flash-tough-${PREVIEW_ID}.html"
             echo "m5dial_page_url=${PREVIEW_BASE}/flash-m5dial-${PREVIEW_ID}.html"
             echo "sticks3_page_url=${PREVIEW_BASE}/flash-sticks3-${PREVIEW_ID}.html"
@@ -1909,6 +2060,7 @@ jobs:
             echo "frame_firmware_sha256=$(sha256sum "deployed-preview/hiphi_frame_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "rlcd_firmware_sha256=$(sha256sum "deployed-preview/hiphi_rlcd_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "joy_firmware_sha256=$(sha256sum "deployed-preview/hiphi_joy_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
+            echo "halo_firmware_sha256=$(sha256sum "deployed-preview/hiphi_halo_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             echo "tough_firmware_sha256=$(sha256sum "deployed-preview/hiphi_tough_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
             for target in m5dial sticks3 stopwatch stackchan; do
               echo "${target}_firmware_sha256=$(sha256sum "deployed-preview/hiphi_${target}_merged-${PREVIEW_ID}.bin" | awk '{print $1}')"
@@ -1923,6 +2075,7 @@ jobs:
           FRAME_PAGE_URL: ${{ steps.verify-preview.outputs.frame_page_url }}
           RLCD_PAGE_URL: ${{ steps.verify-preview.outputs.rlcd_page_url }}
           JOY_PAGE_URL: ${{ steps.verify-preview.outputs.joy_page_url }}
+          HALO_PAGE_URL: ${{ steps.verify-preview.outputs.halo_page_url }}
           TOUGH_PAGE_URL: ${{ steps.verify-preview.outputs.tough_page_url }}
           M5DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.m5dial_page_url }}
           STICKS3_PAGE_URL: ${{ steps.verify-preview.outputs.sticks3_page_url }}
@@ -1933,6 +2086,7 @@ jobs:
           FRAME_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.frame_firmware_sha256 }}
           RLCD_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.rlcd_firmware_sha256 }}
           JOY_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.joy_firmware_sha256 }}
+          HALO_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.halo_firmware_sha256 }}
           TOUGH_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.tough_firmware_sha256 }}
           M5DIAL_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.m5dial_firmware_sha256 }}
           STICKS3_FIRMWARE_SHA256: ${{ steps.verify-preview.outputs.sticks3_firmware_sha256 }}
@@ -1968,6 +2122,7 @@ jobs:
             - [Flash HiPhi Frame](${process.env.FRAME_PAGE_URL}) — \`${process.env.FRAME_FIRMWARE_SHA256}\`
             - [Flash HiPhi RLCD](${process.env.RLCD_PAGE_URL}) — \`${process.env.RLCD_FIRMWARE_SHA256}\`
             - [Flash AtomS3 JoyStick](${process.env.JOY_PAGE_URL}) — \`${process.env.JOY_FIRMWARE_SHA256}\`
+            - [Flash HiPhi HALO](${process.env.HALO_PAGE_URL}) — \`${process.env.HALO_FIRMWARE_SHA256}\`
             - [Flash M5Stack Tough](${process.env.TOUGH_PAGE_URL}) — \`${process.env.TOUGH_FIRMWARE_SHA256}\`
             - [Flash M5 Dial Lab Alpha](${process.env.M5DIAL_PAGE_URL}) — \`${process.env.M5DIAL_FIRMWARE_SHA256}\`
             - [Flash M5StickS3 Twist Alpha](${process.env.STICKS3_PAGE_URL}) — \`${process.env.STICKS3_FIRMWARE_SHA256}\`
@@ -2031,6 +2186,12 @@ jobs:
         with:
           name: hiphi-joy-firmware
           path: joy-artifacts
+
+      - name: Download HiPhi HALO firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: hiphi-halo-firmware
+          path: halo-artifacts
 
       - name: Download M5Stack Tough firmware
         uses: actions/download-artifact@v7
@@ -2116,7 +2277,7 @@ jobs:
             -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-rlcd.html
-          for target in joy tough m5dial sticks3 stopwatch stackchan knobaux; do
+          for target in joy halo tough m5dial sticks3 stopwatch stackchan knobaux; do
             sed -e "s/{{TARGET_FILTER}}/${target}/g" \
               -e "s/{{VERSION}}/${VERSION}/g" \
               -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
@@ -2167,6 +2328,14 @@ jobs:
           cp joy-artifacts/atom_app/build/ota_data_initial.bin \
             gh-pages-build/hiphi_joy_ota_data_initial.bin
           cp joy-artifacts/hiphi_joy_merged.bin gh-pages-build/
+          cp halo-artifacts/halo_app/build/hiphi_halo.bin gh-pages-build/
+          cp halo-artifacts/halo_app/build/bootloader/bootloader.bin \
+            gh-pages-build/hiphi_halo_bootloader.bin
+          cp halo-artifacts/halo_app/build/partition_table/partition-table.bin \
+            gh-pages-build/hiphi_halo_partition-table.bin
+          cp halo-artifacts/halo_app/build/ota_data_initial.bin \
+            gh-pages-build/hiphi_halo_ota_data_initial.bin
+          cp halo-artifacts/hiphi_halo_merged.bin gh-pages-build/
           cp tough-artifacts/tough_app/build/hiphi_tough.bin gh-pages-build/
           cp tough-artifacts/tough_app/build/bootloader/bootloader.bin \
             gh-pages-build/hiphi_tough_bootloader.bin
@@ -2207,7 +2376,7 @@ jobs:
             gh-pages-build/manifest-frame.json --assets-dir gh-pages-build
           python3 scripts/check_flash_manifest.py \
             gh-pages-build/manifest-rlcd.json --assets-dir gh-pages-build
-          for manifest in manifest-joy.json manifest-tough.json manifest-m5dial.json manifest-sticks3.json manifest-stopwatch.json manifest-stackchan.json manifest-knob-aux.json; do
+          for manifest in manifest-joy.json manifest-halo.json manifest-tough.json manifest-m5dial.json manifest-sticks3.json manifest-stopwatch.json manifest-stackchan.json manifest-knob-aux.json; do
             python3 scripts/check_flash_manifest.py \
               "gh-pages-build/${manifest}" --assets-dir gh-pages-build
           done
@@ -2288,7 +2457,7 @@ jobs:
                 "https://firmware.hiphi.audio/flash/${legacy_channel}/"
             )
           done
-          for target in dial frame rlcd joy tough m5dial sticks3 stopwatch stackchan knobaux; do
+          for target in dial frame rlcd joy halo tough m5dial sticks3 stopwatch stackchan knobaux; do
             test -f "deployed-release/flash-${target}.html"
             grep -F "data-target-filter=\"${target}\"" \
               "deployed-release/flash-${target}.html"

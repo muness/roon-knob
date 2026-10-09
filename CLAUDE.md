@@ -24,6 +24,7 @@ See [AGENTS.md](AGENTS.md) for complete instructions on working with this projec
 | HiPhi Frame | `frame_app` | `docs/dial/BLE_HID.md`, `.oh/frame-recovery.md` |
 | HiPhi Slate | `rlcd_app` | `docs/targets/README.md` |
 | HiPhi Joy | `atom_app` | `docs/dial/hw-reference/board-atom-s3-joystick.md` |
+| HiPhi HALO | `halo_app` | `docs/targets/README.md` |
 | HiPhi Tough | `tough_app` | `docs/dial/M5STACK.md`, `docs/dial/hw-reference/board-tough.md` |
 | Dial Lab / Twist / Remote / Kizz | `m5_beta_app` | `docs/dial/hw-reference/m5-form-native-betas.md`, `docs/dev/KIZZ_VOICE.md` |
 
@@ -146,6 +147,7 @@ of these in `docker.yml`:
 - `frame_app/CMakeLists.txt` (HiPhi Frame)
 - `rlcd_app/CMakeLists.txt` (HiPhi Slate)
 - `atom_app/CMakeLists.txt` (HiPhi Joy)
+- `halo_app/CMakeLists.txt` (HiPhi HALO)
 - `tough_app/CMakeLists.txt` (HiPhi Tough)
 - `m5_beta_app/CMakeLists.txt` (Dial Lab, Twist, Remote, Kizz)
 - `knob_aux_app/CMakeLists.txt` (Dial auxiliary parking image)
@@ -184,7 +186,7 @@ checkout configures correctly:
 
 | App | Chip |
 |-----|------|
-| `idf_app`, `frame_app`, `rlcd_app`, `atom_app`, `m5_beta_app` | `esp32s3` |
+| `idf_app`, `frame_app`, `rlcd_app`, `atom_app`, `halo_app`, `m5_beta_app` | `esp32s3` |
 | `tough_app`, `knob_aux_app` | `esp32` |
 
 If a build fails with undeclared `ESP_EXT1_WAKEUP_*` or similar, a stale

@@ -9,6 +9,7 @@ This repository builds nine HiPhi controller profiles and one auxiliary parking 
 | [HiPhi Frame](#hiphi-frame) | Waveshare ESP32-S3-PhotoPainter | `frame_app` | `hiphi-frame` | ESP32-S3 / 16 MB / octal | `hiphi_frame.bin` |
 | [HiPhi Slate](#hiphi-slate) | Waveshare ESP32-S3-RLCD-4.2 | `rlcd_app` | `hiphi-rlcd` | ESP32-S3 / 16 MB / octal | `hiphi_rlcd.bin` |
 | [HiPhi Joy](#hiphi-joy) | M5Stack AtomS3 JoyStick K137 | `atom_app` | `hiphi-joy` | ESP32-S3 / 8 MB / none | `hiphi_joy.bin` |
+| [HiPhi HALO](#hiphi-halo) | innoelement HALO TOUCH USB hub dock (V2 board) | `halo_app` | `hiphi-halo` | ESP32-S3 / 16 MB / octal | `hiphi_halo.bin` |
 | [HiPhi Tough](#hiphi-tough) | M5Stack Tough K034 | `tough_app` | `hiphi-tough` | ESP32 / 16 MB / quad | `hiphi_tough.bin` |
 | [HiPhi Dial Lab](#m5-beta-targets) | M5Stack Dial K130-V11 | `m5_beta_app`, `HIPHI_M5_TARGET=dial` | `hiphi-dial-beta` | ESP32-S3 / 8 MB / none | `hiphi_m5dial.bin` |
 | [HiPhi Twist](#m5-beta-targets) | M5StickS3 K150 | `m5_beta_app`, `HIPHI_M5_TARGET=sticks3` | `hiphi-sticks3-beta` | ESP32-S3 / 8 MB / octal | `hiphi_sticks3.bin` |
@@ -65,6 +66,10 @@ Reflective-LCD controller. No dedicated guide yet; the shared controller notes a
 - [hw-reference/board-atom-s3-joystick.md](../dial/hw-reference/board-atom-s3-joystick.md) — AtomS3 + JoyStick hardware contract
 - [`.oh/input-bindings.md`](../../.oh/input-bindings.md) — joystick and button binding notes
 - [docs/hardware/README.md](../hardware/README.md)
+
+## HiPhi HALO
+
+- `halo_app/` — innoelement HALO TOUCH V2 (ESP32-S3 N16R8), always USB powered; shares the Dial LVGL UI. Set the hub USB3/FLASH switch to FLASH to flash.
 
 ## HiPhi Tough
 
