@@ -16,11 +16,10 @@ static const char *TAG = "halo_input";
 #define HALO_ENC_A 38
 #define HALO_ENC_B 6
 #define HALO_ENC_INVERT 0
-#define HALO_ENC_TRANSITIONS_PER_DETENT 4
 
 static QueueHandle_t s_deltas;
 static uint8_t s_enc_prev;
-static int s_enc_accum;
+static volatile uint32_t s_enc_raw_transitions, s_enc_detents_total, s_enc_invalid;
 
 static void encoder_init(void) {
     gpio_config_t io = {
@@ -32,27 +31,44 @@ static void encoder_init(void) {
     s_enc_prev = (uint8_t)((gpio_get_level(HALO_ENC_A) << 1) | gpio_get_level(HALO_ENC_B));
 }
 
-/* Gray-code transition table: +1 / -1 for valid single-step transitions, 0 for none/invalid. */
-static const int8_t k_enc_table[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
-
+/* The HALO knob is NOT a quadrature encoder: it has two independent direction contacts (the factory
+ * firmware's "BidiSwitchEncoder"). Both idle high (state AB = 11). Each clockwise detent pulses A low
+ * once (11 -> 01 -> 11); each counter-clockwise detent pulses B low once (11 -> 10 -> 11). Measured on
+ * the test unit 2026-10-09. A step is counted on a contact's falling edge out of the idle 11 state;
+ * simultaneous/bounce transitions (e.g. 01 -> 10) are ignored. A quadrature decoder nets these pulses
+ * to zero, which is why volume previously never moved. */
 static void encoder_poll(void) {
     uint8_t cur = (uint8_t)((gpio_get_level(HALO_ENC_A) << 1) | gpio_get_level(HALO_ENC_B));
     if (cur == s_enc_prev) return;
-    s_enc_accum += k_enc_table[(s_enc_prev << 2) | cur];
+    s_enc_raw_transitions++;
+    int step = 0;
+    if (s_enc_prev == 0x3 && cur == 0x1) step = +1;        /* A fell: clockwise */
+    else if (s_enc_prev == 0x3 && cur == 0x2) step = -1;   /* B fell: counter-clockwise */
+    else if (cur != 0x3 && s_enc_prev != 0x3) s_enc_invalid++;
     s_enc_prev = cur;
-    if (abs(s_enc_accum) >= HALO_ENC_TRANSITIONS_PER_DETENT) {
-        int detents = s_enc_accum / HALO_ENC_TRANSITIONS_PER_DETENT;
-        s_enc_accum -= detents * HALO_ENC_TRANSITIONS_PER_DETENT;
-        if (HALO_ENC_INVERT) detents = -detents;
-        ESP_LOGD(TAG, "encoder %+d", detents);
-        if (s_deltas && xQueueSend(s_deltas, &detents, 0) != pdTRUE) ESP_LOGW(TAG, "encoder queue full");
-    }
+    if (!step) return;
+    if (HALO_ENC_INVERT) step = -step;
+    s_enc_detents_total++;
+    ESP_LOGD(TAG, "encoder %+d", step);
+    if (s_deltas && xQueueSend(s_deltas, &step, 0) != pdTRUE) ESP_LOGW(TAG, "encoder queue full");
 }
 
 static void input_task(void *arg) {
     (void)arg;
+    TickType_t last_report = xTaskGetTickCount();
+    uint32_t reported_raw = 0;
     for (;;) {
         encoder_poll();
+        if (xTaskGetTickCount() - last_report >= pdMS_TO_TICKS(1000)) {
+            last_report = xTaskGetTickCount();
+            if (s_enc_raw_transitions != reported_raw) {
+                reported_raw = s_enc_raw_transitions;
+                ESP_LOGD(TAG, "encoder raw transitions=%lu invalid=%lu detents=%lu A=%d B=%d",
+                         (unsigned long)s_enc_raw_transitions, (unsigned long)s_enc_invalid,
+                         (unsigned long)s_enc_detents_total,
+                         gpio_get_level(HALO_ENC_A), gpio_get_level(HALO_ENC_B));
+            }
+        }
         vTaskDelay(1);
     }
 }
