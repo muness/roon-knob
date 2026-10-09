@@ -144,6 +144,17 @@ static char s_ip[16];
 static bool s_ap_mode;           // true when in AP provisioning mode
 static bool s_wifi_mode_transitioning;
 static int s_sta_fail_count;     // consecutive STA connection failures
+/* Credential failures (wrong password / handshake timeout) for the network being
+ * tried, counted only until it has connected once this boot.  Two in a row on a
+ * never-connected network means the credentials are wrong: retrying for a minute
+ * only keeps the user locked out of setup. */
+static int s_sta_cred_fail_count;
+static bool s_sta_connected_since_boot;
+#define STA_CRED_FAIL_THRESHOLD 2
+/* The network and reason behind the most recent fallback to setup mode, for the
+ * setup page.  Cleared when a connection succeeds. */
+static char s_last_failed_ssid[33];
+static const char *s_last_failed_reason;
 static char s_device_hostname[32] = {0};  // cached network hostname
 static int s_wifi_idx;           // index into this device's saved WiFi list
 static rk_wifi_scan_state_t s_scan_state = RK_WIFI_SCAN_IDLE;
@@ -615,6 +626,17 @@ static void schedule_retry_with_reason(uint8_t reason) {
     // Get human-readable reason and specific event type
     rk_net_evt_t evt = RK_NET_EVT_FAIL;
     s_last_error = get_disconnect_reason_str(reason, &evt);
+    if (evt == RK_NET_EVT_WRONG_PASSWORD && !s_sta_connected_since_boot) {
+        if (++s_sta_cred_fail_count >= STA_CRED_FAIL_THRESHOLD &&
+            s_sta_fail_count < STA_FAIL_THRESHOLD) {
+            ESP_LOGW(TAG, "Credentials rejected %d times on a network that has not "
+                     "connected this boot; skipping remaining retries",
+                     s_sta_cred_fail_count);
+            s_sta_fail_count = STA_FAIL_THRESHOLD;
+        }
+    } else if (evt != RK_NET_EVT_WRONG_PASSWORD) {
+        s_sta_cred_fail_count = 0;
+    }
 
     const int fail_count = s_sta_fail_count;
     const char *last_error = s_last_error;
@@ -625,6 +647,9 @@ static void schedule_retry_with_reason(uint8_t reason) {
         const rk_wifi_entry_t *prior = active_wifi_locked();
         char prior_ssid[sizeof(((rk_wifi_entry_t *)0)->ssid)] = {0};
         copy_str(prior_ssid, sizeof(prior_ssid), prior ? prior->ssid : "");
+        copy_str(s_last_failed_ssid, sizeof(s_last_failed_ssid), prior_ssid);
+        s_last_failed_reason = last_error;
+        s_sta_cred_fail_count = 0;
         s_wifi_idx++;
         if (s_wifi_idx < s_wifi_cfg.count && s_wifi_idx < RK_MAX_WIFI) {
             char next_ssid[sizeof(((rk_wifi_entry_t *)0)->ssid)] = {0};
@@ -836,6 +861,10 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
         s_backoff_idx = 0;
         s_sta_fail_count = 0;  // Reset failure count on successful connection
         s_last_error = NULL;   // Clear last error on success
+        s_sta_cred_fail_count = 0;
+        s_sta_connected_since_boot = true;
+        s_last_failed_ssid[0] = '\0';
+        s_last_failed_reason = NULL;
         unlock_wifi_state();
     }
     rk_net_evt_cb(RK_NET_EVT_GOT_IP, ip_text);
@@ -1168,6 +1197,21 @@ const char *wifi_mgr_get_last_error(void) {
     const char *last_error = s_last_error;
     unlock_wifi_state();
     return last_error;
+}
+
+bool wifi_mgr_get_last_failure(char *ssid_out, size_t ssid_len, const char **reason_out) {
+    if (reason_out) *reason_out = NULL;
+    if (ssid_out && ssid_len) ssid_out[0] = '\0';
+    if (!lock_wifi_state()) {
+        return false;
+    }
+    const bool have = s_last_failed_ssid[0] != '\0' && s_last_failed_reason;
+    if (have) {
+        if (ssid_out && ssid_len) copy_str(ssid_out, ssid_len, s_last_failed_ssid);
+        if (reason_out) *reason_out = s_last_failed_reason;
+    }
+    unlock_wifi_state();
+    return have;
 }
 
 int wifi_mgr_get_retry_count(void) {

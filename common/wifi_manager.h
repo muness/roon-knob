@@ -49,6 +49,10 @@ bool wifi_mgr_start_provisioning(void);       // true only when setup AP mode ca
 const char *wifi_mgr_get_hostname(void);     // get device hostname (for mDNS, logs)
 void wifi_mgr_stop_ap(void);                 // stop AP mode, attempt STA connection
 const char *wifi_mgr_get_last_error(void);   // get last disconnect reason string
+/* Network that failed before the most recent fall-back to setup mode, and why
+ * (e.g. "Wrong password").  False when there is none or a connection has since
+ * succeeded.  For the setup page. */
+bool wifi_mgr_get_last_failure(char *ssid_out, size_t ssid_len, const char **reason_out);
 int wifi_mgr_get_retry_count(void);          // get current retry attempt count (0 = connected)
 int wifi_mgr_get_retry_max(void);            // get max retries before AP mode
 /* Temporary target override. The shared STA baseline is MIN_MODEM; callers

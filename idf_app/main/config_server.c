@@ -81,7 +81,7 @@ static const char *HTML_CONFIG =
     "<h2>Add WiFi Network</h2>"
     RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
-        "<input type='password' name='pass' maxlength='64' placeholder='Password (optional)'>"
+        RK_WIFI_PORTAL_PASSWORD_INPUT("Password (optional)")
         "<p class='hint'>Up to two networks. Remove one before replacing it.</p>"
     "<input type='submit' value='Add Network'>"
     "</form>"

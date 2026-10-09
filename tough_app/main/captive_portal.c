@@ -358,6 +358,23 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     if (pos >= 1024) pos = 1023;
   }
 
+  /* If the last network failed (e.g. wrong password) say so above the form, so a
+   * mistyped password is obvious instead of the device silently reappearing in
+   * setup mode. */
+  char failure_html[384] = "";
+  {
+    char failed_ssid[33];
+    const char *failed_reason = NULL;
+    if (wifi_mgr_get_last_failure(failed_ssid, sizeof(failed_ssid), &failed_reason)) {
+      char esc_ssid[128];
+      html_escape(failed_ssid, esc_ssid, sizeof(esc_ssid));
+      snprintf(failure_html, sizeof(failure_html),
+               "<div class='section' style='border-color:#c0392b;color:#ff8a80'>"
+               "Couldn't join <strong>%s</strong>: %s. Check the password and try again."
+               "</div>", esc_ssid, failed_reason);
+    }
+  }
+
   size_t html_size = 16384;  /* includes the shared brand stylesheet */
   // MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT requires PSRAM.  AtomS3 has no
   // PSRAM, so use any 8-bit heap and let ESP-IDF choose internal RAM (or
@@ -384,22 +401,23 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
     "</head><body>"
     "%s"
     "<h1>WiFi Setup</h1>"
-    "%s%s%s"
+    "%s%s%s%s"
     "<form method='POST' action='/configure'>"
     "<h2>Connect to WiFi</h2>"
     RK_WIFI_PORTAL_SELECT_OPEN "%s</option>%s" RK_WIFI_PORTAL_SELECT_CLOSE
     "<label>Password</label>"
-    "<input type='password' name='pass' maxlength='64' placeholder='WiFi password'>"
+    RK_WIFI_PORTAL_PASSWORD_INPUT("WiFi password")
     "<input type='submit' value='Connect'>"
     "</form>"
     "<div class='note'>"
-    "<strong>Note:</strong> HiPhi Tough requires Unified Hi-Fi Control on your network. "
+    "<strong>Note:</strong> HiPhi " PORTAL_BRAND_PRODUCT " requires Unified Hi-Fi Control on your network. "
     "It supports Roon, LMS, and OpenHome. See "
     "<a href='https://github.com/open-horizon-labs/unified-hifi-control' "
     "target='_blank'>Unified Hi-Fi Control setup</a>."
     "</div><script>%s</script>%s</body></html>",
     PORTAL_BRAND_CSS,
     portal_brand_header_html(),
+    failure_html,
     cfg->wifi_count > 0 ? "<h2>Saved Networks</h2><div class='section'>" : "",
     wifi_html,
     cfg->wifi_count > 0 ? "</div>" : "",
