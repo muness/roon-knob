@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-APPS = ('idf_app', 'frame_app', 'rlcd_app', 'atom_app', 'tough_app', 'm5_beta_app', 'knob_aux_app')
+APPS = ('idf_app', 'frame_app', 'rlcd_app', 'atom_app', 'tough_app', 'halo_app', 'm5_beta_app', 'knob_aux_app')
 
 
 class ReleaseTests(unittest.TestCase):

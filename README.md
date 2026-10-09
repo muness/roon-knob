@@ -28,6 +28,7 @@ Dedicated hi-fi controllers built from commodity ESP32 hardware. A HiPhi control
 | **HiPhi Frame** | Waveshare ESP32-S3-PhotoPainter | [Flash Frame](https://firmware.hiphi.audio/stable/?target=frame) |
 | **HiPhi Slate** | Waveshare ESP32-S3-RLCD-4.2 | [Flash Slate](https://firmware.hiphi.audio/stable/?target=rlcd) |
 | **HiPhi Joy** | M5Stack AtomS3 JoyStick K137 | [Flash Joy](https://firmware.hiphi.audio/stable/?target=joy) |
+| **HiPhi HALO** | innoelement HALO TOUCH USB Hub Dock (V2 board) | [Flash HALO](https://firmware.hiphi.audio/stable/?target=halo) |
 | **HiPhi Tough** | M5Stack Tough K034 | [Flash Tough](https://firmware.hiphi.audio/stable/?target=tough) |
 | **HiPhi Dial Lab** | M5Stack Dial K130-V11 | [Flash Dial Lab](https://firmware.hiphi.audio/beta/?target=m5dial) |
 | **HiPhi Twist** | M5StickS3 K150 | [Flash Twist](https://firmware.hiphi.audio/beta/?target=sticks3) |

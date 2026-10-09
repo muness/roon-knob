@@ -925,6 +925,13 @@ static void update_battery_display(void) {
     const int percent = power.battery_level;
     const bool charging = power.external_power;
 
+    // Targets without a battery gauge report -1: keep the indicator hidden.
+    if (percent < 0) {
+        lv_obj_add_flag(s_battery_icon, LV_OBJ_FLAG_HIDDEN);
+        s_last_battery_level = -1;
+        return;
+    }
+
     // Convert to 4 discrete levels for stability (precision matches fidelity)
     // Critical: ≤10%, Low: 11-25%, Medium: 26-60%, High: ≥61%
     int level;

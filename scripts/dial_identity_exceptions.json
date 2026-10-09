@@ -224,7 +224,7 @@
     },
     {
       "path": ".github/workflows/docker.yml",
-      "contains": "needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-tough, build-m5-betas, build-knob-aux]"
+      "contains": "needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-halo, build-tough, build-m5-betas, build-knob-aux]"
     },
     {
       "path": ".github/workflows/docker.yml",

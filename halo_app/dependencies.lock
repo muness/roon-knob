@@ -1,0 +1,54 @@
+dependencies:
+  espressif/cmake_utilities:
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 0.5.3
+  espressif/esp_lcd_st77916:
+    component_hash: 5fa0f8b1274576d4484e2b8d9358e2a5d09c721511bef0dce6a55b4206b5f0e9
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>5.0.4,!=5.1.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.1
+  espressif/mdns:
+    component_hash: b5b30022c46302eab89c1d2e3b6fb5918a627563a7462f0ee284b22b9a934967
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.14.0
+  idf:
+    source:
+      type: idf
+    version: 5.5.5
+  lvgl/lvgl:
+    component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 9.5.0
+direct_dependencies:
+- espressif/esp_lcd_st77916
+- espressif/mdns
+- idf
+- lvgl/lvgl
+manifest_hash: d793c6093c200e99e05c44d94ae2c1f6ad33c2ed2956e1b1602bb7275e68138f
+target: esp32s3
+version: 2.0.0

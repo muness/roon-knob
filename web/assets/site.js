@@ -9,7 +9,7 @@
 
   const targetNames = {
     dial: 'HiPhi Dial', frame: 'HiPhi Frame', rlcd: 'HiPhi Slate',
-    joy: 'HiPhi Joy', tough: 'HiPhi Tough', m5dial: 'HiPhi Dial Lab',
+    joy: 'HiPhi Joy', halo: 'HiPhi HALO', tough: 'HiPhi Tough', m5dial: 'HiPhi Dial Lab',
     sticks3: 'HiPhi Twist', stopwatch: 'HiPhi Remote', stackchan: 'Kizz',
     knobaux: 'Dial auxiliary parking image'
   };

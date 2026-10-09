@@ -17,6 +17,7 @@ TARGETS = (
     ("frame", "flash-frame.html"),
     ("rlcd", "flash-rlcd.html"),
     ("joy", "flash-joy.html"),
+    ("halo", "flash-halo.html"),
     ("tough", "flash-tough.html"),
     ("m5dial", "flash-m5dial.html"),
     ("sticks3", "flash-sticks3.html"),
