@@ -245,6 +245,20 @@ details.install-detail > div { padding: 0 1.2rem 1.2rem; }
 .channel-notice { padding: 1.3rem 1.5rem; border: 1px solid var(--line-dark); background: var(--midnight-2); }
 .channel-notice p { margin-bottom: 0; color: #d4e0e7; }
 .channel-notice.alpha { border-color: var(--orange); }
+.alpha-comparison { margin: 0 0 3rem; padding: 2rem 0; border-top: 1px solid var(--line-dark); border-bottom: 1px solid var(--line-dark); }
+.alpha-comparison-heading h2 { font-size: clamp(1.65rem, 3vw, 2.3rem); margin-bottom: .5rem; }
+.alpha-comparison-heading > p { color: #d4e0e7; margin-bottom: 1.75rem; }
+.alpha-comparison-content { display: grid; grid-template-columns: minmax(14rem, 1fr) minmax(0, 2fr); gap: 2.5rem; }
+.alpha-compatibility h3 { font-size: 1.35rem; color: var(--cyan-soft); margin-bottom: .75rem; }
+.alpha-comparison p, .alpha-changes li { max-width: 70ch; line-height: 1.6; }
+.alpha-comparison a { color: var(--cyan-soft); text-underline-offset: .2em; }
+.alpha-compatibility p, .alpha-testing p { color: #d4e0e7; }
+.alpha-changes { padding-left: 1.25rem; margin: 0 0 1.5rem; }
+.alpha-changes li + li { margin-top: 1rem; }
+.alpha-testing { margin-bottom: 1.25rem; }
+.alpha-testing summary { cursor: pointer; min-height: 44px; display: list-item; padding: .5rem 0; }
+.alpha-testing summary:focus-visible { outline: 2px solid var(--cyan-soft); outline-offset: 4px; }
+@media (max-width: 700px) { .alpha-comparison-content { grid-template-columns: 1fr; gap: 1.5rem; } }
 .browser-requirement { display: grid; grid-template-columns: minmax(13rem, .55fr) minmax(18rem, 1.45fr); gap: 1rem 2rem; align-items: center; margin: 0 0 2rem; padding: 1.3rem 1.5rem; border: 1px solid var(--cyan); background: #e7f8fb; color: var(--ink); }
 .browser-requirement strong { display: block; font-family: "Familjen Grotesk", sans-serif; font-size: 1.35rem; line-height: 1.15; }
 .browser-requirement p { margin: 0; color: var(--body); line-height: 1.45; }
