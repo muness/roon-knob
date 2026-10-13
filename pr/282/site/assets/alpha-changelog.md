@@ -4,7 +4,7 @@
 
 Use the latest Unified Hi-Fi Control v4 build with this alpha. Update your UHC server before flashing; the new Library uses v4's browse and playback APIs.
 
-Recommended today: [UHC v4.0.0-beta.4](https://github.com/open-horizon-labs/unified-hifi-control/releases/tag/v4.0.0-beta.4).
+Recommended for this alpha: [UHC v4.0.0-beta.4](https://github.com/open-horizon-labs/unified-hifi-control/releases/tag/v4.0.0-beta.4).
 
 ## What's different
 
