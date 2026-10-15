@@ -8,6 +8,8 @@ Recommended for this alpha: [UHC v4.0.0-beta.4](https://github.com/open-horizon-
 
 ## What's different
 
+- **Stable upgrades:** preserve saved Wi-Fi, bridge, zone and display settings from v2.5.2 configurations carrying a legacy version marker.
+
 - **Bridge recovery after wake:** all controllers share a last-working address cache and Wi-Fi readiness lifecycle. A healthy bridge is checked directly before DNS or discovery; a failed discovery refresh no longer drops it.
 
 - **Dial and HALO touch navigation:** artwork-only home, a browsable music library, album covers, and full-screen Zones and Settings. Touch scrolls naturally; the knob browses on these pages.
