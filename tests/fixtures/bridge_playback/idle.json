@@ -1,0 +1,46 @@
+{
+  "zone_id": "roon:1601c43d3e2aad4b4d38b7baf9f967806de4",
+  "line1": "Idle",
+  "line2": "",
+  "line3": null,
+  "is_playing": false,
+  "volume": null,
+  "volume_type": "fixed",
+  "volume_min": 0.0,
+  "volume_max": 0.0,
+  "volume_step": 1.0,
+  "image_url": "/knob/now_playing/image?zone_id=roon:1601c43d3e2aad4b4d38b7baf9f967806de4",
+  "image_key": null,
+  "seek_position": null,
+  "length": null,
+  "is_play_allowed": false,
+  "is_pause_allowed": false,
+  "is_next_allowed": false,
+  "is_previous_allowed": false,
+  "zones": [
+    {
+      "zone_id": "roon:1601c43d3e2aad4b4d38b7baf9f967806de4",
+      "zone_name": "Keltons MBP",
+      "source": "roon",
+      "state": "stopped",
+      "browse_supported": true,
+      "library_tabs": [
+        "browse",
+        "playlists"
+      ]
+    },
+    {
+      "zone_id": "roon:1601bc1d89689dfb2b8de5ea21040d4741d6",
+      "zone_name": "Keltons Gustard",
+      "source": "roon",
+      "state": "playing",
+      "browse_supported": true,
+      "library_tabs": [
+        "browse",
+        "playlists"
+      ]
+    }
+  ],
+  "config_sha": null,
+  "zones_sha": "fixture1"
+}
