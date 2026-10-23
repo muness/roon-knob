@@ -37,6 +37,8 @@ void platform_bridge_cache_write(const platform_bridge_cache_t *value) { retaine
 
 static void (*queued)(void *);
 static void *queued_arg;
+static bool defer_zone_count;
+static void *queued_zone_count;
 bool controller_config_snapshot(controller_config_snapshot_t *out) { *out = fixture; return true; }
 bool controller_config_capture_endpoint_token(controller_config_endpoint_token_t *out) {
     memset(out, 0, sizeof(*out)); out->generation = generation;
@@ -82,7 +84,9 @@ void platform_http_free(char *value) { free(value); }
 bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) {
     /* Only endpoint commits are delayed deliberately for race tests. Other
      * callbacks must consume their owned messages as the real UI loop does. */
-    if (cb == commit_discovered_endpoint_on_ui) {
+    if (cb == ui_zone_count_cb && defer_zone_count) {
+        assert(!queued_zone_count); queued_zone_count = arg;
+    } else if (cb == commit_discovered_endpoint_on_ui) {
         assert(!queued);
         queued = cb; queued_arg = arg;
     } else {
@@ -107,7 +111,8 @@ int platform_http_post_json(const char *url, const char *body, char **out, size_
 static unsigned volume_overlays;
 void controller_presentation_show_volume_change(float value, float step) { (void)value; (void)step; ++volume_overlays; }
 static void reset(const char *url, bool automatic) {
-    response_race = 0;
+    response_race = 0; defer_zone_count = false;
+    free(queued_zone_count); queued_zone_count = NULL;
     free(s_artwork_identity); s_artwork_identity = NULL;
     s_selection_generation = s_media_generation = s_inventory_generation = 0;
     memset(&s_volume_context, 0, sizeof(s_volume_context));
@@ -571,6 +576,17 @@ static void test_response_fences(void) {
     response_race=1; http_body="{\"zones\":[]}";
     assert(!refresh_zone_label(true) && s_state.zone_count==count); response_race=0;
 }
+static void test_auto_selection_queues_current_inventory(void) {
+    reset("http://192.168.1.2:8088", false);
+    http_body="{\"zones\":[{\"zone_id\":\"room\"}]}";
+    defer_zone_count=true;
+    unsigned before=zone_count_updates;
+    assert(refresh_zone_label(true) && queued_zone_count);
+    assert(fixture.revision && !strcmp(fixture.value.zone_id,"room"));
+    void *pending=queued_zone_count; queued_zone_count=NULL;
+    ui_zone_count_cb(pending); assert(zone_count_updates==before+1);
+    defer_zone_count=false;
+}
 static void test_zone_inventory_contract(void) {
     reset("http://192.168.1.2:8088", false); strcpy(fixture.value.zone_id,"selected");
     const char *mixed="{\"zones\":[null,{\"zone_id\":\"selected\"},{\"zone_name\":\"missing ID\"}]}";
@@ -635,4 +651,4 @@ static void test_response_resource_budget(void) {
     assert(!strcmp(cJSON_GetObjectItemCaseSensitive(root,"zone_id")->valuestring,context.zone_id)); cJSON_Delete(root);
 }
 
-int main(void) { test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) { test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

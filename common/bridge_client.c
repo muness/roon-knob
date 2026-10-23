@@ -160,6 +160,7 @@ static uint32_t s_selection_generation;
 static atomic_uint s_media_generation;
 static atomic_uint s_inventory_generation;
 static response_context_t s_volume_context;
+static response_context_t s_playback_request_context;
 static char *s_artwork_identity;
 static uint64_t s_artwork_identity_generation;
 typedef struct {
@@ -1144,8 +1145,10 @@ static bool fetch_now_playing_snapshot(struct now_playing_state *state,
 
 static bool fetch_now_playing(struct now_playing_state *state,
                               const platform_power_snapshot_t *power) {
+    if (!capture_response_context(&s_playback_request_context)) return response_failed(RESPONSE_STALE);
     bool accepted = fetch_now_playing_snapshot(state, power);
-    if (!accepted && s_response_failure != RESPONSE_STALE) {
+    if (!response_context_current(&s_playback_request_context)) return response_failed(RESPONSE_STALE);
+    if (!accepted) {
         lock_state();
         s_last_known_volume_fixed = true;
         ++s_media_generation; // Invalidate already queued media after a failed observation.
@@ -1205,7 +1208,6 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     lock_state();
     int parsed_zone_count = s_state.zone_count;
     unlock_state();
-    post_ui_zone_count(parsed_zone_count);
 
     char zone_label_copy[MAX_ZONE_NAME] = {0};
     char selected_zone_id[sizeof(cfg.zone_id)] = {0};
@@ -1248,6 +1250,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     if (!response_context_current(&request)) return response_failed(RESPONSE_STALE);
     if (!success) {
         LOGI("refresh_zone_label: No zone selected (success=false)");
+        post_ui_zone_count(parsed_zone_count);
         return false;
     }
     if (persist_zone) {
@@ -1256,6 +1259,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
             selected_zone_id, &committed);
         if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
             LOGW("Could not persist selected zone");
+            post_ui_zone_count(parsed_zone_count);
             return false;
         }
         if (result == CONTROLLER_CONFIG_COMMITTED_UNVERIFIED) {
@@ -1263,6 +1267,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
             /* A candidate may survive reboot, but do not switch this running
              * controller to a selection whose durability is unverified. */
             pin_runtime_zone_selection(preferred_zone_id);
+            post_ui_zone_count(parsed_zone_count);
             return false;
         }
     }
@@ -1275,6 +1280,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     unlock_state();
     LOGI("refresh_zone_label: Selected zone '%s', posting to UI",
          zone_label_copy);
+    post_ui_zone_count(parsed_zone_count);
     post_ui_zone_name(zone_label_copy);
     return success;
 }
@@ -1364,7 +1370,7 @@ static void bridge_poll_thread(void *arg) {
             controller_connection_api(&s_connection, true, s_state.zone_count, true, platform_millis());
             s_connection.failures = 0;
             unlock_state();
-        } else if (ready && s_response_failure != RESPONSE_STALE) {
+        } else if (ready && response_context_current(&s_playback_request_context)) {
             lock_state();
             s_last_known_volume_fixed = true;
             controller_connection_api(&s_connection, false, -1, false, platform_millis());
