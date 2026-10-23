@@ -278,7 +278,6 @@ static bool fetch_now_playing(struct now_playing_state *state,
                               const platform_power_snapshot_t *power);
 static bool refresh_zone_label(bool prefer_zone_id);
 static void parse_zones_from_response(const char *resp);
-static const char *extract_json_string(const char *start, const char *key, char *out, size_t len);
 static bool send_control_json(const char *json);
 static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(const platform_power_snapshot_t *power);
@@ -474,16 +473,33 @@ static void default_now_playing(struct now_playing_state *state) {
     state->zones_sha[0] = '\0';
 }
 
-static bool json_bool_field(const char *json, const char *field,
-                            bool fallback) {
-    const char *p = json ? strstr(json, field) : NULL;
-    if (!p) return fallback;
-    p = strchr(p, ':');
-    if (!p) return fallback;
-    do { ++p; } while (*p && isspace((unsigned char)*p));
-    if (strncmp(p, "true", 4) == 0) return true;
-    if (strncmp(p, "false", 5) == 0) return false;
-    return fallback;
+/* Read only top-level fields: zone summaries and future metadata must not
+ * override the selected zone's media. Missing partial fields retain their last
+ * value; explicit null strings clear it. */
+static void json_string_field(const cJSON *root, const char *key,
+                              char *out, size_t len) {
+    if (!out || len == 0) return;
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsNull(value)) {
+        out[0] = '\0';
+    } else if (cJSON_IsString(value)) {
+        size_t source_len = strlen(value->valuestring);
+        size_t copy_len = source_len < len ? source_len : len - 1;
+        /* Do not split a UTF-8 code point when truncating decoded text. */
+        if (copy_len < source_len) {
+            while (copy_len > 0 &&
+                   ((unsigned char)value->valuestring[copy_len] & 0xc0) == 0x80) --copy_len;
+        }
+        memcpy(out, value->valuestring, copy_len);
+        out[copy_len] = '\0';
+    }
+}
+
+static double json_number_field(const cJSON *root, const char *key,
+                                 double fallback) {
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsNumber(value)) return value->valuedouble;
+    return cJSON_IsNull(value) ? 0 : fallback;
 }
 
 static void post_ui_update(const struct now_playing_state *state) {
@@ -832,30 +848,28 @@ static bool fetch_now_playing(struct now_playing_state *state,
         return false;
     }
 
-    if (strstr(resp, "\"error\"") || resp_len == 0) {
-        LOGW("now_playing response was empty or reported an error");
+    const char *parse_end = NULL;
+    cJSON *root = cJSON_ParseWithLengthOpts(resp, resp_len, &parse_end, false);
+    /* cJSON permits trailing input unless checked explicitly. A truncated or
+     * otherwise invalid document cannot publish partial playback state. */
+    while (parse_end && parse_end < resp + resp_len &&
+           isspace((unsigned char)*parse_end)) ++parse_end;
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    if (!cJSON_IsObject(root) || parse_end != resp + resp_len ||
+        (error && !cJSON_IsNull(error))) {
+        LOGW("now_playing response was invalid or reported an API error");
+        cJSON_Delete(root);
         platform_http_free(resp);
         return false;
     }
 
-    const char *line1 = strstr(resp, "\"line1\"");
-    if (line1) {
-        extract_json_string(line1, "\"line1\"", state->line1, sizeof(state->line1));
-    }
-    const char *line2 = strstr(resp, "\"line2\"");
-    if (line2) {
-        extract_json_string(line2, "\"line2\"", state->line2, sizeof(state->line2));
-    }
-    const char *line3 = strstr(resp, "\"line3\"");
-    if (line3) {
-        extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
-    }
-    /* Preserve the last good value if a transient/partial response omits the
-     * field. Treating an incomplete payload as stopped makes the UI lie. */
-    state->is_playing = json_bool_field(resp, "\"is_playing\"", state->is_playing);
+    json_string_field(root, "line1", state->line1, sizeof(state->line1));
+    json_string_field(root, "line2", state->line2, sizeof(state->line2));
+    json_string_field(root, "line3", state->line3, sizeof(state->line3));
+    const cJSON *playing = cJSON_GetObjectItemCaseSensitive(root, "is_playing");
+    if (cJSON_IsBool(playing)) state->is_playing = cJSON_IsTrue(playing);
 
-    cJSON *volume_response = cJSON_Parse(resp);
-    const cJSON *volume_type = cJSON_GetObjectItemCaseSensitive(volume_response, "volume_type");
+    const cJSON *volume_type = cJSON_GetObjectItemCaseSensitive(root, "volume_type");
     bool adjustable = cJSON_IsString(volume_type) &&
         (strcmp(volume_type->valuestring, "db") == 0 ||
          strcmp(volume_type->valuestring, "number") == 0);
@@ -865,87 +879,28 @@ static bool fetch_now_playing(struct now_playing_state *state,
     rk_strlcpy(s_volume_capability_bridge, bridge_base, sizeof(s_volume_capability_bridge));
     s_volume_capability_generation = volume_token.generation;
     unlock_state();
-    cJSON_Delete(volume_response);
 
-    const char *vol_key = strstr(resp, "\"volume\"");
-    if (vol_key) {
-        const char *colon = strchr(vol_key, ':');
-        if (colon) {
-            state->volume = atof(colon + 1);
-        }
-    }
+    state->volume = json_number_field(root, "volume", state->volume);
+    state->volume_min = json_number_field(root, "volume_min", state->volume_min);
+    state->volume_max = json_number_field(root, "volume_max", state->volume_max);
+    double step = json_number_field(root, "volume_step", 1.0);
+    state->volume_step = step > 0 ? step : 1.0;
+    const cJSON *seek = cJSON_GetObjectItemCaseSensitive(root, "seek_position");
+    if (cJSON_IsNumber(seek) || cJSON_IsNull(seek)) state->seek_position = seek->valueint;
+    const cJSON *length = cJSON_GetObjectItemCaseSensitive(root, "length");
+    if (cJSON_IsNumber(length) || cJSON_IsNull(length)) state->length = length->valueint;
 
-    const char *vol_min_key = strstr(resp, "\"volume_min\"");
-    if (vol_min_key) {
-        const char *colon = strchr(vol_min_key, ':');
-        if (colon) {
-            state->volume_min = atof(colon + 1);
-        }
-    }
-
-    const char *vol_max_key = strstr(resp, "\"volume_max\"");
-    if (vol_max_key) {
-        const char *colon = strchr(vol_max_key, ':');
-        if (colon) {
-            state->volume_max = atof(colon + 1);
-        }
-    }
-
-    state->volume_step = 1.0f;  // Default 1.0 dB step
-    const char *step_key = strstr(resp, "\"volume_step\"");
-    if (step_key) {
-        const char *colon = strchr(step_key, ':');
-        if (colon) {
-            float parsed = atof(colon + 1);
-            if (parsed > 0.0f) {
-                state->volume_step = parsed;
-            }
-        }
-    }
-
-    const char *seek_key = strstr(resp, "\"seek_position\"");
-    if (seek_key) {
-        const char *colon = strchr(seek_key, ':');
-        if (colon) {
-            state->seek_position = atoi(colon + 1);
-        }
-    }
-    const char *length_key = strstr(resp, "\"length\"");
-    if (length_key) {
-        const char *colon = strchr(length_key, ':');
-        if (colon) {
-            state->length = atoi(colon + 1);
-        }
-    }
-
-    // Parse image_key for album artwork
-    const char *image_key = strstr(resp, "\"image_key\"");
-    if (image_key) {
-        extract_json_string(image_key, "\"image_key\"", state->image_key, sizeof(state->image_key));
-    }
+    json_string_field(root, "image_key", state->image_key, sizeof(state->image_key));
     LOGD("now_playing parsed playing=%s image_key=%s zone=%s",
          state->is_playing ? "true" : "false", state->image_key, zone_id);
-    /* A partial response may omit artwork metadata. Keep the last good key;
-     * the bridge normally supplies a string (or an empty string) here. */
 
-    // Parse config_sha for config change detection (silent - checked in poll loop)
-    const char *config_sha_key = strstr(resp, "\"config_sha\"");
-    if (config_sha_key) {
-        extract_json_string(config_sha_key, "\"config_sha\"", state->config_sha, sizeof(state->config_sha));
-    } else {
-        state->config_sha[0] = '\0';
-    }
+    state->config_sha[0] = '\0';
+    state->zones_sha[0] = '\0';
+    json_string_field(root, "config_sha", state->config_sha, sizeof(state->config_sha));
+    json_string_field(root, "zones_sha", state->zones_sha, sizeof(state->zones_sha));
+    cJSON_Delete(root);
 
-    // Parse zones_sha for zone list change detection
-    const char *zones_sha_key = strstr(resp, "\"zones_sha\"");
-    if (zones_sha_key) {
-        extract_json_string(zones_sha_key, "\"zones_sha\"", state->zones_sha, sizeof(state->zones_sha));
-    } else {
-        state->zones_sha[0] = '\0';
-    }
-
-    // Note: Don't parse zones from now_playing response - it doesn't have zone_name
-    // Zones are parsed from /zones endpoint in refresh_zone_label()
+    /* Zone inventory and selection are owned by refresh_zone_label(). */
     platform_http_free(resp);
     return true;
 }
@@ -1091,41 +1046,6 @@ static void parse_zones_from_response(const char *resp) {
     if (!valid) controller_connection_schedule(&s_connection, platform_millis(), false);
     unlock_state();
     cJSON_Delete(root);
-}
-
-static const char *extract_json_string(const char *start, const char *key, char *out, size_t len) {
-    if (!start || !key || !out || len == 0) return NULL;
-    const char *key_pos = strstr(start, key);
-    if (!key_pos) return NULL;
-    const char *colon = strchr(key_pos, ':');
-    if (!colon) return NULL;
-    const char *value_start = colon + 1;
-    while (isspace((unsigned char)*value_start)) ++value_start;
-    /* A null/non-string value must never scan ahead into the next JSON field.
-     * cJSON owns escape and surrogate-pair decoding and leaves the cursor after
-     * this token, including when the output buffer truncates its text. */
-    if (*value_start != '"' && strncmp(value_start, "null", 4) != 0) return NULL;
-    const char *parse_end = NULL;
-    cJSON *value = cJSON_ParseWithOpts(value_start, &parse_end, false);
-    if (!value) return NULL;
-    if (cJSON_IsNull(value)) {
-        out[0] = '\0';
-    } else if (cJSON_IsString(value)) {
-        size_t source_len = strlen(value->valuestring);
-        size_t copy_len = source_len < len ? source_len : len - 1;
-        /* Do not split a UTF-8 code point when a valid string is truncated. */
-        if (copy_len < source_len) {
-            while (copy_len > 0 &&
-                   ((unsigned char)value->valuestring[copy_len] & 0xc0) == 0x80) --copy_len;
-        }
-        memcpy(out, value->valuestring, copy_len);
-        out[copy_len] = '\0';
-    } else {
-        cJSON_Delete(value);
-        return NULL;
-    }
-    cJSON_Delete(value);
-    return parse_end;
 }
 
 static bool send_control_json(const char *json) {

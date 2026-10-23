@@ -214,12 +214,114 @@ static void test_now_playing_json_strings(void) {
     assert(!strcmp(state.line2,"Lee \"Scratch\" Perry") && !strcmp(state.line3,"C:\\Music é 🎵"));
     http_body="{}"; assert(fetch_now_playing(&state,&power)); assert(!state.line1[0]);
     char bounded[4]="old";
-    const char *json="\"line1\":\"éé\",\"line2\":\"later\"";
-    const char *end=extract_json_string(json,"\"line1\"",bounded,sizeof(bounded));
-    assert(!strcmp(bounded,"é") && end && *end==',');
-    assert(!extract_json_string(json,"\"line1\"",bounded,0));
-    assert(!extract_json_string("\"line1\":false,\"line2\":\"later\"","\"line1\"",bounded,sizeof(bounded)));
+    cJSON *root = cJSON_Parse("{\"line1\":\"éé\",\"line2\":\"later\"}");
+    assert(root);
+    json_string_field(root, "line1", bounded, sizeof(bounded));
     assert(!strcmp(bounded,"é"));
+    json_string_field(root, "line1", bounded, 0);
+    assert(!strcmp(bounded,"é"));
+    cJSON_Delete(root);
+}
+static char *playback_fixture(const char *name) {
+    char path[160];
+    snprintf(path, sizeof(path), "tests/fixtures/bridge_playback/%s.json", name);
+    FILE *file = fopen(path, "rb");
+    assert(file && fseek(file, 0, SEEK_END) == 0);
+    long size = ftell(file);
+    assert(size > 0 && fseek(file, 0, SEEK_SET) == 0);
+    char *body = malloc((size_t)size + 1);
+    assert(body && fread(body, 1, (size_t)size, file) == (size_t)size);
+    body[size] = 0;
+    fclose(file);
+    return body;
+}
+static void test_idle_zone_coexists_with_playing_fixed_volume_zone(void) {
+    reset("http://192.168.1.2:8088", false);
+    const char *selected = "roon:1601bc1d89689dfb2b8de5ea21040d4741d6";
+    strcpy(fixture.value.zone_id, selected);
+    char *zones = playback_fixture("zones");
+    http_body = zones;
+    assert(update_connection() && refresh_zone_label(true));
+    assert(controller_connection_ready(&s_connection) && s_state.zone_count == 2);
+    assert(!strcmp(s_state.runtime_zone_id, selected));
+    assert(!strcmp(s_state.zone_label, "Keltons Gustard"));
+    /* Order, and the unrelated stopped zone disappearing, cannot change selection. */
+    cJSON *root = cJSON_Parse(zones);
+    cJSON *list = cJSON_GetObjectItemCaseSensitive(root, "zones");
+    cJSON *idle = cJSON_DetachItemFromArray(list, 0);
+    cJSON_AddItemToArray(list, idle);
+    char *reordered = cJSON_PrintUnformatted(root);
+    http_body = reordered;
+    assert(refresh_zone_label(true));
+    assert(!strcmp(s_state.runtime_zone_id, selected));
+    cJSON_DeleteItemFromArray(list, 1);
+    char *playing_only = cJSON_PrintUnformatted(root);
+    http_body = playing_only;
+    assert(refresh_zone_label(true) && controller_connection_ready(&s_connection));
+    cJSON_Delete(root); free(reordered); free(playing_only); free(zones);
+
+    struct now_playing_state state = {0};
+    default_now_playing(&state);
+    platform_power_snapshot_t power = {.battery_level = -1};
+    char *playing = playback_fixture("playing");
+    http_body = playing;
+    for (int i = 0; i < 20; ++i) {
+        assert(fetch_now_playing(&state, &power));
+        assert(state.is_playing && !strcmp(state.line1, "Breadwinner"));
+        assert(!strcmp(state.image_key, "74cb6ab8cc8bd13ba53433b456d00057"));
+        assert(state.seek_position == 122 && state.length == 173);
+        assert(s_last_known_volume_fixed);
+        controller_command_t command = controller_command_adjust_volume(1);
+        assert(bridge_client_execute_command(&command) && controls == 0);
+    }
+    free(playing);
+    /* Selecting a genuinely idle zone must clear old artwork and progress. */
+    strcpy(fixture.value.zone_id, "roon:1601c43d3e2aad4b4d38b7baf9f967806de4");
+    char *stopped = playback_fixture("idle");
+    http_body = stopped;
+    assert(fetch_now_playing(&state, &power));
+    assert(!state.is_playing && !strcmp(state.line1, "Idle"));
+    assert(!state.line2[0] && !state.line3[0] && !state.image_key[0]);
+    assert(!state.seek_position && !state.length && s_last_known_volume_fixed);
+    free(stopped);
+}
+static void test_playback_metadata_cannot_report_a_connection_error(void) {
+    reset("http://192.168.1.2:8088", false);
+    strcpy(fixture.value.zone_id, "roon:room");
+    struct now_playing_state state = {0};
+    default_now_playing(&state);
+    platform_power_snapshot_t power = {.battery_level = -1};
+    http_body = "{\"line1\":\"error\",\"is_playing\":true,\"image_key\":\"cover\"}";
+    assert(fetch_now_playing(&state, &power));
+    assert(state.is_playing && !strcmp(state.line1, "error") && !strcmp(state.image_key, "cover"));
+    http_body = "{\"metadata\":{\"error\":\"unrelated\",\"line1\":\"wrong\",\"is_playing\":false,\"image_key\":null},"
+                "\"line1\":\"Downstairs\",\"is_playing\":true,\"image_key\":\"cover\"}";
+    assert(fetch_now_playing(&state, &power));
+    assert(state.is_playing && !strcmp(state.line1, "Downstairs") && !strcmp(state.image_key, "cover"));
+    /* Catch an error-check-only patch that still searches nested media fields. */
+    http_body = "{\"metadata\":{\"line1\":\"wrong\",\"is_playing\":false,\"image_key\":null,\"volume\":99,\"length\":999},"
+                "\"line1\":\"Breadwinner\",\"is_playing\":true,\"image_key\":\"cover\",\"volume\":12,\"length\":173} \n";
+    assert(fetch_now_playing(&state, &power));
+    assert(state.is_playing && !strcmp(state.line1, "Breadwinner") && !strcmp(state.image_key, "cover"));
+    assert(state.volume == 12 && state.length == 173);
+    http_body = "{\"error\":null,\"volume\":\"bad\",\"is_playing\":42}";
+    assert(fetch_now_playing(&state, &power));
+    assert(state.volume == 12 && state.is_playing && state.length == 173 && !strcmp(state.image_key, "cover"));
+    struct now_playing_state before = state;
+    const char *invalid[] = {"{\"error\":\"zone not found\",\"line1\":\"bad\"}",
+        "{\"line1\":\"truncated\",\"image_key\":", "[]", "null", "", "{} garbage"};
+    for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i) {
+        http_body = invalid[i];
+        assert(!fetch_now_playing(&state, &power));
+        assert(!memcmp(&state, &before, sizeof(state)));
+    }
+    http_ok = false;
+    assert(!fetch_now_playing(&state, &power));
+    assert(!memcmp(&state, &before, sizeof(state)));
+    http_ok = true;
+    http_body = "{\"line1\":\"Downstairs\",\"is_playing\":true,\"image_key\":\"cover\",\"seek_position\":0}";
+    assert(fetch_now_playing(&state, &power));
+    assert(!strcmp(state.line1, "Downstairs") && state.is_playing && !strcmp(state.image_key, "cover"));
 }
 static void test_zone_refresh_invalidates_old_readiness(void) {
     reset("http://192.168.1.2:8088", true);
@@ -344,4 +446,4 @@ static void test_legacy_automatic_ip_keeps_hostname_recovery(void) {
     assert(update_connection()); /* Learned name and address survive restart together. */
     assert(controller_connection_ready(&s_connection));
 }
-int main(void) { test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) { test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
