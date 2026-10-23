@@ -556,6 +556,9 @@ static void test_response_fences(void) {
     clock_ms += BRIDGE_MEDIA_MAX_AGE_MS+1; ui_update_cb(pending); assert(media_updates==before);
     assert(fetch_now_playing(&state,&power));
     post_ui_update(&state); assert(media_updates==before+1);
+    pending=calloc(1,sizeof(*pending)); pending->context=state.context;
+    http_body="{}"; assert(!fetch_now_playing(&state,&power));
+    ui_update_cb(pending); assert(media_updates==before+1);
     http_body="{\"zones\":[{\"zone_id\":\"roon:room\"}]}";
     assert(refresh_zone_label(true)); int count=s_state.zone_count;
     pending_zones_t *zone_pending=calloc(1,sizeof(*zone_pending));
@@ -576,7 +579,7 @@ static void test_zone_inventory_contract(void) {
     assert(probe.zone_count==1 && probe.selected_zone_available);
     assert(parse_zones_from_response(mixed,strlen(mixed),NULL) && s_state.zone_count==1);
     assert(!strcmp(s_state.zones[0].name,"selected"));
-    const char *bad[]={"{\"zones\":[null]}","{\"zones\":[]} trailing", "{\"error\":\"bad\",\"zones\":[]}",
+    const char *bad[]={"{\"zones\":[{\"zone_id\":\"selected\",\"zone_id\":\"other\"}]}", "{\"zones\":[null]}","{\"zones\":[]} trailing", "{\"error\":\"bad\",\"zones\":[]}",
         "{\"zones\":[{\"zone_id\":\"selected\"},{\"zone_id\":\"selected\"}]}",
         "{\"zones\":[{\"zone_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}"};
     for(size_t i=0;i<sizeof(bad)/sizeof(bad[0]);++i) {
@@ -601,6 +604,7 @@ static void test_zone_inventory_contract(void) {
 }
 static void *fail_json_alloc(size_t size) { (void)size; return NULL; }
 static void test_response_resource_budget(void) {
+    assert(!response_document("{}", PLATFORM_HTTP_JSON_MAX_BYTES + 1));
     char deep[160]; strcpy(deep,"{\"extension\":"); size_t n=strlen(deep);
     for(int i=0;i<BRIDGE_JSON_MAX_DEPTH;++i) deep[n++]='[';
     deep[n++]='0'; for(int i=0;i<BRIDGE_JSON_MAX_DEPTH;++i) deep[n++]=']'; deep[n++]='}';

@@ -584,9 +584,6 @@ static const char *response_failure_name(response_failure_t failure) {
 }
 static bool response_failed(response_failure_t reason) {
     s_response_failure = reason;
-    if (reason != RESPONSE_STALE) {
-        lock_state(); s_last_known_volume_fixed = true; unlock_state();
-    }
     LOGW("Bridge response rejected: %s; last-good age=%llu ms", response_failure_name(reason),
          (unsigned long long)media_age_ms());
     return false;
@@ -681,6 +678,12 @@ static zone_inventory_t *decode_zones(const char *text, size_t length, const cha
     memset(result, 0, sizeof(*result));
     const cJSON *item;
     cJSON_ArrayForEach(item, zones) {
+        unsigned id_fields = 0;
+        for (const cJSON *field = item->child; field; field = field->next)
+            if (field->string && !strcmp(field->string, "zone_id")) ++id_fields;
+        if (id_fields > 1) {
+            free(result); cJSON_Delete(root); response_failed(RESPONSE_SCHEMA); return NULL;
+        }
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "zone_id");
         if (!cJSON_IsObject(item) || !cJSON_IsString(id) || !id->valuestring[0] ||
             strlen(id->valuestring) >= sizeof(result->zones[0].id)) continue;
@@ -853,8 +856,11 @@ static bool probe_connection(const char *base, controller_connection_t *connecti
     platform_http_get_knob_id(knob_id, sizeof(knob_id));
     int written = snprintf(url, sizeof(url), "%s/zones?knob_id=%s", base, knob_id);
     if (written <= 0 || (size_t)written >= sizeof(url)) return false;
+    response_context_t request;
+    if (!capture_response_context(&request)) return false;
     char *response = NULL; size_t response_len = 0;
     int result = platform_http_get(url, &response, &response_len);
+    if (!response_context_current(&request)) { platform_http_free(response); return false; }
     zone_inventory_t *inventory = result == 0 ? decode_zones(response, response_len, zone) : NULL;
     bool valid = inventory != NULL;
     bool selected = valid && inventory->selected;
@@ -994,7 +1000,7 @@ static bool update_connection(void) {
     return valid;
 }
 
-static bool fetch_now_playing(struct now_playing_state *state,
+static bool fetch_now_playing_snapshot(struct now_playing_state *state,
                               const platform_power_snapshot_t *power) {
     if (!state || !power) {
         return false;
@@ -1134,6 +1140,18 @@ static bool fetch_now_playing(struct now_playing_state *state,
     *state = next;
     unlock_state();
     return true;
+}
+
+static bool fetch_now_playing(struct now_playing_state *state,
+                              const platform_power_snapshot_t *power) {
+    bool accepted = fetch_now_playing_snapshot(state, power);
+    if (!accepted && s_response_failure != RESPONSE_STALE) {
+        lock_state();
+        s_last_known_volume_fixed = true;
+        ++s_media_generation; // Invalidate already queued media after a failed observation.
+        unlock_state();
+    }
+    return accepted;
 }
 
 static bool refresh_zone_label(bool prefer_zone_id) {
@@ -1276,7 +1294,11 @@ static bool parse_zones_from_response(const char *resp, size_t length, const res
     }
     controller_connection_api(&s_connection, inventory != NULL,
         inventory ? inventory->count : -1, inventory && inventory->selected, platform_millis());
-    if (!inventory) controller_connection_schedule(&s_connection, platform_millis(), false);
+    if (!inventory) {
+        s_last_known_volume_fixed = true;
+        ++s_media_generation;
+        controller_connection_schedule(&s_connection, platform_millis(), false);
+    }
     unlock_state();
     bool valid = inventory != NULL;
     free(inventory);
