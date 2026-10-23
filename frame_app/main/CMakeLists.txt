@@ -13,7 +13,7 @@ set(SRC_FILES
     "ble_hid_host_frame.c"
     "platform_display_frame.c"
     "platform_input_frame.c"
-    "platform_http_frame.c"
+    "../../common/platform/platform_http_esp.c"
     "platform_storage_frame.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"

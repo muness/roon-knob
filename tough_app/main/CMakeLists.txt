@@ -5,7 +5,7 @@ set(SRC_FILES
     "controller_input_profile_tough.c"
     "controller_presentation_tough.c"
     "platform_input_tough.c"
-    "platform_http_tough.c"
+    "../../common/platform/platform_http_esp.c"
     "platform_storage_tough.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"
@@ -74,3 +74,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NA
 # aggressive GCC false positives in legacy bounded string copies.
 # TODO(#183): Remove after ESP-IDF 6.0 migration.
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
+
+# Preserve the no-PSRAM fallback and uncompressed artwork request policy.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    PLATFORM_HTTP_JSON_INTERNAL_FALLBACK=1 PLATFORM_HTTP_IMAGE_REQUEST_GZIP=0)

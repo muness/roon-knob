@@ -41,7 +41,7 @@ set(SRC_FILES
     "../../common/platform/platform_time.c"
     "../../frame_app/main/captive_portal.c"
     "../../frame_app/main/dns_server.c"
-    "../../frame_app/main/platform_http_frame.c"
+    "../../common/platform/platform_http_esp.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"
     "../../frame_app/main/platform_provisioning_frame.c"

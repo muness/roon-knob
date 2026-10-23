@@ -12,12 +12,15 @@ typedef int (*platform_http_stream_callback_t)(const void *data, size_t len,
                                                void *ctx);
 
 int platform_http_get(const char *url, char **out, size_t *out_len);
-/* Fetches a response into PSRAM with a hard ceiling. Adaptive-screen callers
+/* Fetches a complete 2xx response with a hard ceiling. ESP targets prefer
+ * PSRAM; targets without PSRAM may enable internal RAM fallback. Adaptive-screen callers
  * should select the smallest limit their schema permits. */
 int platform_http_get_bounded(const char *url, size_t max_bytes,
                               char **out, size_t *out_len);
 /* Streams a response without retaining the body. The callback must consume
  * each chunk before returning; a non-zero callback result aborts the request.
+ * Success requires a complete HTTP 200 response. Callbacks may receive partial
+ * data before a later failure; callers must discard partial results on error.
  */
 int platform_http_stream(const char *url, size_t max_bytes,
                          platform_http_stream_callback_t callback, void *ctx,

@@ -231,11 +231,6 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "eink_ui_post_show_ip(frame_display_preferences_show_ip())",
         "eink_ui_post_device_ip(NULL)",
     ),
-    "frame_app/main/platform_http_frame.c": (
-        "max_image_size = 2 * 1024 * 1024",
-        "content_length + 4096",
-        "next_size = max_image_size",
-    ),
     "frame_app/main/frame_display_preferences.c": (
         'NAMESPACE = "rk_frame"',
         'SHOW_IP_KEY = "show_ip"',

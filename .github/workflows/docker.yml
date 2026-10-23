@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
 
       - name: Install runtime test dependency
-        run: sudo apt-get update -qq && sudo apt-get install -y libcjson-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libcjson-dev zlib1g-dev
 
       - name: Test HALO native touch UI
         run: |
@@ -65,6 +65,7 @@ jobs:
           node scripts/check_firmware_site.js
           python3 tests/test_firmware_project_identity.py
           python3 tests/test_release_firmware.py
+          bash scripts/test_platform_http_esp.sh
           bash scripts/test_ota_update.sh
           sh tests/run_portal_trace.sh
           python3 tests/test_dial_wake_dispatch.py

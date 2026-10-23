@@ -6,7 +6,7 @@ set(SRC_FILES
     "platform_input_atom.c"
     "platform_identity_atom.c"
     "platform_display_atom.c"
-    "../../tough_app/main/platform_http_tough.c"
+    "../../common/platform/platform_http_esp.c"
     "../../tough_app/main/platform_storage_tough.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"
@@ -47,3 +47,7 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-joy\"
     PORTAL_BRAND_PRODUCT="Joy")
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
+
+# Preserve the no-PSRAM fallback and uncompressed artwork request policy.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    PLATFORM_HTTP_JSON_INTERNAL_FALLBACK=1 PLATFORM_HTTP_IMAGE_REQUEST_GZIP=0)
