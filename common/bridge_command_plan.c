@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 static bool build_simple_plan(bridge_command_plan_t *plan,
                               const char *zone_id,
@@ -27,7 +28,20 @@ bool bridge_command_plan_build(const controller_command_t *command,
     }
 
     memset(plan, 0, sizeof(*plan));
-    const char *zone_id = context->zone_id ? context->zone_id : "";
+    const char *raw_zone = context->zone_id ? context->zone_id : "";
+    char zone_id[BRIDGE_COMMAND_JSON_CAPACITY];
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *)raw_zone; *p; ++p) {
+        if (*p < 0x20) {
+            if (used + 6 >= sizeof(zone_id)) return false;
+            snprintf(zone_id + used, sizeof(zone_id) - used, "\\u%04x", *p); used += 6;
+        } else {
+            if (used + 2 >= sizeof(zone_id)) return false;
+            if (*p == '"' || *p == '\\') zone_id[used++] = '\\';
+            zone_id[used++] = (char)*p;
+        }
+    }
+    zone_id[used] = 0;
 
     bool supported = command->kind == CONTROLLER_COMMAND_TOGGLE_PLAYBACK ||
         command->kind == CONTROLLER_COMMAND_NEXT_TRACK ||
@@ -55,9 +69,18 @@ bool bridge_command_plan_build(const controller_command_t *command,
             plan, zone_id, "prev",
             BRIDGE_COMMAND_FEEDBACK_PREVIOUS_FAILED);
     case CONTROLLER_COMMAND_ADJUST_VOLUME_STEPS:
-        plan->predicted_volume =
-            context->volume +
-            ((float)command->volume_steps * context->volume_step);
+        if (!isfinite(context->volume) || !isfinite(context->volume_min) ||
+            !isfinite(context->volume_max) || !isfinite(context->volume_step) ||
+            context->volume_min >= context->volume_max || context->volume_step <= 0 ||
+            context->volume < context->volume_min || context->volume > context->volume_max) {
+            plan->accepted = true; plan->no_op = true; return true;
+        }
+        double predicted = (double)context->volume +
+            (double)command->volume_steps * context->volume_step;
+        if (predicted < context->volume_min) predicted = context->volume_min;
+        if (predicted > context->volume_max) predicted = context->volume_max;
+        plan->predicted_volume = (float)predicted;
+        /* Clamp in double before narrowing, so large step counts cannot overflow. */
         if (plan->predicted_volume < context->volume_min) {
             plan->predicted_volume = context->volume_min;
         }
