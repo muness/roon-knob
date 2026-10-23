@@ -59,10 +59,8 @@ idf_component_register(SRCS ${SRC_FILES}
     REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant driver esp_lcd lvgl__lvgl espressif__esp_lcd_st77916
     PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_i2c nvs_flash esp_http_client esp_http_server esp_app_format json)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-halo\"
-    PORTAL_BRAND_PRODUCT="HALO" HIPHI_HALO_NATIVE_SETTINGS=1)
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
-
 # Preserve the no-PSRAM fallback and uncompressed artwork request policy.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    PLATFORM_HTTP_JSON_INTERNAL_FALLBACK=1 PLATFORM_HTTP_IMAGE_REQUEST_GZIP=0)
+    PLATFORM_HTTP_JSON_INTERNAL_FALLBACK=1 PLATFORM_HTTP_IMAGE_REQUEST_GZIP=0 TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-halo\"
+    PORTAL_BRAND_PRODUCT="HALO" HIPHI_HALO_NATIVE_SETTINGS=1)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation)
