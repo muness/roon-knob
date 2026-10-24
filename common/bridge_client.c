@@ -1491,10 +1491,6 @@ bool bridge_client_execute_command(const controller_command_t *command) {
 
     bridge_command_context_t context;
     bridge_command_plan_t plan;
-    rk_cfg_t cfg;
-    if (!bridge_config_snapshot(&cfg)) {
-        return false;
-    }
     controller_connection_t connection;
     bridge_client_connection_snapshot(&connection);
     controller_config_endpoint_token_t volume_token;
