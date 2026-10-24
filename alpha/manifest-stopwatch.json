@@ -1,6 +1,6 @@
 {
   "name": "HiPhi Remote (Alpha)",
-  "version": "2.8.0-alpha.2",
+  "version": "2.8.0-alpha.3",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",
