@@ -1,0 +1,11 @@
+{
+  "name": "HiPhi RLCD Alpha (PR #297 Preview)",
+  "version": "pr-297",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_rlcd_bootloader-04b7fa64f85e9fab7d7b74cf9dfb3baa480d5d76-40090592887-1.bin", "offset": 0},
+    {"path": "hiphi_rlcd_partition-table-04b7fa64f85e9fab7d7b74cf9dfb3baa480d5d76-40090592887-1.bin", "offset": 32768},
+    {"path": "hiphi_rlcd_ota_data_initial-04b7fa64f85e9fab7d7b74cf9dfb3baa480d5d76-40090592887-1.bin", "offset": 53248},
+    {"path": "hiphi_rlcd-04b7fa64f85e9fab7d7b74cf9dfb3baa480d5d76-40090592887-1.bin", "offset": 65536}
+  ]}]
+}
