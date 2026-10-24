@@ -149,13 +149,13 @@ controller_config_write_result_t controller_config_set_endpoint(const char *base
 void ui_hide_zone_picker(void) {}
 bool ui_is_zone_picker_visible(void) { return false; }
 void ui_zone_picker_scroll(int delta) { (void)delta; }
-static bool artwork_only;
+static bool artwork_only, controls_visible;
 static void (*background_tap_handler)(void);
 static int reset_calls;
 void ui_set_background_tap_handler(void (*handler)(void)) { background_tap_handler = handler; }
 void wifi_mgr_forget_wifi(void) { reset_calls++; }
 const char *portal_brand_firmware_version(void) { return "test-version"; }
-void ui_set_controls_visible(bool visible) { (void)visible; }
+void ui_set_controls_visible(bool visible) { controls_visible = visible; }
 void ui_set_artwork_only(bool only) { artwork_only = only; }
 int platform_http_get_bounded(const char *url, size_t maximum, char **out,
                               size_t *len) {
@@ -272,6 +272,11 @@ int main(int argc, char **argv) {
   background_tap_handler();
   assert(screen == CONTROLLER_SCREEN_ARTWORK && artwork_only);
   assert(!background_tap_handler);
+  assert(!controller_touch_navigation_encoder(1)); /* Same detent adjusts volume. */
+  assert(screen == CONTROLLER_SCREEN_NOW_PLAYING);
+  assert(controls_visible && !artwork_only);
+  controller_touch_navigation_restore_visibility();
+  assert(controls_visible && !artwork_only);
   change_screen(CONTROLLER_SCREEN_MENU);
   advance(100);
   snapshot(dir, "menu");
@@ -317,7 +322,7 @@ int main(int argc, char **argv) {
   assert(zone_index == 63);
   assert(lv_obj_get_scroll_y(scroller) > 0);
   snapshot(dir, "zones");
-  /* Production carousel with unique opaque playback handles. */
+  /* Text library with unique opaque playback handles and supplied images. */
   page->count = 4;
   for (int i = 0; i < 4; i++) {
     snprintf(page->items[i].title, sizeof(page->items[i].title), "Album %d",
@@ -335,15 +340,12 @@ int main(int argc, char **argv) {
   controller_touch_navigation_encoder(3);
   advance(500);
   assert(selected_index == 3);
-  input(180, 175, true, 60);
-  for (int x = 180; x < 280; x += 10)
-    input(x, 175, true, 30);
-  input(280, 175, false, 600);
-  assert(screen == CONTROLLER_SCREEN_LIBRARY);
-  assert(selected_index < 3);
+  assert(!carousel); /* Cover-bearing rows remain readable text lists. */
+  assert(lv_obj_get_scroll_y(scroller) > 0);
   assert(pending_mutation == -1);
-  /* Direct Play sends precisely the selected item after a cover download,
-   * without asking for a second Play or replaying during navigation. */
+  click(rows[selected_index]);
+  assert(chooser);
+  /* Play sends the exact selected opaque handle. */
   request_t in_flight;
   xQueueReceive(requests, &in_flight, 0);
   busy = true;
@@ -360,6 +362,7 @@ int main(int argc, char **argv) {
   busy = true;
   busy_kind = IMAGE;
   depth = 0;
+  chooser = false;
   screen = CONTROLLER_SCREEN_LIBRARY;
   pending_mutation = -1;
   render();
@@ -372,6 +375,7 @@ int main(int argc, char **argv) {
       false; /* A separate scenario after fresh listening state. */
   busy = true;
   busy_kind = IMAGE;
+  chooser = true;
   render();
   click(primary);
   assert(pending_mutation == PLAY);
@@ -393,6 +397,44 @@ int main(int argc, char **argv) {
   controller_touch_navigation_process();
   if (xQueueReceive(requests, &request, 0))
     assert(request.kind == IMAGE);
+  /* A saved playlist is both navigable and playable. Tapping it exposes
+   * actions; Play/Queue retain the collection ref, Open browses its location. */
+  busy = false;
+  mutation_locked = false;
+  chooser = false;
+  selected_index = 0;
+  page->count = 1;
+  snprintf(page->items[0].title, sizeof(page->items[0].title), "Evening playlist");
+  snprintf(page->items[0].location, sizeof(page->items[0].location), "playlist-location");
+  snprintf(page->items[0].ref, sizeof(page->items[0].ref), "whole-playlist-ref");
+  render();
+  click(rows[0]);
+  assert(chooser && !pending_browse);
+  snapshot(dir, "playlist-actions");
+  click(secondary);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0));
+  assert(request.kind == QUEUE && !strcmp(request.ref, "whole-playlist-ref"));
+  /* Detents during the sending screen must not dereference removed buttons. */
+  assert(controller_touch_navigation_encoder(1));
+  busy = false;
+  mutation_locked = false;
+  pending_mutation = -1;
+  render();
+  click(primary);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0));
+  assert(request.kind == PLAY && !strcmp(request.ref, "whole-playlist-ref"));
+  busy = false;
+  mutation_locked = false;
+  pending_mutation = -1;
+  render();
+  /* The collection title is the Open action, separate from playback. */
+  click(lv_obj_get_child(scroller, 0));
+  assert(pending_browse && !chooser);
+  assert(!strcmp(location, "playlist-location"));
+  pending_browse = false;
+  page->items[0].location[0] = 0;
   /* A stale image result never attaches pixels to the new page. */
   busy = true;
   busy_kind = IMAGE;
