@@ -1,5 +1,18 @@
 # HiPhi v{{VERSION}}
 
+## Playback recovery and library fixes in alpha.3
+
+Pair this firmware with Unified Hi-Fi Control **v4.0.0-beta.8** for the collection changes below.
+
+- **Visible volume feedback on Dial and HALO:** turning the ring from artwork mode reveals Now Playing and its volume indicator while the same detent adjusts volume.
+- **Clearer round-screen library lists:** text rows replace the artwork carousel. Playable collections expose Open, Play and Queue separately. Turning the ring while a library command is being sent no longer accesses removed controls.
+- **Whole LMS playlists:** Play and Queue target the saved playlist rather than its first track. The bridge also exposes Favorites and artist/album letter menus, using LMS's own alphabetical ordering.
+- **Browse-only discovery across providers:** Roon retains Playlists in the browse root; Music Assistant exposes Playlists, Favorites and Radio there; LMS exposes Radio alongside Favorites and Playlists.
+- **Safer playback snapshots on all shared-client targets:** malformed, partial, stale or wrong-zone replies cannot replace valid current playback. Optional fields reset safely; invalid volume data cannot enable volume commands. Long artwork URLs retain their full identity instead of colliding after 127 bytes.
+- **Consistent HTTP handling:** controller targets share status, body-length and bounded-response validation. Metadata containing the word “error” is no longer mistaken for a bridge failure.
+
+Software regression tests and all target builds pass for the integration candidate. Exact release images still require physical display, ring, wake/reconnect and live-library qualification. Alpha builds remain opt-in and do not enter stable automatic OTA. Favorites currently covers playable entries; nested LMS Favorites folders are not added. Letter menus are LMS-specific.
+
 ## Bridge recovery after sleep and Wi-Fi interruption
 
 Upgrading from stable v2.5.2 also preserves configurations that were saved with a full V2 layout but a legacy V1 version marker. This exact hardware counterexample now has a shared migration regression.

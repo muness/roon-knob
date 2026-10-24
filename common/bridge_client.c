@@ -26,6 +26,9 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#include <math.h>
+#include <float.h>
+#include <limits.h>
 #include <cJSON.h>
 
 #ifdef ESP_PLATFORM
@@ -38,6 +41,11 @@ static void apply_knob_config(const rk_cfg_t *cfg);
 static void check_config_sha(const char *new_sha);
 static void check_zones_sha(const char *new_sha);
 static void check_charging_state_change(bool current_external_power);
+
+#define BRIDGE_JSON_MAX_DEPTH 16
+#define BRIDGE_JSON_MAX_TOKENS 4096
+#define BRIDGE_ARTWORK_KEY_MAX_BYTES 4096
+#define BRIDGE_MEDIA_MAX_AGE_MS 90000
 
 #define MAX_LINE 128
 #define MAX_ZONE_NAME 64
@@ -89,7 +97,16 @@ static void bridge_json_allocator_init(void) {
     initialized = true;
 }
 
+typedef struct {
+    controller_config_endpoint_token_t endpoint;
+    uint32_t revision, selection_generation, media_generation;
+    unsigned network_epoch;
+    char bridge[128], zone[64];
+    uint64_t observed_ms;
+} response_context_t;
+
 struct now_playing_state {
+    response_context_t context;
     char line1[MAX_LINE];
     char line2[MAX_LINE];
     char line3[MAX_LINE];
@@ -139,6 +156,17 @@ static char s_volume_capability_zone[64];
 static char s_volume_capability_bridge[128];
 static uint32_t s_volume_capability_generation;
 static uint32_t s_artwork_generation;
+static uint32_t s_selection_generation;
+static atomic_uint s_media_generation;
+static atomic_uint s_inventory_generation;
+static response_context_t s_volume_context;
+static response_context_t s_playback_request_context;
+static char *s_artwork_identity;
+static uint64_t s_artwork_identity_generation;
+typedef struct {
+    controller_media_view_t view;
+    response_context_t context;
+} pending_media_t;
 static bool s_last_charging_state = true;  // Track charging state for config reapply
 static bool s_last_is_playing = false;     // Track play state for extended sleep polling
 static char s_last_zones_sha[9] = {0};     // Track zones SHA for zone list change detection
@@ -238,6 +266,7 @@ static void pin_runtime_zone_selection(const char *zone_id) {
     rk_strlcpy(s_state.runtime_zone_id, zone_id ? zone_id : "",
                sizeof(s_state.runtime_zone_id));
     s_state.runtime_zone_pinned = true;
+    ++s_selection_generation;
     unlock_state();
 }
 
@@ -274,12 +303,54 @@ static bool bridge_endpoint_snapshot(char *bridge_base, size_t bridge_len,
     return true;
 }
 
+static bool encode_query_value(const char *value, char *out, size_t capacity) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)value; *p; ++p) {
+        bool plain = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+            (*p >= '0' && *p <= '9') || *p == '-' || *p == '_' || *p == '.' || *p == '~';
+        size_t needed = plain ? 1 : 3;
+        if (needed >= capacity - n) { if (capacity) out[0] = 0; return false; }
+        if (plain) out[n++] = (char)*p;
+        else { out[n++] = '%'; out[n++] = hex[*p >> 4]; out[n++] = hex[*p & 15]; }
+    }
+    out[n] = 0;
+    return true;
+}
+
+static bool capture_response_context(response_context_t *context) {
+    *context = (response_context_t){0};
+    controller_config_snapshot_t config;
+    if (!controller_config_snapshot(&config) ||
+        !controller_config_capture_endpoint_token(&context->endpoint)) return false;
+    context->revision = config.revision;
+    context->network_epoch = atomic_load_explicit(&s_network_epoch, memory_order_acquire);
+    lock_state();
+    context->selection_generation = s_selection_generation;
+    unlock_state();
+    context->observed_ms = platform_millis();
+    return bridge_endpoint_snapshot(context->bridge, sizeof(context->bridge),
+                                    context->zone, sizeof(context->zone));
+}
+static bool response_context_matches(const response_context_t *context) {
+    response_context_t current;
+    if (!capture_response_context(&current)) return false;
+    return context->revision == current.revision &&
+        context->endpoint.generation == current.endpoint.generation &&
+        context->network_epoch == current.network_epoch &&
+        context->selection_generation == current.selection_generation &&
+        !strcmp(context->bridge, current.bridge) && !strcmp(context->zone, current.zone);
+}
+
+static bool response_context_current(const response_context_t *context) {
+    return atomic_load_explicit(&s_network_ready, memory_order_acquire) && response_context_matches(context);
+}
+
 static bool fetch_now_playing(struct now_playing_state *state,
                               const platform_power_snapshot_t *power);
 static bool refresh_zone_label(bool prefer_zone_id);
-static void parse_zones_from_response(const char *resp);
-static const char *extract_json_string(const char *start, const char *key, char *out, size_t len);
-static bool send_control_json(const char *json);
+static bool parse_zones_from_response(const char *resp, size_t length, const response_context_t *request);
+static bool send_control_json(const char *json, const response_context_t *request);
 static void default_now_playing(struct now_playing_state *state);
 static void wait_for_poll_interval(const platform_power_snapshot_t *power);
 static void bridge_poll_thread(void *arg);
@@ -293,15 +364,14 @@ static void post_ui_message(const char *msg);
 static void post_ui_message_copy(char *msg_copy);
 static void strip_trailing_slashes(char *url);
 static void post_ui_status_copy(bool *status_copy);
-static void post_ui_zone_name_copy(char *name_copy);
 
 static void ui_update_cb(void *arg) {
-    controller_media_view_t *view = arg;
-    if (!view) {
-        LOGI("ui_update_cb: view is NULL!");
-        return;
-    }
-
+    pending_media_t *pending = arg;
+    if (!pending) return;
+    if (pending->context.media_generation != s_media_generation ||
+        !response_context_current(&pending->context) ||
+        platform_millis() - pending->context.observed_ms > BRIDGE_MEDIA_MAX_AGE_MS) { free(pending); return; }
+    controller_media_view_t *view = &pending->view;
     // Cache volume for optimistic UI updates
     lock_state();
     s_last_known_volume = view->volume;
@@ -311,7 +381,7 @@ static void ui_update_cb(void *arg) {
     unlock_state();
 
     controller_view_compat_apply_media(view);
-    free(view);
+    free(pending);
 }
 
 static void ui_status_cb(void *arg) {
@@ -417,33 +487,34 @@ static void post_ui_connectivity_update(const char *line1, const char *line2) {
     }
 }
 
+typedef struct {
+    response_context_t context;
+    uint32_t generation;
+    char name[MAX_ZONE_NAME];
+    int count;
+} pending_zones_t;
+static atomic_uint s_zone_name_generation, s_zone_count_generation;
 static void ui_zone_name_cb(void *arg) {
-    char *name = arg;
-    if (!name) {
-        return;
-    }
-    controller_presentation_set_zone_name(name);
-    free(name);
+    pending_zones_t *pending = arg;
+    if (!pending) return;
+    if (pending->generation == s_zone_name_generation && response_context_matches(&pending->context))
+        controller_presentation_set_zone_name(pending->name);
+    free(pending);
 }
-
 static void ui_zone_count_cb(void *arg) {
-    int *count = arg;
-    if (!count) {
-        return;
-    }
-    controller_presentation_set_zone_count(*count);
-    free(count);
+    pending_zones_t *pending = arg;
+    if (!pending) return;
+    if (pending->generation == s_zone_count_generation && response_context_matches(&pending->context))
+        controller_presentation_set_zone_count(pending->count);
+    free(pending);
 }
-
 static void post_ui_zone_count(int count) {
-    int *copy = malloc(sizeof(int));
-    if (!copy) {
-        return;
-    }
-    *copy = count;
-    if (!platform_task_post_to_ui(ui_zone_count_cb, copy)) {
-        free(copy);
-    }
+    pending_zones_t *pending = bridge_external_alloc(sizeof(*pending));
+    if (!pending) return;
+    if (!capture_response_context(&pending->context)) { free(pending); return; }
+    pending->count = count;
+    pending->generation = ++s_zone_count_generation;
+    if (!platform_task_post_to_ui(ui_zone_count_cb, pending)) free(pending);
 }
 
 static void ui_battery_cb(void *arg) {
@@ -474,16 +545,174 @@ static void default_now_playing(struct now_playing_state *state) {
     state->zones_sha[0] = '\0';
 }
 
-static bool json_bool_field(const char *json, const char *field,
-                            bool fallback) {
-    const char *p = json ? strstr(json, field) : NULL;
-    if (!p) return fallback;
-    p = strchr(p, ':');
-    if (!p) return fallback;
-    do { ++p; } while (*p && isspace((unsigned char)*p));
-    if (strncmp(p, "true", 4) == 0) return true;
-    if (strncmp(p, "false", 5) == 0) return false;
-    return fallback;
+/* Read only top-level fields: zone summaries and future metadata must not
+ * override the selected zone's media. The caller initializes a fresh snapshot;
+ * explicit null strings clear it and invalid optional values keep safe defaults. */
+static void json_string_field(const cJSON *root, const char *key,
+                              char *out, size_t len) {
+    if (!out || len == 0) return;
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsNull(value)) {
+        out[0] = '\0';
+    } else if (cJSON_IsString(value)) {
+        size_t source_len = strlen(value->valuestring);
+        size_t copy_len = source_len < len ? source_len : len - 1;
+        /* Do not split a UTF-8 code point when truncating decoded text. */
+        if (copy_len < source_len) {
+            while (copy_len > 0 &&
+                   ((unsigned char)value->valuestring[copy_len] & 0xc0) == 0x80) --copy_len;
+        }
+        memcpy(out, value->valuestring, copy_len);
+        out[copy_len] = '\0';
+    }
+}
+
+/* Bounds are checked before cJSON's recursive parser allocates any nodes. */
+
+typedef enum {
+    RESPONSE_OK, RESPONSE_TRANSPORT, RESPONSE_DOCUMENT, RESPONSE_API,
+    RESPONSE_SCHEMA, RESPONSE_STALE, RESPONSE_RESOURCE
+} response_failure_t;
+static atomic_int s_response_failure;
+static uint64_t s_media_last_good_ms;
+static uint64_t media_age_ms(void) {
+    lock_state(); uint64_t last = s_media_last_good_ms; unlock_state();
+    return last ? platform_millis() - last : 0;
+}
+static const char *response_failure_name(response_failure_t failure) {
+    static const char *names[] = {"ok", "transport", "document", "api", "schema", "stale", "resource"};
+    return names[failure];
+}
+static bool response_failed(response_failure_t reason) {
+    s_response_failure = reason;
+    LOGW("Bridge response rejected: %s; last-good age=%llu ms", response_failure_name(reason),
+         (unsigned long long)media_age_ms());
+    return false;
+}
+static cJSON *response_document(const char *text, size_t length) {
+    if (!text || !length || length > PLATFORM_HTTP_JSON_MAX_BYTES) {
+        response_failed(RESPONSE_RESOURCE); return NULL;
+    }
+    unsigned depth = 0, tokens = 0;
+    bool string = false, escape = false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = (unsigned char)text[i];
+        if (!c) { response_failed(RESPONSE_DOCUMENT); return NULL; }
+        if (string) {
+            /* cJSON strings cannot represent embedded NUL losslessly. */
+            if (escape) {
+                if (c == 'u' && i + 4 < length && !memcmp(text+i+1, "0000", 4)) {
+                    response_failed(RESPONSE_DOCUMENT); return NULL;
+                }
+                escape = false;
+            } else if (c == '\\') escape = true;
+            else if (c == '"') string = false;
+            continue;
+        }
+        if (c == '"') string = true;
+        if (c == '[' || c == '{') {
+            if (++depth > BRIDGE_JSON_MAX_DEPTH) { response_failed(RESPONSE_RESOURCE); return NULL; }
+        } else if (c == ']' || c == '}') {
+            if (!depth) { response_failed(RESPONSE_DOCUMENT); return NULL; }
+            --depth;
+        }
+        if (c == '"' || c == ',' || c == '[' || c == '{') {
+            if (++tokens > BRIDGE_JSON_MAX_TOKENS) { response_failed(RESPONSE_RESOURCE); return NULL; }
+        }
+    }
+    const char *end = NULL;
+    cJSON *root = cJSON_ParseWithLengthOpts(text, length, &end, false);
+    while (end && end < text + length && isspace((unsigned char)*end)) ++end;
+    if (!cJSON_IsObject(root) || end != text + length) {
+        cJSON_Delete(root); response_failed(RESPONSE_DOCUMENT); return NULL;
+    }
+    /* Duplicate top-level keys make identity/authority ambiguous. */
+    for (const cJSON *a = root->child; a; a = a->next) {
+        for (const cJSON *b = a->next; b; b = b->next) {
+            if (a->string && b->string && !strcmp(a->string, b->string)) {
+                cJSON_Delete(root); response_failed(RESPONSE_SCHEMA); return NULL;
+            }
+        }
+    }
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    if (error && !cJSON_IsNull(error)) {
+        cJSON_Delete(root); response_failed(RESPONSE_API); return NULL;
+    }
+    return root;
+}
+
+static bool number_field(const cJSON *root, const char *key, float *out) {
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) ||
+        value->valuedouble > FLT_MAX || value->valuedouble < -FLT_MAX) return false;
+    *out = (float)value->valuedouble;
+    return true;
+}
+static int progress_field(const cJSON *root, const char *key) {
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) ||
+        value->valuedouble < 0 || value->valuedouble > INT_MAX) return 0;
+    int result = (int)value->valuedouble;
+    return result == value->valuedouble ? result : 0;
+}
+static void marker_field(const cJSON *root, const char *key, char *out, size_t capacity) {
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, key);
+    out[0] = 0;
+    if (cJSON_IsString(value) && strlen(value->valuestring) < capacity)
+        rk_strlcpy(out, value->valuestring, capacity);
+}
+
+typedef struct {
+    bridge_zone_t zones[MAX_ZONES];
+    int count;
+    bool selected;
+} zone_inventory_t;
+static zone_inventory_t *decode_zones(const char *text, size_t length, const char *selected) {
+    cJSON *root = response_document(text, length);
+    if (!root) return NULL;
+    const cJSON *zones = cJSON_GetObjectItemCaseSensitive(root, "zones");
+    if (!cJSON_IsArray(zones)) {
+        cJSON_Delete(root); response_failed(RESPONSE_SCHEMA); return NULL;
+    }
+    zone_inventory_t *result = bridge_external_alloc(sizeof(*result));
+    if (!result) { cJSON_Delete(root); response_failed(RESPONSE_RESOURCE); return NULL; }
+    memset(result, 0, sizeof(*result));
+    const cJSON *item;
+    cJSON_ArrayForEach(item, zones) {
+        unsigned id_fields = 0;
+        for (const cJSON *field = item->child; field; field = field->next)
+            if (field->string && !strcmp(field->string, "zone_id")) ++id_fields;
+        if (id_fields > 1) {
+            free(result); cJSON_Delete(root); response_failed(RESPONSE_SCHEMA); return NULL;
+        }
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "zone_id");
+        if (!cJSON_IsObject(item) || !cJSON_IsString(id) || !id->valuestring[0] ||
+            strlen(id->valuestring) >= sizeof(result->zones[0].id)) continue;
+        /* Check all earlier entries, including those beyond the output capacity. */
+        for (const cJSON *prior = zones->child; prior != item; prior = prior->next) {
+            const cJSON *other = cJSON_GetObjectItemCaseSensitive(prior, "zone_id");
+            if (cJSON_IsString(other) && !strcmp(other->valuestring, id->valuestring)) {
+                free(result); cJSON_Delete(root); response_failed(RESPONSE_SCHEMA); return NULL;
+            }
+        }
+        bool chosen = selected[0] && !strcmp(id->valuestring, selected);
+        if (chosen) result->selected = true;
+        int index = result->count;
+        if (index == MAX_ZONES) {
+            if (!chosen) continue;
+            index = MAX_ZONES - 1;
+        } else ++result->count;
+        bridge_zone_t *entry = &result->zones[index];
+        rk_strlcpy(entry->id, id->valuestring, sizeof(entry->id));
+        rk_strlcpy(entry->name, id->valuestring, sizeof(entry->name));
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "zone_name");
+        if (cJSON_IsString(name) && name->valuestring[0])
+            json_string_field(item, "zone_name", entry->name, sizeof(entry->name));
+    }
+    bool valid = result->count > 0 || zones->child == NULL;
+    cJSON_Delete(root);
+    if (!valid) { free(result); response_failed(RESPONSE_SCHEMA); return NULL; }
+    return result;
 }
 
 static void post_ui_update(const struct now_playing_state *state) {
@@ -491,11 +720,15 @@ static void post_ui_update(const struct now_playing_state *state) {
         return;
     }
 
-    controller_media_view_t *view = bridge_external_alloc(sizeof(*view));
-    if (!view) {
+    if (state->context.media_generation != s_media_generation ||
+        !response_context_current(&state->context)) return;
+    pending_media_t *pending = bridge_external_alloc(sizeof(*pending));
+    if (!pending) {
         return;
     }
 
+    pending->context = state->context;
+    controller_media_view_t *view = &pending->view;
     lock_state();
     bool force_refresh = s_force_artwork_refresh;
     if (force_refresh) {
@@ -519,13 +752,13 @@ static void post_ui_update(const struct now_playing_state *state) {
         state->length,
         state->image_key,
         artwork_generation);
-    if (!platform_task_post_to_ui(ui_update_cb, view)) {
+    if (!platform_task_post_to_ui(ui_update_cb, pending)) {
         if (force_refresh) {
             lock_state();
             s_force_artwork_refresh = true;
             unlock_state();
         }
-        free(view);
+        free(pending);
     }
 }
 
@@ -561,21 +794,14 @@ static void post_ui_message(const char *msg) {
     post_ui_message_copy(copy);
 }
 
-static void post_ui_zone_name_copy(char *name_copy) {
-    if (!platform_task_post_to_ui(ui_zone_name_cb, name_copy)) {
-        free(name_copy);
-    }
-}
-
 static void post_ui_zone_name(const char *name) {
-    if (!name) {
-        return;
-    }
-    char *copy = bridge_external_strdup(name);
-    if (!copy) {
-        return;
-    }
-    post_ui_zone_name_copy(copy);
+    if (!name) return;
+    pending_zones_t *pending = bridge_external_alloc(sizeof(*pending));
+    if (!pending) return;
+    if (!capture_response_context(&pending->context)) { free(pending); return; }
+    rk_strlcpy(pending->name, name, sizeof(pending->name));
+    pending->generation = ++s_zone_name_generation;
+    if (!platform_task_post_to_ui(ui_zone_name_cb, pending)) free(pending);
 }
 
 static void wait_for_poll_interval(const platform_power_snapshot_t *power) {
@@ -631,30 +857,24 @@ static bool probe_connection(const char *base, controller_connection_t *connecti
     platform_http_get_knob_id(knob_id, sizeof(knob_id));
     int written = snprintf(url, sizeof(url), "%s/zones?knob_id=%s", base, knob_id);
     if (written <= 0 || (size_t)written >= sizeof(url)) return false;
+    response_context_t request;
+    if (!capture_response_context(&request)) return false;
     char *response = NULL; size_t response_len = 0;
     int result = platform_http_get(url, &response, &response_len);
-    bool valid = false, selected = false; int count = -1;
-    if (result == 0 && response) {
-        cJSON *root = cJSON_ParseWithLength(response, response_len);
-        cJSON *zones = cJSON_GetObjectItemCaseSensitive(root, "zones");
-        valid = cJSON_IsObject(root) && cJSON_IsArray(zones);
-        if (valid) {
-            count = cJSON_GetArraySize(zones);
-            cJSON *item;
-            cJSON_ArrayForEach(item, zones) {
-                cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "zone_id");
-                if (zone[0] && cJSON_IsString(id) && strcmp(zone, id->valuestring) == 0)
-                    selected = true;
-            }
-        }
-        cJSON_Delete(root);
-    }
+    if (!response_context_current(&request)) { platform_http_free(response); return false; }
+    zone_inventory_t *inventory = result == 0 ? decode_zones(response, response_len, zone) : NULL;
+    bool valid = inventory != NULL;
+    bool selected = valid && inventory->selected;
+    int count = valid ? inventory->count : -1;
+    free(inventory);
     platform_http_free(response);
     controller_connection_api(connection, valid, count, selected, platform_millis());
     return valid;
 }
 
 static bool update_connection(void) {
+    response_context_t request;
+    if (!capture_response_context(&request)) return false;
     controller_config_endpoint_token_t token;
     if (!controller_config_capture_endpoint_token(&token)) return false;
     controller_connection_t next;
@@ -739,7 +959,8 @@ static bool update_connection(void) {
     else controller_connection_schedule(&next, platform_millis(), false);
     /* Reject all evidence as well as writes if a manual decision raced I/O. */
     controller_config_endpoint_token_t current;
-    if (!controller_config_capture_endpoint_token(&current) || current.generation != token.generation ||
+    if (!response_context_current(&request) ||
+        !controller_config_capture_endpoint_token(&current) || current.generation != token.generation ||
         network_epoch != atomic_load_explicit(&s_network_epoch, memory_order_acquire) ||
         !atomic_load_explicit(&s_network_ready, memory_order_acquire))
         return false;
@@ -780,13 +1001,11 @@ static bool update_connection(void) {
     return valid;
 }
 
-static bool fetch_now_playing(struct now_playing_state *state,
+static bool fetch_now_playing_snapshot(struct now_playing_state *state,
                               const platform_power_snapshot_t *power) {
     if (!state || !power) {
         return false;
     }
-    controller_config_endpoint_token_t volume_token;
-    if (!controller_config_capture_endpoint_token(&volume_token)) return false;
     char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
     char zone_id[sizeof(((rk_cfg_t *)0)->zone_id)] = {0};
     if (!bridge_endpoint_snapshot(bridge_base, sizeof(bridge_base), zone_id,
@@ -807,147 +1026,135 @@ static bool fetch_now_playing(struct now_playing_state *state,
     char knob_id[16];
     platform_http_get_knob_id(knob_id, sizeof(knob_id));
 
-    char url[384];
+    char encoded_zone[3 * sizeof(zone_id)];
+    if (!encode_query_value(zone_id, encoded_zone, sizeof(encoded_zone))) return false;
+    char url[512];
+    int written;
     if (battery_level >= 0 && battery_level <= 100) {
-        snprintf(url, sizeof(url),
+        written = snprintf(url, sizeof(url),
                  "%s/now_playing?zone_id=%s&battery_level=%d&battery_charging=%d&knob_id=%s",
-                 bridge_base, zone_id, battery_level, battery_charging ? 1 : 0,
+                 bridge_base, encoded_zone, battery_level, battery_charging ? 1 : 0,
                  knob_id);
     } else {
         /* Some mains-powered targets have no battery gauge.  Omitting the
          * optional field is valid; sending -1 makes UHC's u8 query parser
          * reject the whole request. */
-        snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_charging=%d&knob_id=%s",
-                 bridge_base, zone_id, battery_charging ? 1 : 0, knob_id);
+        written = snprintf(url, sizeof(url), "%s/now_playing?zone_id=%s&battery_charging=%d&knob_id=%s",
+                 bridge_base, encoded_zone, battery_charging ? 1 : 0, knob_id);
     }
+    if (written < 0 || (size_t)written >= sizeof(url)) return response_failed(RESPONSE_RESOURCE);
     LOGD("now_playing request zone=%s url=%s", zone_id, url);
+    response_context_t request;
+    if (!capture_response_context(&request) || strcmp(request.bridge, bridge_base) ||
+        strcmp(request.zone, zone_id)) return response_failed(RESPONSE_STALE);
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_get(url, &resp, &resp_len);
-    LOGD("now_playing response ret=%d bytes=%u", ret, (unsigned)resp_len);
+    if (!response_context_current(&request)) {
+        platform_http_free(resp); return response_failed(RESPONSE_STALE);
+    }
     if (ret != 0 || !resp) {
-        LOGW("now_playing request failed: ret=%d response=%s", ret,
-             resp ? "present" : "missing");
-        platform_http_free(resp);
-        return false;
+        platform_http_free(resp); return response_failed(RESPONSE_TRANSPORT);
     }
-
-    if (strstr(resp, "\"error\"") || resp_len == 0) {
-        LOGW("now_playing response was empty or reported an error");
-        platform_http_free(resp);
-        return false;
+    cJSON *root = response_document(resp, resp_len);
+    platform_http_free(resp);
+    if (!root) return false;
+    const cJSON *identity = cJSON_GetObjectItemCaseSensitive(root, "zone_id");
+    if (identity && (!cJSON_IsString(identity) || strcmp(identity->valuestring, zone_id))) {
+        cJSON_Delete(root); return response_failed(RESPONSE_SCHEMA);
     }
-
-    const char *line1 = strstr(resp, "\"line1\"");
-    if (line1) {
-        extract_json_string(line1, "\"line1\"", state->line1, sizeof(state->line1));
+    const cJSON *playing = cJSON_GetObjectItemCaseSensitive(root, "is_playing");
+    const cJSON *title = cJSON_GetObjectItemCaseSensitive(root, "line1");
+    const cJSON *volume_type = cJSON_GetObjectItemCaseSensitive(root, "volume_type");
+    /* Legacy bridges can omit zone_id and optional fields, but an empty or
+     * unrelated object is not evidence of a playback snapshot. */
+    if (!cJSON_IsBool(playing) && !cJSON_IsString(title) && !cJSON_IsNull(title) &&
+        !cJSON_IsString(volume_type)) {
+        cJSON_Delete(root); return response_failed(RESPONSE_SCHEMA);
     }
-    const char *line2 = strstr(resp, "\"line2\"");
-    if (line2) {
-        extract_json_string(line2, "\"line2\"", state->line2, sizeof(state->line2));
-    }
-    const char *line3 = strstr(resp, "\"line3\"");
-    if (line3) {
-        extract_json_string(line3, "\"line3\"", state->line3, sizeof(state->line3));
-    }
-    /* Preserve the last good value if a transient/partial response omits the
-     * field. Treating an incomplete payload as stopped makes the UI lie. */
-    state->is_playing = json_bool_field(resp, "\"is_playing\"", state->is_playing);
-
-    cJSON *volume_response = cJSON_Parse(resp);
-    const cJSON *volume_type = cJSON_GetObjectItemCaseSensitive(volume_response, "volume_type");
+    struct now_playing_state next = {0};
+    default_now_playing(&next);
+    next.context = request;
+    json_string_field(root, "line1", next.line1, sizeof(next.line1));
+    json_string_field(root, "line2", next.line2, sizeof(next.line2));
+    json_string_field(root, "line3", next.line3, sizeof(next.line3));
+    next.is_playing = cJSON_IsTrue(playing);
     bool adjustable = cJSON_IsString(volume_type) &&
-        (strcmp(volume_type->valuestring, "db") == 0 ||
-         strcmp(volume_type->valuestring, "number") == 0);
+        (!strcmp(volume_type->valuestring, "db") || !strcmp(volume_type->valuestring, "number"));
+    float volume = 0, minimum = 0, maximum = 0, step = 0;
+    bool tuple = number_field(root, "volume", &volume) &&
+        number_field(root, "volume_min", &minimum) && number_field(root, "volume_max", &maximum) &&
+        number_field(root, "volume_step", &step) && minimum < maximum &&
+        volume >= minimum && volume <= maximum && step > 0 &&
+        (double)step <= (double)maximum - minimum;
+    adjustable = adjustable && tuple;
+    if (tuple) {
+        next.volume = volume; next.volume_min = minimum; next.volume_max = maximum;
+        next.volume_step = adjustable ? step : 0;
+    }
+    next.seek_position = progress_field(root, "seek_position");
+    next.length = progress_field(root, "length");
+    if (next.length && next.seek_position > next.length) next.seek_position = next.length;
+    marker_field(root, "config_sha", next.config_sha, sizeof(next.config_sha));
+    marker_field(root, "zones_sha", next.zones_sha, sizeof(next.zones_sha));
+    const cJSON *image = cJSON_GetObjectItemCaseSensitive(root, "image_key");
+    const char *image_value = cJSON_IsString(image) ? image->valuestring : "";
+    if (strlen(image_value) > BRIDGE_ARTWORK_KEY_MAX_BYTES) {
+        cJSON_Delete(root); return response_failed(RESPONSE_RESOURCE);
+    }
+    char *image_copy = bridge_external_strdup(image_value);
+    if (!image_copy) { cJSON_Delete(root); return response_failed(RESPONSE_RESOURCE); }
+    cJSON_Delete(root);
+    if (!response_context_current(&request)) {
+        free(image_copy); return response_failed(RESPONSE_STALE);
+    }
     lock_state();
+    /* Renderers need a change token, not the provider URL: the bridge artwork
+     * endpoint fetches by selected zone. Compare the complete owned identity. */
+    if (!s_artwork_identity || strcmp(s_artwork_identity, image_copy)) ++s_artwork_identity_generation;
+    free(s_artwork_identity);
+    s_artwork_identity = image_copy;
+    if (*image_copy) {
+        /* Include a stable full-value fingerprint so a reboot cannot reuse the
+         * first change token for different art in an intermediary HTTP cache.
+         * Equality/change detection itself uses the lossless string above. */
+        uint64_t fingerprint = UINT64_C(14695981039346656037);
+        for (const unsigned char *p = (const unsigned char *)image_copy; *p; ++p) {
+            fingerprint ^= *p;
+            fingerprint *= UINT64_C(1099511628211);
+        }
+        snprintf(next.image_key, sizeof(next.image_key), "art:%016llx:%llu",
+                 (unsigned long long)fingerprint, (unsigned long long)s_artwork_identity_generation);
+    }
     s_last_known_volume_fixed = !adjustable;
+    s_last_known_volume = next.volume;
+    s_last_known_volume_min = next.volume_min;
+    s_last_known_volume_max = next.volume_max;
+    s_last_known_volume_step = next.volume_step;
     rk_strlcpy(s_volume_capability_zone, zone_id, sizeof(s_volume_capability_zone));
     rk_strlcpy(s_volume_capability_bridge, bridge_base, sizeof(s_volume_capability_bridge));
-    s_volume_capability_generation = volume_token.generation;
+    s_volume_capability_generation = request.endpoint.generation;
+    next.context.media_generation = ++s_media_generation;
+    s_volume_context = next.context;
+    s_media_last_good_ms = platform_millis();
+    s_response_failure = RESPONSE_OK;
+    *state = next;
     unlock_state();
-    cJSON_Delete(volume_response);
-
-    const char *vol_key = strstr(resp, "\"volume\"");
-    if (vol_key) {
-        const char *colon = strchr(vol_key, ':');
-        if (colon) {
-            state->volume = atof(colon + 1);
-        }
-    }
-
-    const char *vol_min_key = strstr(resp, "\"volume_min\"");
-    if (vol_min_key) {
-        const char *colon = strchr(vol_min_key, ':');
-        if (colon) {
-            state->volume_min = atof(colon + 1);
-        }
-    }
-
-    const char *vol_max_key = strstr(resp, "\"volume_max\"");
-    if (vol_max_key) {
-        const char *colon = strchr(vol_max_key, ':');
-        if (colon) {
-            state->volume_max = atof(colon + 1);
-        }
-    }
-
-    state->volume_step = 1.0f;  // Default 1.0 dB step
-    const char *step_key = strstr(resp, "\"volume_step\"");
-    if (step_key) {
-        const char *colon = strchr(step_key, ':');
-        if (colon) {
-            float parsed = atof(colon + 1);
-            if (parsed > 0.0f) {
-                state->volume_step = parsed;
-            }
-        }
-    }
-
-    const char *seek_key = strstr(resp, "\"seek_position\"");
-    if (seek_key) {
-        const char *colon = strchr(seek_key, ':');
-        if (colon) {
-            state->seek_position = atoi(colon + 1);
-        }
-    }
-    const char *length_key = strstr(resp, "\"length\"");
-    if (length_key) {
-        const char *colon = strchr(length_key, ':');
-        if (colon) {
-            state->length = atoi(colon + 1);
-        }
-    }
-
-    // Parse image_key for album artwork
-    const char *image_key = strstr(resp, "\"image_key\"");
-    if (image_key) {
-        extract_json_string(image_key, "\"image_key\"", state->image_key, sizeof(state->image_key));
-    }
-    LOGD("now_playing parsed playing=%s image_key=%s zone=%s",
-         state->is_playing ? "true" : "false", state->image_key, zone_id);
-    /* A partial response may omit artwork metadata. Keep the last good key;
-     * the bridge normally supplies a string (or an empty string) here. */
-
-    // Parse config_sha for config change detection (silent - checked in poll loop)
-    const char *config_sha_key = strstr(resp, "\"config_sha\"");
-    if (config_sha_key) {
-        extract_json_string(config_sha_key, "\"config_sha\"", state->config_sha, sizeof(state->config_sha));
-    } else {
-        state->config_sha[0] = '\0';
-    }
-
-    // Parse zones_sha for zone list change detection
-    const char *zones_sha_key = strstr(resp, "\"zones_sha\"");
-    if (zones_sha_key) {
-        extract_json_string(zones_sha_key, "\"zones_sha\"", state->zones_sha, sizeof(state->zones_sha));
-    } else {
-        state->zones_sha[0] = '\0';
-    }
-
-    // Note: Don't parse zones from now_playing response - it doesn't have zone_name
-    // Zones are parsed from /zones endpoint in refresh_zone_label()
-    platform_http_free(resp);
     return true;
+}
+
+static bool fetch_now_playing(struct now_playing_state *state,
+                              const platform_power_snapshot_t *power) {
+    if (!capture_response_context(&s_playback_request_context)) return response_failed(RESPONSE_STALE);
+    bool accepted = fetch_now_playing_snapshot(state, power);
+    if (!response_context_current(&s_playback_request_context)) return response_failed(RESPONSE_STALE);
+    if (!accepted) {
+        lock_state();
+        s_last_known_volume_fixed = true;
+        ++s_media_generation; // Invalidate already queued media after a failed observation.
+        unlock_state();
+    }
+    return accepted;
 }
 
 static bool refresh_zone_label(bool prefer_zone_id) {
@@ -967,6 +1174,9 @@ static bool refresh_zone_label(bool prefer_zone_id) {
         return false;
     }
 
+    response_context_t request;
+    if (!capture_response_context(&request)) return false;
+
     // Get knob ID for zone filtering
     char knob_id[16];
     platform_http_get_knob_id(knob_id, sizeof(knob_id));
@@ -979,19 +1189,25 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     size_t resp_len = 0;
     bool success = false;
 
-    if (platform_http_get(url, &resp, &resp_len) != 0 || !resp) {
+    int result = platform_http_get(url, &resp, &resp_len);
+    if (!response_context_current(&request)) {
+        platform_http_free(resp); return response_failed(RESPONSE_STALE);
+    }
+    if (result != 0 || !resp) {
         LOGI("refresh_zone_label: HTTP request failed");
-        parse_zones_from_response(NULL);
+        lock_state();
+        controller_connection_api(&s_connection, false, -1, false, platform_millis());
+        controller_connection_schedule(&s_connection, platform_millis(), false);
+        unlock_state();
         platform_http_free(resp);
-        return false;
+        return response_failed(RESPONSE_TRANSPORT);
     }
 
     LOGI("refresh_zone_label: Received %zu bytes", resp_len);
-    parse_zones_from_response(resp);
+    if (!parse_zones_from_response(resp, resp_len, &request)) { platform_http_free(resp); return false; }
     lock_state();
     int parsed_zone_count = s_state.zone_count;
     unlock_state();
-    post_ui_zone_count(parsed_zone_count);
 
     char zone_label_copy[MAX_ZONE_NAME] = {0};
     char selected_zone_id[sizeof(cfg.zone_id)] = {0};
@@ -1031,8 +1247,10 @@ static bool refresh_zone_label(bool prefer_zone_id) {
     unlock_state();
 
     platform_http_free(resp);
+    if (!response_context_current(&request)) return response_failed(RESPONSE_STALE);
     if (!success) {
         LOGI("refresh_zone_label: No zone selected (success=false)");
+        post_ui_zone_count(parsed_zone_count);
         return false;
     }
     if (persist_zone) {
@@ -1041,6 +1259,7 @@ static bool refresh_zone_label(bool prefer_zone_id) {
             selected_zone_id, &committed);
         if (result == CONTROLLER_CONFIG_NOT_COMMITTED) {
             LOGW("Could not persist selected zone");
+            post_ui_zone_count(parsed_zone_count);
             return false;
         }
         if (result == CONTROLLER_CONFIG_COMMITTED_UNVERIFIED) {
@@ -1048,111 +1267,70 @@ static bool refresh_zone_label(bool prefer_zone_id) {
             /* A candidate may survive reboot, but do not switch this running
              * controller to a selection whose durability is unverified. */
             pin_runtime_zone_selection(preferred_zone_id);
+            post_ui_zone_count(parsed_zone_count);
             return false;
         }
     }
     lock_state();
     rk_strlcpy(s_state.zone_label, zone_label_copy, sizeof(s_state.zone_label));
-    rk_strlcpy(s_state.runtime_zone_id, selected_zone_id,
-               sizeof(s_state.runtime_zone_id));
+    if (strcmp(s_state.runtime_zone_id, selected_zone_id)) ++s_selection_generation;
+    rk_strlcpy(s_state.runtime_zone_id, selected_zone_id, sizeof(s_state.runtime_zone_id));
     s_state.runtime_zone_pinned = true;
     s_connection.selected_zone_available = true;
     unlock_state();
     LOGI("refresh_zone_label: Selected zone '%s', posting to UI",
          zone_label_copy);
+    post_ui_zone_count(parsed_zone_count);
     post_ui_zone_name(zone_label_copy);
     return success;
 }
 
-static void parse_zones_from_response(const char *resp) {
-    char selected[64] = {0};
+static bool parse_zones_from_response(const char *resp, size_t length, const response_context_t *request) {
+    char selected[64];
     bridge_client_get_current_zone_id(selected, sizeof(selected));
-    cJSON *root = resp ? cJSON_Parse(resp) : NULL;
-    cJSON *zones = cJSON_GetObjectItemCaseSensitive(root, "zones");
-    bool valid = cJSON_IsObject(root) && cJSON_IsArray(zones);
-    bool available = false;
+    zone_inventory_t *inventory = decode_zones(resp, length, selected);
+    if (request && !response_context_current(request)) {
+        free(inventory); return response_failed(RESPONSE_STALE);
+    }
     lock_state();
-    s_state.zone_count = 0;
-    if (valid) {
-        cJSON *item;
-        cJSON_ArrayForEach(item, zones) {
-            cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "zone_id");
-            cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "zone_name");
-            if (!cJSON_IsString(id) || !cJSON_IsString(name)) continue;
-            if (selected[0] && strcmp(selected, id->valuestring) == 0) available = true;
-            if (s_state.zone_count == MAX_ZONES) continue;
-            bridge_zone_t *entry = &s_state.zones[s_state.zone_count++];
-            rk_strlcpy(entry->id, id->valuestring, sizeof(entry->id));
-            rk_strlcpy(entry->name, name->valuestring, sizeof(entry->name));
-        }
+    if (inventory) {
+        memcpy(s_state.zones, inventory->zones, sizeof(s_state.zones));
+        s_state.zone_count = inventory->count;
+        ++s_inventory_generation;
     }
-    controller_connection_api(&s_connection, valid,
-        valid ? cJSON_GetArraySize(zones) : -1, available, platform_millis());
-    if (!valid) controller_connection_schedule(&s_connection, platform_millis(), false);
+    controller_connection_api(&s_connection, inventory != NULL,
+        inventory ? inventory->count : -1, inventory && inventory->selected, platform_millis());
+    if (!inventory) {
+        s_last_known_volume_fixed = true;
+        ++s_media_generation;
+        controller_connection_schedule(&s_connection, platform_millis(), false);
+    }
     unlock_state();
-    cJSON_Delete(root);
+    bool valid = inventory != NULL;
+    free(inventory);
+    return valid;
 }
 
-static const char *extract_json_string(const char *start, const char *key, char *out, size_t len) {
-    if (!start || !key || !out || len == 0) return NULL;
-    const char *key_pos = strstr(start, key);
-    if (!key_pos) return NULL;
-    const char *colon = strchr(key_pos, ':');
-    if (!colon) return NULL;
-    const char *value_start = colon + 1;
-    while (isspace((unsigned char)*value_start)) ++value_start;
-    /* A null/non-string value must never scan ahead into the next JSON field.
-     * cJSON owns escape and surrogate-pair decoding and leaves the cursor after
-     * this token, including when the output buffer truncates its text. */
-    if (*value_start != '"' && strncmp(value_start, "null", 4) != 0) return NULL;
-    const char *parse_end = NULL;
-    cJSON *value = cJSON_ParseWithOpts(value_start, &parse_end, false);
-    if (!value) return NULL;
-    if (cJSON_IsNull(value)) {
-        out[0] = '\0';
-    } else if (cJSON_IsString(value)) {
-        size_t source_len = strlen(value->valuestring);
-        size_t copy_len = source_len < len ? source_len : len - 1;
-        /* Do not split a UTF-8 code point when a valid string is truncated. */
-        if (copy_len < source_len) {
-            while (copy_len > 0 &&
-                   ((unsigned char)value->valuestring[copy_len] & 0xc0) == 0x80) --copy_len;
-        }
-        memcpy(out, value->valuestring, copy_len);
-        out[copy_len] = '\0';
-    } else {
-        cJSON_Delete(value);
-        return NULL;
-    }
-    cJSON_Delete(value);
-    return parse_end;
-}
-
-static bool send_control_json(const char *json) {
+static bool send_control_json(const char *json, const response_context_t *request) {
     if (!json) {
         return false;
     }
-    char bridge_base[sizeof(((rk_cfg_t *)0)->bridge_base)] = {0};
-    char zone_id[sizeof(((rk_cfg_t *)0)->zone_id)] = {0};
-    if (!bridge_endpoint_snapshot(bridge_base, sizeof(bridge_base), zone_id,
-                                  sizeof(zone_id))) {
-        return false;
-    }
-    if (bridge_base[0] == '\0' || zone_id[0] == '\0') {
-        return false;
-    }
+    if (!request || !response_context_current(request)) return false;
+    const char *bridge_base = request->bridge;
+    if (!bridge_base[0] || !request->zone[0]) return false;
     char url[256];
     snprintf(url, sizeof(url), "%s/control", bridge_base);
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_post_json(url, json, &resp, &resp_len);
-    if (ret != 0) {
+    if (ret != 0 || !response_context_current(request)) {
         platform_http_free(resp);
         return false;
     }
-    if (resp && strstr(resp, "\"error\"")) {
-        platform_http_free(resp);
-        return false;
+    if (resp_len) {
+        cJSON *root = response_document(resp, resp_len);
+        if (!root) { platform_http_free(resp); return false; }
+        cJSON_Delete(root);
     }
     platform_http_free(resp);
     return true;
@@ -1186,14 +1364,20 @@ static void bridge_poll_thread(void *arg) {
         bridge_client_connection_snapshot(&connection);
         bool ready = controller_connection_ready(&connection);
         bool ok = ready && fetch_now_playing(&state, &power);
+        if (ok && !response_context_current(&state.context)) ok = response_failed(RESPONSE_STALE);
         if (ok) {
             lock_state();
             controller_connection_api(&s_connection, true, s_state.zone_count, true, platform_millis());
             s_connection.failures = 0;
             unlock_state();
-        } else if (ready) {
+        } else if (ready && response_context_current(&s_playback_request_context)) {
             lock_state();
+            s_last_known_volume_fixed = true;
             controller_connection_api(&s_connection, false, -1, false, platform_millis());
+            if (s_response_failure != RESPONSE_TRANSPORT) {
+                s_connection.reachable = true;
+                s_connection.stale = true;
+            }
             controller_connection_schedule(&s_connection, platform_millis(), false);
             unlock_state();
         }
@@ -1238,6 +1422,11 @@ static void bridge_poll_thread(void *arg) {
             char title[128], action[128], device_ip[16] = {0};
             wifi_mgr_get_ip(device_ip, sizeof(device_ip));
             controller_connection_recovery(&status, device_ip, title, sizeof(title), action, sizeof(action));
+            if (!status.offline && s_response_failure != RESPONSE_OK &&
+                s_response_failure != RESPONSE_TRANSPORT && s_response_failure != RESPONSE_STALE) {
+                snprintf(title, sizeof(title), "Playback data unavailable");
+                snprintf(action, sizeof(action), "Retrying automatically");
+            }
             post_ui_zone_name("Hi-Fi Control");
             post_ui_connectivity_update(title, action);
             post_ui_network_status(status.reachable ? "" : "Retrying automatically");
@@ -1302,10 +1491,6 @@ bool bridge_client_execute_command(const controller_command_t *command) {
 
     bridge_command_context_t context;
     bridge_command_plan_t plan;
-    rk_cfg_t cfg;
-    if (!bridge_config_snapshot(&cfg)) {
-        return false;
-    }
     controller_connection_t connection;
     bridge_client_connection_snapshot(&connection);
     controller_config_endpoint_token_t volume_token;
@@ -1313,10 +1498,19 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     char current_zone[64], current_bridge[128];
     if (!bridge_endpoint_snapshot(current_bridge, sizeof(current_bridge),
                                   current_zone, sizeof(current_zone))) return false;
+    response_context_t command_request;
+    if (!capture_response_context(&command_request) || strcmp(command_request.zone, current_zone) ||
+        strcmp(command_request.bridge, current_bridge)) return false;
+    lock_state();
+    response_context_t volume_context = s_volume_context;
+    uint64_t last_good = s_media_last_good_ms;
+    unlock_state();
+    bool fresh_volume = response_context_current(&volume_context) &&
+        platform_millis() - last_good <= BRIDGE_MEDIA_MAX_AGE_MS;
     lock_state();
     context.ready = controller_connection_ready(&connection);
     context.zone_id = current_zone;
-    context.volume_fixed = s_last_known_volume_fixed ||
+    context.volume_fixed = !fresh_volume || s_last_known_volume_fixed ||
         strcmp(s_volume_capability_zone, current_zone) != 0 ||
         strcmp(s_volume_capability_bridge, current_bridge) != 0 ||
         s_volume_capability_generation != volume_token.generation;
@@ -1362,7 +1556,7 @@ bool bridge_client_execute_command(const controller_command_t *command) {
             plan.predicted_volume, plan.volume_step);
     }
 
-    bool sent = send_control_json(plan.json);
+    bool sent = send_control_json(plan.json, &command_request);
     if (!sent &&
         plan.failure_feedback > BRIDGE_COMMAND_FEEDBACK_NONE &&
         plan.failure_feedback <= BRIDGE_COMMAND_FEEDBACK_VOLUME_FAILED) {
@@ -1444,26 +1638,28 @@ const char* bridge_client_get_artwork_url_for_format_and_scale(
         return NULL;
     }
 
+    char encoded_zone[3 * sizeof(zone_id)];
+    if (!encode_query_value(zone_id, encoded_zone, sizeof(encoded_zone))) return NULL;
     int written = 0;
     if (clip_radius > 0 && crop_limit_percent > 0) {
         written = snprintf(url_buf, buf_len,
                            "%s/now_playing/image?zone_id=%s&scale=%s&crop_limit=%d&width=%d&height=%d&format=%s&clip_radius=%d",
-                           bridge_base, zone_id, scale, crop_limit_percent,
+                           bridge_base, encoded_zone, scale, crop_limit_percent,
                            width, height, format, clip_radius);
     } else if (clip_radius > 0) {
         written = snprintf(url_buf, buf_len,
                            "%s/now_playing/image?zone_id=%s&scale=%s&width=%d&height=%d&format=%s&clip_radius=%d",
-                           bridge_base, zone_id, scale, width, height, format,
+                           bridge_base, encoded_zone, scale, width, height, format,
                            clip_radius);
     } else if (crop_limit_percent > 0) {
         written = snprintf(url_buf, buf_len,
                            "%s/now_playing/image?zone_id=%s&scale=%s&crop_limit=%d&width=%d&height=%d&format=%s",
-                           bridge_base, zone_id, scale, crop_limit_percent,
+                           bridge_base, encoded_zone, scale, crop_limit_percent,
                            width, height, format);
     } else {
         written = snprintf(url_buf, buf_len,
                            "%s/now_playing/image?zone_id=%s&scale=%s&width=%d&height=%d&format=%s",
-                           bridge_base, zone_id, scale, width, height, format);
+                           bridge_base, encoded_zone, scale, width, height, format);
     }
     if (written < 0 || (size_t)written >= buf_len) {
         url_buf[0] = '\0';
@@ -1665,6 +1861,7 @@ bridge_zone_selection_result_t bridge_client_select_zone_value(
     rk_strlcpy(s_state.runtime_zone_id, zone_id,
                sizeof(s_state.runtime_zone_id));
     s_state.runtime_zone_pinned = true;
+    ++s_selection_generation;
     rk_strlcpy(result.zone_name, s_state.zone_label, sizeof(result.zone_name));
     bool was_ready = controller_connection_ready(&s_connection);
     s_connection.selected_zone_available = true;
@@ -1781,12 +1978,10 @@ static void check_zones_sha(const char *new_sha) {
         LOGI("Zones SHA changed: '%s' -> '%s', refreshing zone list",
              s_last_zones_sha[0] ? s_last_zones_sha : "(empty)", new_sha);
 
-        // Update cached SHA
-        strncpy(s_last_zones_sha, new_sha, sizeof(s_last_zones_sha) - 1);
-        s_last_zones_sha[sizeof(s_last_zones_sha) - 1] = '\0';
-
-        // Re-fetch zones from bridge
+        uint32_t before = s_inventory_generation;
         refresh_zone_label(true);
+        if (s_inventory_generation != before)
+            rk_strlcpy(s_last_zones_sha, new_sha, sizeof(s_last_zones_sha));
     }
 }
 
@@ -2035,7 +2230,13 @@ void bridge_client_connection_status(char *summary, size_t summary_len, char *de
                      zone[0] ? " - " : "", zone);
         }
     }
-    if (details && details_len) controller_connection_details(&status, platform_millis(), details, details_len);
+    if (details && details_len) {
+        controller_connection_details(&status, platform_millis(), details, details_len);
+        size_t used = strlen(details);
+        if (used < details_len) snprintf(details + used, details_len - used,
+            "\nPlayback response: %s; last-good age: %llu ms", response_failure_name(s_response_failure),
+            (unsigned long long)media_age_ms());
+    }
 }
 
 bool bridge_client_get_request_base(char *out, size_t len) {

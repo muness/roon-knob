@@ -108,7 +108,7 @@ assert "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2" in STACKCHAN_DEFAULTS
 assert 'CONFIG_M5_PLATFORM_ENROLLMENT_WS_URI=""' in STACKCHAN_DEFAULTS
 
 HTTP_SOURCE = (
-    Path(__file__).parents[1] / "tough_app/main/platform_http_tough.c"
+    Path(__file__).parents[1] / "common/platform/platform_http_esp.c"
 ).read_text()
 assert 'esp_http_client_set_header(client, "Connection", "close")' in HTTP_SOURCE
 assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in HTTP_SOURCE

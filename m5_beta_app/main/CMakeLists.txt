@@ -10,7 +10,7 @@ set(SRC_FILES
     "platform_identity_beta.c"
     "platform_display_beta.c"
     "../../tough_app/main/main_tough.c"
-    "../../tough_app/main/platform_http_tough.c"
+    "../../common/platform/platform_http_esp.c"
     "../../tough_app/main/platform_storage_tough.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"
@@ -79,7 +79,9 @@ idf_component_register(SRCS ${SRC_FILES}
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
+# Preserve the no-PSRAM fallback and uncompressed artwork request policy.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    PLATFORM_HTTP_JSON_INTERNAL_FALLBACK=1 PLATFORM_HTTP_IMAGE_REQUEST_GZIP=0
     TARGET_PC=0
     HIPHI_KIZZ_WAKE_WORD=${_wake_word_compile_definition}
     HIPHI_M5_TARGET_ID=${_target_id}

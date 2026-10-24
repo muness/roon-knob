@@ -5,7 +5,7 @@ set(SRC_FILES
     "controller_input_profile_tough.c"
     "controller_presentation_tough.c"
     "platform_input_tough.c"
-    "platform_http_tough.c"
+    "../../common/platform/platform_http_esp.c"
     "platform_storage_tough.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"
@@ -68,7 +68,9 @@ set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-tough\"
+# Preserve the no-PSRAM fallback and uncompressed artwork request policy.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    PLATFORM_HTTP_JSON_INTERNAL_FALLBACK=1 PLATFORM_HTTP_IMAGE_REQUEST_GZIP=0 TARGET_PC=0 HIPHI_PRODUCT_NAME=\"hiphi-tough\"
     PORTAL_BRAND_PRODUCT="Tough")
 # Match the shipping Dial/Frame targets until ESP-IDF 6.0/Picolibc removes the
 # aggressive GCC false positives in legacy bounded string copies.

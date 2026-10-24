@@ -12,7 +12,7 @@ set(SRC_FILES
     "../../common/controller_navigation.c"
     "display_sleep.c"
     "platform_storage_idf.c"
-    "platform_http_idf.c"
+    "../../common/platform/platform_http_esp.c"
     "../../common/platform/platform_mdns_esp.c"
     "../../common/platform/platform_bridge_cache_esp.c"
     "platform_log_idf.c"

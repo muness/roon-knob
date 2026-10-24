@@ -264,7 +264,10 @@ static void focus_row(int index) {
   lv_obj_scroll_to_view(rows[index], LV_ANIM_ON);
 }
 static void move_item(int delta) {
+  if (pending_browse || (busy && busy_kind != IMAGE) || !page || !page->count)
+    return;
   if (chooser) {
+    if (!primary || !secondary) return;
     action_index = delta > 0 ? 1 : 0;
     lv_obj_set_style_bg_color(
         primary, lv_color_hex(action_index == 0 ? 0x39434b : 0x252525), 0);
@@ -272,8 +275,6 @@ static void move_item(int delta) {
         secondary, lv_color_hex(action_index == 1 ? 0x39434b : 0x252525), 0);
     return;
   }
-  if (pending_browse || (busy && busy_kind != IMAGE) || !page || !page->count)
-    return;
   int next = selected_index + delta;
   if (next >= page->count) {
     if (page->next_offset >= 0) {
@@ -340,6 +341,11 @@ static void open_item(void) {
       selected_index >= page->count)
     return;
   controller_library_item_t *item = &page->items[selected_index];
+  if (*item->ref && !chooser) {
+    chooser = true;
+    render();
+    return;
+  }
   if (*item->location) {
     if (depth == HISTORY_MAX) {
       lv_label_set_text(subtitle, "Use Back before opening more folders.");
@@ -353,6 +359,7 @@ static void open_item(void) {
              folder_name);
     snprintf(folder_name, sizeof(folder_name), "%s", item->title);
     depth++;
+    chooser = false;
     desired_absolute = -1;
     snprintf(location, sizeof(location), "%s", item->location);
     offset = selected_index = 0;
@@ -1055,7 +1062,11 @@ static void render(void) {
       lv_label_set_text(message, page && *page->notice ? page->notice : "No items");
       lv_label_set_text(subtitle, "");
     } else if (chooser) {
-      list_row(page->items[selected_index].title, NULL, ACTION_OPEN, -1);
+      lv_obj_set_height(scroller, 120);
+      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 235);
+      list_row(page->items[selected_index].title,
+               *page->items[selected_index].location ? "Open collection" : NULL,
+               ACTION_OPEN, -1);
       primary = button(overlay, -52, 278, 96, ACTION_PLAY);
       button_text(primary, "Play");
       secondary = button(overlay, 52, 278, 96, ACTION_QUEUE);
@@ -1064,11 +1075,9 @@ static void render(void) {
                                       ? "Check now playing before retrying"
                                       : "Choose playback action");
     } else {
-      int images = 0;
-      for (int i = 0; i < page->count; i++)
-        if (*page->items[i].image)
-          images++;
-      carousel = images > 0 && images * 2 >= page->count;
+      /* A stable text layout avoids asynchronous cover changes and keeps
+       * large collections legible on the round display. */
+      carousel = false;
       if (carousel) {
         lv_obj_set_size(scroller, 300, 175);
         lv_obj_align(scroller, LV_ALIGN_TOP_MID, 0, 101);
@@ -1462,6 +1471,8 @@ bool controller_touch_navigation_encoder(int delta) {
     focus_row(setting_index);
     return true;
   }
+  if (delta && screen == CONTROLLER_SCREEN_ARTWORK)
+    change_screen(CONTROLLER_SCREEN_NOW_PLAYING);
   return !controller_navigation_encoder_uses_volume(screen);
 }
 void controller_touch_navigation_settings(void) {

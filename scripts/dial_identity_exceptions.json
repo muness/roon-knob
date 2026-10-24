@@ -201,14 +201,9 @@
       "contains": "return \"hiphi-dial-setup\";"
     },
     {
-      "path": "idf_app/main/platform_http_idf.c",
+      "path": "common/platform/platform_http_esp.c",
       "contains": "esp_http_client_set_header(client, \"X-Device-Type\", platform_device_slug());",
-      "min_count": 3
-    },
-    {
-      "path": "frame_app/main/platform_http_frame.c",
-      "contains": "esp_http_client_set_header(client, \"X-Device-Type\", platform_device_slug());",
-      "min_count": 3
+      "min_count": 1
     },
     {
       "path": "common/platform/platform_mdns_esp.c",

@@ -15,6 +15,6 @@ fi
 cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-function \
   -ffunction-sections -fdata-sections -fsanitize=address,undefined \
   -Icommon -Iinclude tests/test_connection_runtime.c \
-  common/controller_connection.c common/bridge_command_plan.c common/platform/platform_mdns_endpoint.c \
+  common/controller_connection.c common/controller_view.c common/bridge_command_plan.c common/platform/platform_mdns_endpoint.c \
   "${json_flags[@]}" "${link_flags[@]}" -o "$binary"
 "$binary"
