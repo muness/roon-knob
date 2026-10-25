@@ -26,8 +26,10 @@ static char network_context[96] = "home|192.168.1.1|255.255.255.0";
 static bool disconnect_during_http;
 static int response_race;
 static controller_config_write_result_t zone_write_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+static float displayed_volume, sent_volume;
+static bool control_ok = true, command_during_read;
 static unsigned media_updates, zone_name_updates, zone_count_updates;
-void controller_view_compat_apply_media(const controller_media_view_t *view) { (void)view; ++media_updates; }
+void controller_view_compat_apply_media(const controller_media_view_t *view) { displayed_volume = view->volume; ++media_updates; }
 bool wifi_mgr_get_network_context(char *out, size_t len) {
     snprintf(out, len, "%s", network_context); return out[0] != 0;
 }
@@ -76,6 +78,11 @@ int platform_http_get(const char *url, char **out, size_t *len) {
     if (response_race == 2) { pin_runtime_zone_selection("other"); pin_runtime_zone_selection("roon:room"); }
     if (response_race == 3) atomic_fetch_add(&s_network_epoch, 1);
     if (race) { ++generation; strcpy(fixture.value.bridge_base, "http://manual:8088"); fixture.value.bridge_from_mdns = false; }
+    if (command_during_read) {
+        command_during_read = false;
+        controller_command_t command = controller_command_adjust_volume(1);
+        assert(bridge_client_execute_command(&command));
+    }
     *out = http_ok ? strdup(http_body) : NULL;
     *len = *out ? strlen(*out) : 0;
     return http_ok ? 0 : -1;
@@ -108,12 +115,17 @@ void controller_presentation_set_zone_count(int count) { (void)count; ++zone_cou
 static unsigned controls;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));
-    ++controls; *out = strdup("{}"); *len = 2; return 0;
+    cJSON *root = cJSON_Parse(body); assert(root);
+    sent_volume = (float)cJSON_GetObjectItemCaseSensitive(root, "value")->valuedouble;
+    cJSON_Delete(root);
+    ++controls; *out = strdup("{}"); *len = 2; return control_ok ? 0 : -1;
 }
 static unsigned volume_overlays;
 void controller_presentation_show_volume_change(float value, float step) { (void)value; (void)step; ++volume_overlays; }
 static void reset(const char *url, bool automatic) {
     zone_write_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+    s_volume_pending = false; s_volume_command_generation = 0;
+    control_ok = true; command_during_read = false;
     response_race = 0; defer_zone_count = false;
     free(queued_zone_count); queued_zone_count = NULL;
     free(s_artwork_identity); s_artwork_identity = NULL;
@@ -681,4 +693,44 @@ static void test_first_zone_fallback(void) {
     assert(!strcmp(fixture.value.zone_id, "roon:removed") && !controller_connection_ready(&s_connection));
 }
 
-int main(void) { test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+static void test_volume_prediction_reconciliation(void) {
+    reset("http://192.168.1.2:8088", false);
+    strcpy(fixture.value.zone_id,"roon:room");
+    http_body="{\"zones\":[{\"zone_id\":\"roon:room\"}]}"; assert(update_connection());
+    struct now_playing_state state={0}; platform_power_snapshot_t power={.battery_level=-1};
+    const char *at40="{\"volume_type\":\"number\",\"volume\":40,\"volume_min\":0,\"volume_max\":100,\"volume_step\":1}";
+    const char *at42="{\"volume_type\":\"number\",\"volume\":42,\"volume_min\":0,\"volume_max\":100,\"volume_step\":1}";
+    http_body=at40; assert(fetch_now_playing(&state,&power));
+    controller_command_t command=controller_command_adjust_volume(1);
+    assert(bridge_client_execute_command(&command) && sent_volume==41);
+    post_ui_update(&state); /* queued snapshot captured before the detent */
+    assert(s_last_known_volume==41 && displayed_volume==41);
+    assert(fetch_now_playing(&state,&power)); /* provider still reports 40 */
+    post_ui_update(&state); assert(s_last_known_volume==41 && displayed_volume==41);
+    assert(fetch_now_playing(&state,&power)); post_ui_update(&state);
+    assert(s_volume_pending && s_last_known_volume==41 && displayed_volume==41);
+    assert(bridge_client_execute_command(&command) && sent_volume==42);
+    assert(fetch_now_playing(&state,&power)); post_ui_update(&state);
+    assert(s_last_known_volume==42 && displayed_volume==42);
+    http_body=at42; assert(fetch_now_playing(&state,&power));
+    assert(!s_volume_pending && s_last_known_volume==42); /* confirmation */
+    http_body=at40; assert(fetch_now_playing(&state,&power));
+    assert(s_last_known_volume==40); /* external changes are visible after acknowledgement */
+    command_during_read=true;
+    assert(fetch_now_playing(&state,&power));
+    assert(s_last_known_volume==41 && state.volume==41); /* in-flight response predates command */
+    clock_ms+=BRIDGE_VOLUME_SETTLE_MS;
+    assert(fetch_now_playing(&state,&power)); assert(s_last_known_volume==40 && !s_volume_pending);
+    control_ok=false;
+    assert(!bridge_client_execute_command(&command) && !s_volume_pending);
+    unsigned before=controls; assert(fetch_now_playing(&state,&power));
+    assert(s_last_known_volume==40 && controls==before); /* failure reconciles; no replay */
+    control_ok=true; assert(bridge_client_execute_command(&command));
+    strcpy(fixture.value.zone_id,"roon:other");
+    assert(fetch_now_playing(&state,&power)); assert(s_last_known_volume==40 && !s_volume_pending);
+    assert(bridge_client_execute_command(&command));
+    http_body="{\"volume_type\":\"fixed\"}";
+    assert(fetch_now_playing(&state,&power)); assert(!s_volume_pending && s_last_known_volume_fixed);
+}
+
+int main(void) { test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

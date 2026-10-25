@@ -1273,6 +1273,11 @@ void ui_set_volume_with_range(float vol, float vol_min, float vol_max, float vol
 }
 
 void ui_show_volume_change(float vol, float vol_step) {
+    /* Other UI dirtiness must not redraw a pre-detent pending volume. */
+    os_mutex_lock(&s_state_lock);
+    s_pending.volume = vol;
+    s_pending.volume_step = vol_step;
+    os_mutex_unlock(&s_state_lock);
     s_last_predicted_volume = vol;  // Track prediction for emphasis suppression
 
     // Note: Reading volume_min/volume_max without lock (atomic float reads, self-correct on next poll if stale)
