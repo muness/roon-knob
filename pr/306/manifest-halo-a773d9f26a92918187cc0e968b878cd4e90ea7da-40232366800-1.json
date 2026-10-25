@@ -1,0 +1,11 @@
+{
+  "name": "HiPhi HALO Alpha (PR #306 Preview)",
+  "version": "pr-306",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_halo_bootloader-a773d9f26a92918187cc0e968b878cd4e90ea7da-40232366800-1.bin", "offset": 0},
+    {"path": "hiphi_halo_partition-table-a773d9f26a92918187cc0e968b878cd4e90ea7da-40232366800-1.bin", "offset": 32768},
+    {"path": "hiphi_halo_ota_data_initial-a773d9f26a92918187cc0e968b878cd4e90ea7da-40232366800-1.bin", "offset": 53248},
+    {"path": "hiphi_halo-a773d9f26a92918187cc0e968b878cd4e90ea7da-40232366800-1.bin", "offset": 65536}
+  ]}]
+}
