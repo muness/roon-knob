@@ -65,3 +65,11 @@ if(m5_official_target STREQUAL "atom_joystick")
     target_compile_options(${COMPONENT_LIB} PRIVATE
         -Wno-error=maybe-uninitialized)
 endif()
+
+# IDF 6.1's HAL uses partial designated C initializers in gpspi_flash_ll.h.
+# Arduino's Esp.cpp includes it from C++; GCC diagnoses the omitted zero fields.
+# Keep this exception on that upstream translation unit, not application code.
+idf_component_get_property(arduino_dir espressif__arduino-esp32 COMPONENT_DIR)
+set_property(SOURCE "${arduino_dir}/cores/esp32/Esp.cpp"
+    TARGET_DIRECTORY ${arduino_lib} APPEND PROPERTY COMPILE_OPTIONS
+    "-Wno-error=missing-field-initializers")
