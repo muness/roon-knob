@@ -81,7 +81,7 @@ class AssetVersioningTests(unittest.TestCase):
             self.assertIn('Requires UHC v4', text)
             self.assertIn('Stable v2.5.2', text)
             self.assertIn('Library', text)
-            self.assertIn('v4.0.0-beta.9', text)
+            self.assertIn('v4.0.0-beta.10', text)
             self.assertNotIn('**Dial', text)
             assets.prepare_site(root)
             self.assertEqual(text, (root / 'index.html').read_text())
