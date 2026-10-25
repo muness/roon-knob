@@ -1,6 +1,16 @@
 # Prepared ESP-IDF runner
 
-The four Linux ESP jobs use `esp-idf-5-5-5` from homelab-infra's builder catalog
+Current builds use the official ESP-IDF 6.1 action on hosted runners. The fleet
+image below remains baked with 5.5.5 and is not eligible for these builds.
+`esp-source.yml` is synchronized with the current unconverted workflow, and
+`esp-requirements.json` requires 6.1 before any future fleet adoption.
+`esp-profile.json` and the commands below record the previous deployment; they
+do not describe the active toolchain. A new prepared image requires its own
+publication and provenance before restoring fleet routing.
+
+## Previous 5.5.5 adoption
+
+The four original Linux ESP jobs used `esp-idf-5-5-5` from homelab-infra's builder catalog
 when `LOCAL_LINUX_CI_ENABLED=true` and the event comes from this repository.
 Fork PRs and disabled fleet routing retain the original Espressif Docker action.
 
@@ -11,8 +21,8 @@ build/verification command directly; they need no Docker socket or per-job image
 pull. The image contains no roon-knob source, components, compiler cache or firmware.
 
 `esp-profile.json` records jobs, versions and publisher; `esp-requirements.json`
-declares compatibility. `esp-source.yml` records the unconverted workflow used
-for this adoption. To prepare the runner using homelab-infra:
+declares compatibility. `esp-source.yml` now records the current unconverted workflow rather than
+this historical adoption. To prepare the runner using homelab-infra:
 
 ```sh
 runner/builder/builder prepare-esp \

@@ -52,7 +52,7 @@ idf_component_register(
     SRCS ${SRC_FILES}
     INCLUDE_DIRS "." "../../include" "../../common" "../../frame_app/main"
     REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant lvgl esp_lcd
-    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver esp_adc json bt esp_hid rk_ble_hid_host esp_pm
+    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver esp_adc espressif__cjson bt esp_hid rk_ble_hid_host esp_pm
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

@@ -1,3 +1,5 @@
 dependencies:
   idf: ">=5.0"
   espressif/mdns: ">=1.2.0"
+  espressif/cjson:
+    version: "^1.7.19~2"

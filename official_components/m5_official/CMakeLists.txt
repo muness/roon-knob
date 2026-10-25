@@ -51,6 +51,8 @@ idf_component_get_property(m5_unified_lib m5stack__m5unified COMPONENT_LIB)
 idf_component_get_property(m5_gfx_lib m5stack__m5gfx COMPONENT_LIB)
 idf_component_get_property(arduino_lib espressif__arduino-esp32 COMPONENT_LIB)
 target_link_libraries(${m5_unified_lib} PRIVATE ${arduino_lib})
+target_compile_options(${m5_unified_lib} PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_LIST_DIR}/../../components/m5_platform/m5_math_compat.hpp>")
 target_link_libraries(${m5_gfx_lib} PRIVATE ${arduino_lib})
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
@@ -62,4 +64,20 @@ if(m5_official_target STREQUAL "atom_joystick")
     # immutable while allowing GCC 14 to compile the official library.
     target_compile_options(${COMPONENT_LIB} PRIVATE
         -Wno-error=maybe-uninitialized)
+endif()
+
+# IDF 6.1's HAL uses partial designated C initializers in gpspi_flash_ll.h.
+# Arduino's Esp.cpp includes it from C++; GCC diagnoses the omitted zero fields.
+# Keep this exception on that upstream translation unit, not application code.
+idf_component_get_property(arduino_dir espressif__arduino-esp32 COMPONENT_DIR)
+set_property(SOURCE "${arduino_dir}/cores/esp32/Esp.cpp"
+    TARGET_DIRECTORY ${arduino_lib} APPEND PROPERTY COMPILE_OPTIONS
+    "-Wno-error=missing-field-initializers")
+
+if(m5_official_target STREQUAL "stackchan")
+    # IDF 6.1 added UART config fields; the pinned BSP intentionally leaves
+    # those defaults zero. Scope the C++ aggregate warning to its servo source.
+    set_property(SOURCE
+        "${m5_official_vendor}/StackChan-BSP/src/drivers/FTServo_Arduino/src/SCSerial.cpp"
+        APPEND PROPERTY COMPILE_OPTIONS "-Wno-error=missing-field-initializers")
 endif()

@@ -1,5 +1,11 @@
 # HiPhi v{{VERSION}}
 
+## Current stable dependency sweep in alpha.4
+
+This alpha migrates all controller builds to ESP-IDF 6.1, LVGL 9.6, Arduino-ESP32 3.3.12 and M5Unified 0.2.28. It updates mDNS, WebSocket and display components, the StackChan board library, and the Roku compiler. IDF 6 uses the managed cJSON component. Dial and HALO preserve their 24 KiB internal LVGL arena and 72 KiB PSRAM pool.
+
+Pair with **UHC v4.0.0-beta.9**. These are dependency and compatibility migrations; software builds and regression checks do not establish physical qualification of the new SDK. Exact alpha.4 images still require flash, sustained boot, display, input, BLE, sleep and reconnect checks on each target.
+
 ## Playback recovery and library fixes in alpha.3
 
 Pair this firmware with Unified Hi-Fi Control **v4.0.0-beta.8** for the collection changes below.

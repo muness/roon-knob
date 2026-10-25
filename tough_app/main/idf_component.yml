@@ -1,8 +1,10 @@
 ## IDF Component Manager Manifest File
 dependencies:
   idf:
-    version: '>=5.0'
+    version: '>=6.1,<6.2'
   m5stack/m5unified:
-    version: 0.2.19
+    version: 0.2.28
   espressif/mdns:
-    version: '>=1.2.0'
+    version: '==1.14.1'
+  espressif/cjson:
+    version: "^1.7.19~2"

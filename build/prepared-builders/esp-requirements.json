@@ -1,6 +1,6 @@
 {
   "tools": {
-    "esp-idf": "v5.5.5"
+    "esp-idf": "v6.1"
   },
   "targets": [
     "esp32s3"

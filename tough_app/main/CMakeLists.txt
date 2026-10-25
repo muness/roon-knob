@@ -61,7 +61,7 @@ idf_component_register(
         esp_http_server
         esp_app_format
         driver
-        json
+        espressif__cjson
 )
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)

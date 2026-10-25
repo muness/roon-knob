@@ -91,7 +91,7 @@ idf_component_register(
         esp_driver_uart
         esp_adc
         app_update
-        json
+        espressif__cjson
         rk_ble_hid_host
 )
 

@@ -33,7 +33,7 @@ jobs:
     name: test-shared
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -42,8 +42,8 @@ jobs:
 
       - name: Test HALO native touch UI
         run: |
-          git clone --quiet --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git /tmp/halo-test-lvgl
-          test "$(git -C /tmp/halo-test-lvgl rev-parse HEAD)" = 85aa60d18b3d5e5588d7b247abf90198f07c8a63
+          git clone --quiet --depth 1 --branch v9.6.0 https://github.com/lvgl/lvgl.git /tmp/halo-test-lvgl
+          test "$(git -C /tmp/halo-test-lvgl rev-parse HEAD)" = 80ca777e37a2b176770726a02e07a6fb79ef0b39
           cmake -S tests/halo_native -B /tmp/halo-native-build -DLVGL_SOURCE=/tmp/halo-test-lvgl -DHALO_SANITIZE=ON
           cmake --build /tmp/halo-native-build -j2
           /tmp/halo-native-build/halo_native_checks
@@ -399,9 +399,9 @@ jobs:
   build-idf:
     name: build-idf
     needs: test-shared
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -412,7 +412,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/dial
           key: firmware-v1-dial-${{ steps.firmware-key.outputs.fingerprint }}
@@ -450,25 +450,25 @@ jobs:
       # updated cache after each successful build.
       - name: Restore ESP-IDF compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache
-          key: ${{ runner.os }}-esp-idf-v5.5.5-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-ccache-
 
       - name: Restore Dial managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: idf_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-dial-components-${{ hashFiles('idf_app/dependencies.lock') }}
 
       - name: Build with ESP-IDF
-        if: ${{ steps.reuse.outputs.reused != 'true' && !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           path: idf_app
           extra_docker_args: >-
@@ -487,8 +487,7 @@ jobs:
             grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig;
             grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig;
             grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" sdkconfig;
-            grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig;
-            grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72" sdkconfig;
+            grep -Fx "CONFIG_LV_MEM_SIZE=24576" sdkconfig;
             grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig;
             grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig;
             grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig;
@@ -512,23 +511,6 @@ jobs:
             0x10000 build/hiphi_dial.bin;
             ccache --show-stats
 
-      - name: Build with ESP-IDF (local image)
-        if: ${{ steps.reuse.outputs.reused != 'true' && vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        shell: bash
-        working-directory: ${{ github.workspace }}/idf_app
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ci/ccache
-          CCACHE_MAXSIZE: 500M
-          CCACHE_COMPRESS: '1'
-          IDF_TARGET: esp32s3
-        run: |
-          set -e
-          git config --global --add safe.directory /opt/esp/idf
-          # Tools are in the approved runner; no Docker socket or image pull.
-          . /opt/esp/idf/export.sh
-          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-          set -e; ccache --zero-stats; idf.py build; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig; ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig; grep -Fx "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=49152" sdkconfig; grep -Fx "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" sdkconfig; grep -Fx "CONFIG_LV_MEM_SIZE_KILOBYTES=24" sdkconfig; grep -Fx "CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=72" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; python3 ../scripts/audit_firmware_stack.py build/hiphi_dial.elf --output build/stack-audit.json --enforce-dial; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/" build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_dial.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_dial.map; esptool.py --chip esp32s3 merge_bin -o ../hiphi_dial_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_dial.bin; ccache --show-stats
-
       - name: Verify merged Dial flash image
         if: steps.reuse.outputs.reused != 'true'
         run: |
@@ -548,24 +530,34 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/dial
           key: firmware-v1-dial-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload HiPhi Dial artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-dial-firmware
           path: firmware-cache/dial/
           retention-days: 30
 
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-idf
+          path: |
+            idf_app/dependencies*.lock
+            idf_app/sdkconfig
+          if-no-files-found: ignore
+
   build-frame:
     name: build-frame
     needs: test-shared
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -576,7 +568,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/frame
           key: firmware-v1-frame-${{ steps.firmware-key.outputs.fingerprint }}
@@ -609,25 +601,25 @@ jobs:
 
       - name: Restore Frame compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-frame
-          key: ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-frame-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-frame-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-frame-ccache-
 
       - name: Restore Frame managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: frame_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-frame-components-${{ hashFiles('frame_app/dependencies.lock') }}
 
       - name: Build HiPhi Frame with ESP-IDF
-        if: ${{ steps.reuse.outputs.reused != 'true' && !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           path: frame_app
           extra_docker_args: >-
@@ -674,23 +666,6 @@ jobs:
             esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin;
             ccache --show-stats
 
-      - name: Build HiPhi Frame with ESP-IDF (local image)
-        if: ${{ steps.reuse.outputs.reused != 'true' && vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        shell: bash
-        working-directory: ${{ github.workspace }}/frame_app
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ci/ccache-frame
-          CCACHE_MAXSIZE: 500M
-          CCACHE_COMPRESS: '1'
-          IDF_TARGET: esp32s3
-        run: |
-          set -e
-          git config --global --add safe.directory /opt/esp/idf
-          # Tools are in the approved runner; no Docker socket or image pull.
-          . /opt/esp/idf/export.sh
-          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-          set -e; ccache --zero-stats; idf.py build; python3 ../scripts/audit_firmware_stack.py build/hiphi_frame.elf --output build/stack-audit.json; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig; ! grep -Fx "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y" sdkconfig; grep -Fx "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" sdkconfig; grep -Fx "CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096" sdkconfig; grep -Fx "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_ENABLED=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_NVS_PERSIST=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_SM_SC=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_HID_SERVICE=y" sdkconfig; grep -Fx "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2" sdkconfig; grep -F "/components/esp_hid/" build/compile_commands.json; grep -F "/generated/nimble_hidh.c" build/compile_commands.json; grep -F "/rk_ble_hid_host.c.obj" build/compile_commands.json; ! grep -F "rk_ble_hid_host_stub.c.obj" build/compile_commands.json; grep -E "^rk_ble_hid_host_init[[:space:]]+esp-idf/rk_ble_hid_host/librk_ble_hid_host[.]a[(]rk_ble_hid_host[.]c[.]obj[)][[:space:]]*$" build/hiphi_frame.map; ! grep -F "rk_ble_hid_host_stub" build/hiphi_frame.map; grep -Fx "CONFIG_RK_FRAME_DEEP_SLEEP=y" sdkconfig; grep -F "esp_sleep_enable_ext1_wakeup_io" main/frame_power_manager.c; ! grep -F "esp_sleep_enable_timer_wakeup" main/frame_power_manager.c; grep -F "pmic_power_source()" main/frame_power_manager.c; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" sdkconfig; esptool.py --chip esp32s3 merge_bin -o ../hiphi_frame_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_frame.bin; esptool.py --chip esp32s3 image_info ../hiphi_frame_merged.bin; ccache --show-stats
-
       - name: Verify merged HiPhi Frame image
         if: steps.reuse.outputs.reused != 'true'
         run: |
@@ -713,24 +688,34 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/frame
           key: firmware-v1-frame-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload HiPhi Frame artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-frame-firmware
           path: firmware-cache/frame/
           retention-days: 30
 
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-frame
+          path: |
+            frame_app/dependencies*.lock
+            frame_app/sdkconfig
+          if-no-files-found: ignore
+
   build-rlcd:
     name: build-rlcd
     needs: test-shared
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -741,7 +726,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/rlcd
           key: firmware-v1-rlcd-${{ steps.firmware-key.outputs.fingerprint }}
@@ -773,25 +758,25 @@ jobs:
 
       - name: Restore RLCD compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-rlcd
-          key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-rlcd-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-rlcd-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-rlcd-ccache-
 
       - name: Restore RLCD managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: rlcd_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-rlcd-components-${{ hashFiles('rlcd_app/dependencies.lock') }}
 
       - name: Build HiPhi RLCD with ESP-IDF
-        if: ${{ steps.reuse.outputs.reused != 'true' && !(vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) }}
+        if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           path: rlcd_app
           extra_docker_args: >-
@@ -819,23 +804,6 @@ jobs:
             esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin;
             ccache --show-stats
 
-      - name: Build HiPhi RLCD with ESP-IDF (local image)
-        if: ${{ steps.reuse.outputs.reused != 'true' && vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/roon-knob' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        shell: bash
-        working-directory: ${{ github.workspace }}/rlcd_app
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ci/ccache-rlcd
-          CCACHE_MAXSIZE: 500M
-          CCACHE_COMPRESS: '1'
-          IDF_TARGET: esp32s3
-        run: |
-          set -e
-          git config --global --add safe.directory /opt/esp/idf
-          # Tools are in the approved runner; no Docker socket or image pull.
-          . /opt/esp/idf/export.sh
-          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
-          set -e; ccache --zero-stats; idf.py build; python3 ../scripts/audit_firmware_stack.py build/hiphi_rlcd_42.elf --output build/stack-audit.json; grep -Fx "CONFIG_COMPILER_OPTIMIZATION_PERF=y" sdkconfig; grep -Fx "CONFIG_PM_DFS_INIT_AUTO=y" sdkconfig; grep -Fx "CONFIG_SPIRAM=y" sdkconfig; grep -Fx "CONFIG_RK_BLE_HID_HOST=y" sdkconfig; grep -Fx "CONFIG_BT_ENABLED=y" sdkconfig; grep -Fx "CONFIG_ESPTOOLPY_FLASHMODE_QIO=y" sdkconfig; esptool.py --chip esp32s3 merge_bin -o ../hiphi_rlcd_merged.bin --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/hiphi_rlcd_42.bin; esptool.py --chip esp32s3 image_info ../hiphi_rlcd_merged.bin; ccache --show-stats
-
       - name: Verify merged HiPhi RLCD image
         if: steps.reuse.outputs.reused != 'true'
         run: |
@@ -856,24 +824,34 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/rlcd
           key: firmware-v1-rlcd-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload HiPhi RLCD artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-rlcd-firmware
           path: firmware-cache/rlcd/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-rlcd
+          path: |
+            rlcd_app/dependencies*.lock
+            rlcd_app/sdkconfig
+          if-no-files-found: ignore
 
   build-atom:
     name: build-atom-s3-joystick
     needs: test-shared
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: recursive
@@ -884,7 +862,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/atom
           key: firmware-v1-atom-${{ steps.firmware-key.outputs.fingerprint }}
@@ -908,23 +886,23 @@ jobs:
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.atom-version.outputs.version }}")/' atom_app/CMakeLists.txt
       - name: Restore Atom compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-atom
-          key: ${{ runner.os }}-esp-idf-v5.5.5-atom-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-atom-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-atom-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-atom-ccache-
       - name: Restore Atom managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: atom_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-atom-components-${{ hashFiles('atom_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-atom-components-${{ hashFiles('atom_app/dependencies.lock') }}
       - name: Build AtomS3 Joystick with ESP-IDF
         if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           path: atom_app
           extra_docker_args: >-
@@ -963,24 +941,34 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/atom
           key: firmware-v1-atom-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload AtomS3 Joystick artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-joy-firmware
           path: firmware-cache/atom/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-atom
+          path: |
+            atom_app/dependencies*.lock
+            atom_app/sdkconfig
+          if-no-files-found: ignore
 
   build-halo:
     name: build-halo
     needs: test-shared
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: recursive
@@ -991,7 +979,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/halo
           key: firmware-v1-halo-${{ steps.firmware-key.outputs.fingerprint }}
@@ -1015,23 +1003,23 @@ jobs:
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.halo-version.outputs.version }}")/' halo_app/CMakeLists.txt
       - name: Restore HALO compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-halo
-          key: ${{ runner.os }}-esp-idf-v5.5.5-halo-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-halo-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-halo-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-halo-ccache-
       - name: Restore HALO managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: halo_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-halo-components-${{ hashFiles('halo_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-halo-components-${{ hashFiles('halo_app/dependencies.lock') }}
       - name: Build HALOS3 Joystick with ESP-IDF
         if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           path: halo_app
           extra_docker_args: >-
@@ -1063,24 +1051,34 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/halo
           key: firmware-v1-halo-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload HALOS3 Joystick artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-halo-firmware
           path: firmware-cache/halo/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-halo
+          path: |
+            halo_app/dependencies*.lock
+            halo_app/sdkconfig
+          if-no-files-found: ignore
 
   build-tough:
     name: build-m5-tough
     needs: test-shared
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Fingerprint firmware inputs
@@ -1090,7 +1088,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/tough
           key: firmware-v1-tough-${{ steps.firmware-key.outputs.fingerprint }}
@@ -1114,23 +1112,23 @@ jobs:
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.tough-version.outputs.version }}")/' tough_app/CMakeLists.txt
       - name: Restore Tough compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-tough
-          key: ${{ runner.os }}-esp-idf-v5.5.5-tough-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-tough-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-tough-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-tough-ccache-
       - name: Restore Tough managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: tough_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-tough-components-${{ hashFiles('tough_app/dependencies.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-tough-components-${{ hashFiles('tough_app/dependencies.lock') }}
       - name: Build M5Stack Tough with pure ESP-IDF
         if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32
           path: tough_app
           extra_docker_args: >-
@@ -1170,17 +1168,27 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/tough
           key: firmware-v1-tough-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload M5Stack Tough artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-tough-firmware
           path: firmware-cache/tough/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-tough
+          path: |
+            tough_app/dependencies*.lock
+            tough_app/sdkconfig
+          if-no-files-found: ignore
 
   build-m5-betas:
     name: build-m5-beta-${{ matrix.target }}
@@ -1211,7 +1219,7 @@ jobs:
             psram: true
             expected: STACKCHAN
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: recursive
@@ -1222,7 +1230,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/m5-${{ matrix.target }}
           key: firmware-v1-m5-${{ steps.firmware-key.outputs.fingerprint }}
@@ -1246,23 +1254,23 @@ jobs:
         run: sed -i 's/set(PROJECT_VER ".*")/set(PROJECT_VER "${{ steps.m5-beta-version.outputs.version }}")/' m5_beta_app/CMakeLists.txt
       - name: Restore M5 beta compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-m5-beta-${{ matrix.target }}
-          key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-${{ matrix.target }}-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-m5-beta-${{ matrix.target }}-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-${{ matrix.target }}-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-m5-beta-${{ matrix.target }}-ccache-
       - name: Restore M5 beta managed components
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: m5_beta_app/managed_components
-          key: ${{ runner.os }}-esp-idf-v5.5.5-m5-beta-${{ matrix.target }}-components-${{ hashFiles('m5_beta_app/dependencies*.lock') }}
+          key: ${{ runner.os }}-esp-idf-v6.1-m5-beta-${{ matrix.target }}-components-${{ hashFiles('m5_beta_app/dependencies*.lock') }}
       - name: Build exact M5 beta profile
         if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32s3
           path: m5_beta_app
           extra_docker_args: >-
@@ -1313,24 +1321,34 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/m5-${{ matrix.target }}
           key: firmware-v1-m5-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload M5 beta artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-m5-beta-${{ matrix.target }}
           path: firmware-cache/m5-${{ matrix.target }}/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-m5-betas-${{ matrix.target }}
+          path: |
+            m5_beta_app/dependencies*.lock
+            m5_beta_app/sdkconfig
+          if-no-files-found: ignore
 
   build-knob-aux:
     name: build-waveshare-knob-aux-parking-image
     needs: test-shared
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -1341,7 +1359,7 @@ jobs:
       - name: Restore exact firmware artifact
         id: firmware-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: firmware-cache/aux
           key: firmware-v1-aux-${{ steps.firmware-key.outputs.fingerprint }}
@@ -1367,18 +1385,18 @@ jobs:
 
       - name: Restore auxiliary compiler cache
         if: steps.reuse.outputs.reused != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/ccache-knob-aux
-          key: ${{ runner.os }}-esp-idf-v5.5.5-knob-aux-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-esp-idf-v6.1-knob-aux-ccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-esp-idf-v5.5.5-knob-aux-ccache-
+            ${{ runner.os }}-esp-idf-v6.1-knob-aux-ccache-
 
       - name: Build auxiliary ESP32 parking firmware
         if: steps.reuse.outputs.reused != 'true'
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v6.1
           target: esp32
           path: knob_aux_app
           extra_docker_args: >-
@@ -1422,13 +1440,13 @@ jobs:
 
       - name: Save exact firmware artifact
         if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: firmware-cache/aux
           key: firmware-v1-aux-${{ steps.firmware-key.outputs.fingerprint }}
 
       - name: Upload auxiliary parking firmware
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hiphi-knob-aux-parking-firmware
           path: firmware-cache/aux/
@@ -1442,55 +1460,55 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Download ESP32-S3 firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-dial-firmware
           path: dial-artifacts
 
       - name: Download HiPhi Frame firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-frame-firmware
           path: frame-artifacts
 
       - name: Download HiPhi RLCD firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
 
       - name: Download AtomS3 JoyStick firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-joy-firmware
           path: joy-artifacts
 
       - name: Download HiPhi HALO firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-halo-firmware
           path: halo-artifacts
 
       - name: Download M5Stack Tough firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-tough-firmware
           path: tough-artifacts
 
       - name: Download form-native M5 beta firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: hiphi-m5-beta-*
           path: m5-beta-artifacts
           merge-multiple: true
 
       - name: Download Waveshare auxiliary parking firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-knob-aux-parking-firmware
           path: aux-artifacts
@@ -1695,62 +1713,62 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Download Dial firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-dial-firmware
           path: dial-artifacts
 
       - name: Download Frame firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-frame-firmware
           path: frame-artifacts
 
       - name: Download RLCD firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
 
       - name: Download AtomS3 JoyStick firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-joy-firmware
           path: joy-artifacts
 
       - name: Download HiPhi HALO firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-halo-firmware
           path: halo-artifacts
 
       - name: Download M5Stack Tough firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-tough-firmware
           path: tough-artifacts
 
       - name: Download form-native M5 beta firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: hiphi-m5-beta-*
           path: m5-beta-artifacts
           merge-multiple: true
 
       - name: Download Waveshare Dial auxiliary parking firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-knob-aux-parking-firmware
           path: aux-artifacts
 
       - name: Read preview commit metadata
         id: preview-commit
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: commit } = await github.rest.repos.getCommit({
@@ -2135,7 +2153,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Post all preview URLs to PR
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           PREVIEW_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           DIAL_PAGE_URL: ${{ steps.verify-preview.outputs.dial_page_url }}
@@ -2226,55 +2244,55 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Download ESP32-S3 firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-dial-firmware
           path: dial-artifacts
 
       - name: Download HiPhi Frame firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-frame-firmware
           path: frame-artifacts
 
       - name: Download HiPhi RLCD firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-rlcd-firmware
           path: rlcd-artifacts
 
       - name: Download AtomS3 JoyStick firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-joy-firmware
           path: joy-artifacts
 
       - name: Download HiPhi HALO firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-halo-firmware
           path: halo-artifacts
 
       - name: Download M5Stack Tough firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-tough-firmware
           path: tough-artifacts
 
       - name: Download form-native M5 beta firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: hiphi-m5-beta-*
           path: m5-beta-artifacts
           merge-multiple: true
 
       - name: Download Waveshare auxiliary parking firmware
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: hiphi-knob-aux-parking-firmware
           path: aux-artifacts

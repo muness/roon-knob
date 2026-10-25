@@ -40,7 +40,7 @@ set(SRC_FILES
 idf_component_register(SRCS ${SRC_FILES}
     INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main"
     REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant m5_platform
-    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver json)
+    PRIV_REQUIRES nvs_flash esp_http_client esp_http_server esp_app_format driver espressif__cjson)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)

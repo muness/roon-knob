@@ -1,4 +1,14 @@
 dependencies:
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.19~2
   espressif/esp_websocket_client:
     component_hash: dc00233af846f3a744ada283a300e0d586040aadc3ee67361645ecdce4523672
     dependencies:
@@ -10,7 +20,7 @@ dependencies:
       type: service
     version: 1.8.0
   espressif/mdns:
-    component_hash: 3ba256ac95e07c274be53cbd73f06cb846c403b61e8fbdf1be57bdb79db7a63e
+    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
     dependencies:
     - name: idf
       require: private
@@ -18,34 +28,35 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.12.0
+    version: 1.14.1
   idf:
     source:
       type: idf
-    version: 5.5.5
+    version: 6.1.0
   m5stack/m5gfx:
-    component_hash: a0d59be99d469d0144bacf0ddf420cdd2a3328f6c392f074b590b56c20b84763
+    component_hash: b5818d13703a4ac48f7f49cab3d7d44d7170603261f40f4f2d66b2dd3ab9f609
     dependencies: []
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.2.28
+    version: 0.2.35
   m5stack/m5unified:
-    component_hash: 85ab29e360fde0623ce30c8b8323d9f2c00acfffade19b104d6b7741b592e9ef
+    component_hash: f2cb2e8c85f08f217ab77e84032f431e6838cf8393a500f16fd8fc61b4c14613
     dependencies:
     - name: m5stack/m5gfx
       registry_url: https://components.espressif.com
       require: private
-      version: '>=0.2.26'
+      version: '>=0.2.35'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 0.2.19
+    version: 0.2.28
 direct_dependencies:
+- espressif/cjson
 - espressif/esp_websocket_client
 - espressif/mdns
 - idf
 - m5stack/m5unified
-manifest_hash: 6c66013b7c28c46c8e0fd58da66d9505663b06b4748e5c17a4e75a5f7190f06a
+manifest_hash: 24a9f6135fa13c529b5c903603f344cff852286b3fd431d1e89a92753f54bb0a
 target: esp32s3
-version: 2.0.0
+version: 3.0.0

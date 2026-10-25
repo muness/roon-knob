@@ -22,19 +22,19 @@ jobs:
       run:
         working-directory: roku
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '26.12.1'
           cache: npm
           cache-dependency-path: roku/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm test
       - run: npm run build
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: hiphi-roku-${{ github.sha }}
           path: roku/dist/
