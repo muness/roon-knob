@@ -1,0 +1,11 @@
+{
+  "name": "HiPhi Frame Alpha (PR #304 Preview)",
+  "version": "pr-304",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_frame_bootloader-af826c86c1e24bd2414ee5a5b1fc84909aa5816c-40193498091-1.bin", "offset": 0},
+    {"path": "hiphi_frame_partition-table-af826c86c1e24bd2414ee5a5b1fc84909aa5816c-40193498091-1.bin", "offset": 32768},
+    {"path": "hiphi_frame_ota_data_initial-af826c86c1e24bd2414ee5a5b1fc84909aa5816c-40193498091-1.bin", "offset": 53248},
+    {"path": "hiphi_frame-af826c86c1e24bd2414ee5a5b1fc84909aa5816c-40193498091-1.bin", "offset": 65536}
+  ]}]
+}
