@@ -384,7 +384,8 @@ static inline bool rk_cfg_normalize_v3(rk_cfg_t *cfg) {
         changed = true;
     }
     for (size_t i = cfg->wifi_count; i < RK_MAX_WIFI; ++i) {
-        rk_wifi_entry_t empty = {0};
+        rk_wifi_entry_t empty;
+        memset(&empty, 0, sizeof(empty));
         if (memcmp(&cfg->wifi[i], &empty, sizeof(empty)) != 0) {
             cfg->wifi[i] = empty;
             changed = true;
@@ -414,7 +415,7 @@ static inline void rk_cfg_set_storage_defaults(rk_cfg_t *cfg) {
     if (!cfg) {
         return;
     }
-    *cfg = (rk_cfg_t){0};
+    memset(cfg, 0, sizeof(*cfg));
     rk_cfg_set_display_defaults(cfg);
     cfg->cfg_ver = RK_CFG_CURRENT_VER;
 }
@@ -465,7 +466,7 @@ static inline bool rk_cfg_canonicalize_v3(rk_cfg_t *out, const rk_cfg_t *in) {
 
     rk_cfg_t normalized = *in;
     (void)rk_cfg_normalize_v3(&normalized);
-    *out = (rk_cfg_t){0};
+    memset(out, 0, sizeof(*out));
 
     rk_strlcpy(out->ssid, normalized.ssid, sizeof(out->ssid));
     rk_strlcpy(out->pass, normalized.pass, sizeof(out->pass));

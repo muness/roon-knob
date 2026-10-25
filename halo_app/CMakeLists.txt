@@ -12,3 +12,8 @@ project(hiphi_halo)
 # 24 KiB internal arena and the 72 KiB external arena's TLSF capacity.
 idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
 target_compile_definitions(${lvgl_lib} PUBLIC LV_MEM_POOL_EXPAND_SIZE=73728)
+# LVGL 9.6 retains this compatibility path but emits a deprecation warning.
+# Scope the exception to that allocator source; other preprocessor errors remain fatal.
+set_property(SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/managed_components/lvgl__lvgl/src/stdlib/builtin/lv_tlsf.c"
+    TARGET_DIRECTORY ${lvgl_lib} APPEND PROPERTY COMPILE_OPTIONS "-Wno-error=cpp")

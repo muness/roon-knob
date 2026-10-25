@@ -51,6 +51,8 @@ idf_component_get_property(m5_unified_lib m5stack__m5unified COMPONENT_LIB)
 idf_component_get_property(m5_gfx_lib m5stack__m5gfx COMPONENT_LIB)
 idf_component_get_property(arduino_lib espressif__arduino-esp32 COMPONENT_LIB)
 target_link_libraries(${m5_unified_lib} PRIVATE ${arduino_lib})
+target_compile_options(${m5_unified_lib} PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_LIST_DIR}/../../components/m5_platform/m5_math_compat.hpp>")
 target_link_libraries(${m5_gfx_lib} PRIVATE ${arduino_lib})
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)

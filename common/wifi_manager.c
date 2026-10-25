@@ -84,7 +84,7 @@ static const char *get_disconnect_reason_str(uint8_t reason, rk_net_evt_t *out_e
             evt = RK_NET_EVT_AUTH_TIMEOUT;
             break;
         case WIFI_REASON_ASSOC_FAIL:
-        case WIFI_REASON_ASSOC_EXPIRE:
+        case WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY:
             str = "Association failed";
             break;
         case WIFI_REASON_BEACON_TIMEOUT:
