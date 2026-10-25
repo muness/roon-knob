@@ -73,3 +73,11 @@ idf_component_get_property(arduino_dir espressif__arduino-esp32 COMPONENT_DIR)
 set_property(SOURCE "${arduino_dir}/cores/esp32/Esp.cpp"
     TARGET_DIRECTORY ${arduino_lib} APPEND PROPERTY COMPILE_OPTIONS
     "-Wno-error=missing-field-initializers")
+
+if(m5_official_target STREQUAL "stackchan")
+    # IDF 6.1 added UART config fields; the pinned BSP intentionally leaves
+    # those defaults zero. Scope the C++ aggregate warning to its servo source.
+    set_property(SOURCE
+        "${m5_official_vendor}/StackChan-BSP/src/drivers/FTServo_Arduino/src/SCSerial.cpp"
+        APPEND PROPERTY COMPILE_OPTIONS "-Wno-error=missing-field-initializers")
+endif()
