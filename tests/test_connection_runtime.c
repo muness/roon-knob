@@ -25,6 +25,7 @@ static platform_bridge_cache_t retained_cache;
 static char network_context[96] = "home|192.168.1.1|255.255.255.0";
 static bool disconnect_during_http;
 static int response_race;
+static controller_config_write_result_t zone_write_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
 static unsigned media_updates, zone_name_updates, zone_count_updates;
 void controller_view_compat_apply_media(const controller_media_view_t *view) { (void)view; ++media_updates; }
 bool wifi_mgr_get_network_context(char *out, size_t len) {
@@ -98,8 +99,9 @@ void controller_presentation_set_message(const char *msg) { (void)msg; }
 void controller_presentation_set_network_status(const char *msg) { (void)msg; }
 void platform_log_backend(const char *level, const char *fmt, va_list args) { (void)level; (void)fmt; (void)args; }
 controller_config_write_result_t controller_config_set_zone(const char *zone, controller_config_snapshot_t *out) {
+    if (zone_write_result == CONTROLLER_CONFIG_NOT_COMMITTED) return zone_write_result;
     strcpy(fixture.value.zone_id, zone); ++fixture.revision; *out = fixture;
-    return CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+    return zone_write_result;
 }
 void controller_presentation_set_zone_name(const char *name) { (void)name; ++zone_name_updates; }
 void controller_presentation_set_zone_count(int count) { (void)count; ++zone_count_updates; }
@@ -111,6 +113,7 @@ int platform_http_post_json(const char *url, const char *body, char **out, size_
 static unsigned volume_overlays;
 void controller_presentation_show_volume_change(float value, float step) { (void)value; (void)step; ++volume_overlays; }
 static void reset(const char *url, bool automatic) {
+    zone_write_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
     response_race = 0; defer_zone_count = false;
     free(queued_zone_count); queued_zone_count = NULL;
     free(s_artwork_identity); s_artwork_identity = NULL;
@@ -651,4 +654,31 @@ static void test_response_resource_budget(void) {
     assert(!strcmp(cJSON_GetObjectItemCaseSensitive(root,"zone_id")->valuestring,context.zone_id)); cJSON_Delete(root);
 }
 
-int main(void) { test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+static void test_first_zone_fallback(void) {
+    const char *zones = "{\"zones\":[{\"zone_id\":\"roon:first\",\"zone_name\":\"First\"},{\"zone_id\":\"roon:saved\",\"zone_name\":\"Saved\"}]}";
+    const char *preferences[] = {"", "roon:removed", "roon:saved"};
+    for (int i = 0; i < 3; i++) {
+        reset("http://192.168.1.2:8088", false);
+        strcpy(fixture.value.zone_id, preferences[i]); http_body = zones;
+        assert(update_connection() && refresh_zone_label(true));
+        const char *expected = i == 2 ? "roon:saved" : "roon:first";
+        assert(!strcmp(s_state.runtime_zone_id, expected));
+        assert(!strcmp(fixture.value.zone_id, expected));
+        assert(controller_connection_ready(&s_connection));
+    }
+    for (int unverified = 0; unverified < 2; unverified++) {
+        reset("http://192.168.1.2:8088", false);
+        strcpy(fixture.value.zone_id, "roon:removed"); http_body = zones;
+        zone_write_result = unverified ? CONTROLLER_CONFIG_COMMITTED_UNVERIFIED : CONTROLLER_CONFIG_NOT_COMMITTED;
+        assert(update_connection() && !refresh_zone_label(true));
+        assert(!controller_connection_ready(&s_connection));
+        char current[64]; bridge_client_get_current_zone_id(current, sizeof(current));
+        assert(!strcmp(current, "roon:removed"));
+    }
+    reset("http://192.168.1.2:8088", false);
+    strcpy(fixture.value.zone_id, "roon:removed");
+    assert(update_connection() && !refresh_zone_label(true));
+    assert(!strcmp(fixture.value.zone_id, "roon:removed") && !controller_connection_ready(&s_connection));
+}
+
+int main(void) { test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

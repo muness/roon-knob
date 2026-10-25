@@ -1242,6 +1242,13 @@ static bool refresh_zone_label(bool prefer_zone_id) {
                 break;
             }
         }
+        /* Keep an available saved zone; otherwise use the first valid zone,
+         * just as on initial setup. Publish it only after verified persistence. */
+        if (!selected_zone_id[0]) {
+            rk_strlcpy(selected_zone_id, s_state.zones[0].id, sizeof(selected_zone_id));
+            rk_strlcpy(zone_label_copy, s_state.zones[0].name, sizeof(zone_label_copy));
+            persist_zone = true;
+        }
         success = zone_label_copy[0] != '\0';
     }
     unlock_state();
