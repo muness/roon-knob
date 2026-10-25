@@ -76,7 +76,7 @@ static bool settings_about, settings_reset;
 static int settings_detail, edit_kind, forget_index = -1;
 static char edit_ssid[33], forget_ssid[33], displayed_networks[RK_MAX_WIFI][33];
 static lv_obj_t *entry, *detail_label;
-static bool recovery_active, brightness_dirty;
+static bool recovery_active, recovery_choose_zone, brightness_dirty;
 static int64_t brightness_changed_ms, recovery_check_ms;
 static char recovery_title[64], recovery_text[600];
 static char settings_notice[100];
@@ -837,8 +837,8 @@ static void render(void) {
     lv_label_set_text(detail_label, recovery_text);
     primary = button(overlay, -52, 278, 96, ACTION_SETTINGS);
     button_text(primary, "Settings");
-    secondary = button(overlay, 52, 278, 96, wifi_mgr_is_ap_mode() ? ACTION_WIFI_DETAILS : ACTION_REFRESH);
-    button_text(secondary, wifi_mgr_is_ap_mode() ? "Wi-Fi" : "Retry");
+    secondary = button(overlay, 52, 278, 96, recovery_choose_zone ? ACTION_ZONES : wifi_mgr_is_ap_mode() ? ACTION_WIFI_DETAILS : ACTION_REFRESH);
+    button_text(secondary, recovery_choose_zone ? "Zones" : wifi_mgr_is_ap_mode() ? "Wi-Fi" : "Retry");
     rebuilding = false;
     return;
   }
@@ -1376,6 +1376,7 @@ void controller_touch_navigation_process(void) {
     char title[64] = "", text[600] = "", ip[32] = "";
     bool has_ip = wifi_mgr_get_ip(ip, sizeof(ip));
     bool recovery = true;
+    bool choose_zone = false;
     if (wifi_mgr_is_ap_mode()) {
       snprintf(title, sizeof(title), "Set up Wi-Fi");
       snprintf(text, sizeof(text), "On your phone:\nJoin %s\nOpen 192.168.4.1\nOr use Wi-Fi in Settings.", platform_provisioning_ssid());
@@ -1389,11 +1390,20 @@ void controller_touch_navigation_process(void) {
     } else if (!controller_connection_ready(&connection)) {
       char summary[100];
       snprintf(title, sizeof(title), "Music connection");
-      bridge_client_connection_status(summary, sizeof(summary), text, sizeof(text));
-      if (!*text) snprintf(text, sizeof(text), "%s", summary);
+      controller_connection_summary(&connection, summary, sizeof(summary));
+      choose_zone = !connection.offline && !connection.stale && !connection.ambiguous &&
+          connection.reachable && connection.zones_current && connection.zone_count > 0 &&
+          !connection.selected_zone_available;
+      if (choose_zone) {
+        snprintf(title, sizeof(title), "Choose a zone");
+        snprintf(text, sizeof(text), "Your bridge has %d zones.\nChoose one to control.", connection.zone_count);
+      } else {
+        snprintf(text, sizeof(text), "%s\n\nDetails in Settings.", summary);
+      }
     } else recovery = false;
-    bool changed = recovery_active != recovery || strcmp(recovery_title, title) || strcmp(recovery_text, text);
+    bool changed = recovery_active != recovery || recovery_choose_zone != choose_zone || strcmp(recovery_title, title) || strcmp(recovery_text, text);
     recovery_active = recovery;
+    recovery_choose_zone = choose_zone;
     snprintf(recovery_title, sizeof(recovery_title), "%s", title);
     snprintf(recovery_text, sizeof(recovery_text), "%s", text);
     if (changed && screen == CONTROLLER_SCREEN_ARTWORK) render();

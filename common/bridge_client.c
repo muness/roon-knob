@@ -99,7 +99,7 @@ static void bridge_json_allocator_init(void) {
 
 typedef struct {
     controller_config_endpoint_token_t endpoint;
-    uint32_t revision, selection_generation, media_generation;
+    uint32_t revision, selection_generation, media_generation, volume_command_generation;
     unsigned network_epoch;
     char bridge[128], zone[64];
     uint64_t observed_ms;
@@ -160,6 +160,15 @@ static uint32_t s_selection_generation;
 static atomic_uint s_media_generation;
 static atomic_uint s_inventory_generation;
 static response_context_t s_volume_context;
+/* A successful HTTP control can precede the provider's reported volume.
+ * Keep local detents together briefly, then always yield to server truth. */
+#define BRIDGE_VOLUME_SETTLE_MS 1500
+static uint32_t s_volume_command_generation;
+static bool s_volume_pending;
+static uint64_t s_volume_pending_until;
+static float s_volume_target, s_volume_target_min, s_volume_target_max, s_volume_target_step;
+static response_context_t s_volume_target_context;
+
 static response_context_t s_playback_request_context;
 static char *s_artwork_identity;
 static uint64_t s_artwork_identity_generation;
@@ -327,6 +336,7 @@ static bool capture_response_context(response_context_t *context) {
     context->network_epoch = atomic_load_explicit(&s_network_epoch, memory_order_acquire);
     lock_state();
     context->selection_generation = s_selection_generation;
+    context->volume_command_generation = s_volume_command_generation;
     unlock_state();
     context->observed_ms = platform_millis();
     return bridge_endpoint_snapshot(context->bridge, sizeof(context->bridge),
@@ -365,6 +375,27 @@ static void post_ui_message_copy(char *msg_copy);
 static void strip_trailing_slashes(char *url);
 static void post_ui_status_copy(bool *status_copy);
 
+/* Called with the state lock. Only volume is reconciled; metadata stays fresh. */
+static void reconcile_volume(const response_context_t *context, float *volume,
+                             float minimum, float maximum, float step, bool server_observation) {
+    if (!s_volume_pending) return;
+    bool same = context->revision == s_volume_target_context.revision &&
+        context->endpoint.generation == s_volume_target_context.endpoint.generation &&
+        context->network_epoch == s_volume_target_context.network_epoch &&
+        context->selection_generation == s_volume_target_context.selection_generation &&
+        !strcmp(context->zone, s_volume_target_context.zone) &&
+        !strcmp(context->bridge, s_volume_target_context.bridge) &&
+        minimum == s_volume_target_min && maximum == s_volume_target_max && step == s_volume_target_step;
+    if (!same || step <= 0 || platform_millis() >= s_volume_pending_until) {
+        s_volume_pending = false;
+    } else if (server_observation && context->volume_command_generation == s_volume_command_generation &&
+               fabsf(*volume - s_volume_target) < 0.01f) {
+        s_volume_pending = false;
+    } else {
+        *volume = s_volume_target;
+    }
+}
+
 static void ui_update_cb(void *arg) {
     pending_media_t *pending = arg;
     if (!pending) return;
@@ -374,6 +405,7 @@ static void ui_update_cb(void *arg) {
     controller_media_view_t *view = &pending->view;
     // Cache volume for optimistic UI updates
     lock_state();
+    reconcile_volume(&pending->context, &view->volume, view->volume_min, view->volume_max, view->volume_step, false);
     s_last_known_volume = view->volume;
     s_last_known_volume_min = view->volume_min;
     s_last_known_volume_max = view->volume_max;
@@ -1126,6 +1158,7 @@ static bool fetch_now_playing_snapshot(struct now_playing_state *state,
         snprintf(next.image_key, sizeof(next.image_key), "art:%016llx:%llu",
                  (unsigned long long)fingerprint, (unsigned long long)s_artwork_identity_generation);
     }
+    reconcile_volume(&request, &next.volume, next.volume_min, next.volume_max, next.volume_step, true);
     s_last_known_volume_fixed = !adjustable;
     s_last_known_volume = next.volume;
     s_last_known_volume_min = next.volume_min;
@@ -1241,6 +1274,13 @@ static bool refresh_zone_label(bool prefer_zone_id) {
                 persist_zone = true;
                 break;
             }
+        }
+        /* Keep an available saved zone; otherwise use the first valid zone,
+         * just as on initial setup. Publish it only after verified persistence. */
+        if (!selected_zone_id[0]) {
+            rk_strlcpy(selected_zone_id, s_state.zones[0].id, sizeof(selected_zone_id));
+            rk_strlcpy(zone_label_copy, s_state.zones[0].name, sizeof(zone_label_copy));
+            persist_zone = true;
         }
         success = zone_label_copy[0] != '\0';
     }
@@ -1521,6 +1561,14 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     bool planned = bridge_command_plan_build(command, &context, &plan);
     if (planned && plan.accepted && plan.updates_volume) {
         s_last_known_volume = plan.predicted_volume;
+        ++s_volume_command_generation;
+        s_volume_pending = true;
+        s_volume_pending_until = platform_millis() + BRIDGE_VOLUME_SETTLE_MS;
+        s_volume_target = plan.predicted_volume;
+        s_volume_target_min = context.volume_min;
+        s_volume_target_max = context.volume_max;
+        s_volume_target_step = context.volume_step;
+        s_volume_target_context = command_request;
     }
     unlock_state();
 
@@ -1557,6 +1605,15 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     }
 
     bool sent = send_control_json(plan.json, &command_request);
+    if (plan.updates_volume) {
+        lock_state();
+        if (!sent) {
+            s_volume_pending = false;
+            s_last_known_volume = context.volume;
+        }
+        s_trigger_poll = true;
+        unlock_state();
+    }
     if (!sent &&
         plan.failure_feedback > BRIDGE_COMMAND_FEEDBACK_NONE &&
         plan.failure_feedback <= BRIDGE_COMMAND_FEEDBACK_VOLUME_FAILED) {

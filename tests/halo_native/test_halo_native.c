@@ -51,6 +51,8 @@ int xTaskCreate(void (*task)(void *), const char *name, unsigned stack,
 }
 static uint32_t now;
 static bool fixture_ap, fixture_has_ip = true, fixture_ready = true;
+static bool fixture_connection_override, fixture_selection_persists = true;
+static controller_connection_t fixture_connection;
 static controller_config_durability_t fixture_durability = CONTROLLER_CONFIG_DURABILITY_DURABLE;
 int64_t esp_timer_get_time(void) { return (int64_t)now * 1000; }
 bool bridge_client_get_request_base(char *out, size_t n) {
@@ -74,16 +76,18 @@ int bridge_client_get_zones(bridge_zone_t *out, int max) {
   return count;
 }
 bridge_zone_selection_result_t bridge_client_select_zone_value(const char *id) {
-  (void)id;
-  return (bridge_zone_selection_result_t){.found=true, .persisted=true};
+  if (fixture_selection_persists) {
+    snprintf(fixture_zone, sizeof(fixture_zone), "%s", id);
+    fixture_connection.selected_zone_available = true;
+  }
+  return (bridge_zone_selection_result_t){.found=true, .persisted=fixture_selection_persists};
 }
 void bridge_client_connection_snapshot(controller_connection_t *out) {
   memset(out, 0, sizeof(*out));
   out->last_success_ms = now;
-}
-bool controller_connection_ready(const controller_connection_t *c) {
-  (void)c;
-  return fixture_ready;
+  out->reachable = out->zones_current = out->selected_zone_available = fixture_ready;
+  out->zone_count = fixture_ready ? 64 : -1;
+  if (fixture_connection_override) *out = fixture_connection;
 }
 void bridge_client_request_poll(void) {}
 void bridge_client_connection_status(char *summary, size_t n, char *detail,
@@ -543,6 +547,48 @@ int main(int argc, char **argv) {
   advance(1100); controller_touch_navigation_process();
   assert(!recovery_active && lv_obj_has_flag(overlay, LV_OBJ_FLAG_HIDDEN));
   assert(artwork_only);
+  /* A reachable bridge with a removed/unselected zone is not an outage. */
+  fixture_connection_override = true;
+  fixture_connection = (controller_connection_t){.reachable=true, .zones_current=true, .zone_count=7};
+  for (int missing = 0; missing < 2; missing++) {
+    snprintf(fixture_zone, sizeof(fixture_zone), "%s", missing ? "roon:removed" : "");
+    change_screen(CONTROLLER_SCREEN_ARTWORK);
+    advance(1100); controller_touch_navigation_process();
+    assert(recovery_active && !strcmp(recovery_title, "Choose a zone"));
+    assert(!strcmp(lv_label_get_text(lv_obj_get_child(secondary, 0)), "Zones"));
+    lv_obj_update_layout(overlay);
+    assert(lv_obj_get_self_height(detail_label) <= lv_obj_get_height(detail_label));
+    snapshot(dir, "choose-zone");
+    click(secondary);
+    assert(screen == CONTROLLER_SCREEN_ZONES && zone_count == 64);
+    advance(2200); controller_touch_navigation_process();
+    assert(screen == CONTROLLER_SCREEN_ZONES); /* polling must not steal navigation */
+    fixture_selection_persists = false;
+    click(rows[0]);
+    assert(screen == CONTROLLER_SCREEN_ZONES);
+    fixture_selection_persists = true;
+    click(rows[0]);
+    advance(1100); controller_touch_navigation_process();
+    assert(screen == CONTROLLER_SCREEN_ARTWORK && !recovery_active);
+    fixture_connection.selected_zone_available = false;
+  }
+  /* Stale, ambiguous, offline, missing inventory and empty inventory must not offer Zones. */
+  for (int failure = 0; failure < 6; failure++) {
+    fixture_connection = (controller_connection_t){.reachable=true, .zones_current=true, .zone_count=7};
+    if (failure == 0) fixture_connection.stale = true;
+    if (failure == 1) fixture_connection.ambiguous = true;
+    if (failure == 2) fixture_connection.offline = true;
+    if (failure == 3) fixture_connection.zones_current = false;
+    if (failure == 4) fixture_connection.zone_count = 0;
+    if (failure == 5) fixture_connection.reachable = false;
+    advance(1100); controller_touch_navigation_process();
+    assert(recovery_active);
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(secondary, 0)), "Zones"));
+    lv_obj_update_layout(overlay);
+    assert(lv_obj_get_self_height(detail_label) <= lv_obj_get_height(detail_label));
+  }
+  fixture_connection_override = false;
+  advance(1100); controller_touch_navigation_process();
   fixture_durability = CONTROLLER_CONFIG_DURABILITY_VOLATILE_RECOVERY;
   advance(1100); controller_touch_navigation_process();
   assert(recovery_active && strstr(recovery_title, "storage"));
