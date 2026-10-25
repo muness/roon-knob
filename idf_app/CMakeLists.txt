@@ -45,3 +45,8 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(hiphi_dial)
+
+# LVGL 9.6 no longer maps the expansion size from Kconfig. Keep the
+# 24 KiB internal arena and the 72 KiB external arena's TLSF capacity.
+idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
+target_compile_definitions(${lvgl_lib} PUBLIC LV_MEM_POOL_EXPAND_SIZE=73728)
