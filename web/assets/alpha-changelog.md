@@ -1,12 +1,15 @@
-# Alpha v2.8.0-alpha.4 compared with Stable v2.5.2
+# Alpha v2.8.0-alpha.5 compared with Stable v2.5.2
 
 ## Requires UHC v4
 
 Use the latest Unified Hi-Fi Control v4 build with this alpha. Update your UHC server before flashing; the new Library uses v4's browse and playback APIs.
 
-Recommended for this alpha: [UHC v4.0.0-beta.9](https://github.com/open-horizon-labs/unified-hifi-control/releases/tag/v4.0.0-beta.9).
+Recommended for this alpha: [UHC v4.0.0-beta.10](https://github.com/open-horizon-labs/unified-hifi-control/releases/tag/v4.0.0-beta.10).
 
 ## What's different
+
+- **Zone selection:** keep an available saved zone; otherwise select the first available zone automatically. Recovery offers a direct Zones action if selection cannot complete.
+- **Steady ring volume:** queued playback updates and briefly lagging provider values no longer reset the next detent. Local predictions reconcile with server confirmation or a bounded settling period.
 
 - **Current stable SDKs:** ESP-IDF 6.1, LVGL 9.6, Arduino-ESP32 3.3.12 and M5Unified 0.2.28, with updated network, display and board components.
 
@@ -24,4 +27,4 @@ Recommended for this alpha: [UHC v4.0.0-beta.9](https://github.com/open-horizon-
 
 ## Testing status
 
-Earlier Dial touch previews were tested on hardware. All alpha.4 target builds and shared software tests passed; exact alpha.4 images still need their own hardware checks. A battery-life improvement has not been measured.
+All alpha.5 target builds and shared software tests passed. The volume-fixed Dial CI image was flashed on a Waveshare ESP32-S3 knob; its owner confirmed the playback screen, touch navigation and ring response, then confirmed stable volume matching Roon. The final tagged Dial image was flashed and reconnected with its saved settings. Other target images need their own hardware qualification. A battery-life improvement has not been measured.
