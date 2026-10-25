@@ -21,3 +21,5 @@ dependencies:
   esp_lcd_sh8601:
     version: '*'
     public: true
+  espressif/cjson:
+    version: "^1.7.19~2"

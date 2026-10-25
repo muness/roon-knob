@@ -5,3 +5,5 @@ dependencies:
     version: '==1.14.1'
   lvgl/lvgl:
     version: ==9.6.0~1
+  espressif/cjson:
+    version: "^1.7.19~2"

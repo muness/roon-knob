@@ -7,3 +7,5 @@ dependencies:
     version: '==9.6.0~1'
   espressif/esp_lcd_st77916:
     version: '==2.0.2'
+  espressif/cjson:
+    version: "^1.7.19~2"

@@ -7,3 +7,5 @@ dependencies:
     version: '==1.14.1'
   espressif/esp_websocket_client:
     version: '==1.8.0'
+  espressif/cjson:
+    version: "^1.7.19~2"

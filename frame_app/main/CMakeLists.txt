@@ -68,7 +68,7 @@ idf_component_register(
         esp_http_server
         esp_app_format
         driver
-        json
+        espressif__cjson
         bt
         esp_hid
         rk_ble_hid_host

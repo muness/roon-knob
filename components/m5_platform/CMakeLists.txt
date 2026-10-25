@@ -8,7 +8,7 @@ if(m5_platform_target STREQUAL "dial" OR
 endif()
 if(m5_platform_target STREQUAL "stackchan" AND m5_platform_wake_word)
     list(APPEND m5_platform_requires
-        esp_websocket_client json espressif__esp-sr nvs_flash lwip kizz_wake_word)
+        esp_websocket_client espressif__cjson espressif__esp-sr nvs_flash lwip kizz_wake_word)
 endif()
 
 idf_component_register(
