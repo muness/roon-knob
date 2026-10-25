@@ -27,6 +27,8 @@ site_workflow = ".github/workflows/firmware-site-preview.yml"
 require(workflow, "cname: firmware.hiphi.audio")
 require(workflow, "publish_dir: ./publish-root")
 require(workflow, "destination_dir: .")
+# Root channel deployments must retain the publisher workflow on gh-pages.
+require(workflow, "exclude_assets: ''")
 require(workflow, 'DEPLOY_BASE="${{ steps.channel.outputs.url }}"')
 require(workflow, '> gh-pages-build/index.html')
 require(workflow, 'cp web/index.html publish-root/index.html')
