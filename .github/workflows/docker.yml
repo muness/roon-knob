@@ -542,6 +542,16 @@ jobs:
           path: firmware-cache/dial/
           retention-days: 30
 
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-idf
+          path: |
+            idf_app/dependencies*.lock
+            idf_app/sdkconfig
+          if-no-files-found: ignore
+
   build-frame:
     name: build-frame
     needs: test-shared
@@ -690,6 +700,16 @@ jobs:
           path: firmware-cache/frame/
           retention-days: 30
 
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-frame
+          path: |
+            frame_app/dependencies*.lock
+            frame_app/sdkconfig
+          if-no-files-found: ignore
+
   build-rlcd:
     name: build-rlcd
     needs: test-shared
@@ -816,6 +836,16 @@ jobs:
           path: firmware-cache/rlcd/
           retention-days: 30
 
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-rlcd
+          path: |
+            rlcd_app/dependencies*.lock
+            rlcd_app/sdkconfig
+          if-no-files-found: ignore
+
   build-atom:
     name: build-atom-s3-joystick
     needs: test-shared
@@ -923,6 +953,16 @@ jobs:
           path: firmware-cache/atom/
           retention-days: 30
 
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-atom
+          path: |
+            atom_app/dependencies*.lock
+            atom_app/sdkconfig
+          if-no-files-found: ignore
+
   build-halo:
     name: build-halo
     needs: test-shared
@@ -1022,6 +1062,16 @@ jobs:
           name: hiphi-halo-firmware
           path: firmware-cache/halo/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-halo
+          path: |
+            halo_app/dependencies*.lock
+            halo_app/sdkconfig
+          if-no-files-found: ignore
 
   build-tough:
     name: build-m5-tough
@@ -1129,6 +1179,16 @@ jobs:
           name: hiphi-tough-firmware
           path: firmware-cache/tough/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-tough
+          path: |
+            tough_app/dependencies*.lock
+            tough_app/sdkconfig
+          if-no-files-found: ignore
 
   build-m5-betas:
     name: build-m5-beta-${{ matrix.target }}
@@ -1272,6 +1332,16 @@ jobs:
           name: hiphi-m5-beta-${{ matrix.target }}
           path: firmware-cache/m5-${{ matrix.target }}/
           retention-days: 30
+
+      - name: Save resolved dependency provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-build-m5-betas-${{ matrix.target }}
+          path: |
+            m5_beta_app/dependencies*.lock
+            m5_beta_app/sdkconfig
+          if-no-files-found: ignore
 
   build-knob-aux:
     name: build-waveshare-knob-aux-parking-image
