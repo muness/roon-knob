@@ -25,7 +25,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Verify the prepared site
@@ -46,7 +46,7 @@ jobs:
                       assert path.is_relative_to(Path.cwd()), f'Unsafe path: {manifest}'
                       assert path.is_file(), f'Missing asset: {path}'
           PY
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: .
       - name: Publish prepared site
