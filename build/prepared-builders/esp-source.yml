@@ -2493,6 +2493,8 @@ jobs:
           publish_dir: ./publish-root
           destination_dir: .
           keep_files: true
+          # The Pages publisher lives on this branch; the action otherwise deletes .github.
+          exclude_assets: ''
           cname: firmware.hiphi.audio
 
       - name: Verify every deployed firmware link
