@@ -39,7 +39,7 @@ A paired remote's keys can also start a Library shortcut on the bridge. The
 controller never stores what a key does: it reports the key and gesture to the
 bridge (`POST /knob/input`, identified by `X-Knob-Id`), and the bridge plays the
 mapped Library item on this controller's own zone. Maps and shortcuts are edited
-in the bridge web UI (Library → "Pin as shortcut", Controllers → Config), so
+in the bridge web UI (Library → "Add to Shortcuts", Controllers → Config), so
 they survive a re-flash and are shared across controllers.
 
 | Key | Gestures that can start a shortcut |
@@ -315,3 +315,21 @@ must be exercised on its target hardware for:
 
 Frame and Dial require separate hardware evidence even though they share the
 same BLE service.
+
+
+## Shortcuts on the screen
+
+On Dial and HALO, open Music → Shortcuts. Tap a row to immediately play the
+saved item in the room shown below the list. Shortcuts appears above Library;
+scroll it with touch or the encoder, and use Back to return to Music.
+Button assignments and a paired BLE remote are optional.
+
+The bridge must support the version 1 paged shortcuts API. Firmware fetches at
+most 12 rows at a time, with Previous and More shortcuts for longer lists.
+A bridge, network or room change invalidates the displayed selection. An
+uncertain playback response is never retried automatically: check Now Playing
+before deliberately trying again.
+
+UHC owns saved-item identities and source resolution. The shared firmware backend
+loads the catalog and submits the selected stable ID with an expected room;
+the round renderer does not construct provider browse references or fake HID input.

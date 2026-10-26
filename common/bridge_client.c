@@ -1686,6 +1686,131 @@ static bool shortcut_authority_current(const shortcut_authority_t *authority) {
         shortcut_request_equal(&current.request, &authority->request);
 }
 
+static atomic_bool s_shortcut_busy;
+
+bool bridge_client_shortcuts_capture(bridge_shortcuts_context_t *out) {
+    shortcut_authority_t authority;
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
+    if (!out || !controller_connection_ready(&connection) || !capture_shortcut_authority(&authority) || !authority.request.zone[0]) return false;
+    memset(out, 0, sizeof(*out));
+    snprintf(out->endpoint.base, sizeof(out->endpoint.base), "%s", authority.request.bridge);
+    out->endpoint.endpoint_generation = authority.request.endpoint.generation;
+    out->endpoint.network_epoch = authority.request.network_epoch;
+    snprintf(out->zone, sizeof(out->zone), "%s", authority.request.zone);
+    out->zone_generation = authority.request.config_zone_generation;
+    out->selection_generation = authority.request.selection_generation;
+    out->interaction_generation = authority.interaction_generation;
+    return true;
+}
+
+bool bridge_client_shortcuts_current(const bridge_shortcuts_context_t *context) {
+    bridge_shortcuts_context_t current;
+    return context && bridge_client_shortcuts_capture(&current) &&
+        current.endpoint.endpoint_generation == context->endpoint.endpoint_generation &&
+        current.endpoint.network_epoch == context->endpoint.network_epoch &&
+        current.zone_generation == context->zone_generation &&
+        current.selection_generation == context->selection_generation &&
+        current.interaction_generation == context->interaction_generation &&
+        !strcmp(current.endpoint.base, context->endpoint.base) && !strcmp(current.zone, context->zone);
+}
+
+static bool shortcut_id_valid(const char *id) {
+    if (!id || strncmp(id, "sc_", 3) || strlen(id) >= 64 || !id[3]) return false;
+    for (const char *p = id + 3; *p; p++)
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+              (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return false;
+    return true;
+}
+
+static void shortcut_text(char *out, size_t capacity, const char *text) {
+    size_t n = strlen(text);
+    if (n >= capacity) {
+        n = capacity - 1;
+        while (n && (((unsigned char)text[n] & 0xc0) == 0x80)) n--;
+    }
+    memcpy(out, text, n);
+    out[n] = 0;
+}
+
+bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
+                                   int offset, controller_shortcuts_page_t *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out)); out->next_offset = -1;
+    snprintf(out->notice, sizeof(out->notice), "Shortcuts unavailable. Tap Retry.");
+    if (offset < 0 || !bridge_client_shortcuts_current(context)) return false;
+    char url[256], *response = NULL; size_t length = 0;
+    snprintf(url, sizeof(url), "%s/api/shortcuts?offset=%d&limit=%d", context->endpoint.base,
+             offset, CONTROLLER_SHORTCUTS_PAGE_SIZE);
+    int rc = platform_http_get_bounded(url, 16384, &response, &length);
+    cJSON *root = rc == 0 && bridge_client_shortcuts_current(context)
+        ? response_document(response, length) : NULL;
+    const cJSON *version = cJSON_GetObjectItemCaseSensitive(root, "version");
+    if (root && (!cJSON_IsNumber(version) || version->valuedouble != 1))
+        snprintf(out->notice, sizeof(out->notice), "Shortcut API differs. Update UHC or firmware.");
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(root, "shortcuts");
+    const cJSON *next = cJSON_GetObjectItemCaseSensitive(root, "next_offset");
+    bool ok = cJSON_IsNumber(version) && version->valuedouble == 1 && cJSON_IsArray(items) &&
+        cJSON_GetArraySize(items) <= CONTROLLER_SHORTCUTS_PAGE_SIZE &&
+        (cJSON_IsNull(next) || (cJSON_IsNumber(next) && next->valuedouble == next->valueint && next->valueint > offset));
+    if (ok) {
+        const cJSON *item;
+        cJSON_ArrayForEach(item, items) {
+            const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
+            const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
+            const cJSON *provider = cJSON_GetObjectItemCaseSensitive(item, "provider");
+            if (!cJSON_IsString(id) || !shortcut_id_valid(id->valuestring) ||
+                !cJSON_IsString(name) || !name->valuestring[0] || !cJSON_IsString(provider)) { ok = false; break; }
+            for (int i = 0; i < out->count; i++)
+                if (!strcmp(out->items[i].id, id->valuestring)) ok = false;
+            if (!ok) break;
+            controller_shortcuts_item_t *row = &out->items[out->count++];
+            shortcut_text(row->id, sizeof(row->id), id->valuestring);
+            shortcut_text(row->name, sizeof(row->name), name->valuestring);
+            shortcut_text(row->provider, sizeof(row->provider), provider->valuestring);
+        }
+        if (cJSON_IsNumber(next)) out->next_offset = next->valueint;
+        if (!out->count && out->next_offset >= 0) ok = false;
+    }
+    cJSON_Delete(root); platform_http_free(response);
+    if (!ok) { out->count = 0; out->next_offset = -1; }
+    else snprintf(out->notice, sizeof(out->notice), "%s", out->count ? "Tap to play in current zone" : "Add shortcuts in UHC Library.");
+    return ok;
+}
+
+bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
+                                  const char *id, controller_shortcuts_page_t *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out)); out->next_offset = -1;
+    snprintf(out->notice, sizeof(out->notice), "Connection changed. Open Shortcuts again.");
+    if (!shortcut_id_valid(id) || !bridge_client_shortcuts_current(context)) return false;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&s_shortcut_busy, &expected, true)) {
+        snprintf(out->notice, sizeof(out->notice), "Shortcut still sending. Check now playing.");
+        return false;
+    }
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "zone_id", context->zone);
+    char *json = cJSON_PrintUnformatted(body); cJSON_Delete(body);
+    if (!json) { atomic_store(&s_shortcut_busy, false); return false; }
+    char url[256], *response = NULL; size_t length = 0;
+    snprintf(url, sizeof(url), "%s/api/shortcuts/%s/play", context->endpoint.base, id);
+    /* Check immediately before admission. Never retry an uncertain mutation. */
+    int rc = bridge_client_shortcuts_current(context) ? platform_http_post_json(url, json, &response, &length) : -1;
+    cJSON_free(json);
+    cJSON *root = rc == 0 && bridge_client_shortcuts_current(context) ? response_document(response, length) : NULL;
+    const cJSON *code = cJSON_GetObjectItemCaseSensitive(root, "code");
+    const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+    if (!cJSON_IsString(message)) message = cJSON_GetObjectItemCaseSensitive(root, "error");
+    out->accepted = cJSON_IsString(code) && !strcmp(code->valuestring, "accepted");
+    shortcut_text(out->notice, sizeof(out->notice), cJSON_IsString(message) ? message->valuestring :
+                  "Playback uncertain. Check now playing.");
+    cJSON_Delete(root); platform_http_free(response);
+    atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+    bridge_client_request_poll();
+    return out->accepted;
+}
+
 static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
                                    const shortcut_authority_t *authority) {
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
@@ -1723,8 +1848,6 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
     platform_http_free(resp);
     return ok;
 }
-
-static atomic_bool s_shortcut_busy;
 
 typedef struct {
     controller_shortcut_event_t event;

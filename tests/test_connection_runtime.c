@@ -97,6 +97,13 @@ int platform_http_get(const char *url, char **out, size_t *len) {
     *len = *out ? strlen(*out) : 0;
     return http_ok ? 0 : -1;
 }
+static const char *catalog_reply = "{}";
+int platform_http_get_bounded(const char *url, size_t max_bytes, char **out, size_t *length) {
+    assert(strstr(url, "/api/shortcuts?offset="));
+    assert(max_bytes <= 16384);
+    *out = strdup(catalog_reply); *length = strlen(*out);
+    return 0;
+}
 void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
 void platform_http_free(char *value) { free(value); }
 void platform_task_finish(void) {}
@@ -141,7 +148,7 @@ static char shortcut_url[128], shortcut_body[96];
 static const char *shortcut_reply = "{}";
 static bool shortcut_http_ok = true, replace_during_shortcut;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
-    if (strstr(url, "/knob/input")) {
+    if (strstr(url, "/knob/input") || strstr(url, "/api/shortcuts/")) {
         ++shortcut_posts;
         snprintf(shortcut_url, sizeof(shortcut_url), "%s", url);
         snprintf(shortcut_body, sizeof(shortcut_body), "%s", body);
@@ -342,6 +349,53 @@ static void test_shortcut_authority_at_admission(void) {
         assert(!atomic_load(&s_shortcut_busy));
         hold_shortcut_task = false;
     }
+}
+
+static void test_named_shortcuts_are_bounded_and_fenced(void) {
+    char unicode[5];
+    shortcut_text(unicode, sizeof(unicode), "音楽");
+    assert(!strcmp(unicode, "音"));
+    controller_shortcuts_page_t page;
+    bridge_shortcuts_context_t context;
+    for (int change = 0; change < 7; change++) {
+        connect_for_shortcut();
+        assert(bridge_client_shortcuts_capture(&context));
+        shortcut_posts = 0; shortcut_http_ok = true;
+        shortcut_reply = "{\"code\":\"accepted\",\"message\":\"Command accepted\"}";
+        switch (change) {
+        case 0: generation += 2; break; /* A->B->A, same URL */
+        case 1: atomic_fetch_add(&s_network_epoch, 1); break;
+        case 2: s_selection_generation += 2; break;
+        case 3: fixture.zone_generation += 2; break;
+        case 4: interaction_generation += 2; break;
+        case 5: ++fixture.revision; break; /* unrelated preferences allowed */
+        }
+        bool ok = bridge_client_shortcuts_play(&context, "sc_album", &page);
+        assert(ok == (change >= 5));
+        assert(shortcut_posts == (change >= 5 ? 1u : 0u));
+    }
+    assert(!strcmp(shortcut_url, "http://192.168.1.2:8088/api/shortcuts/sc_album/play"));
+    assert(!strcmp(shortcut_body, "{\"zone_id\":\"roon:room\"}"));
+    assert(!bridge_client_shortcuts_play(&context, "sc_../../control", &page));
+    shortcut_posts = 0;
+    atomic_store(&s_shortcut_busy, true);
+    assert(!bridge_client_shortcuts_play(&context, "sc_album", &page));
+    assert(shortcut_posts == 0);
+    atomic_store(&s_shortcut_busy, false);
+    shortcut_http_ok = false;
+    assert(!bridge_client_shortcuts_play(&context, "sc_album", &page));
+    assert(shortcut_posts == 1 && strstr(page.notice, "uncertain"));
+    /* Reading a page never fires playback. Old/unknown schemas fail closed. */
+    catalog_reply = "{\"shortcuts\":[]}";
+    assert(!bridge_client_shortcuts_fetch(&context, 0, &page));
+    catalog_reply = "{\"version\":1,\"shortcuts\":[{\"id\":\"sc_album\",\"name\":\"Evening\",\"provider\":\"LMS\"}],\"next_offset\":null}";
+    assert(bridge_client_shortcuts_fetch(&context, 0, &page));
+    assert(page.count == 1 && !strcmp(page.items[0].id, "sc_album"));
+    catalog_reply = "{\"version\":1,\"shortcuts\":[],\"next_offset\":12}";
+    assert(!bridge_client_shortcuts_fetch(&context, 0, &page));
+    catalog_reply = "{\"version\":1,\"shortcuts\":[{\"id\":\"sc_album\",\"name\":\"Evening\",\"provider\":\"LMS\"}],\"next_offset\":0}";
+    assert(!bridge_client_shortcuts_fetch(&context, 0, &page));
+    assert(shortcut_posts == 1);
 }
 
 static void test_fixed_volume_response_and_zone_switch(void) {
@@ -941,6 +995,7 @@ static void test_volume_prediction_reconciliation(void) {
 
 int main(void) {
     test_shortcut_authority_at_admission();
+    test_named_shortcuts_are_bounded_and_fenced();
     test_config_fetch_applies_device_settings_and_install();
     test_failed_device_setting_is_retried_without_a_refetch();
     test_volume_prediction_reconciliation();
