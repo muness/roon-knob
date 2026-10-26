@@ -22,6 +22,7 @@ static const char *TAG = "ota";
  * the separately published result under the short admission lock. */
 static ota_info_t s_ota_info;
 static ota_info_t s_published;
+static bridge_request_endpoint_t s_result_endpoint;
 static os_critical_t s_ota_lock = OS_CRITICAL_INITIALIZER;
 typedef enum { OTA_JOB_CHECK, OTA_JOB_UPDATE, OTA_JOB_INSTALL } ota_job_kind_t;
 typedef struct {
@@ -534,6 +535,7 @@ static void ota_worker(void *arg) {
          * either joins this worker or reserves a new one after it publishes idle. */
         os_critical_enter(&s_ota_lock);
         s_published = s_ota_info;
+        s_result_endpoint = job.endpoint;
         bool again = s_have_pending;
         if (again) {
             s_active_job = s_pending_job;
@@ -574,7 +576,10 @@ static ota_request_result_t ota_submit(ota_job_kind_t kind, const char *from) {
         return result;
     }
     if (kind == OTA_JOB_UPDATE) {
-        if (s_published.status != OTA_STATUS_AVAILABLE) {
+        if (s_published.status != OTA_STATUS_AVAILABLE ||
+            job.endpoint.endpoint_generation != s_result_endpoint.endpoint_generation ||
+            job.endpoint.network_epoch != s_result_endpoint.network_epoch ||
+            strcmp(job.endpoint.base, s_result_endpoint.base)) {
             os_critical_leave(&s_ota_lock); return OTA_REQUEST_STALE;
         }
         memcpy(job.selected_version, s_published.available_version, sizeof(job.selected_version));
