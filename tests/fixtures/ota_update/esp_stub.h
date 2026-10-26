@@ -9,6 +9,7 @@ typedef int esp_err_t;
 #define ESP_FAIL -1
 #define ESP_IMAGE_HEADER_MAGIC 0xe9
 #define ESP_IMAGE_MAX_SEGMENTS 16
+#define ESP_CHIP_ID_ESP32 0
 #define ESP_CHIP_ID_ESP32S3 9
 #define ESP_IMAGE_FLASH_SIZE_8MB 3
 #define ESP_IMAGE_FLASH_SIZE_16MB 4
@@ -59,5 +60,6 @@ esp_err_t esp_ota_write(esp_ota_handle_t, const void *, size_t);
 esp_err_t esp_ota_abort(esp_ota_handle_t);
 esp_err_t esp_ota_end(esp_ota_handle_t);
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t *);
+esp_err_t esp_ota_mark_app_valid_cancel_rollback(void);
 const esp_app_desc_t *esp_app_get_description(void);
 void esp_restart(void);

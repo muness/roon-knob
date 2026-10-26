@@ -20,7 +20,7 @@ set(SRC_FILES
     "platform_identity_idf.c"
     "platform_provisioning_dial.c"
     "battery.c"
-    "ota_update.c"
+    "../../common/ota_update.c"
     "controller_input_profile_dial.c"
     "controller_presentation_dial.c"
     "ble_hid_host_dial.c"
