@@ -569,7 +569,9 @@ static ota_request_result_t ota_submit(ota_job_kind_t kind, const char *from) {
         if (same_install(&job, &s_active_job) ||
             (s_have_pending && same_install(&job, &s_pending_job))) {
             result = OTA_REQUEST_COALESCED;
-        } else if (kind == OTA_JOB_INSTALL && !s_have_pending) {
+        } else if (kind == OTA_JOB_INSTALL && s_active_job.kind == OTA_JOB_CHECK && !s_have_pending) {
+            /* A check returns to this worker. An install/update may reboot,
+             * so never accept distinct work behind a flash operation. */
             s_pending_job = job; s_have_pending = true; result = OTA_REQUEST_ACCEPTED;
         }
         os_critical_leave(&s_ota_lock);

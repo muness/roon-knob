@@ -275,6 +275,10 @@ static void test_concurrent_admission_and_status(void) {
         accepted+=caller_results[i]==OTA_REQUEST_ACCEPTED;
     }
     assert(accepted==1 && task_creates==1 && s_ota_busy && !s_have_pending);
+    ++endpoint_generation;
+    assert(ota_request_install_result("2.7.0")==OTA_REQUEST_BUSY);
+    assert(!s_have_pending); /* cannot park accepted work behind a reboot */
+    --endpoint_generation;
     pthread_t reader; atomic_store(&read_snapshots,true);
     assert(!pthread_create(&reader,NULL,snapshot_reader,NULL));
     hold_worker=false; held_worker(held_worker_arg);
