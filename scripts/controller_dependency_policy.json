@@ -578,7 +578,11 @@
     "frame|common/controller_ble_input.c|common/controller_shortcut_key.h",
     "frame|common/controller_ble_input.c|common/platform/platform_task.h",
     "frame|common/controller_ble_input.c|common/platform/platform_time.h",
-    "frame|common/controller_shortcut_key.c|common/controller_shortcut_key.h"
+    "frame|common/controller_shortcut_key.c|common/controller_shortcut_key.h",
+    "dial|common/controller_input.c|common/controller_effect_context.h",
+    "dial|common/bridge_client.c|common/controller_effect_context.h",
+    "frame|common/controller_input.c|common/controller_effect_context.h",
+    "frame|common/bridge_client.c|common/controller_effect_context.h"
   ],
   "grandfathered_edges": [
     {

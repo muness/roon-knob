@@ -18,6 +18,8 @@ static platform_mdns_observation_t advertised;
 static uint64_t clock_ms;
 static uint32_t generation;
 static unsigned discovery_calls, resolve_calls, http_calls, writes;
+static uint32_t interaction_generation;
+uint32_t controller_effect_context_generation(void) { return interaction_generation; }
 static bool mdns_ready = true;
 bool platform_mdns_is_ready(void) { return mdns_ready; }
 static bool resolution_ok, http_ok, race;
@@ -43,7 +45,14 @@ static void (*queued)(void *);
 static void *queued_arg;
 static bool defer_zone_count;
 static void *queued_zone_count;
-bool controller_config_snapshot(controller_config_snapshot_t *out) { *out = fixture; return true; }
+static bool change_during_snapshot;
+bool controller_config_snapshot(controller_config_snapshot_t *out) {
+    *out = fixture;
+    if (change_during_snapshot) {
+        change_during_snapshot = false; ++fixture.revision; ++generation;
+    }
+    return true;
+}
 bool controller_config_capture_endpoint_token(controller_config_endpoint_token_t *out) {
     memset(out, 0, sizeof(*out)); out->generation = generation;
     strcpy(out->bridge_base, fixture.value.bridge_base);
@@ -230,7 +239,9 @@ static void shortcut_send(const char *reply, bool http_ok, bool expect_ok,
     const unsigned before = shortcut_posts;
     controller_shortcut_event_t event = {0x0223, CONTROLLER_SHORTCUT_GESTURE_LONG};
     (void)expect_ok; /* the blocking send reports the bridge's verdict */
-    assert(send_shortcut_blocking(&event) == expect_ok);
+    shortcut_authority_t authority;
+    assert(capture_shortcut_authority(&authority));
+    assert(send_shortcut_blocking(&event, &authority) == expect_ok);
     assert(shortcut_posts == before + 1);
     assert(strcmp(last_message, expect_message) == 0);
 }
@@ -296,6 +307,32 @@ static void test_shortcut_submit_is_single_flight_and_readiness_gated(void) {
     assert(!bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
     assert(shortcut_posts == posts && strcmp(last_message, "Not ready") == 0);
 }
+static void test_shortcut_authority_at_admission(void) {
+    connect_for_shortcut();
+    shortcut_authority_t authority;
+    change_during_snapshot = true;
+    assert(!capture_shortcut_authority(&authority));
+    for (int change = 0; change < 7; ++change) {
+        connect_for_shortcut();
+        shortcut_posts = 0; hold_shortcut_task = true;
+        shortcut_reply = "{\"code\":\"accepted\"}";
+        assert(bridge_client_submit_shortcut(0x223, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
+        switch (change) {
+        case 0: strcpy(fixture.value.bridge_base, "http://other"); ++generation; break;
+        case 1: generation += 2; break; /* endpoint A->B->A */
+        case 2: atomic_fetch_add(&s_network_epoch, 1); break;
+        case 3: s_selection_generation += 2; break;
+        case 4: fixture.zone_generation += 2; break;
+        case 5: interaction_generation += 2; break; /* media->picker->media */
+        case 6: ++fixture.revision; ++s_volume_command_generation; break;
+        }
+        held_shortcut_fn(held_shortcut_arg);
+        assert(shortcut_posts == (change == 6 ? 1u : 0u));
+        assert(!atomic_load(&s_shortcut_busy));
+        hold_shortcut_task = false;
+    }
+}
+
 static void test_fixed_volume_response_and_zone_switch(void) {
     test_volume_uses_current_connection_evidence();
     struct now_playing_state state = {0};
@@ -892,6 +929,7 @@ static void test_volume_prediction_reconciliation(void) {
 }
 
 int main(void) {
+    test_shortcut_authority_at_admission();
     test_config_fetch_applies_device_settings_and_install();
     test_failed_device_setting_is_retried_without_a_refetch();
     test_volume_prediction_reconciliation();

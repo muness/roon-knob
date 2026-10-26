@@ -16,6 +16,7 @@
 #include "os_mutex.h"
 #include "controller_presentation.h"
 #include "controller_shortcut_key.h"
+#include "controller_effect_context.h"
 #include "controller_view.h"
 #include "controller_view_compat.h"
 #include "wifi_manager.h"
@@ -103,6 +104,7 @@ static void bridge_json_allocator_init(void) {
 typedef struct {
     controller_config_endpoint_token_t endpoint;
     uint32_t revision, selection_generation, media_generation, volume_command_generation;
+    uint32_t config_zone_generation;
     unsigned network_epoch;
     char bridge[128], zone[64];
     uint64_t observed_ms;
@@ -336,6 +338,7 @@ static bool capture_response_context(response_context_t *context) {
     if (!controller_config_snapshot(&config) ||
         !controller_config_capture_endpoint_token(&context->endpoint)) return false;
     context->revision = config.revision;
+    context->config_zone_generation = config.zone_generation;
     context->network_epoch = atomic_load_explicit(&s_network_epoch, memory_order_acquire);
     lock_state();
     context->selection_generation = s_selection_generation;
@@ -1628,23 +1631,61 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     return sent;
 }
 
-static bool send_shortcut_blocking(const controller_shortcut_event_t *event) {
+typedef struct {
+    response_context_t request;
+    uint32_t interaction_generation;
+} shortcut_authority_t;
+
+static bool shortcut_request_equal(const response_context_t *a, const response_context_t *b) {
+    return a->endpoint.generation == b->endpoint.generation &&
+        a->config_zone_generation == b->config_zone_generation &&
+        a->network_epoch == b->network_epoch &&
+        a->selection_generation == b->selection_generation &&
+        !strcmp(a->bridge, b->bridge) && !strcmp(a->zone, b->zone);
+}
+
+/* Double collection rejects a mixed snapshot without holding config/state locks
+ * across effects. The broad revision is used only to establish coherence, not
+ * to cancel valid work when unrelated preferences or media observations change. */
+static bool capture_shortcut_authority(shortcut_authority_t *out) {
+    response_context_t first, second;
+    uint32_t interaction = controller_effect_context_generation();
+    if (!capture_response_context(&first) || !capture_response_context(&second) ||
+        first.revision != second.revision || !shortcut_request_equal(&first, &second) ||
+        interaction != controller_effect_context_generation() ||
+        !atomic_load_explicit(&s_network_ready, memory_order_acquire)) return false;
+    out->request = second;
+    out->interaction_generation = interaction;
+    return second.bridge[0] != '\0';
+}
+
+static bool shortcut_authority_current(const shortcut_authority_t *authority) {
+    shortcut_authority_t current;
+    return capture_shortcut_authority(&current) &&
+        current.interaction_generation == authority->interaction_generation &&
+        shortcut_request_equal(&current.request, &authority->request);
+}
+
+static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
+                                   const shortcut_authority_t *authority) {
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
     if (!controller_shortcut_build_body(event, body, sizeof(body))) return false;
 
-    response_context_t request;
-    if (!capture_response_context(&request) || !request.bridge[0]) {
-        post_ui_message("Not ready");
-        return false;
-    }
+    /* Admission: stale queued work cannot follow a new bridge/context. Once
+     * admitted, HTTP uses this immutable endpoint; remote effects are not revocable. */
+    if (!shortcut_authority_current(authority)) return false;
     char url[256];
-    snprintf(url, sizeof(url), "%s/knob/input", request.bridge);
+    snprintf(url, sizeof(url), "%s/knob/input", authority->request.bridge);
     char *resp = NULL;
     size_t resp_len = 0;
     int ret = platform_http_post_json(url, body, &resp, &resp_len);
-    if (ret != 0 || !response_context_current(&request)) {
+    if (!shortcut_authority_current(authority)) {
         platform_http_free(resp);
-        if (ret != 0) post_ui_message("Shortcut failed");
+        return false;
+    }
+    if (ret != 0) {
+        platform_http_free(resp);
+        post_ui_message("Shortcut failed");
         return false;
     }
 
@@ -1667,11 +1708,12 @@ static atomic_bool s_shortcut_busy;
 
 typedef struct {
     controller_shortcut_event_t event;
+    shortcut_authority_t authority;
 } shortcut_job_t;
 
 static void shortcut_task(void *arg) {
     shortcut_job_t *job = arg;
-    (void)send_shortcut_blocking(&job->event);
+    (void)send_shortcut_blocking(&job->event, &job->authority);
     free(job);
     atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
 }
@@ -1702,6 +1744,11 @@ bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
         return false;
     }
     job->event = event;
+    if (!capture_shortcut_authority(&job->authority)) {
+        free(job);
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+        return false;
+    }
     if (platform_task_start_external_stack("shortcut_input", 6144,
                                            shortcut_task, job) != 0) {
         free(job);
