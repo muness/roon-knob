@@ -20,6 +20,10 @@
 
 #include "cJSON.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define CONTROLLER_DEVICE_BRIGHTNESS_MIN 5
 #define CONTROLLER_DEVICE_BRIGHTNESS_MAX 100
 #define CONTROLLER_DEVICE_SOUND_VOLUME_MAX 2
@@ -50,15 +54,19 @@ bool controller_device_settings_parse(const cJSON *config, controller_device_set
  * was nothing to deliver, false when the target could not store or queue them. */
 bool controller_device_settings_apply(const controller_device_settings_t *settings);
 
-/* The bridge serves a config hash once: after the device accepts it, the same values are never
- * fetched again. So a change the target failed to apply is kept here and retried, instead of being
- * acknowledged and lost. submit() applies now and keeps the values pending on failure (replacing any
- * older pending set); retry_pending() is called from the bridge poll loop and gives up after
- * CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES failed attempts so a persistent fault is not replayed
- * forever. Single-threaded: both run on the bridge worker. */
+/* Full snapshots replace pending remote work. Endpoint generations reject ABA.
+ * Queue acceptance is not application; inspect status for the terminal outcome.
+ * Local UI edits invalidate fields before their effect, portal edits use submit_local.
+ * retry_pending only schedules the actor; it never mutates target state itself. */
 #define CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES 5
-void controller_device_settings_submit(const controller_device_settings_t *settings);
+typedef enum { CDS_STATUS_IDLE, CDS_STATUS_PENDING, CDS_STATUS_APPLIED,
+               CDS_STATUS_CANCELLED, CDS_STATUS_EXHAUSTED } controller_device_settings_status_t;
+void controller_device_settings_submit(const controller_device_settings_t *settings,
+                                        uint32_t endpoint_generation);
+void controller_device_settings_local_edit(uint32_t fields);
+bool controller_device_settings_submit_local(const controller_device_settings_t *settings);
 void controller_device_settings_retry_pending(void);
+controller_device_settings_status_t controller_device_settings_status(void);
 
 /* Platform hook, defined once per target. Called only with at least one present, valid field.
  * Returns true when every present field that applies to the device is now in effect (or already
@@ -72,3 +80,7 @@ bool platform_device_settings_apply(const controller_device_settings_t *settings
  * {"action":"install","from_version":"<string>"}; the version is copied to from_version (which may
  * be empty). Any other shape, or a version that does not fit, yields false and an empty string. */
 bool controller_firmware_update_parse(const cJSON *config, char *from_version, size_t capacity);
+
+#ifdef __cplusplus
+}
+#endif

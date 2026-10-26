@@ -1,5 +1,6 @@
 /* Shared 360px round touch navigation; hardware and power policy stay target-owned. */
 #include "controller_touch_navigation.h"
+#include "controller_device_settings.h"
 #include "bridge_client.h"
 #include "cJSON.h"
 #include "controller_config.h"
@@ -735,7 +736,8 @@ static void brightness_changed(lv_event_t *event) {
   brightness = lv_slider_get_value(lv_event_get_target(event));
   platform_touch_set_brightness(brightness);
   lv_label_set_text_fmt(lv_event_get_user_data(event), "%d%%", brightness);
-  brightness_dirty = true;
+  controller_device_settings_local_edit(CDS_BRIGHTNESS);
+    brightness_dirty = true;
   brightness_changed_ms = esp_timer_get_time() / 1000;
 }
 static void carousel_end(lv_event_t *e) {
@@ -1364,6 +1366,7 @@ void controller_touch_navigation_process(void) {
   int64_t clock_ms = esp_timer_get_time() / 1000;
   if (brightness_dirty && clock_ms - brightness_changed_ms >= 700) {
     brightness_dirty = false;
+    controller_device_settings_local_edit(CDS_BRIGHTNESS);
     bool saved = platform_touch_save_brightness(brightness);
     snprintf(settings_notice, sizeof(settings_notice), "%s", saved ? "Brightness saved" : "Brightness could not be saved");
     if (screen == CONTROLLER_SCREEN_SETTINGS && !settings_detail && !edit_kind)

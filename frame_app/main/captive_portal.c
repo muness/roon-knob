@@ -1,3 +1,4 @@
+#include "controller_device_settings.h"
 #include "captive_portal.h"
 #include "portal_trace.h"
 #include "portal_brand.h"
@@ -953,12 +954,13 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
   const bool show_ip = get_form_field(body, "show_ip", show_ip_text,
                                       sizeof(show_ip_text)) &&
                        strcmp(show_ip_text, "1") == 0;
-  if (!frame_display_preferences_set_show_ip(show_ip)) {
+  controller_device_settings_t display_settings = {.present = CDS_SHOW_IP, .show_ip = show_ip};
+  if (!controller_device_settings_submit_local(&display_settings)) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                         "Display timeout saved, but IP visibility was not");
     return ESP_FAIL;
   }
-  eink_ui_post_show_ip(show_ip);
+
 #endif
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/settings");

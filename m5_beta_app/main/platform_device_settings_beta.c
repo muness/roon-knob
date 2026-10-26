@@ -18,8 +18,7 @@ bool platform_device_settings_apply(const controller_device_settings_t *settings
     const bool sound = (settings->present & CDS_SOUND_ENABLED) ? settings->sound_enabled : sound_now;
     uint8_t volume = (settings->present & CDS_SOUND_VOLUME) ? settings->sound_volume : volume_now;
     if (volume > CONTROLLER_DEVICE_SOUND_VOLUME_MAX) return true; /* never reaches here; not retryable */
-    if (body == body_now && sound == sound_now && volume == volume_now) return true; /* idempotent */
-    if (!touch_ui_post_stackchan_preferences(body, sound, volume)) {
+    if (!touch_ui_apply_stackchan_preferences(body, sound, volume)) {
         LOGW("device settings: StackChan preferences were not applied");
         return false;
     }

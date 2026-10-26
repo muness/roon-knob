@@ -1,3 +1,4 @@
+#include "controller_device_settings.h"
 #include "touch_ui.h"
 #include "kizz_semantic_native_layout.h"
 
@@ -924,14 +925,14 @@ bool load_body_enabled(bool *configured) {
     return value == 1;
 }
 
-void save_body_enabled(bool enabled) {
+bool save_body_enabled(bool enabled) {
     nvs_handle_t handle = 0;
-    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
-        return;
-    nvs_set_u8(handle, kStackChanBodyKey, enabled ? 1 : 0);
-    nvs_set_u8(handle, kStackChanBodyPreferenceKey, 1);
-    nvs_commit(handle);
+    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(handle, kStackChanBodyKey, enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_u8(handle, kStackChanBodyPreferenceKey, 1);
+    if (err == ESP_OK) err = nvs_commit(handle);
     nvs_close(handle);
+    return err == ESP_OK;
 }
 
 bool load_sound_enabled(bool *configured = nullptr) {
@@ -951,14 +952,14 @@ bool load_sound_enabled(bool *configured = nullptr) {
     return value == 1;
 }
 
-void save_sound_enabled(bool enabled) {
+bool save_sound_enabled(bool enabled) {
     nvs_handle_t handle = 0;
-    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
-        return;
-    nvs_set_u8(handle, kStackChanSoundKey, enabled ? 1 : 0);
-    nvs_set_u8(handle, kStackChanSoundPreferenceKey, 1);
-    nvs_commit(handle);
+    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(handle, kStackChanSoundKey, enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_u8(handle, kStackChanSoundPreferenceKey, 1);
+    if (err == ESP_OK) err = nvs_commit(handle);
     nvs_close(handle);
+    return err == ESP_OK;
 }
 
 m5_platform_stackchan_volume_t load_voice_volume(bool *configured = nullptr) {
@@ -978,14 +979,14 @@ m5_platform_stackchan_volume_t load_voice_volume(bool *configured = nullptr) {
     return static_cast<m5_platform_stackchan_volume_t>(value);
 }
 
-void save_voice_volume(m5_platform_stackchan_volume_t volume) {
+bool save_voice_volume(m5_platform_stackchan_volume_t volume) {
     nvs_handle_t handle = 0;
-    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK)
-        return;
-    nvs_set_u8(handle, kStackChanVoiceVolumeKey, static_cast<uint8_t>(volume));
-    nvs_set_u8(handle, kStackChanVoiceVolumePreferenceKey, 1);
-    nvs_commit(handle);
+    if (nvs_open(kStackChanNvsNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(handle, kStackChanVoiceVolumeKey, static_cast<uint8_t>(volume));
+    if (err == ESP_OK) err = nvs_set_u8(handle, kStackChanVoiceVolumePreferenceKey, 1);
+    if (err == ESP_OK) err = nvs_commit(handle);
     nvs_close(handle);
+    return err == ESP_OK;
 }
 
 void body_notice(const char *message) {
@@ -1001,7 +1002,7 @@ void set_body_language(bool wanted, bool persist = true) {
              m5_platform_stackchan_expression_faulted());
     /* Persist the user's intent, not the result of this one hardware attempt.
      * A transient qualification failure should retry after the next boot. */
-    if (persist) save_body_enabled(wanted);
+    if (persist) { controller_device_settings_local_edit(CDS_BODY_ENABLED); save_body_enabled(wanted); }
     body_notice(s.body_enabled ? "BODY LANGUAGE ON" :
                 (wanted ? "SERVOS NOT READY" : "BODY LANGUAGE OFF"));
 }
@@ -1010,7 +1011,7 @@ void toggle_body_language() { set_body_language(!s.body_enabled); }
 
 void set_sounds(bool enabled, bool confirm = true, bool persist = true) {
     s.sound_enabled = m5_platform_stackchan_sound_enable(enabled) && enabled;
-    if (persist) save_sound_enabled(enabled);
+    if (persist) { controller_device_settings_local_edit(CDS_SOUND_ENABLED); save_sound_enabled(enabled); }
     ESP_LOGI(TAG, "Kizz sound toggle: wanted=%d enabled=%d", enabled,
              s.sound_enabled);
     if (confirm) body_notice(s.sound_enabled ? "SOUNDS ON" : "SOUNDS OFF");
@@ -1032,7 +1033,7 @@ void set_voice_volume(m5_platform_stackchan_volume_t volume,
         return;
     }
     s.voice_volume = volume;
-    if (persist) save_voice_volume(volume);
+    if (persist) { controller_device_settings_local_edit(CDS_SOUND_VOLUME); save_voice_volume(volume); }
     static constexpr const char *NAMES[] = {"SOUND LOW", "SOUND MEDIUM",
                                             "SOUND HIGH"};
     body_notice(NAMES[static_cast<size_t>(volume)]);
@@ -2514,42 +2515,26 @@ extern "C" uint8_t touch_ui_stackchan_voice_volume_preference(void) {
     return 0;
 #endif
 }
-extern "C" bool touch_ui_post_stackchan_preferences(bool body_enabled,
-                                                      bool sound_enabled,
-                                                      uint8_t voice_volume) {
+extern "C" bool touch_ui_apply_stackchan_preferences(bool body, bool sound, uint8_t volume) {
 #if HIPHI_M5_TARGET_ID == 4
-    if (voice_volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return false;
-    struct PreferenceRequest { bool body; bool sound; uint8_t volume; };
-    auto *request = static_cast<PreferenceRequest *>(
-        calloc(1, sizeof(PreferenceRequest)));
-    if (!request) return false;
-    request->body = body_enabled;
-    request->sound = sound_enabled;
-    request->volume = voice_volume;
-    if (!platform_task_post_to_ui([](void *arg) {
-            auto *preference = static_cast<PreferenceRequest *>(arg);
-            set_body_language(preference->body, false);
-            set_sounds(preference->sound, false, false);
-            set_voice_volume(static_cast<m5_platform_stackchan_volume_t>(
-                                 preference->volume),
-                             preference->sound, false);
-            body_notice("PERSONALITY UPDATED");
-            free(preference);
-        }, request)) {
-        free(request);
-        return false;
-    }
-    /* The HTTP handler redirects immediately after queueing this work. Commit
-     * the user's intent here so the redirected Settings page never flashes the
-     * previous values while the UI task safely applies hardware changes. */
-    save_body_enabled(body_enabled);
-    save_sound_enabled(sound_enabled);
-    save_voice_volume(static_cast<m5_platform_stackchan_volume_t>(voice_volume));
-    return true;
+    if (volume > M5_PLATFORM_STACKCHAN_VOLUME_HIGH) return false;
+    auto level = static_cast<m5_platform_stackchan_volume_t>(volume);
+    if (load_body_enabled(nullptr) != body && !save_body_enabled(body)) return false;
+    if (load_sound_enabled(nullptr) != sound && !save_sound_enabled(sound)) return false;
+    if (load_voice_volume(nullptr) != level && !save_voice_volume(level)) return false;
+    set_body_language(body, false);
+    set_sounds(sound, false, false);
+    set_voice_volume(level, false, false);
+    return s.body_enabled == body && s.sound_enabled == sound && s.voice_volume == level;
 #else
-    (void)body_enabled;
-    (void)sound_enabled;
-    (void)voice_volume;
-    return false;
+    (void)body; (void)sound; (void)volume;
+    return true;
 #endif
+}
+extern "C" bool touch_ui_post_stackchan_preferences(bool body, bool sound, uint8_t volume) {
+    if (volume > CONTROLLER_DEVICE_SOUND_VOLUME_MAX) return false;
+    controller_device_settings_t desired = {};
+    desired.present = CDS_BODY_ENABLED | CDS_SOUND_ENABLED | CDS_SOUND_VOLUME;
+    desired.body_enabled = body; desired.sound_enabled = sound; desired.sound_volume = volume;
+    return controller_device_settings_submit_local(&desired);
 }

@@ -6,6 +6,25 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "controller_config.h"
+#include "platform/platform_task.h"
+
+static uint32_t endpoint = 1;
+static bool defer_ui, reject_ui;
+static platform_task_fn_t queued;
+static void *queued_arg;
+bool controller_config_capture_endpoint_token(controller_config_endpoint_token_t *out) {
+    memset(out, 0, sizeof(*out)); out->generation = endpoint; return true;
+}
+bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg) {
+    if (reject_ui) return false;
+    if (defer_ui) { assert(!queued); queued=fn; queued_arg=arg; } else fn(arg);
+    return true;
+}
+static void drain(void) {
+    if (queued) { platform_task_fn_t fn=queued; queued=NULL; fn(queued_arg); }
+}
+
 
 /* Fake platform hook: records every call so the tests can prove what reaches a target. */
 static int hook_calls;
@@ -118,7 +137,7 @@ static void test_failed_apply_is_retried_then_delivered(void) {
     bool any;
     hook_calls = 0; hook_result = false;
     controller_device_settings_t s = parse("{\"brightness\":40}", &any);
-    controller_device_settings_submit(&s);
+    controller_device_settings_submit(&s, endpoint);
     assert(hook_calls == 1);
     controller_device_settings_retry_pending();
     controller_device_settings_retry_pending();
@@ -134,7 +153,7 @@ static void test_retry_is_bounded(void) {
     bool any;
     hook_calls = 0; hook_result = false;
     controller_device_settings_t s = parse("{\"show_ip\":true}", &any);
-    controller_device_settings_submit(&s);
+    controller_device_settings_submit(&s, endpoint);
     for (int i = 0; i < 50; i++) controller_device_settings_retry_pending();
     int attempts = hook_calls;
     assert(attempts > 1 && attempts <= 1 + CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES);
@@ -146,10 +165,10 @@ static void test_newer_submission_replaces_the_pending_one(void) {
     bool any;
     hook_calls = 0; hook_result = false;
     controller_device_settings_t old = parse("{\"brightness\":10}", &any);
-    controller_device_settings_submit(&old);
+    controller_device_settings_submit(&old, endpoint);
     controller_device_settings_t fresh = parse("{\"brightness\":80}", &any);
     hook_result = true;
-    controller_device_settings_submit(&fresh);
+    controller_device_settings_submit(&fresh, endpoint);
     assert(hook_last.brightness == 80);
     int calls = hook_calls;
     controller_device_settings_retry_pending(); /* the stale value is never replayed over it */
@@ -160,10 +179,39 @@ static void test_nothing_present_is_not_pending(void) {
     bool any;
     hook_calls = 0; hook_result = false;
     controller_device_settings_t s = parse("{\"zone\":1}", &any);
-    controller_device_settings_submit(&s);
+    controller_device_settings_submit(&s, endpoint);
     controller_device_settings_retry_pending();
     assert(hook_calls == 0);
     hook_result = true;
+}
+
+static void test_actor_authority(void) {
+    controller_device_settings_t old = {.present=CDS_BRIGHTNESS, .brightness=10};
+    controller_device_settings_t fresh = {.present=CDS_BRIGHTNESS, .brightness=80};
+    controller_device_settings_t empty = {0};
+    defer_ui=true; hook_result=true; hook_calls=0;
+    controller_device_settings_submit(&old, endpoint);
+    assert(hook_calls == 0 && controller_device_settings_status() == CDS_STATUS_PENDING);
+    endpoint += 2; drain(); /* ABA invalidates the original request */
+    assert(hook_calls == 0 && controller_device_settings_status() == CDS_STATUS_CANCELLED);
+    controller_device_settings_submit(&old, endpoint);
+    controller_device_settings_submit(&empty, endpoint); drain();
+    assert(hook_calls == 0);
+    controller_device_settings_submit(&old, endpoint);
+    controller_device_settings_local_edit(CDS_BRIGHTNESS); drain();
+    controller_device_settings_retry_pending(); drain();
+    assert(hook_calls == 0); /* same-SHA retry cannot resurrect it */
+    controller_device_settings_submit(&fresh, endpoint); drain();
+    assert(hook_calls == 1 && hook_last.brightness == 80);
+    controller_device_settings_submit(&old, endpoint);
+    assert(controller_device_settings_submit_local(&fresh)); drain();
+    assert(hook_calls == 2 && hook_last.brightness == 80);
+    reject_ui=true;
+    controller_device_settings_submit(&old, endpoint);
+    assert(hook_calls == 2 && controller_device_settings_status() == CDS_STATUS_PENDING);
+    reject_ui=false; controller_device_settings_retry_pending(); drain();
+    assert(hook_calls == 3 && hook_last.brightness == 10);
+    defer_ui=false;
 }
 
 static void test_firmware_update(void) {
@@ -211,6 +259,7 @@ int main(void) {
     test_retry_is_bounded();
     test_newer_submission_replaces_the_pending_one();
     test_nothing_present_is_not_pending();
+    test_actor_authority();
     test_firmware_update();
     puts("controller device settings checks passed");
     return 0;

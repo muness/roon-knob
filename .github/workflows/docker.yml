@@ -55,7 +55,7 @@ jobs:
           /tmp/test-controller-connection
           cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Icommon -I/usr/include/cjson tests/test_controller_library.c common/controller_library.c -lcjson -o /tmp/test-controller-library
           /tmp/test-controller-library
-          cc -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -Icommon -I/usr/include/cjson tests/test_controller_device_settings.c common/controller_device_settings.c -lcjson -o /tmp/test-controller-device-settings
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -pthread -Iinclude -Icommon -I/usr/include/cjson tests/test_controller_device_settings.c common/controller_device_settings.c -lcjson -o /tmp/test-controller-device-settings
           /tmp/test-controller-device-settings
           cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Icommon tests/test_controller_navigation.c common/controller_navigation.c -o /tmp/test-controller-navigation
           /tmp/test-controller-navigation
