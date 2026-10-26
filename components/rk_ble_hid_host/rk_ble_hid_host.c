@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_hid_common.h"
 #include "esp_hidh.h"
@@ -71,12 +72,14 @@ typedef enum {
     EVENT_CONNECT_CALL_DONE,
     EVENT_CLOSE,
     EVENT_INPUT,
+    EVENT_CONSUMER_TICK,
     EVENT_DISCOVERY,
     EVENT_DISCOVERY_DONE,
 } event_type_t;
 
 typedef struct {
     event_type_t type;
+    uint32_t input_time_ms, input_session, input_sequence;
     union {
         struct {
             esp_err_t status;
@@ -165,6 +168,8 @@ typedef struct {
     /* The callback updates this registry before IDF invalidates event pointers. */
     tracked_device_t devices[MAX_HID_DEVS];
     size_t close_events_pending;
+    /* Which Consumer Control key the remote holds; owner task only. */
+    rk_ble_consumer_tracker_t consumer;
     bool have_active_bda;
     uint8_t active_bda[6];
     uint8_t bonded_bda[6];
@@ -248,6 +253,44 @@ static void status_set_sleep_quiesced(bool quiesced) {
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
     s.status.quiesced_for_sleep = quiesced;
     xSemaphoreGive(s.status_lock);
+}
+
+/* A BLE session ended (disconnect, disable, sleep teardown) or is starting:
+ * forget the held key and tell the controller to drop any half-recognised
+ * gesture, so a press never survives into the next session. Cancellation
+ * bypasses both queues and cannot be lost behind older reports. */
+static portMUX_TYPE s_input_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_input_session = 1, s_input_sequence, s_tracker_session;
+static bool s_input_faulted;
+
+static void cancel_consumer_ingress(void) {
+    portENTER_CRITICAL(&s_input_lock);
+    uint32_t session = ++s_input_session;
+    portEXIT_CRITICAL(&s_input_lock);
+    if (s.config.on_consumer_event) {
+        const rk_ble_consumer_event_t cancel = {.kind=RK_BLE_CONSUMER_CANCEL, .session=session};
+        s.config.on_consumer_event(&cancel, s.config.callback_context);
+    }
+}
+static void end_consumer_session(void) {
+    portENTER_CRITICAL(&s_input_lock); s_input_faulted = false; portEXIT_CRITICAL(&s_input_lock);
+    rk_ble_consumer_tracker_reset(&s.consumer);
+    cancel_consumer_ingress();
+}
+
+/* Both reports and watermarks pass this seam. No allocation, blocking wait or
+ * controller effect occurs under the ingress lock. Queue loss cancels out of band. */
+static void enqueue_consumer_event(service_event_t *event) {
+    portENTER_CRITICAL(&s_input_lock);
+    event->input_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    event->input_session = s_input_session;
+    event->input_sequence = ++s_input_sequence;
+    bool accepted = s.events && xQueueSend(s.events, event, 0) == pdPASS;
+    portEXIT_CRITICAL(&s_input_lock);
+    if (!accepted) {
+        portENTER_CRITICAL(&s_input_lock); s_input_faulted = true; portEXIT_CRITICAL(&s_input_lock);
+        cancel_consumer_ingress();
+    }
 }
 
 static void status_set_connection(bool connected, const char *name) {
@@ -547,6 +590,7 @@ static void hidh_event(void *handler_args, esp_event_base_t base, int32_t id, vo
         enqueue_lifecycle_event(&event);
         break;
     case ESP_HIDH_CLOSE_EVENT:
+        cancel_consumer_ingress();
         event.type = EVENT_CLOSE;
         event.data.close.reason = event_data_hidh->close.reason;
         event.data.close.tracked = untrack_device_from_callback(
@@ -580,7 +624,7 @@ static void hidh_event(void *handler_args, esp_event_base_t base, int32_t id, vo
                                          event.data.input.len, ESP_LOG_INFO);
             }
         }
-        enqueue_event(&event);
+        enqueue_consumer_event(&event);
         break;
     default:
         break;
@@ -872,6 +916,7 @@ static void request_stop(void) {
         return;
     }
     const bool was_scanning = s.status.state == RK_BLE_HID_HOST_STATE_SCANNING;
+    end_consumer_session();
     set_state(RK_BLE_HID_HOST_STATE_STOPPING, RK_BLE_HID_HOST_ERROR_NONE);
     s.stop_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(STOP_TIMEOUT_MS);
     if (was_scanning) {
@@ -1137,6 +1182,7 @@ static void finalize_open_connection(uint32_t generation) {
         return;
     }
     s.reconnect_attempts = 0;
+    end_consumer_session();
     status_set_connection(true, s.opening_name);
     if (nvs_save_bond(s.active_bda, s.opening_addr_type,
                       s.opening_name) != ESP_OK) {
@@ -1248,6 +1294,7 @@ static void process_event(const service_event_t *event) {
                    sizeof(s.active_bda)) == 0) {
             s.have_active_bda = false;
             memset(s.active_bda, 0, sizeof(s.active_bda));
+            end_consumer_session();
             status_set_connection(false, NULL);
         }
         if (is_stopping()) {
@@ -1261,10 +1308,64 @@ static void process_event(const service_event_t *event) {
             schedule_reconnect();
         }
         break;
+    case EVENT_CONSUMER_TICK: {
+        portENTER_CRITICAL(&s_input_lock);
+        bool current = event->input_session == s_input_session;
+        portEXIT_CRITICAL(&s_input_lock);
+        if (current && s.config.on_consumer_event && s.status.connected && !is_stopping()) {
+            const rk_ble_consumer_event_t tick = {.kind=RK_BLE_CONSUMER_TICK,
+                .time_ms=event->input_time_ms, .session=event->input_session,
+                .sequence=event->input_sequence * 2};
+            s.config.on_consumer_event(&tick, s.config.callback_context);
+        }
+        break;
+    }
     case EVENT_INPUT: {
+        portENTER_CRITICAL(&s_input_lock);
+        bool current = event->input_session == s_input_session;
+        bool faulted = s_input_faulted;
+        if (current && faulted && event->data.input.len >= 2 &&
+            event->data.input.data[0] == 0 && event->data.input.data[1] == 0)
+            s_input_faulted = false;
+        portEXIT_CRITICAL(&s_input_lock);
+        if (!current || faulted) break;
+        if (s_tracker_session != event->input_session) {
+            rk_ble_consumer_tracker_reset(&s.consumer);
+            s_tracker_session = event->input_session;
+        }
         rk_ble_media_key_t key;
         const bool mapped = rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
+
+        /* Report every Consumer Control key down and up, known or not, so the
+         * controller can recognise long and double presses and a person can
+         * map a key this firmware has no name for. Only reports ESP-IDF
+         * classified as Consumer Control, or that the bounded mapper accepted
+         * despite a GENERIC label: a keyboard or mouse report would otherwise
+         * decode its first two bytes as a "usage". This runs in addition to
+         * the media-key path below, which is unchanged. */
+        const bool release_of_held_key =
+            rk_ble_consumer_tracker_holding(&s.consumer) &&
+            event->data.input.len >= 2 && event->data.input.data[0] == 0 &&
+            event->data.input.data[1] == 0;
+        if (s.config.on_consumer_event && s.status.connected && !is_stopping() &&
+            (mapped || event->data.input.usage == ESP_HID_USAGE_CCONTROL ||
+             release_of_held_key)) {
+            /* `00 00` releases whichever key was held; the tracker supplies its
+             * usage. A GENERIC-labelled release of a held key is accepted too,
+             * otherwise the key would stay down forever. */
+            rk_ble_consumer_edge_t edges[2];
+            const size_t count = rk_ble_consumer_tracker_update(
+                &s.consumer, event->data.input.data, event->data.input.len,
+                edges);
+            for (size_t i = 0; i < count; ++i) {
+                const rk_ble_consumer_event_t edge = {.kind=RK_BLE_CONSUMER_EDGE,
+                    .time_ms=event->input_time_ms, .session=event->input_session,
+                    .sequence=event->input_sequence * 2 + (uint32_t)i,
+                    .usage=edges[i].usage, .pressed=edges[i].pressed};
+                s.config.on_consumer_event(&edge, s.config.callback_context);
+            }
+        }
 
         /* ESP-IDF 5.5 can classify a valid Consumer Control report as GENERIC
          * when its HID report-map metadata is incomplete. The proven Frame
@@ -1330,7 +1431,10 @@ static void owner_task(void *arg) {
         while (xQueueReceive(s.lifecycle_events, &event, 0) == pdPASS) {
             process_event(&event);
         }
-        while (xQueueReceive(s.events, &event, 0) == pdPASS) {
+        service_event_t tick = {.type=EVENT_CONSUMER_TICK};
+        enqueue_consumer_event(&tick);
+        for (unsigned n = 0; n < EVENT_QUEUE_LENGTH &&
+             xQueueReceive(s.events, &event, 0) == pdPASS; ++n) {
             process_event(&event);
         }
         if (xQueueReceive(s.commands, &command, 0) == pdPASS) {
@@ -1452,6 +1556,7 @@ rk_ble_hid_host_result_t rk_ble_hid_host_set_enabled(bool enabled) {
         (enabled && state == RK_BLE_HID_HOST_STATE_ERROR)) {
         return RK_BLE_HID_HOST_ERR_INVALID_STATE;
     }
+    if (!enabled) cancel_consumer_ingress();
     const command_t command = {.type = COMMAND_SET_ENABLED, .data.enabled = enabled};
     return enqueue_command(&command);
 }
@@ -1466,6 +1571,7 @@ rk_ble_hid_host_result_t rk_ble_hid_host_prepare_for_sleep(void) {
     if (snapshot.quiesced_for_sleep) {
         return RK_BLE_HID_HOST_OK;
     }
+    cancel_consumer_ingress();
     const command_t command = {.type = COMMAND_PREPARE_FOR_SLEEP};
     return enqueue_command(&command);
 }

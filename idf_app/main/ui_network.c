@@ -279,7 +279,9 @@ static const char *firmware_channel_suffix(const char *version) {
 static void update_version_label(void) {
     if (!s_widgets.version_label) return;
 
-    const ota_info_t *info = ota_get_info();
+    ota_info_t snapshot;
+    if (!ota_get_info(&snapshot)) return;
+    const ota_info_t *info = &snapshot;
     switch (info->status) {
         case OTA_STATUS_CHECKING:
             lv_label_set_text(s_widgets.version_label, "Checking...");
@@ -314,7 +316,9 @@ static void update_version_label(void) {
 
 static void check_update_cb(lv_event_t *e) {
     (void)e;
-    const ota_info_t *info = ota_get_info();
+    ota_info_t snapshot;
+    if (!ota_get_info(&snapshot)) return;
+    const ota_info_t *info = &snapshot;
 
     if (info->status == OTA_STATUS_AVAILABLE) {
         // Update is available - start it

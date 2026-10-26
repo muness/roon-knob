@@ -205,7 +205,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "Portal stack headroom at request start",
         "Portal stack headroom after render",
         'name=\'show_ip\'',
-        "frame_display_preferences_set_show_ip(show_ip)",
+        "controller_device_settings_submit_local(&display_settings)",
     ),
     "frame_app/main/eink_ui.c": (
         '"controller_utf8.h"',

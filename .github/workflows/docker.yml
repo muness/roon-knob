@@ -55,10 +55,21 @@ jobs:
           /tmp/test-controller-connection
           cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Icommon -I/usr/include/cjson tests/test_controller_library.c common/controller_library.c -lcjson -o /tmp/test-controller-library
           /tmp/test-controller-library
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -pthread -Iinclude -Icommon -I/usr/include/cjson tests/test_controller_device_settings.c common/controller_device_settings.c -lcjson -o /tmp/test-controller-device-settings
+          /tmp/test-controller-device-settings
           cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Icommon tests/test_controller_navigation.c common/controller_navigation.c -o /tmp/test-controller-navigation
           /tmp/test-controller-navigation
           scripts/test_connection_runtime.sh
           bash scripts/test_bridge_cache.sh
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -Icommon \
+            tests/test_controller_shortcut_key.c \
+            common/controller_shortcut_key.c \
+            -o /tmp/test-controller-shortcut-key
+          /tmp/test-controller-shortcut-key
+          bash scripts/test_controller_ble_shortcut.sh
+          python3 scripts/test_ble_consumer_ingress.py
+          python3 scripts/test_device_settings_adapters.py
           python3 scripts/check_bridge_recovery_contract.py
           python3 tests/test_firmware_stack_audit.py
           python3 tests/test_firmware_site_assets.py
@@ -67,6 +78,7 @@ jobs:
           python3 tests/test_release_firmware.py
           bash scripts/test_platform_http_esp.sh
           bash scripts/test_ota_update.sh
+          python3 tests/test_ota_layout.py
           sh tests/run_portal_trace.sh
           python3 tests/test_dial_wake_dispatch.py
           python3 tests/test_firmware_artifact_cache.py

@@ -1,4 +1,5 @@
 #include "controller_input.h"
+#include "controller_effect_context.h"
 
 #include "controller_input_profile.h"
 #include "platform/platform_task.h"
@@ -9,6 +10,7 @@
 #include <stdint.h>
 
 static controller_action_handler_t s_action_handler;
+static atomic_uint_least32_t s_context_generation;
 /* Owned by the existing target UI/controller actor. */
 static controller_interaction_context_t s_context =
     CONTROLLER_INTERACTION_CONTEXT_MEDIA;
@@ -46,6 +48,12 @@ static bool action_is_valid(const controller_action_t *action) {
         return action->value.picker_delta == 0;
     case CONTROLLER_ACTION_SCROLL_ZONE_PICKER:
         return action->value.picker_delta != 0;
+    case CONTROLLER_ACTION_SHORTCUT:
+        return action->value.shortcut.usage != 0 &&
+               action->value.shortcut.gesture >=
+                   CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS &&
+               action->value.shortcut.gesture <=
+                   CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE;
     case CONTROLLER_ACTION_SYSTEM:
         return false;
     case CONTROLLER_ACTION_NONE:
@@ -85,8 +93,15 @@ bool controller_input_set_context(controller_interaction_context_t context) {
     if (!context_is_valid(context)) {
         return false;
     }
-    s_context = context;
+    if (s_context != context) {
+        s_context = context;
+        atomic_fetch_add_explicit(&s_context_generation, 1, memory_order_release);
+    }
     return true;
+}
+
+uint32_t controller_effect_context_generation(void) {
+    return atomic_load_explicit(&s_context_generation, memory_order_acquire);
 }
 
 controller_interaction_context_t controller_input_get_context(void) {

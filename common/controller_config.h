@@ -31,6 +31,7 @@ typedef struct {
     rk_cfg_t value;
     controller_config_durability_t durability;
     uint32_t revision;
+    uint32_t zone_generation; /* runtime only; rejects zone A->B->A effects */
 } controller_config_snapshot_t;
 
 typedef struct {

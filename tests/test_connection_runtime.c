@@ -1,6 +1,7 @@
 /* Execute the real bridge recovery path with deterministic network/config I/O.
  * Unused playback sections are discarded by the linker. */
 #include <stdlib.h>
+#include "../common/controller_action.h"
 static int bridge_alloc_fail_after = -1;
 static void *test_bridge_alloc(size_t size);
 #define malloc test_bridge_alloc
@@ -17,6 +18,8 @@ static platform_mdns_observation_t advertised;
 static uint64_t clock_ms;
 static uint32_t generation;
 static unsigned discovery_calls, resolve_calls, http_calls, writes;
+static uint32_t interaction_generation;
+uint32_t controller_effect_context_generation(void) { return interaction_generation; }
 static bool mdns_ready = true;
 bool platform_mdns_is_ready(void) { return mdns_ready; }
 static bool resolution_ok, http_ok, race;
@@ -42,7 +45,14 @@ static void (*queued)(void *);
 static void *queued_arg;
 static bool defer_zone_count;
 static void *queued_zone_count;
-bool controller_config_snapshot(controller_config_snapshot_t *out) { *out = fixture; return true; }
+static bool change_during_snapshot;
+bool controller_config_snapshot(controller_config_snapshot_t *out) {
+    *out = fixture;
+    if (change_during_snapshot) {
+        change_during_snapshot = false; ++fixture.revision; ++generation;
+    }
+    return true;
+}
 bool controller_config_capture_endpoint_token(controller_config_endpoint_token_t *out) {
     memset(out, 0, sizeof(*out)); out->generation = generation;
     strcpy(out->bridge_base, fixture.value.bridge_base);
@@ -69,7 +79,7 @@ bool platform_mdns_resolve_base_url(const char *base, char *out, size_t len,
 }
 uint64_t platform_millis(void) { return clock_ms; }
 int platform_http_get(const char *url, char **out, size_t *len) {
-    assert(strstr(url, "/zones?knob_id=") || strstr(url, "/now_playing?zone_id=")); ++http_calls;
+    assert(strstr(url, "/zones?knob_id=") || strstr(url, "/now_playing?zone_id=") || strstr(url, "/config/")); ++http_calls;
     if (disconnect_during_http) {
         atomic_store(&s_network_ready, false);
         atomic_fetch_add(&s_network_epoch, 1);
@@ -87,8 +97,27 @@ int platform_http_get(const char *url, char **out, size_t *len) {
     *len = *out ? strlen(*out) : 0;
     return http_ok ? 0 : -1;
 }
+static const char *catalog_reply = "{}";
+int platform_http_get_bounded(const char *url, size_t max_bytes, char **out, size_t *length) {
+    assert(strstr(url, "/api/shortcuts?offset="));
+    assert(max_bytes <= 16384);
+    *out = strdup(catalog_reply); *length = strlen(*out);
+    return 0;
+}
 void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
 void platform_http_free(char *value) { free(value); }
+void platform_task_finish(void) {}
+static bool hold_shortcut_task, shortcut_task_start_fails;
+static void (*held_shortcut_fn)(void *);
+static void *held_shortcut_arg;
+int platform_task_start_external_stack(const char *name, uint32_t stack,
+                                       platform_task_fn_t fn, void *arg) {
+    (void)name; (void)stack;
+    if (shortcut_task_start_fails) return -1;
+    if (hold_shortcut_task) { held_shortcut_fn = fn; held_shortcut_arg = arg; return 0; }
+    fn(arg);
+    return 0;
+}
 bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) {
     /* Only endpoint commits are delayed deliberately for race tests. Other
      * callbacks must consume their owned messages as the real UI loop does. */
@@ -102,7 +131,8 @@ bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) {
     }
     return true;
 }
-void controller_presentation_set_message(const char *msg) { (void)msg; }
+static char last_message[64];
+void controller_presentation_set_message(const char *msg) { snprintf(last_message, sizeof(last_message), "%s", msg ? msg : ""); }
 void controller_presentation_set_network_status(const char *msg) { (void)msg; }
 void platform_log_backend(const char *level, const char *fmt, va_list args) { (void)level; (void)fmt; (void)args; }
 controller_config_write_result_t controller_config_set_zone(const char *zone, controller_config_snapshot_t *out) {
@@ -113,7 +143,19 @@ controller_config_write_result_t controller_config_set_zone(const char *zone, co
 void controller_presentation_set_zone_name(const char *name) { (void)name; ++zone_name_updates; }
 void controller_presentation_set_zone_count(int count) { (void)count; ++zone_count_updates; }
 static unsigned controls;
+static unsigned shortcut_posts;
+static char shortcut_url[128], shortcut_body[96];
+static const char *shortcut_reply = "{}";
+static bool shortcut_http_ok = true, replace_during_shortcut;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
+    if (strstr(url, "/knob/input") || strstr(url, "/api/shortcuts/")) {
+        ++shortcut_posts;
+        snprintf(shortcut_url, sizeof(shortcut_url), "%s", url);
+        snprintf(shortcut_body, sizeof(shortcut_body), "%s", body);
+        *out = strdup(shortcut_reply); *len = strlen(shortcut_reply);
+        if (replace_during_shortcut) { ++generation; strcpy(fixture.value.bridge_base,"http://replacement"); }
+        return shortcut_http_ok ? 0 : -1;
+    }
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));
     cJSON *root = cJSON_Parse(body); assert(root);
     sent_volume = (float)cJSON_GetObjectItemCaseSensitive(root, "value")->valuedouble;
@@ -200,6 +242,167 @@ static void test_volume_uses_current_connection_evidence(void) {
     assert(bridge_client_execute_command(&command));
     assert(controls == 1);
 }
+static void shortcut_send(const char *reply, bool http_ok, bool expect_ok,
+                          const char *expect_message) {
+    shortcut_reply = reply; shortcut_http_ok = http_ok; last_message[0] = 0;
+    const unsigned before = shortcut_posts;
+    controller_shortcut_event_t event = {0x0223, CONTROLLER_SHORTCUT_GESTURE_LONG};
+    (void)expect_ok; /* the blocking send reports the bridge's verdict */
+    shortcut_authority_t authority;
+    assert(capture_shortcut_authority(&authority));
+    assert(send_shortcut_blocking(&event, &authority) == expect_ok);
+    assert(shortcut_posts == before + 1);
+    assert(strcmp(last_message, expect_message) == 0);
+}
+static void connect_for_shortcut(void) {
+    reset("http://192.168.1.2:8088", true);
+    strcpy(fixture.value.zone_id, "roon:room");
+    controller_connection_select(&s_connection, fixture.value.bridge_base, true, generation);
+    s_connection.resolved = true; strcpy(s_connection.endpoint, fixture.value.bridge_base);
+    controller_connection_api(&s_connection, true, 1, true, clock_ms);
+}
+static void test_shortcut_input_reports_what_the_bridge_says(void) {
+    connect_for_shortcut();
+    shortcut_posts = 0;
+    shortcut_send("{\"ok\":true,\"code\":\"accepted\"}", true, true, "");
+    assert(strcmp(shortcut_url, "http://192.168.1.2:8088/knob/input") == 0);
+    assert(strcmp(shortcut_body, "{\"key\":\"home\",\"gesture\":\"long\"}") == 0);
+    shortcut_send("{\"ok\":true,\"code\":\"unmapped\"}", true, true, "");
+    shortcut_send("{\"ok\":false,\"code\":\"zone_missing\"}", true, false, "Zone unavailable");
+    shortcut_send("{\"ok\":false,\"code\":\"item_unavailable\"}", true, false, "Item not found");
+    /* A bridge that is down, answers nonsense, or sends a code we do not know
+     * must never look like success. */
+    shortcut_send("{}", false, false, "Shortcut failed");
+    shortcut_send("not json", true, false, "Shortcut failed");
+    shortcut_send("{\"ok\":true}", true, false, "Shortcut failed");
+    shortcut_send("{\"code\":\"from_the_future\"}", true, false, "Shortcut failed");
+}
+/* The backend adapter owns delivery: non-blocking, one request at a time, and
+ * nothing is sent from a connection that is not ready. */
+static void test_shortcut_submit_is_single_flight_and_readiness_gated(void) {
+    connect_for_shortcut();
+    shortcut_posts = 0; shortcut_reply = "{\"code\":\"accepted\"}"; shortcut_http_ok = true;
+    hold_shortcut_task = true; shortcut_task_start_fails = false;
+    atomic_store(&s_shortcut_busy, false);
+
+    assert(bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
+    assert(shortcut_posts == 0 && held_shortcut_fn); /* returned before the request ran */
+    /* A second press while one is out is dropped, not queued. */
+    assert(!bridge_client_submit_shortcut(0x0224, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
+    held_shortcut_fn(held_shortcut_arg); /* the first completes */
+    assert(shortcut_posts == 1);
+    assert(strstr(shortcut_body, "\"home\""));
+    hold_shortcut_task = false;
+    /* ...and the adapter is free again. */
+    assert(bridge_client_submit_shortcut(0x0224, CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE));
+    assert(shortcut_posts == 2 && strstr(shortcut_body, "\"back\""));
+
+    /* A task that cannot start must not leave the adapter permanently busy. */
+    shortcut_task_start_fails = true; last_message[0] = 0;
+    assert(!bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
+    assert(strcmp(last_message, "Shortcut failed") == 0);
+    shortcut_task_start_fails = false;
+    assert(bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
+
+    /* Malformed input never reaches the network. */
+    const unsigned posts = shortcut_posts;
+    assert(!bridge_client_submit_shortcut(0, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
+    assert(!bridge_client_submit_shortcut(0x0223, 0));
+    assert(shortcut_posts == posts);
+
+    /* A connection that is not ready sends nothing and says so. */
+    memset(&s_connection, 0, sizeof(s_connection));
+    last_message[0] = 0;
+    assert(!bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
+    assert(shortcut_posts == posts && strcmp(last_message, "Not ready") == 0);
+}
+static void test_shortcut_authority_at_admission(void) {
+    connect_for_shortcut();
+    replace_during_shortcut=true; hold_shortcut_task=false;
+    shortcut_posts=0; shortcut_reply="{\"code\":\"no_zone\"}";
+    strcpy(last_message,"new context");
+    assert(bridge_client_submit_shortcut(0x223, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
+    assert(shortcut_posts==1 && !strstr(shortcut_url,"replacement"));
+    assert(!strcmp(last_message,"new context")); /* stale completion cannot publish */
+    replace_during_shortcut=false;
+
+    connect_for_shortcut();
+    shortcut_authority_t authority;
+    change_during_snapshot = true;
+    assert(!capture_shortcut_authority(&authority));
+    for (int change = 0; change < 7; ++change) {
+        connect_for_shortcut();
+        shortcut_posts = 0; hold_shortcut_task = true;
+        shortcut_reply = "{\"code\":\"accepted\"}";
+        assert(bridge_client_submit_shortcut(0x223, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
+        switch (change) {
+        case 0: strcpy(fixture.value.bridge_base, "http://other"); ++generation; break;
+        case 1: generation += 2; break; /* endpoint A->B->A */
+        case 2: atomic_fetch_add(&s_network_epoch, 1); break;
+        case 3: s_selection_generation += 2; break;
+        case 4: fixture.zone_generation += 2; break;
+        case 5: interaction_generation += 2; break; /* media->picker->media */
+        case 6: ++fixture.revision; ++s_volume_command_generation; break;
+        }
+        held_shortcut_fn(held_shortcut_arg);
+        assert(shortcut_posts == (change == 6 ? 1u : 0u));
+        assert(!atomic_load(&s_shortcut_busy));
+        hold_shortcut_task = false;
+    }
+}
+
+static void test_named_shortcuts_are_bounded_and_fenced(void) {
+    char unicode[5];
+    shortcut_text(unicode, sizeof(unicode), "音楽");
+    assert(!strcmp(unicode, "音"));
+    controller_shortcuts_page_t page;
+    bridge_shortcuts_context_t context;
+    for (int change = 0; change < 7; change++) {
+        connect_for_shortcut();
+        assert(bridge_client_shortcuts_capture(&context));
+        shortcut_posts = 0; shortcut_http_ok = true;
+        shortcut_reply = "{\"code\":\"accepted\",\"message\":\"Command accepted\"}";
+        switch (change) {
+        case 0: generation += 2; break; /* A->B->A, same URL */
+        case 1: atomic_fetch_add(&s_network_epoch, 1); break;
+        case 2: s_selection_generation += 2; break;
+        case 3: fixture.zone_generation += 2; break;
+        case 4: interaction_generation += 2; break;
+        case 5: ++fixture.revision; break; /* unrelated preferences allowed */
+        }
+        bool ok = bridge_client_shortcuts_play(&context, "sc_album", &page);
+        assert(ok == (change >= 5));
+        assert(shortcut_posts == (change >= 5 ? 1u : 0u));
+    }
+    assert(!strcmp(shortcut_url, "http://192.168.1.2:8088/api/shortcuts/sc_album/play"));
+    assert(!strcmp(shortcut_body, "{\"zone_id\":\"roon:room\"}"));
+    shortcut_reply = "{\"code\":\"accepted\",\"show_notice\":true,\"message\":\"Multiple matches found. Playing the first exact match.\"}";
+    assert(bridge_client_shortcuts_play(&context, "sc_album", &page));
+    assert(page.accepted && page.show_notice);
+    assert(strstr(page.notice, "Multiple matches"));
+
+    assert(!bridge_client_shortcuts_play(&context, "sc_../../control", &page));
+    shortcut_posts = 0;
+    atomic_store(&s_shortcut_busy, true);
+    assert(!bridge_client_shortcuts_play(&context, "sc_album", &page));
+    assert(shortcut_posts == 0);
+    atomic_store(&s_shortcut_busy, false);
+    shortcut_http_ok = false;
+    assert(!bridge_client_shortcuts_play(&context, "sc_album", &page));
+    assert(shortcut_posts == 1 && strstr(page.notice, "uncertain"));
+    /* Reading a page never fires playback. Old/unknown schemas fail closed. */
+    catalog_reply = "{\"shortcuts\":[]}";
+    assert(!bridge_client_shortcuts_fetch(&context, 0, &page));
+    catalog_reply = "{\"version\":1,\"shortcuts\":[{\"id\":\"sc_album\",\"name\":\"Evening\",\"provider\":\"LMS\"}],\"next_offset\":null}";
+    assert(bridge_client_shortcuts_fetch(&context, 0, &page));
+    assert(page.count == 1 && !strcmp(page.items[0].id, "sc_album"));
+    catalog_reply = "{\"version\":1,\"shortcuts\":[],\"next_offset\":12}";
+    assert(!bridge_client_shortcuts_fetch(&context, 0, &page));
+    catalog_reply = "{\"version\":1,\"shortcuts\":[{\"id\":\"sc_album\",\"name\":\"Evening\",\"provider\":\"LMS\"}],\"next_offset\":0}";
+    assert(!bridge_client_shortcuts_fetch(&context, 0, &page));
+    assert(shortcut_posts == 1);
+}
+
 static void test_fixed_volume_response_and_zone_switch(void) {
     test_volume_uses_current_connection_evidence();
     struct now_playing_state state = {0};
@@ -591,6 +794,68 @@ static void test_response_fences(void) {
     response_race=1; http_body="{\"zones\":[]}";
     assert(!refresh_zone_label(true) && s_state.zone_count==count); response_race=0;
 }
+/* GET /config/<id>: device settings and a firmware request ride along, and are acted on only after
+ * the remote preferences commit. */
+static unsigned device_apply_calls, install_calls, merge_calls;
+static controller_device_settings_t device_applied;
+static char install_from_seen[40];
+static bool install_started = true;
+static controller_config_write_result_t merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+void platform_display_set_rotation(uint16_t rotation) { (void)rotation; }
+void platform_display_apply_config(const rk_cfg_t *cfg, bool charging) { (void)cfg; (void)charging; }
+void platform_power_snapshot(platform_power_snapshot_t *out) { (void)out; }
+static bool device_apply_ok = true;
+bool platform_device_settings_apply(const controller_device_settings_t *settings) {
+    ++device_apply_calls; device_applied = *settings;
+    return device_apply_ok;
+}
+bool ota_request_install(const char *from_version) {
+    ++install_calls; snprintf(install_from_seen, sizeof(install_from_seen), "%s", from_version);
+    return install_started;
+}
+controller_config_write_result_t controller_config_merge_remote_preferences_if_endpoint_current(
+    const controller_config_endpoint_token_t *token, const controller_remote_preferences_t *preferences,
+    controller_config_snapshot_t *out) {
+    (void)token; (void)preferences; ++merge_calls; *out = fixture; return merge_result;
+}
+static void test_config_fetch_applies_device_settings_and_install(void) {
+    reset("http://192.168.1.2:8088", false);
+    http_ok = true;
+    device_apply_calls = install_calls = merge_calls = 0; merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+    http_body = "{\"config_sha\":\"a1\",\"config\":{\"name\":\"Den\",\"brightness\":30,\"show_ip\":true,"
+                "\"firmware_update\":{\"action\":\"install\",\"from_version\":\"4.0.0-beta.9\"}}}";
+    assert(fetch_knob_config());
+    assert(merge_calls == 1 && device_apply_calls == 1 && install_calls == 1);
+    assert(device_applied.present == (CDS_BRIGHTNESS | CDS_SHOW_IP) && device_applied.brightness == 30);
+    assert(!strcmp(install_from_seen, "4.0.0-beta.9"));
+    /* No new keys: the existing preference path is unchanged and nothing extra runs. */
+    device_apply_calls = install_calls = 0;
+    http_body = "{\"config_sha\":\"a2\",\"config\":{\"name\":\"Den\",\"brightness\":3,\"firmware_update\":null}}";
+    assert(fetch_knob_config());
+    assert(device_apply_calls == 0 && install_calls == 0);
+    /* An uncommitted (stale endpoint) response triggers neither. */
+    merge_result = CONTROLLER_CONFIG_NOT_COMMITTED;
+    http_body = "{\"config_sha\":\"a3\",\"config\":{\"brightness\":30,"
+                "\"firmware_update\":{\"action\":\"install\",\"from_version\":\"\"}}}";
+    assert(!fetch_knob_config());
+    assert(device_apply_calls == 0 && install_calls == 0);
+    merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+}
+/* A target that failed to apply a setting keeps it: the config hash is already committed and will
+ * not be fetched again, so the poll loop's retry is what delivers it. */
+static void test_failed_device_setting_is_retried_without_a_refetch(void) {
+    reset("http://192.168.1.2:8088", false);
+    http_ok = true; merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+    device_apply_calls = merge_calls = 0; device_apply_ok = false;
+    http_body = "{\"config_sha\":\"b1\",\"config\":{\"brightness\":55}}";
+    assert(fetch_knob_config());
+    assert(merge_calls == 1 && device_apply_calls == 1);
+    device_apply_ok = true;
+    controller_device_settings_retry_pending();       /* next poll, same hash: no new fetch */
+    assert(merge_calls == 1 && device_apply_calls == 2 && device_applied.brightness == 55);
+    controller_device_settings_retry_pending();
+    assert(device_apply_calls == 2);
+}
 static void test_auto_selection_queues_current_inventory(void) {
     reset("http://192.168.1.2:8088", false);
     http_body="{\"zones\":[{\"zone_id\":\"room\"}]}";
@@ -733,4 +998,36 @@ static void test_volume_prediction_reconciliation(void) {
     assert(fetch_now_playing(&state,&power)); assert(!s_volume_pending && s_last_known_volume_fixed);
 }
 
-int main(void) { test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) {
+    test_shortcut_authority_at_admission();
+    test_named_shortcuts_are_bounded_and_fenced();
+    test_config_fetch_applies_device_settings_and_install();
+    test_failed_device_setting_is_retried_without_a_refetch();
+    test_volume_prediction_reconciliation();
+    test_first_zone_fallback();
+    test_auto_selection_queues_current_inventory();
+    test_complete_snapshot_and_authority();
+    test_full_artwork_identity();
+    test_response_fences();
+    test_zone_inventory_contract();
+    test_response_resource_budget();
+    test_idle_zone_coexists_with_playing_fixed_volume_zone();
+    test_playback_metadata_cannot_report_a_connection_error();
+    test_legacy_automatic_ip_keeps_hostname_recovery();
+    test_wake_reuses_verified_address();
+    test_stale_cache_and_network_change();
+    test_disconnect_fences_inflight_probe();
+    test_refresh_keeps_working_address();
+    test_offline_never_queries();
+    test_now_playing_json_strings();
+    test_fixed_volume_response_and_zone_switch();
+    test_discovery_waits_for_initialization();
+    test_zone_cycle_wraps_without_copying_inventory();
+    test_partial_api_success_preserves_backoff();
+    test_zone_refresh_invalidates_old_readiness();
+    test_volume_uses_current_connection_evidence();
+    test_unresolved_then_recovered();
+    test_failed_and_stale_candidates();
+    test_shortcut_input_reports_what_the_bridge_says();
+    test_shortcut_submit_is_single_flight_and_readiness_gated();
+}

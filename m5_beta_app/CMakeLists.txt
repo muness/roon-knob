@@ -17,7 +17,7 @@ if(HIPHI_KIZZ_WAKE_WORD AND NOT HIPHI_M5_TARGET STREQUAL "stackchan")
     message(FATAL_ERROR "HIPHI_KIZZ_WAKE_WORD is only available for the StackChan target")
 endif()
 
-set(PROJECT_VER "2.8.0-alpha.5")
+set(PROJECT_VER "2.8.0")
 set(_sdkconfig_defaults
     "sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults")
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")

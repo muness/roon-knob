@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Paired BLE remote keys can start a Library shortcut: the controller reports each key and its gesture (press, long press, double press) to the bridge, which plays the shortcut mapped to that button on the controller's own zone. Maps and shortcuts live on the bridge (Library → Pin as shortcut; Controllers → Config), so they survive a re-flash and are shared across controllers. Volume and mute never become shortcuts; play/pause, next and previous only on a long press, after their normal action. A failed press shows one short message ("Zone unavailable", "Item not found", …) and never plays on another zone. Needs a bridge with shortcut support (the bridge release that adds Pin as shortcut): on an older bridge a long press, or a press of a key other than play/pause, next, previous and volume, shows "Shortcut failed" because that bridge has no `/knob/input`; play/pause, next, previous and volume are unaffected. See `docs/dial/BLE_HID.md`.
+
 ## 2.8.0-alpha.2
 
 - Stop ordinary Wi-Fi retries from disconnecting a new association before DHCP; cancel stale retries when an IP arrives.
@@ -16,6 +20,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Bridge-served OTA on every controller (implemented, unverified on hardware):
+  all targets get factory + `ota_0` + `ota_1` slots, app rollback with a 45 s
+  boot confirmation, and the shared OTA client. UHC's Update button requests an
+  install through `config.firmware_update`; the device ignores stale requests,
+  installs only a strictly newer version, and follows its own prerelease
+  channel. Needs a one-time browser reflash of the new partition table that
+  declines erase (settings are kept).
+- Device-specific settings sync from the bridge config (implemented,
+  unverified on hardware): `show_ip` (Frame), `brightness` 5..100 (Dial,
+  HALO), `body_enabled`, `sound_enabled`, `sound_volume` 0..2 (Kizz). Missing,
+  null, wrong-typed or out-of-range values are ignored; unchanged values are
+  not rewritten.
 - Now-playing header: demote the zone label to a darker caption grey and fade
   it to a small dim glyph after ~35s in a stable single-zone household,
   reappearing for 5s on zone-name changes or leaving art mode/picker/settings.

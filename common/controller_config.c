@@ -97,6 +97,9 @@ static void publish_locked(const rk_cfg_t *candidate,
     if (!rk_cfg_canonicalize_v3(&canonical, candidate)) {
         return;
     }
+    if (strcmp(s_config.snapshot.value.zone_id, canonical.zone_id) != 0) {
+        ++s_config.snapshot.zone_generation;
+    }
     s_config.snapshot.value = canonical;
     s_config.snapshot.durability = durability;
     advance_revision_locked();

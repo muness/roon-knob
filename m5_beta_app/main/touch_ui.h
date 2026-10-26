@@ -9,6 +9,7 @@
 extern "C" {
 #endif
 
+bool touch_ui_apply_stackchan_preferences(bool body, bool sound, uint8_t volume);
 void touch_ui_init(void);
 void touch_ui_process(void);
 void touch_ui_set_status(bool online);

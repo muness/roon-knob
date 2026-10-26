@@ -6,6 +6,7 @@
 #include "controller_config.h"
 #include "controller_action_router.h"
 #include "controller_input.h"
+#include "ota_update.h"
 #include "platform/platform_power.h"
 
 #include <stdbool.h>
@@ -31,6 +32,9 @@ void app_entry(void) {
     /* One durable boot event for every physical target. Target power managers
      * only need to record the later attempt/preflight/entry boundaries. */
     platform_power_evidence_note_boot();
+
+    /* Every target confirms a freshly installed image once it has stayed up. */
+    ota_init();
 
     // Note: mDNS init moved to after WiFi connects (in main_idf.c)
     app_controller_init();

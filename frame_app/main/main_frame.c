@@ -1,3 +1,4 @@
+#include "controller_ble_input.h"
 // main_frame.c — hiphi frame entry point
 // Boot sequence: NVS → PMIC → e-ink display → eink_ui_init → input → UI loop → app_entry → WiFi
 
@@ -144,6 +145,7 @@ static void ui_loop_task(void *arg) {
   while (true) {
     // Process bridge_client callbacks (status, zones, track info, etc.)
     platform_task_run_pending();
+    controller_ble_input_service();
 
     // Process queued input events
     platform_input_process_events();

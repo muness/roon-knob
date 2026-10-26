@@ -157,13 +157,13 @@
       "owner": "#265 and #193",
       "retirement": "Retain while supported Dial upgrade sources use the historical application project identity.",
       "path_globs": [
-        "idf_app/main/ota_update.c",
+        "common/ota_update.c",
         "tests/test_ota_update.c"
       ],
       "tokens": [
         "roon_knob"
       ],
-      "line_regex": "(?:strcmp\\(app\\.project_name, \"roon_knob\"\\)|setup\\(\"roon_knob\",ESP_IMAGE_FLASH_SIZE_(?:8|16)MB\\))"
+      "line_regex": "\"roon_knob\""
     },
     {
       "id": "roku-logo-source-provenance",

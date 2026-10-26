@@ -89,6 +89,18 @@ typedef struct {
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
 typedef void (*rk_ble_hid_host_status_callback_t)(const rk_ble_hid_host_status_t *status,
                                                    void *context);
+/* Occurrence time is assigned at HID ingress, under the same ordering lock as
+ * queue insertion. TICK is a FIFO watermark, never the UI's current clock.
+ * CANCEL is delivered out of band and invalidates all older-session work. */
+typedef enum { RK_BLE_CONSUMER_EDGE, RK_BLE_CONSUMER_TICK, RK_BLE_CONSUMER_CANCEL } rk_ble_consumer_kind_t;
+typedef struct {
+    rk_ble_consumer_kind_t kind;
+    uint32_t time_ms, session, sequence;
+    uint16_t usage;
+    bool pressed;
+} rk_ble_consumer_event_t;
+typedef void (*rk_ble_hid_host_consumer_callback_t)(const rk_ble_consumer_event_t *event,
+                                                   void *context);
 
 typedef struct {
     /** Used only when the local `ble_remote/enabled` key has not been written. */
@@ -96,6 +108,8 @@ typedef struct {
     rk_ble_hid_host_media_callback_t on_media_key;
     rk_ble_hid_host_status_callback_t on_status;
     void *callback_context;
+    /** Optional. Appended last so existing designated initialisers are unchanged. */
+    rk_ble_hid_host_consumer_callback_t on_consumer_event;
 } rk_ble_hid_host_config_t;
 
 /**
@@ -143,6 +157,44 @@ rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *o
  */
 bool rk_ble_hid_host_map_consumer_report(const uint8_t *data, size_t len,
                                          rk_ble_media_key_t *key);
+
+/** One key transition derived from a report. */
+typedef struct {
+    uint16_t usage;
+    bool pressed;
+} rk_ble_consumer_edge_t;
+
+/**
+ * Remembers which key a remote holds down. A Consumer Control release is the
+ * report `00 00` (no usage), so the key it releases is only known from the
+ * previous report. Owned and called by one thread (the BLE service task).
+ */
+typedef struct {
+    uint16_t down;
+} rk_ble_consumer_tracker_t;
+
+void rk_ble_consumer_tracker_reset(rk_ble_consumer_tracker_t *tracker);
+bool rk_ble_consumer_tracker_holding(const rk_ble_consumer_tracker_t *tracker);
+
+/**
+ * Turn one report into 0..2 key edges, each naming its real usage:
+ *   - a new key while another is held: the old key's release, then the press;
+ *   - the same key again (auto-repeat while held): nothing;
+ *   - `00 00`: the held key's release, or nothing if none is held.
+ * Short or NULL input yields nothing and leaves the tracker alone.
+ */
+size_t rk_ble_consumer_tracker_update(rk_ble_consumer_tracker_t *tracker,
+                                      const uint8_t *data, size_t len,
+                                      rk_ble_consumer_edge_t out[2]);
+
+/**
+ * Pure decode of a Consumer Control report into its raw usage and whether a
+ * key is down. Unlike the mapper above this keeps releases (usage 0) and every
+ * usage the remote sends, so a controller can recognise long and double presses
+ * and learn which keys a remote has. Returns false for short or NULL input.
+ */
+bool rk_ble_hid_host_decode_consumer_event(const uint8_t *data, size_t len,
+                                           uint16_t *usage, bool *pressed);
 
 #ifdef __cplusplus
 }

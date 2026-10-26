@@ -410,16 +410,17 @@ void eink_ui_post_device_ip(const char *ip) {
     }
 }
 
+void eink_ui_apply_show_ip(bool show) {
+    if (s_ui.show_ip != show) {
+        s_ui.show_ip = show;
+        s_ui.display_pref_dirty = true;
+        s_ui.dirty = true;
+        s_ui.last_change = platform_millis();
+    }
+}
 static void set_show_ip_on_ui(void *arg) {
     bool *show = arg;
-    if (show) {
-        if (s_ui.show_ip != *show) {
-            s_ui.show_ip = *show;
-            s_ui.display_pref_dirty = true;
-            s_ui.dirty = true;
-            s_ui.last_change = platform_millis();
-        }
-    }
+    if (show) eink_ui_apply_show_ip(*show);
     free(show);
 }
 

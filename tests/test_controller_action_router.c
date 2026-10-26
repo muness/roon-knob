@@ -126,6 +126,18 @@ bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg) {
     return true;
 }
 
+static struct { uint16_t usage; uint8_t gesture; } s_shortcuts[TEST_CAPACITY];
+static int s_shortcut_count;
+static bool s_shortcut_result = true;
+
+bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+    assert(s_shortcut_count < TEST_CAPACITY);
+    s_shortcuts[s_shortcut_count].usage = usage;
+    s_shortcuts[s_shortcut_count].gesture = gesture;
+    ++s_shortcut_count;
+    return s_shortcut_result;
+}
+
 bool bridge_client_execute_command(const controller_command_t *command) {
     assert(command);
     assert(s_command_count < TEST_CAPACITY);
@@ -446,7 +458,60 @@ static void test_system_actions_require_locked_physical_resolution(void) {
     assert(!controller_action_router_handle(&restart));
 }
 
+/* A remote key + gesture is semantic input: it reaches the backend only through
+ * the router, only in the media context, and only when well-formed. */
+static void test_shortcut_action_is_context_gated_and_validated(void) {
+    reset_state();
+    s_shortcut_count = 0;
+    s_shortcut_result = true;
+    controller_input_set_action_handler(controller_action_router_handle);
+
+    /* Media context: delivered to the backend adapter, with the key and gesture intact. */
+    assert(controller_input_get_context() == CONTROLLER_INTERACTION_CONTEXT_MEDIA);
+    controller_action_t home_long = controller_action_shortcut(
+        0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG);
+    assert(controller_input_dispatch_action(&home_long));
+    assert(s_shortcut_count == 1);
+    assert(s_shortcuts[0].usage == 0x0223 &&
+           s_shortcuts[0].gesture == CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG);
+
+    /* The backend declining (busy, not ready) is reported, not swallowed. */
+    s_shortcut_result = false;
+    assert(!controller_input_dispatch_action(&home_long));
+    assert(s_shortcut_count == 2);
+    s_shortcut_result = true;
+
+    /* Not while a zone is being chosen, nor with settings open: starting music
+     * from under a menu is a surprise, and the zone is about to change. */
+    s_shortcut_count = 0;
+    controller_input_set_context(CONTROLLER_INTERACTION_CONTEXT_ZONE_PICKER);
+    assert(!controller_input_dispatch_action(&home_long));
+    controller_input_set_context(CONTROLLER_INTERACTION_CONTEXT_SETTINGS_RECOVERY);
+    assert(!controller_input_dispatch_action(&home_long));
+    assert(s_shortcut_count == 0);
+    controller_input_set_context(CONTROLLER_INTERACTION_CONTEXT_MEDIA);
+    assert(controller_input_dispatch_action(&home_long) && s_shortcut_count == 1);
+
+    /* Malformed actions never reach the backend, in any context. */
+    s_shortcut_count = 0;
+    controller_action_t no_key = controller_action_shortcut(
+        0, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS);
+    controller_action_t no_gesture = controller_action_shortcut(0x0223, 0);
+    controller_action_t bad_gesture = controller_action_shortcut(0x0223, 4);
+    assert(!controller_input_dispatch_action(&no_key));
+    assert(!controller_input_dispatch_action(&no_gesture));
+    assert(!controller_input_dispatch_action(&bad_gesture));
+    assert(s_shortcut_count == 0);
+
+    /* Straight into the router, bypassing validation, a gated context still refuses. */
+    controller_input_set_context(CONTROLLER_INTERACTION_CONTEXT_ZONE_PICKER);
+    assert(!controller_action_router_handle(&home_long));
+    controller_input_set_context(CONTROLLER_INTERACTION_CONTEXT_MEDIA);
+    assert(s_shortcut_count == 0);
+}
+
 int main(void) {
+    test_shortcut_action_is_context_gated_and_validated();
     test_command_and_fail_closed_dispatch();
     test_picker_scroll_close_and_settings_context();
     test_picker_back_settings_current();

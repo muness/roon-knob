@@ -1,5 +1,10 @@
-# Name,   Type, SubType, Offset,   Size
+# Name,   Type, SubType, Offset,   Size,     Flags
+# Two equal OTA slots plus the factory slot. Every published image is under 2.3 MB; 2.5 MB slots
+# end at 0x790000, which fits both 8 MB and 16 MB flash. NVS keeps its original offset so a
+# browser reflash that declines erase preserves the owner's settings.
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xd000,   0x2000,
 phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  0x700000,
+factory,  app,  factory, 0x10000,  0x280000,
+ota_0,    app,  ota_0,   0x290000, 0x280000,
+ota_1,    app,  ota_1,   0x510000, 0x280000,

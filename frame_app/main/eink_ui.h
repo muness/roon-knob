@@ -24,6 +24,8 @@ void eink_ui_post_zone_name(const char *name);
 void eink_ui_post_network_status(const char *status);
 void eink_ui_post_device_ip(const char *ip);
 void eink_ui_post_show_ip(bool show);
+/* UI actor only: synchronous effective application. */
+void eink_ui_apply_show_ip(bool show);
 
 // New album artwork available — triggers packed-framebuffer download + display
 void eink_ui_set_artwork(const char *image_key);
