@@ -219,7 +219,7 @@
     "dial|common/ui.c|common/ui_jpeg.h",
     "dial|common/ui.c|common/zone_label_policy.h",
     "dial|common/ui.c|idf_app/main/font_manager.h",
-    "dial|common/ui.c|idf_app/main/ota_update.h",
+    "dial|common/ui.c|common/ota_update.h",
     "dial|common/ui.c|include/os_mutex.h",
     "dial|common/ui_jpeg.c|common/ui_jpeg.h",
     "dial|common/wifi_portal_form.c|common/wifi_portal_form.h",
@@ -294,11 +294,11 @@
     "dial|idf_app/main/main_idf.c|idf_app/main/config_server.h",
     "dial|idf_app/main/main_idf.c|idf_app/main/display_sleep.h",
     "dial|idf_app/main/main_idf.c|idf_app/main/font_manager.h",
-    "dial|idf_app/main/main_idf.c|idf_app/main/ota_update.h",
+    "dial|idf_app/main/main_idf.c|common/ota_update.h",
     "dial|idf_app/main/main_idf.c|idf_app/main/platform_display_idf.h",
     "dial|idf_app/main/main_idf.c|idf_app/main/ui_network.h",
-    "dial|idf_app/main/ota_update.c|common/bridge_client.h",
-    "dial|idf_app/main/ota_update.c|idf_app/main/ota_update.h",
+    "dial|common/ota_update.c|common/bridge_client.h",
+    "dial|common/ota_update.c|common/ota_update.h",
     "dial|idf_app/main/platform_display_idf.c|common/bridge_client.h",
     "dial|idf_app/main/platform_display_idf.c|common/platform/platform_display.h",
     "dial|idf_app/main/platform_display_idf.c|common/platform/platform_power.h",
@@ -331,7 +331,7 @@
     "dial|idf_app/main/ui_network.c|common/ui.h",
     "dial|idf_app/main/ui_network.c|common/wifi_manager.h",
     "dial|idf_app/main/ui_network.c|idf_app/main/font_manager.h",
-    "dial|idf_app/main/ui_network.c|idf_app/main/ota_update.h",
+    "dial|idf_app/main/ui_network.c|common/ota_update.h",
     "dial|idf_app/main/ui_network.c|idf_app/main/ui_network.h",
     "dial|idf_app/main/ui_network.h|common/wifi_manager.h",
     "frame|common/app_main.c|common/app.h",
@@ -520,7 +520,7 @@
     "frame|frame_app/main/platform_storage_frame.c|common/platform/platform_storage.h",
     "frame|frame_app/main/platform_storage_frame.c|common/rk_cfg.h",
     "frame|frame_app/main/pmic_axp2101.c|frame_app/main/pmic_axp2101.h",
-    "dial|idf_app/main/ota_update.c|common/platform/platform_identity.h",
+    "dial|common/ota_update.c|common/platform/platform_identity.h",
     "dial|common/controller_library.c|common/controller_library.h",
     "dial|common/controller_navigation.c|common/controller_navigation.h",
     "dial|common/controller_touch_navigation.c|common/bridge_client.h",
@@ -550,6 +550,24 @@
     "frame|common/bridge_client.c|common/platform/platform_bridge_cache.h",
     "frame|common/platform/platform_bridge_cache_esp.c|common/platform/platform_bridge_cache.h",
     "frame|common/platform/platform_bridge_cache_esp.c|common/platform/platform_mdns_endpoint.h",
+    "dial|common/app_main.c|common/ota_update.h",
+    "dial|common/bridge_client.c|common/controller_device_settings.h",
+    "dial|common/bridge_client.c|common/ota_update.h",
+    "dial|common/controller_device_settings.c|common/controller_device_settings.h",
+    "dial|common/platform/platform_device_settings_touch_brightness.c|common/controller_device_settings.h",
+    "dial|common/platform/platform_device_settings_touch_brightness.c|common/platform/platform_log.h",
+    "dial|common/platform/platform_device_settings_touch_brightness.c|common/platform/platform_touch_navigation.h",
+    "frame|common/app_main.c|common/ota_update.h",
+    "frame|common/bridge_client.c|common/controller_device_settings.h",
+    "frame|common/bridge_client.c|common/ota_update.h",
+    "frame|common/controller_device_settings.c|common/controller_device_settings.h",
+    "frame|common/ota_update.c|common/bridge_client.h",
+    "frame|common/ota_update.c|common/ota_update.h",
+    "frame|common/ota_update.c|common/platform/platform_identity.h",
+    "frame|frame_app/main/platform_device_settings_frame.c|common/controller_device_settings.h",
+    "frame|frame_app/main/platform_device_settings_frame.c|common/platform/platform_log.h",
+    "frame|frame_app/main/platform_device_settings_frame.c|frame_app/main/eink_ui.h",
+    "frame|frame_app/main/platform_device_settings_frame.c|frame_app/main/frame_display_preferences.h",
     "frame|common/wifi_manager.c|common/bridge_client.h"
   ],
   "grandfathered_edges": [
@@ -560,7 +578,7 @@
       "reason": "Legacy Dial renderer still queries controller state directly."
     },
     {
-      "edge": "dial|common/ui.c|idf_app/main/ota_update.h",
+      "edge": "dial|common/ui.c|common/ota_update.h",
       "owner": "controller architecture program",
       "retirement_issue": "#170",
       "reason": "Shared legacy Dial renderer reaches into a target-only OTA API."
@@ -638,7 +656,7 @@
       "reason": "Dial network renderer queries connectivity state directly."
     },
     {
-      "edge": "dial|idf_app/main/ui_network.c|idf_app/main/ota_update.h",
+      "edge": "dial|idf_app/main/ui_network.c|common/ota_update.h",
       "owner": "controller architecture program",
       "retirement_issue": "#170",
       "reason": "Dial network renderer queries OTA state directly."
@@ -702,7 +720,7 @@
       "header_patterns": [
         "common/bridge_client.h",
         "common/wifi_manager.h",
-        "idf_app/main/ota_update.h"
+        "common/ota_update.h"
       ]
     },
     {
