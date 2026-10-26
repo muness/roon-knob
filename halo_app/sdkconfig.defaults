@@ -44,3 +44,6 @@ CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y
+
+# A new OTA image must confirm itself (ota_confirm_boot) or the bootloader returns to the previous one.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

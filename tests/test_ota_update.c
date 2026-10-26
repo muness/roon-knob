@@ -103,6 +103,11 @@ static void set_running(const char *project, const char *slug, const char *versi
     device_slug=slug;
 }
 int main(void) {
+#if defined(OTA_TEST_ROLLBACK)
+    /* Booting confirms the image exactly once, however many times init runs. */
+    mark_valid_calls=0; ota_init(); ota_init(); ota_init();
+    assert(mark_valid_calls==1);
+#endif
 #if defined(OTA_TEST_PROJECT)
     set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.7.0");
     for (size_t chunk=1;chunk<=OTA_IMAGE_PREFIX_SIZE+1;chunk+=37) {

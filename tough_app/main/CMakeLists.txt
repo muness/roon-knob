@@ -16,6 +16,7 @@ set(SRC_FILES
     "captive_portal.c"
     "dns_server.c"
     "../../common/app_main.c"
+    "../../common/ota_update.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
     "../../common/controller_connection.c"
@@ -56,7 +57,7 @@ idf_component_register(
         wpa_supplicant
         m5_platform
     PRIV_REQUIRES
-        nvs_flash
+        app_update nvs_flash
         esp_http_client
         esp_http_server
         esp_app_format

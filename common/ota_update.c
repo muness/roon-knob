@@ -471,11 +471,29 @@ static void do_update_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+/* A freshly installed image is only trusted once it has stayed up for a while. A crash or watchdog
+ * reset inside this window leaves the image unconfirmed and the bootloader returns to the previous
+ * one (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE). It does not depend on Wi-Fi or the bridge, so a
+ * network problem never rolls back a good image. */
+#define OTA_CONFIRM_DELAY_MS 45000
+
+static bool s_confirm_task_started;
+
+static void confirm_boot_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(OTA_CONFIRM_DELAY_MS));
+    ota_confirm_boot();
+    vTaskDelete(NULL);
+}
+
 void ota_init(void) {
     memset(&s_ota_info, 0, sizeof(s_ota_info));
     strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
     s_ota_info.status = OTA_STATUS_IDLE;
     ESP_LOGI(TAG, "OTA initialized, current version: %s", s_ota_info.current_version);
+    if (!s_confirm_task_started) {
+        s_confirm_task_started = true;
+        xTaskCreate(confirm_boot_task, "ota_confirm", 3072, NULL, 1, NULL);
+    }
 }
 
 void ota_check_for_update(bool force) {

@@ -33,6 +33,7 @@ set(SRC_FILES
     "../../tough_app/main/captive_portal.c"
     "../../tough_app/main/dns_server.c"
     "../../common/app_main.c"
+    "../../common/ota_update.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
     "../../common/controller_connection.c"
@@ -57,7 +58,7 @@ set(SRC_FILES
 idf_component_register(SRCS ${SRC_FILES}
     INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main" "../../idf_app/main"
     REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant driver esp_lcd lvgl__lvgl espressif__esp_lcd_st77916
-    PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_i2c nvs_flash esp_http_client esp_http_server esp_app_format espressif__cjson)
+    PRIV_REQUIRES app_update esp_driver_ledc esp_driver_spi esp_driver_i2c nvs_flash esp_http_client esp_http_server esp_app_format espressif__cjson)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 # Preserve the no-PSRAM fallback and uncompressed artwork request policy.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
