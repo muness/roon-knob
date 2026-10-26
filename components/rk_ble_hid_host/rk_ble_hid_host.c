@@ -1266,6 +1266,25 @@ static void process_event(const service_event_t *event) {
         const bool mapped = rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
 
+        /* Report every Consumer Control key down and up, known or not, so the
+         * controller can recognise long and double presses and a person can
+         * map a key this firmware has no name for. Only reports ESP-IDF
+         * classified as Consumer Control, or that the bounded mapper accepted
+         * despite a GENERIC label: a keyboard or mouse report would otherwise
+         * decode its first two bytes as a "usage". This runs in addition to
+         * the media-key path below, which is unchanged. */
+        if (s.config.on_consumer_event && s.status.connected && !is_stopping() &&
+            (mapped || event->data.input.usage == ESP_HID_USAGE_CCONTROL)) {
+            uint16_t usage = 0;
+            bool pressed = false;
+            if (rk_ble_hid_host_decode_consumer_event(
+                    event->data.input.data, event->data.input.len, &usage,
+                    &pressed)) {
+                s.config.on_consumer_event(usage, pressed,
+                                           s.config.callback_context);
+            }
+        }
+
         /* ESP-IDF 5.5 can classify a valid Consumer Control report as GENERIC
          * when its HID report-map metadata is incomplete. The proven Frame
          * implementation decoded the payload directly. Preserve that behavior,

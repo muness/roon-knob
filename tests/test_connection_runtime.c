@@ -102,7 +102,8 @@ bool platform_task_post_to_ui(platform_task_fn_t cb, void *arg) {
     }
     return true;
 }
-void controller_presentation_set_message(const char *msg) { (void)msg; }
+static char last_message[64];
+void controller_presentation_set_message(const char *msg) { snprintf(last_message, sizeof(last_message), "%s", msg ? msg : ""); }
 void controller_presentation_set_network_status(const char *msg) { (void)msg; }
 void platform_log_backend(const char *level, const char *fmt, va_list args) { (void)level; (void)fmt; (void)args; }
 controller_config_write_result_t controller_config_set_zone(const char *zone, controller_config_snapshot_t *out) {
@@ -113,7 +114,18 @@ controller_config_write_result_t controller_config_set_zone(const char *zone, co
 void controller_presentation_set_zone_name(const char *name) { (void)name; ++zone_name_updates; }
 void controller_presentation_set_zone_count(int count) { (void)count; ++zone_count_updates; }
 static unsigned controls;
+static unsigned shortcut_posts;
+static char shortcut_url[128], shortcut_body[96];
+static const char *shortcut_reply = "{}";
+static bool shortcut_http_ok = true;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
+    if (strstr(url, "/knob/input")) {
+        ++shortcut_posts;
+        snprintf(shortcut_url, sizeof(shortcut_url), "%s", url);
+        snprintf(shortcut_body, sizeof(shortcut_body), "%s", body);
+        *out = strdup(shortcut_reply); *len = strlen(shortcut_reply);
+        return shortcut_http_ok ? 0 : -1;
+    }
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));
     cJSON *root = cJSON_Parse(body); assert(root);
     sent_volume = (float)cJSON_GetObjectItemCaseSensitive(root, "value")->valuedouble;
@@ -199,6 +211,41 @@ static void test_volume_uses_current_connection_evidence(void) {
     assert(capture_response_context(&s_volume_context)); s_media_last_good_ms = clock_ms;
     assert(bridge_client_execute_command(&command));
     assert(controls == 1);
+}
+static void shortcut_send(const char *reply, bool http_ok, bool expect_ok,
+                          const char *expect_message) {
+    shortcut_reply = reply; shortcut_http_ok = http_ok; last_message[0] = 0;
+    const unsigned before = shortcut_posts;
+    controller_shortcut_event_t event = {0x0223, CONTROLLER_SHORTCUT_GESTURE_LONG};
+    assert(bridge_client_send_shortcut(&event) == expect_ok);
+    assert(shortcut_posts == before + 1);
+    assert(strcmp(last_message, expect_message) == 0);
+}
+static void test_shortcut_input_reports_what_the_bridge_says(void) {
+    reset("http://192.168.1.2:8088", true);
+    strcpy(fixture.value.zone_id, "roon:room");
+    controller_connection_select(&s_connection, fixture.value.bridge_base, true, generation);
+    s_connection.resolved = true; strcpy(s_connection.endpoint, fixture.value.bridge_base);
+    controller_connection_api(&s_connection, true, 1, true, clock_ms);
+
+    shortcut_posts = 0;
+    shortcut_send("{\"ok\":true,\"code\":\"played\"}", true, true, "");
+    assert(strcmp(shortcut_url, "http://192.168.1.2:8088/knob/input") == 0);
+    assert(strcmp(shortcut_body, "{\"key\":\"home\",\"gesture\":\"long\"}") == 0);
+    shortcut_send("{\"ok\":true,\"code\":\"unmapped\"}", true, true, "");
+    shortcut_send("{\"ok\":false,\"code\":\"zone_missing\"}", true, false, "Zone unavailable");
+    shortcut_send("{\"ok\":false,\"code\":\"item_unavailable\"}", true, false, "Item not found");
+    /* A bridge that is down, answers nonsense, or sends a code we do not know
+     * must never look like success. */
+    shortcut_send("{}", false, false, "Shortcut failed");
+    shortcut_send("not json", true, false, "Shortcut failed");
+    shortcut_send("{\"ok\":true}", true, false, "Shortcut failed");
+    shortcut_send("{\"code\":\"from_the_future\"}", true, false, "Shortcut failed");
+
+    const unsigned posts = shortcut_posts;
+    /* An event with no key or gesture never reaches the network. */
+    controller_shortcut_event_t none = {0, CONTROLLER_SHORTCUT_GESTURE_NONE};
+    assert(!bridge_client_send_shortcut(&none) && shortcut_posts == posts);
 }
 static void test_fixed_volume_response_and_zone_switch(void) {
     test_volume_uses_current_connection_evidence();
@@ -733,4 +780,4 @@ static void test_volume_prediction_reconciliation(void) {
     assert(fetch_now_playing(&state,&power)); assert(!s_volume_pending && s_last_known_volume_fixed);
 }
 
-int main(void) { test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) { test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); test_shortcut_input_reports_what_the_bridge_says(); }

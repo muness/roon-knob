@@ -33,6 +33,39 @@ explicit mute command. Unknown report formats and usages are ignored safely.
 HOGP remotes are not perfectly uniform, so support must be verified with the
 specific remote.
 
+## Shortcuts from remote keys
+
+A paired remote's keys can also start a Library shortcut on the bridge. The
+controller never stores what a key does: it reports the key and gesture to the
+bridge (`POST /knob/input`, identified by `X-Knob-Id`), and the bridge plays the
+mapped Library item on this controller's own zone. Maps and shortcuts are edited
+in the bridge web UI (Library → "Pin as shortcut", Controllers → Config), so
+they survive a re-flash and are shared across controllers.
+
+| Key | Gestures that can start a shortcut |
+| --- | --- |
+| Volume up/down, mute | none: volume always means volume |
+| Play/pause, next, previous | long press only. The key's normal action still runs on the press itself |
+| Any other Consumer Control key | press, long press (600 ms) or double press (350 ms) |
+
+Keys this firmware has no name for are reported as `usage_XXXX` (the HID usage
+in hex), so any key a remote sends can be mapped. A press with no shortcut is
+reported as `unmapped` and is not an error.
+
+When the bridge cannot play a shortcut, the controller shows one short fixed
+message: "Pick a zone first", "Zone unavailable", "Not for this zone", "Item not
+found", "Shortcut was deleted" or "Shortcut failed". It never plays on another
+zone instead. A successful press shows nothing; the music is the feedback.
+
+Only one shortcut request is in flight at a time. A press that arrives while one
+is still running is dropped and logged, not queued.
+
+Only reports ESP-IDF classifies as Consumer Control (or that the bounded mapper
+accepts despite a GENERIC label) are considered, so keyboard and mouse reports
+from a remote are never read as keys. A Consumer Control key ESP-IDF mislabels
+as GENERIC and the mapper does not know is therefore not seen; the raw HID log
+shows it, and that is the evidence needed to extend the mapper.
+
 ## Target behavior
 
 - **HiPhi Frame:** enabled by default to preserve its established behavior.

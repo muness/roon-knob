@@ -13,6 +13,7 @@
 #include "platform/platform_time.h"
 #include "os_mutex.h"
 #include "controller_presentation.h"
+#include "controller_shortcut_key.h"
 #include "controller_view.h"
 #include "controller_view_compat.h"
 #include "wifi_manager.h"
@@ -1620,6 +1621,41 @@ bool bridge_client_execute_command(const controller_command_t *command) {
         post_ui_message(feedback_text[plan.failure_feedback]);
     }
     return sent;
+}
+
+bool bridge_client_send_shortcut(const controller_shortcut_event_t *event) {
+    char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
+    if (!controller_shortcut_build_body(event, body, sizeof(body))) return false;
+
+    response_context_t request;
+    if (!capture_response_context(&request) || !request.bridge[0]) {
+        post_ui_message("Not ready");
+        return false;
+    }
+    char url[256];
+    snprintf(url, sizeof(url), "%s/knob/input", request.bridge);
+    char *resp = NULL;
+    size_t resp_len = 0;
+    int ret = platform_http_post_json(url, body, &resp, &resp_len);
+    if (ret != 0 || !response_context_current(&request)) {
+        platform_http_free(resp);
+        if (ret != 0) post_ui_message("Shortcut failed");
+        return false;
+    }
+
+    /* A reply we cannot read is a failure, never a silent success. */
+    const char *code = NULL;
+    cJSON *root = resp_len ? response_document(resp, resp_len) : NULL;
+    if (root) {
+        const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "code");
+        if (cJSON_IsString(item) && item->valuestring) code = item->valuestring;
+    }
+    const char *feedback = controller_shortcut_feedback_for_code(code);
+    if (feedback) post_ui_message(feedback);
+    const bool ok = code && (!strcmp(code, "played") || !strcmp(code, "unmapped"));
+    cJSON_Delete(root);
+    platform_http_free(resp);
+    return ok;
 }
 
 void bridge_client_set_network_ready(bool ready) {

@@ -2,7 +2,16 @@
 
 #include "controller_input.h"
 
+#include "bridge_client.h"
+#include "controller_shortcut_key.h"
+#include "platform/platform_task.h"
+#include "platform/platform_time.h"
+
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 static const char *TAG = "controller_ble";
 
@@ -37,5 +46,114 @@ void controller_ble_input_on_media_key(rk_ble_media_key_t key, void *context) {
     } else {
         ESP_LOGI(TAG, "BLE media key %d queued as control intent %d", key,
                  intent);
+    }
+}
+
+/*
+ * Remote keys as bridge shortcuts.
+ *
+ * The recogniser (controller_shortcut_key.c) is single-threaded, so it lives on
+ * the UI actor: BLE callbacks and the long-press timer only post to it. Its
+ * timestamps are taken when the UI actor handles an event, a few milliseconds
+ * after the radio saw it, which is far inside the 600 ms / 350 ms windows.
+ *
+ * The bridge call blocks (a Roon shortcut may re-walk a browse trail), so it
+ * runs on a short-lived background task, one at a time. A press that arrives
+ * while one is in flight is dropped with a log line rather than queued: three
+ * queued "play my playlist" presses are worse than one.
+ */
+static controller_shortcut_gesture_state_t s_gesture; /* UI actor only */
+static esp_timer_handle_t s_timer;                    /* UI actor only */
+static atomic_bool s_shortcut_busy;
+
+static uint32_t now_ms(void) { return (uint32_t)platform_millis(); }
+
+static void shortcut_send_task(void *arg) {
+    controller_shortcut_event_t *event = arg;
+    (void)bridge_client_send_shortcut(event);
+    free(event);
+    atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+}
+
+static void dispatch_shortcut(const controller_shortcut_event_t *event) {
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&s_shortcut_busy, &expected, true)) {
+        ESP_LOGW(TAG, "Shortcut still in flight; key %04x dropped",
+                 (unsigned)event->usage);
+        return;
+    }
+    controller_shortcut_event_t *copy = malloc(sizeof(*copy));
+    if (!copy) {
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+        return;
+    }
+    *copy = *event;
+    if (platform_task_start_external_stack("shortcut_input", 6144,
+                                           shortcut_send_task, copy) != 0) {
+        ESP_LOGW(TAG, "Could not start shortcut task");
+        free(copy);
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+    }
+}
+
+static void on_tick_ui(void *arg);
+
+static void timer_fired(void *arg) {
+    (void)arg;
+    (void)platform_task_post_to_ui(on_tick_ui, NULL);
+}
+
+/* Re-arm a one-shot for the next long press or double window, or leave it off. */
+static void arm_timer(void) {
+    const uint32_t due =
+        controller_shortcut_gesture_next_due_ms(&s_gesture, now_ms());
+    if (!s_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = timer_fired,
+            .name = "shortcut_gesture",
+        };
+        if (esp_timer_create(&args, &s_timer) != ESP_OK) {
+            s_timer = NULL;
+            ESP_LOGW(TAG, "Could not create shortcut timer");
+            return;
+        }
+    }
+    (void)esp_timer_stop(s_timer); /* not running is fine */
+    if (due != UINT32_MAX) {
+        (void)esp_timer_start_once(s_timer, ((uint64_t)due + 1u) * 1000u);
+    }
+}
+
+static void on_tick_ui(void *arg) {
+    (void)arg;
+    controller_shortcut_event_t event;
+    for (int i = 0; i < 2; ++i) {
+        if (controller_shortcut_gesture_poll(&s_gesture, now_ms(), &event) == 0) {
+            break;
+        }
+        dispatch_shortcut(&event);
+    }
+    arm_timer();
+}
+
+static void on_key_ui(void *arg) {
+    const uintptr_t packed = (uintptr_t)arg;
+    const uint16_t usage = (uint16_t)(packed >> 1);
+    const bool pressed = (packed & 1u) != 0;
+    controller_shortcut_event_t events[2];
+    const size_t count = controller_shortcut_gesture_on_key(
+        &s_gesture, usage, pressed, now_ms(), events);
+    for (size_t i = 0; i < count; ++i) {
+        dispatch_shortcut(&events[i]);
+    }
+    arm_timer();
+}
+
+void controller_ble_input_on_consumer_event(uint16_t usage, bool pressed,
+                                            void *context) {
+    (void)context;
+    const uintptr_t packed = ((uintptr_t)usage << 1) | (pressed ? 1u : 0u);
+    if (!platform_task_post_to_ui(on_key_ui, (void *)packed)) {
+        ESP_LOGW(TAG, "UI queue full; remote key %04x dropped", (unsigned)usage);
     }
 }

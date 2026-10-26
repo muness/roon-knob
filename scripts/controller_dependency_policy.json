@@ -550,7 +550,21 @@
     "frame|common/bridge_client.c|common/platform/platform_bridge_cache.h",
     "frame|common/platform/platform_bridge_cache_esp.c|common/platform/platform_bridge_cache.h",
     "frame|common/platform/platform_bridge_cache_esp.c|common/platform/platform_mdns_endpoint.h",
-    "frame|common/wifi_manager.c|common/bridge_client.h"
+    "frame|common/wifi_manager.c|common/bridge_client.h",
+    "dial|common/bridge_client.c|common/controller_shortcut_key.h",
+    "dial|common/bridge_client.h|common/controller_shortcut_key.h",
+    "dial|common/controller_ble_input.c|common/bridge_client.h",
+    "dial|common/controller_ble_input.c|common/controller_shortcut_key.h",
+    "dial|common/controller_ble_input.c|common/platform/platform_task.h",
+    "dial|common/controller_ble_input.c|common/platform/platform_time.h",
+    "dial|common/controller_shortcut_key.c|common/controller_shortcut_key.h",
+    "frame|common/bridge_client.c|common/controller_shortcut_key.h",
+    "frame|common/bridge_client.h|common/controller_shortcut_key.h",
+    "frame|common/controller_ble_input.c|common/bridge_client.h",
+    "frame|common/controller_ble_input.c|common/controller_shortcut_key.h",
+    "frame|common/controller_ble_input.c|common/platform/platform_task.h",
+    "frame|common/controller_ble_input.c|common/platform/platform_time.h",
+    "frame|common/controller_shortcut_key.c|common/controller_shortcut_key.h"
   ],
   "grandfathered_edges": [
     {

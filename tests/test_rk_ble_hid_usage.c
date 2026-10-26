@@ -38,6 +38,24 @@ int main(void) {
     assert(!rk_ble_hid_host_map_consumer_report((const uint8_t[]){0xe2, 0}, 2, &key));
     assert(!rk_ble_hid_host_map_consumer_report((const uint8_t[]){0xcd}, 1, &key));
     assert(!rk_ble_hid_host_map_consumer_report(NULL, 0, &key));
+    /* Decode keeps releases and usages the media mapper does not know. */
+    uint16_t usage = 0xffff;
+    bool pressed = false;
+    assert(rk_ble_hid_host_decode_consumer_event(
+        (const uint8_t[]){0xcd, 0x00}, 2, &usage, &pressed));
+    assert(usage == 0x00cd && pressed);
+    assert(rk_ble_hid_host_decode_consumer_event(
+        (const uint8_t[]){0x23, 0x02, 0x00}, 3, &usage, &pressed));
+    assert(usage == 0x0223 && pressed);
+    assert(rk_ble_hid_host_decode_consumer_event(
+        (const uint8_t[]){0x00, 0x00}, 2, &usage, &pressed));
+    assert(usage == 0 && !pressed);
+    assert(!rk_ble_hid_host_decode_consumer_event(
+        (const uint8_t[]){0xcd}, 1, &usage, &pressed));
+    assert(!rk_ble_hid_host_decode_consumer_event(NULL, 0, &usage, &pressed));
+    assert(!rk_ble_hid_host_decode_consumer_event(
+        (const uint8_t[]){0xcd, 0}, 2, NULL, &pressed));
+
     puts("rk_ble_hid_host report mapping tests passed");
     return 0;
 }

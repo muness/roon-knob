@@ -17,6 +17,7 @@ set(SRC_FILES
     "dns_server.c"
     "../../common/app_main.c"
     "../../common/bridge_command_plan.c"
+    "../../common/controller_shortcut_key.c"
     "../../common/bridge_client.c"
     "../../common/controller_connection.c"
     "../../common/platform/platform_mdns_endpoint.c"

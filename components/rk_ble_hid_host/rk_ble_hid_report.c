@@ -61,3 +61,13 @@ bool rk_ble_hid_host_map_consumer_report(const uint8_t *data, size_t len,
         return false;
     }
 }
+
+bool rk_ble_hid_host_decode_consumer_event(const uint8_t *data, size_t len,
+                                           uint16_t *usage, bool *pressed) {
+    if (!data || len < 2 || !usage || !pressed) {
+        return false;
+    }
+    *usage = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+    *pressed = *usage != 0;
+    return true;
+}

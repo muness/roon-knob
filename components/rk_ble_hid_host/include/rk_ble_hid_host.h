@@ -89,6 +89,10 @@ typedef struct {
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
 typedef void (*rk_ble_hid_host_status_callback_t)(const rk_ble_hid_host_status_t *status,
                                                    void *context);
+/** Every decoded Consumer Control report, releases included. Runs on the BLE
+ * service task, in addition to (never instead of) the media-key callback. */
+typedef void (*rk_ble_hid_host_consumer_callback_t)(uint16_t usage, bool pressed,
+                                                     void *context);
 
 typedef struct {
     /** Used only when the local `ble_remote/enabled` key has not been written. */
@@ -96,6 +100,8 @@ typedef struct {
     rk_ble_hid_host_media_callback_t on_media_key;
     rk_ble_hid_host_status_callback_t on_status;
     void *callback_context;
+    /** Optional. Appended last so existing designated initialisers are unchanged. */
+    rk_ble_hid_host_consumer_callback_t on_consumer_event;
 } rk_ble_hid_host_config_t;
 
 /**
@@ -143,6 +149,15 @@ rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *o
  */
 bool rk_ble_hid_host_map_consumer_report(const uint8_t *data, size_t len,
                                          rk_ble_media_key_t *key);
+
+/**
+ * Pure decode of a Consumer Control report into its raw usage and whether a
+ * key is down. Unlike the mapper above this keeps releases (usage 0) and every
+ * usage the remote sends, so a controller can recognise long and double presses
+ * and learn which keys a remote has. Returns false for short or NULL input.
+ */
+bool rk_ble_hid_host_decode_consumer_event(const uint8_t *data, size_t len,
+                                           uint16_t *usage, bool *pressed);
 
 #ifdef __cplusplus
 }
