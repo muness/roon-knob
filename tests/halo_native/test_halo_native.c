@@ -130,6 +130,8 @@ bool platform_touch_has_device_controls(void) {
 void platform_touch_show_device_controls(void) { device_controls_visible=true; }
 bool platform_touch_device_controls_visible(void) { return device_controls_visible; }
 void platform_touch_scroll_device_controls(int delta) { device_scroll_delta+=delta; }
+static uint32_t local_setting_edits;
+void controller_device_settings_local_edit(uint32_t fields) { local_setting_edits |= fields; }
 static int saved_brightness = 100, brightness_saves;
 void platform_touch_set_brightness(int percent) { (void)percent; }
 int platform_touch_load_brightness(void) { return saved_brightness; }
@@ -634,11 +636,13 @@ int main(int argc, char **argv) {
   click(primary);
   assert(settings_detail == 6 && forgotten_networks == 1);
   click(back);
+  local_setting_edits = 0;
   brightness = 42; brightness_dirty = true; brightness_changed_ms = now;
   advance(600); controller_touch_navigation_process();
   assert(brightness_saves == 0);
   advance(200); controller_touch_navigation_process();
   assert(brightness_saves == 1 && platform_touch_load_brightness() == 42);
+  assert(local_setting_edits == CDS_BRIGHTNESS);
   /* A page containing only unsupported folders advances to the provider's
    * offset instead of showing an empty/retry page or repeating offset zero. */
   while (xQueueReceive(requests, &request, 0)) {}

@@ -1,9 +1,12 @@
 #include <assert.h>
 #include <string.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include "esp_stub.h"
 /* Exercise the real OTA task with fake HTTP/flash edges. */
 #include "../common/ota_update.c"
 
+static void (*during_read)(void), (*during_end)(void);
 static unsigned char response_bytes[1024], flashed_bytes[1024];
 static size_t body_size, advertised_size, read_offset, max_chunk, written;
 static int http_status, begin_calls, abort_calls, end_calls, boot_calls, restarted;
@@ -67,6 +70,7 @@ int esp_http_client_get_status_code(esp_http_client_handle_t client) {
     return is_version_request() ? version_status : http_status;
 }
 int esp_http_client_read(esp_http_client_handle_t client, char *out, int capacity) {
+    if (during_read) { void (*hook)(void)=during_read; during_read=NULL; hook(); }
     if (is_version_request()) {
         int n = (int)strlen(version_json);
         if (n > capacity) n = capacity;
@@ -88,7 +92,7 @@ esp_err_t esp_ota_write(esp_ota_handle_t handle, const void *bytes, size_t lengt
     memcpy(flashed_bytes + written, bytes, length); written += length; return ESP_OK;
 }
 esp_err_t esp_ota_abort(esp_ota_handle_t handle) { abort_calls++; return ESP_OK; }
-esp_err_t esp_ota_end(esp_ota_handle_t handle) { end_calls++; return ESP_OK; }
+esp_err_t esp_ota_end(esp_ota_handle_t handle) { end_calls++; if (during_end) { void (*hook)(void)=during_end; during_end=NULL; hook(); } return ESP_OK; }
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t *p) { boot_calls++; return ESP_OK; }
 const esp_app_desc_t *esp_app_get_description(void) { return &running; }
 void esp_restart(void) { restarted++; }
@@ -216,6 +220,67 @@ static void test_busy_install_is_delivered_when_idle(void) {
     setup(OTA_TEST_PROJECT,TARGET_FLASH); assert(ota_request_install("2.7.0"));
     assert(!s_ota_busy && restarted==1);
 }
+static void replace_endpoint(void) { endpoint_generation+=2; }
+static void test_endpoint_replacement_during_effect(void) {
+    setup(OTA_TEST_PROJECT,TARGET_FLASH);
+    during_read=replace_endpoint;
+    assert(ota_request_install("2.7.0"));
+    assert(begin_calls==0 && boot_calls==0 && !s_ota_busy);
+    setup(OTA_TEST_PROJECT,TARGET_FLASH);
+    during_end=replace_endpoint;
+    assert(ota_request_install("2.7.0"));
+    assert(begin_calls==1 && end_calls==1 && boot_calls==0 && !s_ota_busy);
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); ota_check_for_update(true);
+    ota_info_t snapshot; ota_get_info(&snapshot); assert(snapshot.status==OTA_STATUS_AVAILABLE);
+    replace_endpoint(); ota_start_update();
+    assert(begin_calls==0 && !s_ota_busy); /* stale metadata does not authorize a new endpoint */
+}
+static pthread_mutex_t callers_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t callers_ready=PTHREAD_COND_INITIALIZER;
+static unsigned ready_count;
+static bool release_callers;
+static ota_request_result_t caller_results[16];
+static void *concurrent_install(void *arg) {
+    size_t index=(size_t)arg;
+    pthread_mutex_lock(&callers_lock);
+    ++ready_count; pthread_cond_broadcast(&callers_ready);
+    while(!release_callers) pthread_cond_wait(&callers_ready,&callers_lock);
+    pthread_mutex_unlock(&callers_lock);
+    caller_results[index]=ota_request_install_result("2.7.0");
+    return NULL;
+}
+static atomic_bool read_snapshots;
+static void *snapshot_reader(void *arg) {
+    (void)arg;
+    do {
+        ota_info_t info; assert(ota_get_info(&info));
+        assert(!strcmp(info.current_version,"2.7.0"));
+        assert(info.progress_percent>=0 && info.progress_percent<=100);
+    } while(atomic_load(&read_snapshots));
+    return NULL;
+}
+static void test_concurrent_admission_and_status(void) {
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); task_creates=0; hold_worker=true;
+    ready_count=0; release_callers=false;
+    pthread_t callers[16];
+    for(size_t i=0;i<16;++i) assert(!pthread_create(&callers[i],NULL,concurrent_install,(void *)i));
+    pthread_mutex_lock(&callers_lock);
+    while(ready_count!=16) pthread_cond_wait(&callers_ready,&callers_lock);
+    release_callers=true; pthread_cond_broadcast(&callers_ready);
+    pthread_mutex_unlock(&callers_lock);
+    unsigned accepted=0;
+    for(size_t i=0;i<16;++i) {
+        pthread_join(callers[i],NULL);
+        assert(caller_results[i]==OTA_REQUEST_ACCEPTED || caller_results[i]==OTA_REQUEST_COALESCED);
+        accepted+=caller_results[i]==OTA_REQUEST_ACCEPTED;
+    }
+    assert(accepted==1 && task_creates==1 && s_ota_busy && !s_have_pending);
+    pthread_t reader; atomic_store(&read_snapshots,true);
+    assert(!pthread_create(&reader,NULL,snapshot_reader,NULL));
+    hold_worker=false; held_worker(held_worker_arg);
+    atomic_store(&read_snapshots,false); pthread_join(reader,NULL);
+    assert(begin_calls==1 && boot_calls==1 && !s_ota_busy);
+}
 static void test_install_trigger(void) {
     static char json[96];
     /* Stale request: the device already moved on, so nothing is checked or installed. */
@@ -296,6 +361,8 @@ int main(void) {
     test_install_trigger();
     test_downloaded_version_is_enforced();
     test_busy_install_is_delivered_when_idle();
+    test_endpoint_replacement_during_effect();
+    test_concurrent_admission_and_status();
 #endif
 #if defined(OTA_TEST_LEGACY_DIAL)
     /* Dial keeps accepting its historical project name. */

@@ -50,8 +50,8 @@ typedef struct {
  * at least one valid value is present. */
 bool controller_device_settings_parse(const cJSON *config, controller_device_settings_t *out);
 
-/* Apply parsed settings through the platform hook. Returns true when they were delivered or there
- * was nothing to deliver, false when the target could not store or queue them. */
+/* UI actor only. True means durable and effective application completed (or no
+ * applicable fields); false means the owner must retry or report exhaustion. */
 bool controller_device_settings_apply(const controller_device_settings_t *settings);
 
 /* Full snapshots replace pending remote work. Endpoint generations reject ABA.
@@ -70,7 +70,7 @@ controller_device_settings_status_t controller_device_settings_status(void);
 
 /* Platform hook, defined once per target. Called only with at least one present, valid field.
  * Returns true when every present field that applies to the device is now in effect (or already
- * was), false when a store or queue failed and the call should be retried. It must be idempotent (the config is re-fetched), must write nothing when a value is unchanged,
+ * was), false when storage or hardware failed and the call should be retried. It must be idempotent (the config is re-fetched), must write nothing when a value is unchanged,
  * and must ignore fields that do not apply to the device. Targets with no such setting link
  * common/platform/platform_device_settings_none.c. It is deliberately not a weak symbol: a weak
  * default in a static archive can shadow the real definition. */

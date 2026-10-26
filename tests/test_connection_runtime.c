@@ -139,13 +139,14 @@ static unsigned controls;
 static unsigned shortcut_posts;
 static char shortcut_url[128], shortcut_body[96];
 static const char *shortcut_reply = "{}";
-static bool shortcut_http_ok = true;
+static bool shortcut_http_ok = true, replace_during_shortcut;
 int platform_http_post_json(const char *url, const char *body, char **out, size_t *len) {
     if (strstr(url, "/knob/input")) {
         ++shortcut_posts;
         snprintf(shortcut_url, sizeof(shortcut_url), "%s", url);
         snprintf(shortcut_body, sizeof(shortcut_body), "%s", body);
         *out = strdup(shortcut_reply); *len = strlen(shortcut_reply);
+        if (replace_during_shortcut) { ++generation; strcpy(fixture.value.bridge_base,"http://replacement"); }
         return shortcut_http_ok ? 0 : -1;
     }
     assert(strstr(url, "/control")); assert(strstr(body, "vol_abs"));
@@ -309,6 +310,15 @@ static void test_shortcut_submit_is_single_flight_and_readiness_gated(void) {
     assert(shortcut_posts == posts && strcmp(last_message, "Not ready") == 0);
 }
 static void test_shortcut_authority_at_admission(void) {
+    connect_for_shortcut();
+    replace_during_shortcut=true; hold_shortcut_task=false;
+    shortcut_posts=0; shortcut_reply="{\"code\":\"no_zone\"}";
+    strcpy(last_message,"new context");
+    assert(bridge_client_submit_shortcut(0x223, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
+    assert(shortcut_posts==1 && !strstr(shortcut_url,"replacement"));
+    assert(!strcmp(last_message,"new context")); /* stale completion cannot publish */
+    replace_during_shortcut=false;
+
     connect_for_shortcut();
     shortcut_authority_t authority;
     change_during_snapshot = true;

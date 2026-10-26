@@ -257,8 +257,8 @@ static void status_set_sleep_quiesced(bool quiesced) {
 
 /* A BLE session ended (disconnect, disable, sleep teardown) or is starting:
  * forget the held key and tell the controller to drop any half-recognised
- * gesture, so a press never survives into the next session. Usage 0 with
- * pressed=false is the "everything is up" signal. */
+ * gesture, so a press never survives into the next session. Cancellation
+ * bypasses both queues and cannot be lost behind older reports. */
 static portMUX_TYPE s_input_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_input_session = 1, s_input_sequence, s_tracker_session;
 static bool s_input_faulted;

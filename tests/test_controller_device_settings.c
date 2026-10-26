@@ -30,9 +30,11 @@ static void drain(void) {
 static int hook_calls;
 static controller_device_settings_t hook_last;
 static bool hook_result = true;
+static void (*during_apply)(void);
 bool platform_device_settings_apply(const controller_device_settings_t *settings) {
     hook_calls++;
     hook_last = *settings;
+    if (during_apply) { void (*hook)(void)=during_apply; during_apply=NULL; hook(); }
     return hook_result;
 }
 
@@ -185,6 +187,22 @@ static void test_nothing_present_is_not_pending(void) {
     hook_result = true;
 }
 
+static void replace_during_apply(void) {
+    controller_device_settings_t fresh={.present=CDS_BRIGHTNESS,.brightness=90};
+    controller_device_settings_submit(&fresh,endpoint);
+}
+static void test_old_completion_cannot_complete_new_desire(void) {
+    controller_device_settings_t old={.present=CDS_BRIGHTNESS,.brightness=10};
+    defer_ui=true; hook_result=true; hook_calls=0;
+    during_apply=replace_during_apply;
+    controller_device_settings_submit(&old,endpoint); drain();
+    assert(hook_calls==1 && hook_last.brightness==10);
+    assert(controller_device_settings_status()==CDS_STATUS_PENDING);
+    drain(); assert(hook_calls==2 && hook_last.brightness==90);
+    assert(controller_device_settings_status()==CDS_STATUS_APPLIED);
+    defer_ui=false;
+}
+
 static void test_actor_authority(void) {
     controller_device_settings_t old = {.present=CDS_BRIGHTNESS, .brightness=10};
     controller_device_settings_t fresh = {.present=CDS_BRIGHTNESS, .brightness=80};
@@ -260,6 +278,7 @@ int main(void) {
     test_newer_submission_replaces_the_pending_one();
     test_nothing_present_is_not_pending();
     test_actor_authority();
+    test_old_completion_cannot_complete_new_desire();
     test_firmware_update();
     puts("controller device settings checks passed");
     return 0;
