@@ -22,3 +22,6 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_ESP_WIFI_11KV_SUPPORT=y
 CONFIG_ESP_WIFI_RRM_SUPPORT=y
 CONFIG_ESP_WIFI_WNM_SUPPORT=y
+
+# A new OTA image must confirm itself (ota_confirm_boot) or the bootloader returns to the previous one.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

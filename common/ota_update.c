@@ -18,9 +18,28 @@ static const char *TAG = "ota";
 static ota_info_t s_ota_info = {0};
 static TaskHandle_t s_ota_task = NULL;
 
-/* The bridge firmware routes are still Dial-only. Do not let their generic
- * filenames admit another ESP32-S3 product. Historical Dial project identity
- * is retained only with the current verified 16 MB target geometry. */
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+
+/* An OTA image is installed only when it is the same product as the running one. The chip and
+ * flash geometry come from this build's own configuration, and the product from the running
+ * image's descriptor, so no target can be handed a sibling's binary just because the bridge
+ * served it. Nothing here authenticates the firmware; it rejects accidental mismatches. */
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define OTA_TARGET_CHIP_ID ESP_CHIP_ID_ESP32S3
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+#define OTA_TARGET_CHIP_ID ESP_CHIP_ID_ESP32
+#else
+#error "OTA is not configured for this chip"
+#endif
+#if defined(CONFIG_ESPTOOLPY_FLASHSIZE_16MB)
+#define OTA_TARGET_FLASH_SIZE ESP_IMAGE_FLASH_SIZE_16MB
+#elif defined(CONFIG_ESPTOOLPY_FLASHSIZE_8MB)
+#define OTA_TARGET_FLASH_SIZE ESP_IMAGE_FLASH_SIZE_8MB
+#else
+#error "OTA is not configured for this flash size"
+#endif
 #define OTA_IMAGE_PREFIX_SIZE (sizeof(esp_image_header_t) + \
                                sizeof(esp_image_segment_header_t) + \
                                sizeof(esp_app_desc_t))
@@ -33,7 +52,14 @@ static void ota_set_identity_headers(esp_http_client_handle_t client) {
     esp_http_client_set_header(client, "X-Device-Type", platform_device_slug());
 }
 
-static bool ota_image_matches_dial(const void *prefix) {
+/* The historical Dial project name stays valid for the Dial only. */
+static bool ota_project_accepted(const char *image_project) {
+    const esp_app_desc_t *running = esp_app_get_description();
+    if (strncmp(running->project_name, image_project, sizeof(running->project_name)) == 0) return true;
+    return strcmp(running->project_name, "hiphi_dial") == 0 && strcmp(image_project, "roon_knob") == 0;
+}
+
+static bool ota_image_matches_running(const void *prefix) {
     esp_image_header_t image;
     esp_image_segment_header_t segment;
     esp_app_desc_t app;
@@ -43,18 +69,65 @@ static bool ota_image_matches_dial(const void *prefix) {
     memcpy(&app, bytes + sizeof(image) + sizeof(segment), sizeof(app));
     return image.magic == ESP_IMAGE_HEADER_MAGIC &&
            image.segment_count > 0 && image.segment_count <= ESP_IMAGE_MAX_SEGMENTS &&
-           image.chip_id == ESP_CHIP_ID_ESP32S3 &&
-           image.spi_size == ESP_IMAGE_FLASH_SIZE_16MB &&
+           image.chip_id == OTA_TARGET_CHIP_ID &&
+           image.spi_size == OTA_TARGET_FLASH_SIZE &&
            segment.data_len >= sizeof(app) &&
            app.magic_word == ESP_APP_DESC_MAGIC_WORD &&
            memchr(app.project_name, '\0', sizeof(app.project_name)) != NULL &&
-           (strcmp(app.project_name, "hiphi_dial") == 0 ||
-            strcmp(app.project_name, "roon_knob") == 0);
+           ota_project_accepted(app.project_name);
+}
+
+/* The downloaded bytes have to be the release the bridge advertised, newer than what is running,
+ * and on the same channel. The version endpoint is metadata about a different request; only the
+ * descriptor inside the image says what would actually be flashed. */
+static const char *ota_skip_v(const char *version) {
+    return (version[0] == 'v' || version[0] == 'V') ? version + 1 : version;
+}
+
+static bool ota_image_version_acceptable(const void *prefix) {
+    esp_app_desc_t app;
+    memcpy(&app, (const unsigned char *)prefix + sizeof(esp_image_header_t) +
+                     sizeof(esp_image_segment_header_t), sizeof(app));
+    if (memchr(app.version, '\0', sizeof(app.version)) == NULL) return false;
+    const char *image = ota_skip_v(app.version);
+    const char *advertised = ota_skip_v(s_ota_info.available_version);
+    const char *running = ota_get_current_version();
+    if (image[0] == '\0' || strcmp(image, advertised) != 0) return false;
+    if (ota_compare_versions(image, running) <= 0) return false;
+    return strcmp(ota_channel_for_version(image), ota_channel_for_version(running)) == 0;
+}
+
+/* Prerelease builds are published to their own channel. Asking the Stable feed would never
+ * offer them anything, so the channel follows the running version. */
+const char *ota_channel_for_version(const char *version) {
+    const char *pre = strchr(version, '-');
+    if (!pre) return "stable";
+    if (strncmp(pre, "-beta", 5) == 0 || strncmp(pre, "-rc", 3) == 0) return "beta";
+    return "alpha";
+}
+
+bool ota_confirm_boot(void) {
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err != ESP_OK) ESP_LOGW(TAG, "Could not confirm the running image: %s", esp_err_to_name(err));
+    return err == ESP_OK;
 }
 
 const char* ota_get_current_version(void) {
     const esp_app_desc_t *app_desc = esp_app_get_description();
     return app_desc->version;
+}
+
+static int ota_prerelease_stage(const char *pre) {
+    if (strncmp(pre, "-dev", 4) == 0) return 0;
+    if (strncmp(pre, "-alpha", 6) == 0) return 1;
+    if (strncmp(pre, "-beta", 5) == 0) return 2;
+    if (strncmp(pre, "-rc", 3) == 0) return 3;
+    return 1;
+}
+
+static int ota_prerelease_number(const char *pre) {
+    const char *dot = strchr(pre, '.');
+    return dot ? atoi(dot + 1) : 0;
 }
 
 int ota_compare_versions(const char* v1, const char* v2) {
@@ -74,19 +147,26 @@ int ota_compare_versions(const char* v1, const char* v2) {
     if (min1 != min2) return min1 - min2;
     if (pat1 != pat2) return pat1 - pat2;
 
-    // Same major.minor.patch - check pre-release suffix
-    // A version with pre-release (-dev, -beta, -alpha, -rc) is LESS than one without
+    // Same major.minor.patch: a pre-release is lower than the release it precedes, and
+    // pre-releases order by stage (dev < alpha < beta < rc) and then numerically.
     const char *pre1 = strchr(v1, '-');
     const char *pre2 = strchr(v2, '-');
 
-    if (pre1 && !pre2) return -1;  // v1 has pre-release, v2 doesn't: v1 < v2
-    if (!pre1 && pre2) return 1;   // v1 doesn't have pre-release, v2 does: v1 > v2
-    if (pre1 && pre2) return strcmp(pre1, pre2);  // Both have pre-release: compare lexically
+    if (pre1 && !pre2) return -1;
+    if (!pre1 && pre2) return 1;
+    if (pre1 && pre2) {
+        int stage1 = ota_prerelease_stage(pre1), stage2 = ota_prerelease_stage(pre2);
+        if (stage1 != stage2) return stage1 - stage2;
+        return ota_prerelease_number(pre1) - ota_prerelease_number(pre2);
+    }
 
     return 0;  // Identical
 }
 
-static void check_update_task(void *arg) {
+/* The check, update and install bodies are plain functions so the task wrappers stay trivial and
+ * the whole sequence runs under the host test harness. Each returns with s_ota_info holding the
+ * outcome; none of them touches s_ota_task. */
+static void ota_perform_check(void) {
     char bridge_url[128];
     char url[192];
     char response[256];
@@ -99,12 +179,11 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
                 sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
-    snprintf(url, sizeof(url), "%s/firmware/version", bridge_url);
+    snprintf(url, sizeof(url), "%s/firmware/version?channel=%s", bridge_url,
+             ota_channel_for_version(ota_get_current_version()));
     ESP_LOGI(TAG, "Checking for updates at %s", url);
 
     esp_http_client_config_t config = {
@@ -121,8 +200,6 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -133,8 +210,6 @@ static void check_update_task(void *arg) {
         ESP_LOGI(TAG, "No firmware available on server");
         s_ota_info.status = OTA_STATUS_UP_TO_DATE;
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -143,8 +218,6 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Bad server response", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -154,8 +227,6 @@ static void check_update_task(void *arg) {
     if (read_len <= 0) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Read failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     response[read_len] = '\0';
@@ -166,16 +237,12 @@ static void check_update_task(void *arg) {
     if (!ver_start) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Missing version", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     ver_start = strchr(ver_start + 9, '"');  // Find opening quote of value
     if (!ver_start) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid JSON", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     ver_start++;  // Skip opening quote
@@ -183,8 +250,6 @@ static void check_update_task(void *arg) {
     if (!ver_end || (ver_end - ver_start) >= (int)sizeof(s_ota_info.available_version)) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid version", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     size_t ver_len = ver_end - ver_start;
@@ -210,11 +275,9 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_UP_TO_DATE;
     }
 
-    s_ota_task = NULL;
-    vTaskDelete(NULL);
 }
 
-static void do_update_task(void *arg) {
+static void ota_perform_update(void) {
     char bridge_url[128];
     char url[192];
 
@@ -225,12 +288,11 @@ static void do_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
                 sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
-    snprintf(url, sizeof(url), "%s/firmware/download", bridge_url);
+    snprintf(url, sizeof(url), "%s/firmware/download?channel=%s", bridge_url,
+             ota_channel_for_version(ota_get_current_version()));
     ESP_LOGI(TAG, "Downloading firmware from %s", url);
 
     // Get the next OTA partition
@@ -239,8 +301,6 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "No OTA partition found");
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No OTA partition", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -261,8 +321,6 @@ static void do_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -274,8 +332,6 @@ static void do_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid firmware", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -285,8 +341,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Out of memory", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -299,13 +353,18 @@ static void do_update_task(void *arg) {
         if (count <= 0) break;
         prefix_read += (size_t)count;
     }
-    if (prefix_read != OTA_IMAGE_PREFIX_SIZE || !ota_image_matches_dial(buf)) {
+    if (prefix_read != OTA_IMAGE_PREFIX_SIZE || !ota_image_matches_running(buf)) {
         free(buf);
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Firmware target mismatch", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
+        return;
+    }
+    if (!ota_image_version_acceptable(buf)) {
+        free(buf);
+        esp_http_client_cleanup(client);
+        s_ota_info.status = OTA_STATUS_ERROR;
+        strncpy(s_ota_info.error_msg, "Firmware version mismatch", sizeof(s_ota_info.error_msg));
         return;
     }
 
@@ -317,8 +376,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "OTA begin failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     err = esp_ota_write(ota_handle, buf, prefix_read);
@@ -328,8 +385,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -343,8 +398,6 @@ static void do_update_task(void *arg) {
             esp_http_client_cleanup(client);
             s_ota_info.status = OTA_STATUS_ERROR;
             strncpy(s_ota_info.error_msg, "Invalid firmware length", sizeof(s_ota_info.error_msg));
-            s_ota_task = NULL;
-            vTaskDelete(NULL);
             return;
         }
         err = esp_ota_write(ota_handle, buf, read_len);
@@ -355,8 +408,6 @@ static void do_update_task(void *arg) {
             esp_http_client_cleanup(client);
             s_ota_info.status = OTA_STATUS_ERROR;
             strncpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
-            s_ota_task = NULL;
-            vTaskDelete(NULL);
             return;
         }
 
@@ -375,8 +426,6 @@ static void do_update_task(void *arg) {
         esp_ota_abort(ota_handle);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Download incomplete", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -385,8 +434,6 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Validation failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -395,8 +442,6 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Set boot failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -407,8 +452,66 @@ static void do_update_task(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
 
-    // Never reached
+}
+
+/* The bridge asked for an install: always re-check first (forced, so a prerelease device is not
+ * skipped), and install only an image ota_compare_versions says is strictly newer. Whatever the
+ * bridge claimed, nothing older or equal is ever written. */
+static void ota_perform_install(void) {
+    ota_perform_check();
+    if (s_ota_info.status != OTA_STATUS_AVAILABLE) return;
+    if (ota_compare_versions(s_ota_info.available_version, ota_get_current_version()) <= 0) {
+        s_ota_info.status = OTA_STATUS_UP_TO_DATE;
+        return;
+    }
+    ota_perform_update();
+}
+
+/* An install request that arrives while another OTA job is running is remembered rather than
+ * dropped. The bridge has already had its config hash accepted by then and will not serve the same
+ * request again, so the job that finishes is what delivers it. One slot: repeated requests
+ * coalesce, and the stale-version check is applied again when it finally runs. */
+static bool s_install_deferred;
+static char s_deferred_from[32]; /* same width as ota_info_t versions */
+
+/* Every OTA job ends here. */
+static void ota_task_finished(void) {
     s_ota_task = NULL;
+    if (s_install_deferred) {
+        s_install_deferred = false;
+        ota_request_install(s_deferred_from);
+    }
+}
+
+static void check_update_task(void *arg) {
+    ota_perform_check();
+    ota_task_finished();
+    vTaskDelete(NULL);
+}
+
+static void do_update_task(void *arg) {
+    ota_perform_update();
+    ota_task_finished();
+    vTaskDelete(NULL);
+}
+
+static void install_task(void *arg) {
+    ota_perform_install();
+    ota_task_finished();
+    vTaskDelete(NULL);
+}
+
+/* A freshly installed image is only trusted once it has stayed up for a while. A crash or watchdog
+ * reset inside this window leaves the image unconfirmed and the bootloader returns to the previous
+ * one (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE). It does not depend on Wi-Fi or the bridge, so a
+ * network problem never rolls back a good image. */
+#define OTA_CONFIRM_DELAY_MS 45000
+
+static bool s_confirm_task_started;
+
+static void confirm_boot_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(OTA_CONFIRM_DELAY_MS));
+    ota_confirm_boot();
     vTaskDelete(NULL);
 }
 
@@ -417,6 +520,10 @@ void ota_init(void) {
     strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
     s_ota_info.status = OTA_STATUS_IDLE;
     ESP_LOGI(TAG, "OTA initialized, current version: %s", s_ota_info.current_version);
+    if (!s_confirm_task_started) {
+        s_confirm_task_started = true;
+        xTaskCreate(confirm_boot_task, "ota_confirm", 3072, NULL, 1, NULL);
+    }
 }
 
 void ota_check_for_update(bool force) {
@@ -450,6 +557,26 @@ void ota_start_update(void) {
     }
 
     xTaskCreate(do_update_task, "ota_update", 8192, NULL, 1, &s_ota_task);  // Low priority to not block UI
+}
+
+bool ota_request_install(const char *from_version) {
+    /* The bridge's request names the version the device reported when it was made. A mismatch means
+     * the device has since updated (or been re-flashed), so the request is stale. */
+    if (from_version && from_version[0] != '\0' &&
+        strcmp(from_version, ota_get_current_version()) != 0) {
+        ESP_LOGI(TAG, "Stale install request from %s (running %s); ignored", from_version,
+                 ota_get_current_version());
+        return false;
+    }
+    if (s_ota_task != NULL) {
+        size_t length = from_version ? strlen(from_version) : 0;
+        if (length >= sizeof(s_deferred_from)) return false; /* malformed, never retryable */
+        ESP_LOGI(TAG, "OTA job running; install request deferred until it finishes");
+        memcpy(s_deferred_from, from_version ? from_version : "", length + 1);
+        s_install_deferred = true;
+        return true;
+    }
+    return xTaskCreate(install_task, "ota_install", 8192, NULL, 1, &s_ota_task) == pdPASS;
 }
 
 const ota_info_t* ota_get_info(void) {

@@ -1,40 +1,61 @@
 # OTA Updates
 
-HiPhi Dial can install a Stable application image over Wi-Fi through Unified Hi-Fi Control (UHC). The bridge downloads the latest Stable release, and the Dial checks for an available version. **You start installation in Settings; checking for updates does not install them automatically.**
+Every HiPhi controller can install an application image over Wi-Fi through Unified Hi-Fi Control (UHC), and every target can ask UHC for it from the bridge. **Status: implemented, unverified on hardware.** The shared client builds and passes host tests for every target. No target's bridge-served update, rollback, or settings preservation has been exercised on a physical unit, and nothing here should be read as hardware-proven.
 
-This OTA route currently serves Dial firmware. Other controllers need their exact USB installer unless their target guide explicitly documents OTA support. An ESP32-S3 chip match alone is not enough to select another controller's image.
+Two ways to start an update, both always explicit:
+
+- **UHC "Update" button.** The bridge's device page offers an Update button when a newer image exists for the controller's channel. Pressing it adds a pending install request to that controller's configuration. The controller picks it up the next time it fetches its configuration, re-checks the bridge, and installs only a strictly newer version. All targets support this path.
+- **On the Dial itself.** Settings has **Check for Update** and a start button. This on-device control is Dial only.
+
+Checking for updates never installs anything by itself.
+
+## One-time reflash for the new partition table
+
+Earlier firmware has no second application slot. Before the first bridge-served update, each controller needs a **one-time browser reflash** that writes the new partition table (factory + `ota_0` + `ota_1`, with rollback enabled). Use the target's Flash button at the [firmware center](https://firmware.hiphi.audio/) and **decline erase**: the NVS partition keeps its offset, so Wi-Fi and settings are retained. A downloaded merged factory image or an erase clears settings. Until a controller has had this reflash, it cannot take an OTA image and still needs USB. See [Firmware Flashing](FIRMWARE_FLASHING.md).
 
 ## Release Channels
 
 | Channel | Installation | Update behavior |
 |---------|--------------|-----------------|
-| [Stable](https://firmware.hiphi.audio/stable/) | USB; Dial also supports OTA through UHC | The bridge uses GitHub’s `releases/latest`, which excludes prereleases. Dial checks automatically and offers the available update. |
-| [Beta](https://firmware.hiphi.audio/beta/) | Opt-in USB | Prereleases do not enter the Stable feed. Dial skips automatic checks while running Beta. |
-| [Alpha](https://firmware.hiphi.audio/alpha/) | Opt-in USB | Prereleases do not enter the Stable feed. Dial skips automatic checks while running Alpha. |
+| [Stable](https://firmware.hiphi.audio/stable/) | USB reflash once, then OTA through UHC | The bridge uses GitHub's `releases/latest`, which excludes prereleases. |
+| [Beta](https://firmware.hiphi.audio/beta/) | Opt-in USB, then OTA through UHC | A beta or rc build follows the Beta channel. |
+| [Alpha](https://firmware.hiphi.audio/alpha/) | Opt-in USB, then OTA through UHC | An alpha or dev build follows the Alpha channel. |
 
-On Dial, **Check for Update** in Settings forces a check even from a prerelease. It queries the Stable feed and does not select another Alpha or Beta. The version comparison must find a newer version before installation becomes available. Channel labels in Settings keep a prerelease visible after installation.
+A prerelease follows its **own** channel. The controller derives the channel from the version it is running (`-beta*` and `-rc*` are Beta, any other prerelease suffix is Alpha, no suffix is Stable) and sends it as `?channel=` on both the version check and the download. A device on Beta never asks the Stable feed and is never moved to Alpha or Stable by an update. Automatic background checks still skip dev, alpha and beta builds; a bridge-requested install and the Dial's **Check for Update** force the check. Either way the version comparison must find a strictly newer version, otherwise nothing is written.
 
-## Update the Dial
+## Update a controller
+
+From UHC:
+
+1. Confirm the controller is online in UHC.
+2. Press **Update** on its device page.
+3. Leave the controller powered and on Wi-Fi while it fetches its configuration, downloads, validates and reboots.
+4. After the reboot, check the firmware version shown in UHC, room, transport, volume and reconnection.
+
+On the Dial:
 
 1. Confirm the Dial is connected to Wi-Fi and UHC.
 2. Open Settings and choose **Check for Update** if no available update is shown.
 3. Review the offered version and start the update.
 4. Keep the controller powered and connected while the image downloads and validates.
-5. After the controller reboots, check its firmware version, room, transport, volume, and reconnection.
 
-OTA writes an application slot and keeps the NVS settings partition. For USB updates, use the exact target's Flash button and decline erase. Downloaded merged factory images overwrite settings even without a separate erase command. See [Firmware Flashing](FIRMWARE_FLASHING.md).
+OTA writes the other application slot and keeps the NVS settings partition.
+
+## Rollback and boot confirmation
+
+Rollback is enabled in every build. After an OTA the bootloader runs the new image as "pending verification". The image confirms itself only after it has stayed up for **45 seconds**; the confirmation does not depend on Wi-Fi or the bridge. A crash or watchdog reset inside that window leaves the image unconfirmed and the bootloader returns to the previous slot. This is implemented from the ESP-IDF rollback API; no rollback has been triggered on hardware yet.
 
 ## What the Firmware Checks
 
-The Dial sends its controller identity with the version and download requests. Before accepting an image, it checks the ESP32-S3 chip, 16 MB flash geometry, and Dial application identity. The ESP-IDF OTA APIs validate the completed image before it becomes the boot target.
+The controller sends its identity (`X-Knob-Id`, `X-Knob-Version`, `X-Device-Type`) with the version and download requests. A bridge request names the version the controller reported when it was made. If that no longer equals the running version, the request is stale (the controller already updated) and is ignored; a request is also ignored while another OTA job runs. Before erasing a slot, the firmware checks the image's chip, flash size and application project name against its own running image, so a sibling target's binary is rejected. This catches accidents; it does not authenticate firmware. The ESP-IDF OTA APIs validate the completed image before it becomes the boot target.
 
-A download or validation failure leaves the current firmware selected. It is still necessary to test sustained boot and hardware behavior after a successful update; a transfer completing does not prove those functions.
+A download or validation failure leaves the current firmware selected and does not reboot. A successful transfer does not prove sustained boot or hardware behavior; test those after each update.
 
-Implementation: [ota_update.c](../../idf_app/main/ota_update.c), [ota_update.h](../../idf_app/main/ota_update.h), and [ui_network.c](../../idf_app/main/ui_network.c).
+Implementation: [ota_update.c](../../common/ota_update.c), [ota_update.h](../../common/ota_update.h), [controller_device_settings.c](../../common/controller_device_settings.c) (request parsing), and the Dial's [ui_network.c](../../idf_app/main/ui_network.c).
 
 ## Dial Partition Layout
 
-This table describes the current Dial build only. Do not reuse it for another target or assume an older release has the same application-slot sizes.
+This table describes the current Dial build only. Every target now has the same three-slot shape, but offsets and sizes are per target; read each target's `partitions.csv`. Do not assume an older release has the same slot sizes.
 
 | Partition | Offset | Size | Purpose |
 |-----------|--------|------|---------|
@@ -51,19 +72,22 @@ Source: [idf_app/partitions.csv](../../idf_app/partitions.csv). OTA chooses the 
 
 The bridge serves `GET /firmware/version` and `GET /firmware/download`. Its version response identifies the available application version, size, and filename; it is not a browser-flashing manifest.
 
-The released bridge still selects **roon_knob.bin**, the byte-identical compatibility alias for **hiphi_dial.bin**. Keep both assets available during the naming transition. [UHC issue #277](https://github.com/open-horizon-labs/unified-hifi-control/issues/277) tracks selecting the primary HiPhi asset. These generic endpoints currently do not provide a family-wide, per-target OTA catalog.
+The firmware sends `X-Device-Type` (the device slug) and `?channel=` so a bridge can serve the matching target and channel. The firmware side does not depend on filenames, but whether a given UHC release selects the right per-target asset is a bridge matter this repository cannot verify: confirm it against the UHC version you run. Keep the `roon_knob.bin` compatibility alias (byte-identical to **hiphi_dial.bin**) available during the naming transition; [UHC issue #277](https://github.com/open-horizon-labs/unified-hifi-control/issues/277) tracks selecting the primary HiPhi asset.
 
-The bridge downloads Stable firmware from GitHub Releases. It does not use the Beta or Alpha web installer as an OTA feed. See the [UHC firmware service](https://github.com/open-horizon-labs/unified-hifi-control/blob/main/src/firmware.rs) for the current server implementation.
+The bridge may also add `firmware_update` (`{"action":"install","from_version":"<version>"}`) to a controller's `GET /config/<knob_id>` response while an install is pending, and optional device settings keys (`show_ip`, `brightness`, `body_enabled`, `sound_enabled`, `sound_volume`). Absent or invalid values are ignored.
+
+The bridge downloads firmware for the requested channel from GitHub Releases. It does not use the web installer pages as an OTA feed. See the [UHC firmware service](https://github.com/open-horizon-labs/unified-hifi-control/blob/main/src/firmware.rs) for the current server implementation.
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---------|-------|
 | No update available | Confirm UHC has a newer Stable application image. A prerelease or a channel page alone does not enter the OTA feed. |
-| No bridge configured or connection failed | Restore the Dial's connection to the selected UHC bridge before retrying. |
+| UHC Update does nothing | The controller has not had the one-time partition reflash, is offline, or already runs the offered version (a stale request is ignored). It acts on the next configuration fetch, not instantly. |
+| No bridge configured or connection failed | Restore the controller's connection to the selected UHC bridge before retrying. |
 | Download or validation failed | Leave the current firmware running, inspect the offered release and bridge logs, and retry only after resolving the cause. |
 | Wrong target or unsupported image | Use the exact target’s USB installer. Never rename another controller’s binary to the Dial compatibility filename. |
-| Need to test a prerelease | Choose Beta or Alpha explicitly at the firmware center and install over USB. |
+| Need to test a prerelease | Choose Beta or Alpha explicitly at the firmware center and install over USB once; later updates follow that channel. |
 
 ## Release Maintenance
 

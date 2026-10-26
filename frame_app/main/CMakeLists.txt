@@ -24,6 +24,9 @@ set(SRC_FILES
     "dns_server.c"
     "pmic_axp2101.c"
     "../../common/app_main.c"
+    "../../common/ota_update.c"
+    "../../common/controller_device_settings.c"
+    "platform_device_settings_frame.c"
     "../../common/bridge_command_plan.c"
     "../../common/controller_shortcut_key.c"
     "../../common/bridge_client.c"
@@ -64,7 +67,7 @@ idf_component_register(
         esp_wifi
         wpa_supplicant
     PRIV_REQUIRES
-        nvs_flash
+        app_update nvs_flash
         esp_http_client
         esp_http_server
         esp_app_format

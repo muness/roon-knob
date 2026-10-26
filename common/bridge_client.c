@@ -2,6 +2,8 @@
 
 #include "bridge_command_plan.h"
 #include "controller_config.h"
+#include "controller_device_settings.h"
+#include "ota_update.h"
 #include "platform/platform_display.h"
 #include "platform/platform_http.h"
 #include "platform/platform_log.h"
@@ -1432,6 +1434,9 @@ static void bridge_poll_thread(void *arg) {
 
         // Check for config/zones changes (only when bridge is responding)
         if (ok) {
+            /* A device-setting write the target could not make earlier is retried here; the bridge
+             * will not serve the same config hash again. */
+            controller_device_settings_retry_pending();
             check_config_sha(state.config_sha);
             check_zones_sha(state.zones_sha);
         }
@@ -2311,6 +2316,17 @@ static bool fetch_knob_config(void) {
 
     controller_remote_preferences_t preferences;
     bool parsed = parse_remote_preferences(root, &preferences);
+    /* Optional device-specific settings and a pending firmware install ride in the same config
+     * object. They never fail the preference parse; they are acted on only after it commits. */
+    controller_device_settings_t device_settings = {0};
+    char install_from[CONTROLLER_FIRMWARE_VERSION_MAX] = {0};
+    bool install_requested = false;
+    if (parsed) {
+        cJSON *config = cJSON_GetObjectItemCaseSensitive(root, "config");
+        controller_device_settings_parse(config, &device_settings);
+        install_requested = controller_firmware_update_parse(config, install_from,
+                                                             sizeof(install_from));
+    }
     cJSON_Delete(root);
     if (!parsed) {
         LOGW("fetch_knob_config: rejected malformed remote preferences");
@@ -2329,6 +2345,12 @@ static bool fetch_knob_config(void) {
         post_unverified_config_diagnostic("Remote preferences");
     }
     apply_knob_config(&committed.value);
+    controller_device_settings_submit(&device_settings);
+    if (install_requested) {
+        bool started = ota_request_install(install_from);
+        LOGI("Bridge requested firmware install from '%s': %s", install_from,
+             started ? "started" : "ignored");
+    }
     LOGI("Config fetch %s: sha='%s'",
          result == CONTROLLER_CONFIG_COMMITTED_VERIFIED ? "complete"
                                                         : "applied unverified",
