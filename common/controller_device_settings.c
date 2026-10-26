@@ -38,9 +38,33 @@ bool controller_device_settings_parse(const cJSON *config, controller_device_set
     return out->present != 0;
 }
 
-void controller_device_settings_apply(const controller_device_settings_t *settings) {
+bool controller_device_settings_apply(const controller_device_settings_t *settings) {
+    if (!settings || settings->present == 0) return true;
+    return platform_device_settings_apply(settings);
+}
+
+static controller_device_settings_t s_pending;
+static int s_retries_left;
+
+void controller_device_settings_submit(const controller_device_settings_t *settings) {
+    /* An empty submission says nothing about a change that is still pending. */
     if (!settings || settings->present == 0) return;
-    platform_device_settings_apply(settings);
+    /* The bridge serves its full current set each time, so a newer submission supersedes. */
+    memset(&s_pending, 0, sizeof(s_pending));
+    s_retries_left = 0;
+    if (controller_device_settings_apply(settings)) return;
+    s_pending = *settings;
+    s_retries_left = CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES;
+}
+
+void controller_device_settings_retry_pending(void) {
+    if (s_pending.present == 0) return;
+    if (controller_device_settings_apply(&s_pending)) {
+        memset(&s_pending, 0, sizeof(s_pending));
+        s_retries_left = 0;
+        return;
+    }
+    if (--s_retries_left <= 0) memset(&s_pending, 0, sizeof(s_pending));
 }
 
 bool controller_firmware_update_parse(const cJSON *config, char *from_version, size_t capacity) {

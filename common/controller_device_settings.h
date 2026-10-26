@@ -46,15 +46,27 @@ typedef struct {
  * at least one valid value is present. */
 bool controller_device_settings_parse(const cJSON *config, controller_device_settings_t *out);
 
-/* Apply parsed settings through the platform hook. Does nothing when nothing is present. */
-void controller_device_settings_apply(const controller_device_settings_t *settings);
+/* Apply parsed settings through the platform hook. Returns true when they were delivered or there
+ * was nothing to deliver, false when the target could not store or queue them. */
+bool controller_device_settings_apply(const controller_device_settings_t *settings);
+
+/* The bridge serves a config hash once: after the device accepts it, the same values are never
+ * fetched again. So a change the target failed to apply is kept here and retried, instead of being
+ * acknowledged and lost. submit() applies now and keeps the values pending on failure (replacing any
+ * older pending set); retry_pending() is called from the bridge poll loop and gives up after
+ * CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES failed attempts so a persistent fault is not replayed
+ * forever. Single-threaded: both run on the bridge worker. */
+#define CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES 5
+void controller_device_settings_submit(const controller_device_settings_t *settings);
+void controller_device_settings_retry_pending(void);
 
 /* Platform hook, defined once per target. Called only with at least one present, valid field.
- * It must be idempotent (the config is re-fetched), must write nothing when a value is unchanged,
+ * Returns true when every present field that applies to the device is now in effect (or already
+ * was), false when a store or queue failed and the call should be retried. It must be idempotent (the config is re-fetched), must write nothing when a value is unchanged,
  * and must ignore fields that do not apply to the device. Targets with no such setting link
  * common/platform/platform_device_settings_none.c. It is deliberately not a weak symbol: a weak
  * default in a static archive can shadow the real definition. */
-void platform_device_settings_apply(const controller_device_settings_t *settings);
+bool platform_device_settings_apply(const controller_device_settings_t *settings);
 
 /* Parse `config.firmware_update`. Returns true only for
  * {"action":"install","from_version":"<string>"}; the version is copied to from_version (which may

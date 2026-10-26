@@ -601,8 +601,10 @@ static controller_config_write_result_t merge_result = CONTROLLER_CONFIG_COMMITT
 void platform_display_set_rotation(uint16_t rotation) { (void)rotation; }
 void platform_display_apply_config(const rk_cfg_t *cfg, bool charging) { (void)cfg; (void)charging; }
 void platform_power_snapshot(platform_power_snapshot_t *out) { (void)out; }
-void platform_device_settings_apply(const controller_device_settings_t *settings) {
+static bool device_apply_ok = true;
+bool platform_device_settings_apply(const controller_device_settings_t *settings) {
     ++device_apply_calls; device_applied = *settings;
+    return device_apply_ok;
 }
 bool ota_request_install(const char *from_version) {
     ++install_calls; snprintf(install_from_seen, sizeof(install_from_seen), "%s", from_version);
@@ -635,6 +637,21 @@ static void test_config_fetch_applies_device_settings_and_install(void) {
     assert(!fetch_knob_config());
     assert(device_apply_calls == 0 && install_calls == 0);
     merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+}
+/* A target that failed to apply a setting keeps it: the config hash is already committed and will
+ * not be fetched again, so the poll loop's retry is what delivers it. */
+static void test_failed_device_setting_is_retried_without_a_refetch(void) {
+    reset("http://192.168.1.2:8088", false);
+    http_ok = true; merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+    device_apply_calls = merge_calls = 0; device_apply_ok = false;
+    http_body = "{\"config_sha\":\"b1\",\"config\":{\"brightness\":55}}";
+    assert(fetch_knob_config());
+    assert(merge_calls == 1 && device_apply_calls == 1);
+    device_apply_ok = true;
+    controller_device_settings_retry_pending();       /* next poll, same hash: no new fetch */
+    assert(merge_calls == 1 && device_apply_calls == 2 && device_applied.brightness == 55);
+    controller_device_settings_retry_pending();
+    assert(device_apply_calls == 2);
 }
 static void test_auto_selection_queues_current_inventory(void) {
     reset("http://192.168.1.2:8088", false);
@@ -778,4 +795,4 @@ static void test_volume_prediction_reconciliation(void) {
     assert(fetch_now_playing(&state,&power)); assert(!s_volume_pending && s_last_known_volume_fixed);
 }
 
-int main(void) { test_config_fetch_applies_device_settings_and_install(); test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) { test_config_fetch_applies_device_settings_and_install(); test_failed_device_setting_is_retried_without_a_refetch(); test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

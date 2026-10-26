@@ -77,6 +77,26 @@ static bool ota_image_matches_running(const void *prefix) {
            ota_project_accepted(app.project_name);
 }
 
+/* The downloaded bytes have to be the release the bridge advertised, newer than what is running,
+ * and on the same channel. The version endpoint is metadata about a different request; only the
+ * descriptor inside the image says what would actually be flashed. */
+static const char *ota_skip_v(const char *version) {
+    return (version[0] == 'v' || version[0] == 'V') ? version + 1 : version;
+}
+
+static bool ota_image_version_acceptable(const void *prefix) {
+    esp_app_desc_t app;
+    memcpy(&app, (const unsigned char *)prefix + sizeof(esp_image_header_t) +
+                     sizeof(esp_image_segment_header_t), sizeof(app));
+    if (memchr(app.version, '\0', sizeof(app.version)) == NULL) return false;
+    const char *image = ota_skip_v(app.version);
+    const char *advertised = ota_skip_v(s_ota_info.available_version);
+    const char *running = ota_get_current_version();
+    if (image[0] == '\0' || strcmp(image, advertised) != 0) return false;
+    if (ota_compare_versions(image, running) <= 0) return false;
+    return strcmp(ota_channel_for_version(image), ota_channel_for_version(running)) == 0;
+}
+
 /* Prerelease builds are published to their own channel. Asking the Stable feed would never
  * offer them anything, so the channel follows the running version. */
 const char *ota_channel_for_version(const char *version) {
@@ -340,6 +360,13 @@ static void ota_perform_update(void) {
         strncpy(s_ota_info.error_msg, "Firmware target mismatch", sizeof(s_ota_info.error_msg));
         return;
     }
+    if (!ota_image_version_acceptable(buf)) {
+        free(buf);
+        esp_http_client_cleanup(client);
+        s_ota_info.status = OTA_STATUS_ERROR;
+        strncpy(s_ota_info.error_msg, "Firmware version mismatch", sizeof(s_ota_info.error_msg));
+        return;
+    }
 
     esp_ota_handle_t ota_handle;
     err = esp_ota_begin(update_partition, content_length, &ota_handle);
@@ -440,21 +467,37 @@ static void ota_perform_install(void) {
     ota_perform_update();
 }
 
+/* An install request that arrives while another OTA job is running is remembered rather than
+ * dropped. The bridge has already had its config hash accepted by then and will not serve the same
+ * request again, so the job that finishes is what delivers it. One slot: repeated requests
+ * coalesce, and the stale-version check is applied again when it finally runs. */
+static bool s_install_deferred;
+static char s_deferred_from[32]; /* same width as ota_info_t versions */
+
+/* Every OTA job ends here. */
+static void ota_task_finished(void) {
+    s_ota_task = NULL;
+    if (s_install_deferred) {
+        s_install_deferred = false;
+        ota_request_install(s_deferred_from);
+    }
+}
+
 static void check_update_task(void *arg) {
     ota_perform_check();
-    s_ota_task = NULL;
+    ota_task_finished();
     vTaskDelete(NULL);
 }
 
 static void do_update_task(void *arg) {
     ota_perform_update();
-    s_ota_task = NULL;
+    ota_task_finished();
     vTaskDelete(NULL);
 }
 
 static void install_task(void *arg) {
     ota_perform_install();
-    s_ota_task = NULL;
+    ota_task_finished();
     vTaskDelete(NULL);
 }
 
@@ -517,10 +560,6 @@ void ota_start_update(void) {
 }
 
 bool ota_request_install(const char *from_version) {
-    if (s_ota_task != NULL) {
-        ESP_LOGW(TAG, "OTA task already running; install request ignored");
-        return false;
-    }
     /* The bridge's request names the version the device reported when it was made. A mismatch means
      * the device has since updated (or been re-flashed), so the request is stale. */
     if (from_version && from_version[0] != '\0' &&
@@ -528,6 +567,14 @@ bool ota_request_install(const char *from_version) {
         ESP_LOGI(TAG, "Stale install request from %s (running %s); ignored", from_version,
                  ota_get_current_version());
         return false;
+    }
+    if (s_ota_task != NULL) {
+        size_t length = from_version ? strlen(from_version) : 0;
+        if (length >= sizeof(s_deferred_from)) return false; /* malformed, never retryable */
+        ESP_LOGI(TAG, "OTA job running; install request deferred until it finishes");
+        memcpy(s_deferred_from, from_version ? from_version : "", length + 1);
+        s_install_deferred = true;
+        return true;
     }
     return xTaskCreate(install_task, "ota_install", 8192, NULL, 1, &s_ota_task) == pdPASS;
 }

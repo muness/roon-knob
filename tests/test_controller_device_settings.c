@@ -10,9 +10,11 @@
 /* Fake platform hook: records every call so the tests can prove what reaches a target. */
 static int hook_calls;
 static controller_device_settings_t hook_last;
-void platform_device_settings_apply(const controller_device_settings_t *settings) {
+static bool hook_result = true;
+bool platform_device_settings_apply(const controller_device_settings_t *settings) {
     hook_calls++;
     hook_last = *settings;
+    return hook_result;
 }
 
 static controller_device_settings_t parse(const char *json, bool *any) {
@@ -109,6 +111,61 @@ static void test_apply_only_present_and_valid(void) {
     assert(hook_calls == 1);
 }
 
+/* A target that could not store or queue a value must not lose it: the bridge's config hash was
+ * already accepted and will not be served again, so the device keeps the change itself and retries
+ * a bounded number of times. */
+static void test_failed_apply_is_retried_then_delivered(void) {
+    bool any;
+    hook_calls = 0; hook_result = false;
+    controller_device_settings_t s = parse("{\"brightness\":40}", &any);
+    controller_device_settings_submit(&s);
+    assert(hook_calls == 1);
+    controller_device_settings_retry_pending();
+    controller_device_settings_retry_pending();
+    assert(hook_calls == 3 && hook_last.brightness == 40);
+    hook_result = true;
+    controller_device_settings_retry_pending();
+    assert(hook_calls == 4);
+    controller_device_settings_retry_pending(); /* delivered: nothing left to retry */
+    assert(hook_calls == 4);
+}
+
+static void test_retry_is_bounded(void) {
+    bool any;
+    hook_calls = 0; hook_result = false;
+    controller_device_settings_t s = parse("{\"show_ip\":true}", &any);
+    controller_device_settings_submit(&s);
+    for (int i = 0; i < 50; i++) controller_device_settings_retry_pending();
+    int attempts = hook_calls;
+    assert(attempts > 1 && attempts <= 1 + CONTROLLER_DEVICE_SETTINGS_MAX_RETRIES);
+    controller_device_settings_retry_pending(); /* gave up: no unbounded replay */
+    assert(hook_calls == attempts);
+}
+
+static void test_newer_submission_replaces_the_pending_one(void) {
+    bool any;
+    hook_calls = 0; hook_result = false;
+    controller_device_settings_t old = parse("{\"brightness\":10}", &any);
+    controller_device_settings_submit(&old);
+    controller_device_settings_t fresh = parse("{\"brightness\":80}", &any);
+    hook_result = true;
+    controller_device_settings_submit(&fresh);
+    assert(hook_last.brightness == 80);
+    int calls = hook_calls;
+    controller_device_settings_retry_pending(); /* the stale value is never replayed over it */
+    assert(hook_calls == calls);
+}
+
+static void test_nothing_present_is_not_pending(void) {
+    bool any;
+    hook_calls = 0; hook_result = false;
+    controller_device_settings_t s = parse("{\"zone\":1}", &any);
+    controller_device_settings_submit(&s);
+    controller_device_settings_retry_pending();
+    assert(hook_calls == 0);
+    hook_result = true;
+}
+
 static void test_firmware_update(void) {
     char from[32] = "junk";
     assert(firmware("{\"firmware_update\":{\"action\":\"install\",\"from_version\":\"4.0.0-beta.9\"}}",
@@ -150,6 +207,10 @@ int main(void) {
     test_null_wrong_type_out_of_range();
     test_not_an_object();
     test_apply_only_present_and_valid();
+    test_failed_apply_is_retried_then_delivered();
+    test_retry_is_bounded();
+    test_newer_submission_replaces_the_pending_one();
+    test_nothing_present_is_not_pending();
     test_firmware_update();
     puts("controller device settings checks passed");
     return 0;

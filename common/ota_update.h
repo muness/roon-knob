@@ -35,9 +35,11 @@ void ota_check_for_update(bool force);
 void ota_start_update(void);
 
 // Install request from the bridge (non-blocking). Starts one background job that force-checks the
-// bridge and, only if it offers a strictly newer version, installs it and reboots. Returns false
-// without starting anything when a job is already running, or when from_version is non-empty and
-// differs from the running version (a stale request after the device already updated).
+// bridge and, only if it offers a strictly newer version, installs it and reboots. Returns true when
+// the request was started or, because another OTA job is running, parked to start when that job
+// ends (one slot; repeats coalesce). Returns false, doing nothing, when from_version is non-empty
+// and differs from the running version (a stale request after the device already updated) or does
+// not fit.
 bool ota_request_install(const char *from_version);
 
 // Get current OTA status
