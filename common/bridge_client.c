@@ -1623,7 +1623,7 @@ bool bridge_client_execute_command(const controller_command_t *command) {
     return sent;
 }
 
-bool bridge_client_send_shortcut(const controller_shortcut_event_t *event) {
+static bool send_shortcut_blocking(const controller_shortcut_event_t *event) {
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
     if (!controller_shortcut_build_body(event, body, sizeof(body))) return false;
 
@@ -1656,6 +1656,55 @@ bool bridge_client_send_shortcut(const controller_shortcut_event_t *event) {
     cJSON_Delete(root);
     platform_http_free(resp);
     return ok;
+}
+
+static atomic_bool s_shortcut_busy;
+
+typedef struct {
+    controller_shortcut_event_t event;
+} shortcut_job_t;
+
+static void shortcut_task(void *arg) {
+    shortcut_job_t *job = arg;
+    (void)send_shortcut_blocking(&job->event);
+    free(job);
+    atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+}
+
+bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+    const controller_shortcut_event_t event = {
+        .usage = usage,
+        .gesture = (controller_shortcut_gesture_t)gesture,
+    };
+    char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
+    if (!controller_shortcut_build_body(&event, body, sizeof(body))) {
+        return false; /* no key or no gesture: nothing to send */
+    }
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
+    if (!controller_connection_ready(&connection)) {
+        post_ui_message("Not ready");
+        return false;
+    }
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&s_shortcut_busy, &expected, true)) {
+        LOGW("Shortcut still in flight; key %04x dropped", (unsigned)usage);
+        return false;
+    }
+    shortcut_job_t *job = malloc(sizeof(*job));
+    if (!job) {
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+        return false;
+    }
+    job->event = event;
+    if (platform_task_start_external_stack("shortcut_input", 6144,
+                                           shortcut_task, job) != 0) {
+        free(job);
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+        post_ui_message("Shortcut failed");
+        return false;
+    }
+    return true;
 }
 
 void bridge_client_set_network_ready(bool ready) {

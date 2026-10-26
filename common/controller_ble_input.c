@@ -2,16 +2,13 @@
 
 #include "controller_input.h"
 
-#include "bridge_client.h"
 #include "controller_shortcut_key.h"
 #include "platform/platform_task.h"
 #include "platform/platform_time.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
-#include <stdatomic.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 static const char *TAG = "controller_ble";
 
@@ -57,42 +54,24 @@ void controller_ble_input_on_media_key(rk_ble_media_key_t key, void *context) {
  * timestamps are taken when the UI actor handles an event, a few milliseconds
  * after the radio saw it, which is far inside the 600 ms / 350 ms windows.
  *
- * The bridge call blocks (a Roon shortcut may re-walk a browse trail), so it
- * runs on a short-lived background task, one at a time. A press that arrives
- * while one is in flight is dropped with a log line rather than queued: three
- * queued "play my playlist" presses are worse than one.
+ * The router accepts the action only in the media context, and the backend
+ * adapter owns the request: it runs off the UI task, one at a time, and a press
+ * that arrives while one is in flight is dropped rather than queued.
  */
 static controller_shortcut_gesture_state_t s_gesture; /* UI actor only */
 static esp_timer_handle_t s_timer;                    /* UI actor only */
-static atomic_bool s_shortcut_busy;
 
 static uint32_t now_ms(void) { return (uint32_t)platform_millis(); }
 
-static void shortcut_send_task(void *arg) {
-    controller_shortcut_event_t *event = arg;
-    (void)bridge_client_send_shortcut(event);
-    free(event);
-    atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
-}
-
+/* A recognised gesture is semantic input like any other: it enters the shared
+ * action router, which decides by context whether to honour it and hands it to
+ * the backend adapter. Nothing here knows the bridge or its transport. */
 static void dispatch_shortcut(const controller_shortcut_event_t *event) {
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&s_shortcut_busy, &expected, true)) {
-        ESP_LOGW(TAG, "Shortcut still in flight; key %04x dropped",
-                 (unsigned)event->usage);
-        return;
-    }
-    controller_shortcut_event_t *copy = malloc(sizeof(*copy));
-    if (!copy) {
-        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
-        return;
-    }
-    *copy = *event;
-    if (platform_task_start_external_stack("shortcut_input", 6144,
-                                           shortcut_send_task, copy) != 0) {
-        ESP_LOGW(TAG, "Could not start shortcut task");
-        free(copy);
-        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+    const controller_action_t action = controller_action_shortcut(
+        event->usage, (uint8_t)event->gesture);
+    if (!controller_input_dispatch_action(&action)) {
+        ESP_LOGI(TAG, "Shortcut key %04x gesture %d not dispatched",
+                 (unsigned)event->usage, (int)event->gesture);
     }
 }
 

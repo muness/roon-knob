@@ -2,7 +2,6 @@
 
 #include "controller_command.h"
 #include "controller_connection.h"
-#include "controller_shortcut_key.h"
 #include "platform/platform_http.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -18,11 +17,15 @@ void bridge_client_start(void);
 /* Wake the polling worker after a display sleep/power-save interval. */
 void bridge_client_request_poll(void);
 bool bridge_client_execute_command(const controller_command_t *command);
-/* Report a recognised remote key + gesture to the bridge, which owns what it
- * does (a Library shortcut played on this controller's zone). Shows a short
- * message when the bridge says why nothing played. Blocks like any command, so
- * call it from the controller actor, not a BLE or timer callback. */
-bool bridge_client_send_shortcut(const controller_shortcut_event_t *event);
+/* Ask the bridge to play the shortcut mapped to a remote key + gesture on this
+ * controller's zone. The backend adapter owns the `/knob/input` transport: this
+ * returns at once and the request runs on a short-lived background task, one at
+ * a time, so it never blocks the UI actor or a BLE callback. Returns false
+ * (after showing a short message where useful) when the connection is not
+ * ready, a request is already in flight, or the task cannot start; the bridge's
+ * own refusal is reported on the display when the request completes. `gesture`
+ * is a CONTROLLER_SHORTCUT_ACTION_GESTURE_* value. */
+bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture);
 void bridge_client_set_network_ready(bool ready);
 const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height);
 const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_len,

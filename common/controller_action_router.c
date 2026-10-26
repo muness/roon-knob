@@ -209,6 +209,17 @@ bool controller_action_router_handle(const controller_action_t *action) {
         return controller_input_set_context(
             CONTROLLER_INTERACTION_CONTEXT_SETTINGS_RECOVERY);
 
+    case CONTROLLER_ACTION_SHORTCUT:
+        /* Never while a zone is being chosen or settings are open: starting
+         * music from under a menu would be a surprise, and the shortcut's zone
+         * is the one the picker is about to change. */
+        if (controller_input_get_context() !=
+            CONTROLLER_INTERACTION_CONTEXT_MEDIA) {
+            return false;
+        }
+        return bridge_client_submit_shortcut(action->value.shortcut.usage,
+                                             action->value.shortcut.gesture);
+
     case CONTROLLER_ACTION_SYSTEM:
         return false;
 

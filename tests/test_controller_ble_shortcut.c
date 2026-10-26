@@ -14,24 +14,20 @@ static void (*timer_cb)(void *);
 
 static controller_shortcut_event_t sent[8];
 static unsigned sent_count;
-static bool hold_send_tasks;
-static void (*held_fn)(void *);
-static void *held_arg;
 static unsigned posted_controls;
+static bool dispatch_accepts = true;
 
 uint64_t platform_millis(void) { return clock_ms; }
 bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg) { fn(arg); return true; }
-int platform_task_start_external_stack(const char *name, uint32_t stack,
-                                       platform_task_fn_t fn, void *arg) {
-    (void)name; (void)stack;
-    if (hold_send_tasks) { held_fn = fn; held_arg = arg; return 0; }
-    fn(arg);
-    return 0;
-}
-bool bridge_client_send_shortcut(const controller_shortcut_event_t *event) {
+/* The shortcut leaves the glue as a semantic action through the shared router
+ * seam; capture exactly what it dispatches. */
+bool controller_input_dispatch_action(const controller_action_t *action) {
+    assert(action && action->kind == CONTROLLER_ACTION_SHORTCUT);
     assert(sent_count < 8);
-    sent[sent_count++] = *event;
-    return true;
+    sent[sent_count].usage = action->value.shortcut.usage;
+    sent[sent_count].gesture = (controller_shortcut_gesture_t)action->value.shortcut.gesture;
+    ++sent_count;
+    return dispatch_accepts;
 }
 bool controller_input_post_control(controller_control_intent_t intent) {
     (void)intent; ++posted_controls; return true;
@@ -64,9 +60,8 @@ static void session_ends(void) {
 static void reset(void) {
     rk_ble_consumer_tracker_reset(&tracker);
     controller_shortcut_gesture_reset(&s_gesture);
-    clock_ms = 100000; sent_count = 0; timer_armed = false; hold_send_tasks = false;
-    held_fn = NULL; held_arg = NULL; posted_controls = 0;
-    atomic_store(&s_shortcut_busy, false);
+    clock_ms = 100000; sent_count = 0; timer_armed = false;
+    posted_controls = 0; dispatch_accepts = true;
 }
 
 static void advance_to_timer(void) {
@@ -130,27 +125,6 @@ static void a_long_play_pause_is_a_shortcut_and_still_only_that(void) {
            sent[0].gesture == CONTROLLER_SHORTCUT_GESTURE_LONG);
 }
 
-static void one_shortcut_in_flight_at_a_time_and_none_are_queued(void) {
-    reset();
-    hold_send_tasks = true;
-    controller_ble_input_on_consumer_event(HOME, true, NULL);
-    advance_to_timer();
-    assert(held_fn && sent_count == 0); /* started, not finished */
-    controller_ble_input_on_consumer_event(HOME, false, NULL);
-    clock_ms += 1000;
-    controller_ble_input_on_consumer_event(0x0224, true, NULL);
-    advance_to_timer(); /* a second long while the first is out: dropped */
-    assert(held_arg != NULL && sent_count == 0);
-    held_fn(held_arg); /* first finishes */
-    assert(sent_count == 1 && sent[0].usage == HOME);
-    hold_send_tasks = false;
-    controller_ble_input_on_consumer_event(0x0224, false, NULL);
-    clock_ms += 1000;
-    controller_ble_input_on_consumer_event(0x0224, true, NULL);
-    advance_to_timer(); /* free again */
-    assert(sent_count == 2 && sent[1].usage == 0x0224);
-}
-
 static void a_short_tap_from_real_reports_is_a_press_never_a_long(void) {
     reset();
     report(HOME);
@@ -209,6 +183,20 @@ static void the_session_ending_drops_a_held_key_and_a_pending_press(void) {
     assert(sent_count == 1 && sent[0].usage == 0x0224);
 }
 
+static void a_refused_dispatch_does_not_wedge_the_recognizer(void) {
+    reset();
+    dispatch_accepts = false; /* e.g. the router is in a picker context */
+    report(HOME);
+    advance_to_timer();
+    assert(sent_count == 1);
+    report(0);
+    dispatch_accepts = true;
+    clock_ms += 1000;
+    report(0x0224);
+    advance_to_timer();
+    assert(sent_count == 2 && sent[1].usage == 0x0224);
+}
+
 int main(void) {
     a_short_tap_from_real_reports_is_a_press_never_a_long();
     a_short_play_pause_tap_never_fires_its_long_shortcut();
@@ -218,7 +206,7 @@ int main(void) {
     a_tap_waits_for_the_timer_and_a_double_cancels_it();
     volume_and_transport_taps_never_reach_the_bridge();
     a_long_play_pause_is_a_shortcut_and_still_only_that();
-    one_shortcut_in_flight_at_a_time_and_none_are_queued();
+    a_refused_dispatch_does_not_wedge_the_recognizer();
     puts("controller BLE shortcut glue tests passed");
     return 0;
 }

@@ -57,8 +57,20 @@ message: "Pick a zone first", "Zone unavailable", "Not for this zone", "Item not
 found", "Shortcut was deleted" or "Shortcut failed". It never plays on another
 zone instead. A successful press shows nothing; the music is the feedback.
 
-Only one shortcut request is in flight at a time. A press that arrives while one
-is still running is dropped and logged, not queued.
+A recognised gesture is semantic input, not a physical event: it becomes a
+`CONTROLLER_ACTION_SHORTCUT` and enters the shared action router like any other
+action (`controller_action_router.c`). The router honours it only in the media
+context, so a key pressed while the zone picker or settings are open does nothing
+rather than start music from under a menu. The backend adapter (`bridge_client`)
+owns the `/knob/input` request: it runs on a short-lived background task, off the
+UI task, one at a time. A press that arrives while one is still running, or while
+the bridge connection is not ready, is dropped (with "Not ready" in the second
+case), not queued.
+
+If the BLE session ends (disconnect, disable, sleep) the host signals it and any
+held or half-recognised key is dropped, so a gesture never outlives a session. A
+release report (`00 00`) names no key, so the host tracks which key is held and
+turns raw reports into key-down/key-up edges that carry the real usage.
 
 Only reports ESP-IDF classifies as Consumer Control (or that the bounded mapper
 accepts despite a GENERIC label) are considered, so keyboard and mouse reports
