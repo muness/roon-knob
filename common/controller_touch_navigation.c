@@ -25,11 +25,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { BROWSE, PLAY, QUEUE, IMAGE };
+enum { BROWSE, PLAY, QUEUE, IMAGE, SHORTCUTS_FETCH, SHORTCUTS_PLAY };
 #define HISTORY_MAX 8
 #define COVER_SIZE 132
 #define COVER_BYTES (COVER_SIZE * COVER_SIZE * 2)
 typedef struct {
+  bridge_shortcuts_context_t shortcuts_context;
   unsigned generation;
   int kind, offset, item_index;
   char endpoint[128], zone[64], location[513], ref[513], image[600];
@@ -37,6 +38,7 @@ typedef struct {
 typedef struct {
   request_t request;
   controller_library_page_t page;
+  controller_shortcuts_page_t shortcuts;
   char *pixels;
   bool ok;
 } result_t;
@@ -47,6 +49,10 @@ static unsigned generation = 1;
 static int screen = CONTROLLER_SCREEN_ARTWORK, selected_index, offset,
            brightness = 100;
 static controller_library_page_t *page;
+static controller_shortcuts_page_t *shortcuts;
+static bridge_shortcuts_context_t shortcuts_context;
+static int shortcut_index, shortcut_offset;
+static bool pending_shortcuts;
 static char endpoint[128], zone[64], location[513];
 static struct {
   char location[513];
@@ -105,6 +111,8 @@ static void reset_library(void) {
 }
 static bool request_current(const request_t *r) {
   char base[128], selected[64];
+  if (r->kind == SHORTCUTS_FETCH || r->kind == SHORTCUTS_PLAY)
+    return bridge_client_shortcuts_current(&r->shortcuts_context);
   return bridge_client_get_request_base(base, sizeof(base)) &&
          bridge_client_get_current_zone_id(selected, sizeof(selected)) &&
          !strcmp(base, r->endpoint) && !strcmp(selected, r->zone);
@@ -130,7 +138,11 @@ static void worker(void *arg) {
       char url[850], *response = NULL;
       size_t len = 0;
       int rc = -1;
-      if (r.kind == IMAGE) {
+      if (r.kind == SHORTCUTS_FETCH) {
+        result->ok = bridge_client_shortcuts_fetch(&r.shortcuts_context, r.offset, &result->shortcuts);
+      } else if (r.kind == SHORTCUTS_PLAY) {
+        result->ok = bridge_client_shortcuts_play(&r.shortcuts_context, r.ref, &result->shortcuts);
+      } else if (r.kind == IMAGE) {
         snprintf(url, sizeof(url), "%s%s&width=%d&height=%d&format=rgb565",
                  r.endpoint, r.image, COVER_SIZE, COVER_SIZE);
         rc = platform_http_get_bounded(url, COVER_BYTES, &response, &len);
@@ -230,6 +242,12 @@ static void change_screen(int next) {
     for (int i = 0; i < zone_count; i++)
       if (!strcmp(zone_rows[i].id, current))
         zone_index = i;
+  }
+  pending_shortcuts = false;
+  if (screen == CONTROLLER_SCREEN_SHORTCUTS) {
+    shortcut_index = shortcut_offset = 0;
+    if (shortcuts) { memset(shortcuts, 0, sizeof(*shortcuts)); shortcuts->next_offset = -1; }
+    pending_shortcuts = true;
   }
   if (screen == CONTROLLER_SCREEN_LIBRARY) {
     /* Parent/page changes are deferred while an old network request drains. */
@@ -380,6 +398,7 @@ enum {
   ACTION_OPEN,
   ACTION_MENU,
   ACTION_LIBRARY,
+  ACTION_SHORTCUTS,
   ACTION_ZONES,
   ACTION_SETTINGS,
   ACTION_HOME,
@@ -539,7 +558,7 @@ static void tap(lv_event_t *event) {
   if (action == ACTION_WIFI_DETAILS) {
     change_screen(CONTROLLER_SCREEN_SETTINGS); settings_detail = 2; render(); return;
   }
-  if (action == ACTION_REFRESH) { refresh_connection(); return; }
+  if (action == ACTION_REFRESH && screen != CONTROLLER_SCREEN_SHORTCUTS) { refresh_connection(); return; }
   if (action == ACTION_SAVE_ENTRY) { save_entry(); return; }
   if (action == ACTION_EDIT_WIFI || action == ACTION_EDIT_BRIDGE) {
     edit_kind = action == ACTION_EDIT_WIFI ? 1 : 3;
@@ -572,18 +591,23 @@ static void tap(lv_event_t *event) {
     change_screen(CONTROLLER_SCREEN_ARTWORK);
     return;
   }
-  if (action == ACTION_LIBRARY) {
+  if (action == ACTION_SHORTCUTS) {
     menu_index = 0;
+    change_screen(CONTROLLER_SCREEN_SHORTCUTS);
+    return;
+  }
+  if (action == ACTION_LIBRARY) {
+    menu_index = 1;
     change_screen(CONTROLLER_SCREEN_LIBRARY);
     return;
   }
   if (action == ACTION_ZONES) {
-    menu_index = 1;
+    menu_index = 2;
     change_screen(CONTROLLER_SCREEN_ZONES);
     return;
   }
   if (action == ACTION_SETTINGS) {
-    menu_index = 2;
+    menu_index = 3;
     change_screen(CONTROLLER_SCREEN_SETTINGS);
     return;
   }
@@ -605,6 +629,21 @@ static void tap(lv_event_t *event) {
     else
       change_screen(CONTROLLER_SCREEN_MENU);
     return;
+  }
+  if (screen == CONTROLLER_SCREEN_SHORTCUTS) {
+    if (busy || pending_shortcuts || !shortcuts) return;
+    if (action == ACTION_REFRESH) { pending_shortcuts = true; return; }
+    if (action == ACTION_NEXT && shortcuts->next_offset >= 0) {
+      shortcut_offset = shortcuts->next_offset;
+      shortcut_index = 0; pending_shortcuts = true;
+    } else if (action == ACTION_PREVIOUS && shortcut_offset > 0) {
+      shortcut_offset = shortcut_offset > CONTROLLER_SHORTCUTS_PAGE_SIZE ? shortcut_offset - CONTROLLER_SHORTCUTS_PAGE_SIZE : 0;
+      shortcut_index = 0; pending_shortcuts = true;
+    } else if (action >= ACTION_ROW && action - ACTION_ROW < shortcuts->count) {
+      shortcut_index = action - ACTION_ROW;
+      submit(SHORTCUTS_PLAY, shortcuts->items[shortcut_index].id, NULL, -1);
+    }
+    render(); return;
   }
   if (screen == CONTROLLER_SCREEN_ZONES && action >= ACTION_ROW) {
     int i = action - ACTION_ROW;
@@ -727,6 +766,8 @@ static void list_scroll(lv_event_t *event) {
     setting_index = nearest;
   else if (screen == CONTROLLER_SCREEN_ZONES)
     zone_index = nearest;
+  else if (screen == CONTROLLER_SCREEN_SHORTCUTS)
+    shortcut_index = nearest;
   for (int i = 0; i < BRIDGE_CLIENT_MAX_ZONES + 1; i++)
     if (rows[i])
       lv_obj_set_style_bg_color(
@@ -888,7 +929,8 @@ static void render(void) {
     lv_label_set_text(heading, "Music");
     lv_obj_add_flag(back, LV_OBJ_FLAG_HIDDEN);
     lv_obj_align(home, LV_ALIGN_TOP_MID, 0, 53);
-    list_row("Library", NULL, ACTION_LIBRARY, 0);
+    list_row("Shortcuts", NULL, ACTION_SHORTCUTS, 0);
+    list_row("Library", NULL, ACTION_LIBRARY, 1);
     char current[64] = "", name[100] = "Pick a zone";
     bridge_client_get_current_zone_id(current, sizeof(current));
     bridge_zone_t zs[BRIDGE_CLIENT_MAX_ZONES];
@@ -896,10 +938,35 @@ static void render(void) {
     for (int i = 0; i < n; i++)
       if (!strcmp(zs[i].id, current))
         snprintf(name, sizeof(name), "Zone: %s", zs[i].name);
-    list_row(name, NULL, ACTION_ZONES, 1);
-    list_row("Settings", NULL, ACTION_SETTINGS, 2);
+    list_row(name, NULL, ACTION_ZONES, 2);
+    list_row("Settings", NULL, ACTION_SETTINGS, 3);
 
     focus_row(menu_index);
+  } else if (screen == CONTROLLER_SCREEN_SHORTCUTS) {
+    lv_label_set_text(heading, "Shortcuts");
+    char zone_name[100] = "Choose a zone first";
+    bridge_zone_t zs[BRIDGE_CLIENT_MAX_ZONES];
+    int n = bridge_client_get_zones(zs, BRIDGE_CLIENT_MAX_ZONES);
+    for (int i = 0; i < n; i++)
+      if (!strcmp(zs[i].id, zone)) snprintf(zone_name, sizeof(zone_name), "Play in %s", zs[i].name);
+    lv_label_set_text(subtitle, busy ? (busy_kind == SHORTCUTS_PLAY ? "Sending…" : "Loading…") : pending_shortcuts ? "Loading…" : zone_name);
+    if (shortcuts && !busy && !pending_shortcuts) {
+      for (int i = 0; i < shortcuts->count; i++)
+        list_row(shortcuts->items[i].name, shortcuts->items[i].provider, ACTION_ROW + i, i);
+      if (!shortcuts->count) {
+        lv_label_set_text(subtitle, zone_name);
+        lv_obj_t *message = lv_label_create(scroller);
+        lv_obj_set_width(message, 236);
+        lv_label_set_long_mode(message, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(message, platform_touch_font_small(), 0);
+        lv_obj_set_style_text_color(message, lv_color_hex(0xb8c4cd), 0);
+        lv_label_set_text(message, shortcuts->notice);
+        if (!shortcuts->accepted) list_row("Retry", NULL, ACTION_REFRESH, 0);
+      }
+      if (shortcut_offset > 0) list_row("Previous", NULL, ACTION_PREVIOUS, shortcuts->count);
+      if (shortcuts->next_offset >= 0) list_row("More shortcuts", NULL, ACTION_NEXT, shortcuts->count + (shortcut_offset > 0));
+      focus_row(shortcut_index);
+    }
   } else if (screen == CONTROLLER_SCREEN_ZONES) {
     lv_label_set_text(heading, "Pick a zone");
     for (int i = 0; i < zone_count; i++)
@@ -1163,7 +1230,7 @@ static bool submit(int kind, const char *ref, const char *image,
                    int image_index) {
   if (busy || !requests)
     return false;
-  if ((kind == PLAY || kind == QUEUE) && mutation_locked)
+  if ((kind == PLAY || kind == QUEUE || kind == SHORTCUTS_PLAY) && mutation_locked)
     return false;
   request_t *r =
       heap_caps_calloc(1, sizeof(*r), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1173,6 +1240,15 @@ static bool submit(int kind, const char *ref, const char *image,
   r->item_index = image_index;
   r->kind = kind;
   r->offset = offset;
+  if (kind == SHORTCUTS_FETCH || kind == SHORTCUTS_PLAY) {
+    r->offset = shortcut_offset;
+    bool valid = kind == SHORTCUTS_FETCH ? bridge_client_shortcuts_capture(&r->shortcuts_context) :
+        (r->shortcuts_context = shortcuts_context, bridge_client_shortcuts_current(&r->shortcuts_context));
+    if (!valid) {
+      if (shortcuts) { shortcuts->count = 0; snprintf(shortcuts->notice, sizeof(shortcuts->notice), "Connect and choose a zone first."); }
+      free(r); render(); return false;
+    }
+  }
   if (!bridge_client_get_request_base(r->endpoint, sizeof(r->endpoint)) ||
       !bridge_client_get_current_zone_id(r->zone, sizeof(r->zone))) {
     free(r);
@@ -1192,7 +1268,7 @@ static bool submit(int kind, const char *ref, const char *image,
   busy = xQueueSend(requests, r, 0) == pdTRUE;
   if (busy)
     busy_kind = kind;
-  if (busy && (kind == PLAY || kind == QUEUE)) {
+  if (busy && (kind == PLAY || kind == QUEUE || kind == SHORTCUTS_PLAY)) {
     mutation_locked = true;
     mutation_sent_ms = esp_timer_get_time() / 1000;
   }
@@ -1204,6 +1280,8 @@ static bool submit(int kind, const char *ref, const char *image,
   return busy;
 }
 void controller_touch_navigation_process(void) {
+  if (!shortcuts) shortcuts = heap_caps_calloc(1, sizeof(*shortcuts), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!shortcuts) return;
   if (!page) {
     page =
         heap_caps_calloc(1, sizeof(*page), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1232,6 +1310,9 @@ void controller_touch_navigation_process(void) {
     snprintf(zone, sizeof(zone), "%s", selected);
     reset_library();
     clear_cover();
+    if (screen == CONTROLLER_SCREEN_SHORTCUTS) {
+      shortcuts->count = 0; pending_shortcuts = true; render();
+    }
     if (screen == CONTROLLER_SCREEN_LIBRARY) {
       pending_browse = true;
       render();
@@ -1242,7 +1323,20 @@ void controller_touch_navigation_process(void) {
     busy = false;
     if (result && result->request.generation == generation &&
         request_current(&result->request)) {
-      if (result->request.kind == IMAGE) {
+      if (result->request.kind == SHORTCUTS_FETCH) {
+        *shortcuts = result->shortcuts;
+        shortcuts_context = result->request.shortcuts_context;
+        render();
+      } else if (result->request.kind == SHORTCUTS_PLAY) {
+        if (result->ok && !result->shortcuts.show_notice) change_screen(CONTROLLER_SCREEN_ARTWORK);
+        else {
+          *shortcuts = result->shortcuts;
+          shortcuts->count = 0;
+          shortcuts->next_offset = -1;
+          snprintf(shortcuts->notice, sizeof(shortcuts->notice), "%s", result->shortcuts.notice);
+          render();
+        }
+      } else if (result->request.kind == IMAGE) {
         int image_index = result->request.item_index;
         if (!result->ok && image_index >= 0 && image_index < page->count) {
           covers[image_index].failed = true;
@@ -1324,6 +1418,15 @@ void controller_touch_navigation_process(void) {
       snprintf(page->notice, sizeof(page->notice),
                "Not enough memory. Tap Retry.");
       render();
+    }
+    if (result && screen == CONTROLLER_SCREEN_SHORTCUTS &&
+        (result->request.kind == SHORTCUTS_FETCH || result->request.kind == SHORTCUTS_PLAY) &&
+        !bridge_client_shortcuts_current(&result->request.shortcuts_context)) {
+      shortcuts->count = 0; pending_shortcuts = true;
+    }
+    if (!result && screen == CONTROLLER_SCREEN_SHORTCUTS) {
+      shortcuts->count = 0;
+      snprintf(shortcuts->notice, sizeof(shortcuts->notice), "Not enough memory. Tap Retry."); render();
     }
     if (result) {
       platform_http_free(result->pixels);
@@ -1425,6 +1528,15 @@ void controller_touch_navigation_process(void) {
       lv_label_set_text(subtitle, connection_refresh_pending ? "Checking…" : settings_notice);
     }
   }
+  if (screen == CONTROLLER_SCREEN_SHORTCUTS && !busy) {
+    if (!pending_shortcuts && shortcuts->count && !bridge_client_shortcuts_current(&shortcuts_context)) {
+      shortcuts->count = 0; pending_shortcuts = true;
+    }
+    if (pending_shortcuts) {
+      pending_shortcuts = false;
+      submit(SHORTCUTS_FETCH, NULL, NULL, -1);
+    }
+  }
   if (screen == CONTROLLER_SCREEN_LIBRARY && !busy) {
     if (pending_mutation >= 0) {
       int kind = pending_mutation;
@@ -1445,10 +1557,18 @@ bool controller_touch_navigation_encoder(int delta) {
     menu_index += delta;
     if (menu_index < 0)
       menu_index = 0;
-    if (menu_index > 2)
-      menu_index = 2;
+    if (menu_index > 3)
+      menu_index = 3;
     focus_row(menu_index);
     return true;
+  }
+  if (screen == CONTROLLER_SCREEN_SHORTCUTS) {
+    int count = shortcuts ? shortcuts->count + (shortcut_offset > 0) + (shortcuts->next_offset >= 0) : 0;
+    if (!count) count = 1;
+    shortcut_index += delta;
+    if (shortcut_index < 0) shortcut_index = 0;
+    if (shortcut_index >= count) shortcut_index = count - 1;
+    focus_row(shortcut_index); return true;
   }
   if (screen == CONTROLLER_SCREEN_ZONES || ui_is_zone_picker_visible()) {
     if (ui_is_zone_picker_visible()) {

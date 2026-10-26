@@ -1,6 +1,7 @@
 #pragma once
 
 #include "controller_command.h"
+#include "controller_shortcuts.h"
 #include "controller_connection.h"
 #include "platform/platform_http.h"
 #include <stdbool.h>
@@ -23,6 +24,21 @@ typedef struct {
 } bridge_request_endpoint_t;
 bool bridge_client_capture_request_endpoint(bridge_request_endpoint_t *out);
 bool bridge_client_request_endpoint_current(const bridge_request_endpoint_t *endpoint);
+
+/* Capture once when a list is requested. Both reading and launching are fenced
+ * against endpoint replacement, reconnection, zone and interaction changes. */
+typedef struct {
+    bridge_request_endpoint_t endpoint;
+    char zone[64];
+    uint32_t zone_generation, selection_generation, interaction_generation;
+} bridge_shortcuts_context_t;
+bool bridge_client_shortcuts_capture(bridge_shortcuts_context_t *out);
+bool bridge_client_shortcuts_current(const bridge_shortcuts_context_t *context);
+/* Blocking worker APIs; never call from the display actor. No automatic replay. */
+bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
+                                   int offset, controller_shortcuts_page_t *out);
+bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
+                                  const char *id, controller_shortcuts_page_t *out);
 
 /* Wake the polling worker after a display sleep/power-save interval. */
 void bridge_client_request_poll(void);

@@ -64,6 +64,23 @@ bool bridge_client_get_current_zone_id(char *out, size_t n) {
   snprintf(out, n, "%s", fixture_zone);
   return true;
 }
+static unsigned fixture_shortcuts_epoch = 1;
+bool bridge_client_shortcuts_capture(bridge_shortcuts_context_t *out) {
+  memset(out, 0, sizeof(*out));
+  out->endpoint.endpoint_generation = fixture_shortcuts_epoch;
+  bridge_client_get_request_base(out->endpoint.base, sizeof(out->endpoint.base));
+  bridge_client_get_current_zone_id(out->zone, sizeof(out->zone));
+  return fixture_ready;
+}
+bool bridge_client_shortcuts_current(const bridge_shortcuts_context_t *context) {
+  return context->endpoint.endpoint_generation == fixture_shortcuts_epoch && !strcmp(context->zone, fixture_zone);
+}
+bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context, int start, controller_shortcuts_page_t *out) {
+  (void)context; (void)start; (void)out; return false;
+}
+bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context, const char *id, controller_shortcuts_page_t *out) {
+  (void)context; (void)id; (void)out; return false;
+}
 bool bridge_client_get_bridge_url(char *out, size_t n) {
   return bridge_client_get_request_base(out, n);
 }
@@ -247,6 +264,7 @@ int main(int argc, char **argv) {
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, read_pointer);
+  shortcuts = calloc(1, sizeof(*shortcuts));
   page = calloc(1, sizeof(*page));
   page->next_offset = -1;
   requests = xQueueCreate(1, sizeof(request_t));
@@ -286,6 +304,65 @@ int main(int argc, char **argv) {
   change_screen(CONTROLLER_SCREEN_MENU);
   advance(100);
   snapshot(dir, "menu");
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(rows[0], 0)), "Shortcuts"));
+  strcpy(fixture_zone, "roon:room0");
+  strcpy(zone, fixture_zone);
+  click(rows[0]);
+  assert(screen == CONTROLLER_SCREEN_SHORTCUTS && pending_shortcuts);
+  controller_touch_navigation_process();
+  request_t shortcut_request;
+  assert(xQueueReceive(requests, &shortcut_request, 0));
+  assert(shortcut_request.kind == SHORTCUTS_FETCH);
+  result_t *shortcut_result = calloc(1, sizeof(*shortcut_result));
+  shortcut_result->request = shortcut_request;
+  shortcut_result->ok = true;
+  shortcut_result->shortcuts.count = 2;
+  shortcut_result->shortcuts.next_offset = -1;
+  strcpy(shortcut_result->shortcuts.items[0].id, "sc_playlist");
+  strcpy(shortcut_result->shortcuts.items[0].name, "Evening listening");
+  strcpy(shortcut_result->shortcuts.items[0].provider, "Roon");
+  strcpy(shortcut_result->shortcuts.items[1].id, "sc_album");
+  strcpy(shortcut_result->shortcuts.items[1].name, "Kind of Blue");
+  strcpy(shortcut_result->shortcuts.items[1].provider, "LMS");
+  xQueueSend(results, &shortcut_result, 0);
+  controller_touch_navigation_process(); advance(300);
+  assert(shortcuts->count == 2 && !busy);
+  snapshot(dir, "shortcuts");
+  controller_touch_navigation_encoder(1);
+  assert(shortcut_index == 1);
+  click(rows[0]);
+  assert(xQueueReceive(requests, &shortcut_request, 0));
+  assert(shortcut_request.kind == SHORTCUTS_PLAY && !strcmp(shortcut_request.ref, "sc_playlist"));
+  /* A second tap while the first is pending never enqueues another play. */
+  if (rows[0]) click(rows[0]);
+  assert(!requests->occupied);
+  shortcut_result = calloc(1, sizeof(*shortcut_result));
+  shortcut_result->request = shortcut_request;
+  strcpy(shortcut_result->shortcuts.notice, "Playback uncertain. Check now playing.");
+  xQueueSend(results, &shortcut_result, 0);
+  controller_touch_navigation_process();
+  assert(screen == CONTROLLER_SCREEN_SHORTCUTS && shortcuts->count == 0);
+  assert(strstr(shortcuts->notice, "uncertain"));
+  snapshot(dir, "shortcut-uncertain");
+  controller_touch_navigation_process();
+  assert(!requests->occupied); /* no automatic replay */
+  /* An accepted duplicate selection shows its notice without offering a replay. */
+  shortcut_result = calloc(1, sizeof(*shortcut_result));
+  shortcut_result->request = shortcut_request;
+  shortcut_result->ok = true;
+  shortcut_result->shortcuts.accepted = true;
+  shortcut_result->shortcuts.show_notice = true;
+  shortcut_result->shortcuts.next_offset = -1;
+  strcpy(shortcut_result->shortcuts.notice, "Multiple matches found. Playing the first exact match.");
+  xQueueSend(results, &shortcut_result, 0);
+  controller_touch_navigation_process();
+  assert(screen == CONTROLLER_SCREEN_SHORTCUTS && shortcuts->accepted);
+  assert(strstr(shortcuts->notice, "Multiple matches"));
+  assert(!rows[0]); /* no Retry that would send another play */
+  snapshot(dir, "shortcut-multiple-matches");
+  click(back);
+  assert(screen == CONTROLLER_SCREEN_MENU);
+  busy = mutation_locked = pending_shortcuts = false;
   change_screen(CONTROLLER_SCREEN_SETTINGS);
   advance(300);
   snapshot(dir, "settings");
