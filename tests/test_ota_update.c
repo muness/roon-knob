@@ -11,6 +11,9 @@ static bool type_header, version_header, id_header;
 static const esp_partition_t partition = {"ota_0", 0x280000};
 static esp_app_desc_t running = {.version = "2.7.0", .project_name = "hiphi_dial"};
 static char last_url[256];
+static const char *version_json = "{\"version\":\"2.8.0\",\"size\":1024}";
+static int version_status = 200, task_creates;
+static bool is_version_request(void) { return strstr(last_url, "/firmware/version") != NULL; }
 static int mark_valid_calls, mark_valid_result;
 static const char *device_slug = "hiphi-dial";
 #if defined(CONFIG_ESPTOOLPY_FLASHSIZE_8MB)
@@ -30,7 +33,7 @@ static const char *device_slug = "hiphi-dial";
 
 void vTaskDelete(TaskHandle_t task) {}
 void vTaskDelay(int ticks) {}
-int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *handle) { task(arg); return 1; }
+int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *handle) { task_creates++; task(arg); return 1; }
 const char *esp_err_to_name(esp_err_t error) { return "test"; }
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *cfg) { snprintf(last_url, sizeof(last_url), "%s", cfg->url); return (void *)1; }
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t client, const char *key, const char *value) {
@@ -40,9 +43,18 @@ esp_err_t esp_http_client_set_header(esp_http_client_handle_t client, const char
     return ESP_OK;
 }
 esp_err_t esp_http_client_open(esp_http_client_handle_t client, int len) { return ESP_OK; }
-int esp_http_client_fetch_headers(esp_http_client_handle_t client) { return (int)advertised_size; }
-int esp_http_client_get_status_code(esp_http_client_handle_t client) { return http_status; }
+int esp_http_client_fetch_headers(esp_http_client_handle_t client) {
+    return is_version_request() ? (int)strlen(version_json) : (int)advertised_size;
+}
+int esp_http_client_get_status_code(esp_http_client_handle_t client) {
+    return is_version_request() ? version_status : http_status;
+}
 int esp_http_client_read(esp_http_client_handle_t client, char *out, int capacity) {
+    if (is_version_request()) {
+        int n = (int)strlen(version_json);
+        if (n > capacity) n = capacity;
+        memcpy(out, version_json, (size_t)n); return n;
+    }
     size_t count = body_size - read_offset;
     if (count > (size_t)capacity) count = (size_t)capacity;
     if (count > max_chunk) count = max_chunk;
@@ -102,6 +114,61 @@ static void set_running(const char *project, const char *slug, const char *versi
     snprintf(running.version,sizeof(running.version),"%s",version);
     device_slug=slug;
 }
+/* One request_install scenario: remote version served by the check, then the usual image. */
+#if defined(OTA_TEST_PROJECT)
+static void run_install(const char *remote, const char *from, bool expect_started) {
+    version_json = remote; task_creates = 0; last_url[0] = 0;
+    setup(running.project_name, TARGET_FLASH);
+    task_creates = 0;
+    assert(ota_request_install(from) == expect_started);
+    assert(task_creates == (expect_started ? 1 : 0));
+}
+static void test_install_trigger(void) {
+    static char json[96];
+    /* Stale request: the device already moved on, so nothing is checked or installed. */
+    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.7.0");
+    snprintf(json,sizeof(json),"{\"version\":\"2.8.0\",\"size\":1024}");
+    run_install(json, "2.6.0", false);
+    assert(last_url[0]==0 && begin_calls==0 && restarted==0);
+    run_install(json, "2.7.0-beta.1", false);
+    assert(last_url[0]==0 && restarted==0);
+    /* Same version starts exactly one job that checks, then installs. */
+    run_install(json, "2.7.0", true);
+    assert(s_ota_info.status==OTA_STATUS_COMPLETE && begin_calls==1 && boot_calls==1 && restarted==1);
+    assert(strstr(last_url,"/firmware/download"));
+    assert(!strcmp(s_ota_info.available_version,"2.8.0"));
+    /* An empty from_version carries no staleness claim. */
+    run_install(json, "", true);
+    assert(restarted==1 && boot_calls==1);
+    run_install(json, NULL, true);
+    assert(restarted==1);
+    /* Never install a version that is not newer (equal, older, or a prerelease of it). */
+    static const char *not_newer[]={"2.7.0","2.6.9","1.0.0","2.7.0-beta.9","2.7.0-rc.1"};
+    for (size_t i=0;i<sizeof(not_newer)/sizeof(*not_newer);i++) {
+        snprintf(json,sizeof(json),"{\"version\":\"%s\",\"size\":1024}",not_newer[i]);
+        run_install(json, "2.7.0", true);
+        assert(s_ota_info.status==OTA_STATUS_UP_TO_DATE);
+        assert(begin_calls==0 && written==0 && boot_calls==0 && restarted==0);
+        assert(strstr(last_url,"/firmware/version")); /* never reached the download */
+    }
+    /* A job already running ignores the request. */
+    snprintf(json,sizeof(json),"{\"version\":\"2.8.0\",\"size\":1024}");
+    version_json=json; setup(OTA_TEST_PROJECT,TARGET_FLASH); task_creates=0; last_url[0]=0;
+    s_ota_task=(TaskHandle_t)1;
+    assert(!ota_request_install("2.7.0") && task_creates==0 && last_url[0]==0 && restarted==0);
+    s_ota_task=NULL;
+    /* Failures leave ERROR, do not reboot, and free the slot for a later attempt. */
+    version_status=500; run_install(json,"2.7.0",true); version_status=200;
+    assert(s_ota_info.status==OTA_STATUS_ERROR && begin_calls==0 && restarted==0 && s_ota_task==NULL);
+    version_json=json; setup("hiphi_nonexistent_sibling",TARGET_FLASH); task_creates=0;
+    assert(ota_request_install("2.7.0") && task_creates==1);
+    assert(s_ota_info.status==OTA_STATUS_ERROR && begin_calls==0 && boot_calls==0 && restarted==0);
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); http_status=404; task_creates=0;
+    assert(ota_request_install("2.7.0") && s_ota_info.status==OTA_STATUS_ERROR && restarted==0);
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); task_creates=0;
+    assert(ota_request_install("2.7.0") && s_ota_info.status==OTA_STATUS_COMPLETE && restarted==1);
+}
+#endif
 int main(void) {
 #if defined(OTA_TEST_ROLLBACK)
     /* Booting confirms the image exactly once, however many times init runs. */
@@ -133,6 +200,7 @@ int main(void) {
     assert(begin_calls==1 && abort_calls==1 && end_calls==0 && boot_calls==0 && restarted==0);
     setup(OTA_TEST_PROJECT,TARGET_FLASH); advertised_size=OTA_IMAGE_PREFIX_SIZE+1; do_update_task(NULL);
     assert(begin_calls==1 && abort_calls==1 && written==OTA_IMAGE_PREFIX_SIZE && end_calls==0 && boot_calls==0);
+    test_install_trigger();
 #endif
 #if defined(OTA_TEST_LEGACY_DIAL)
     /* Dial keeps accepting its historical project name. */

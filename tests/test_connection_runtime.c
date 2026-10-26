@@ -69,7 +69,7 @@ bool platform_mdns_resolve_base_url(const char *base, char *out, size_t len,
 }
 uint64_t platform_millis(void) { return clock_ms; }
 int platform_http_get(const char *url, char **out, size_t *len) {
-    assert(strstr(url, "/zones?knob_id=") || strstr(url, "/now_playing?zone_id=")); ++http_calls;
+    assert(strstr(url, "/zones?knob_id=") || strstr(url, "/now_playing?zone_id=") || strstr(url, "/config/")); ++http_calls;
     if (disconnect_during_http) {
         atomic_store(&s_network_ready, false);
         atomic_fetch_add(&s_network_epoch, 1);
@@ -591,6 +591,51 @@ static void test_response_fences(void) {
     response_race=1; http_body="{\"zones\":[]}";
     assert(!refresh_zone_label(true) && s_state.zone_count==count); response_race=0;
 }
+/* GET /config/<id>: device settings and a firmware request ride along, and are acted on only after
+ * the remote preferences commit. */
+static unsigned device_apply_calls, install_calls, merge_calls;
+static controller_device_settings_t device_applied;
+static char install_from_seen[40];
+static bool install_started = true;
+static controller_config_write_result_t merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+void platform_display_set_rotation(uint16_t rotation) { (void)rotation; }
+void platform_display_apply_config(const rk_cfg_t *cfg, bool charging) { (void)cfg; (void)charging; }
+void platform_power_snapshot(platform_power_snapshot_t *out) { (void)out; }
+void platform_device_settings_apply(const controller_device_settings_t *settings) {
+    ++device_apply_calls; device_applied = *settings;
+}
+bool ota_request_install(const char *from_version) {
+    ++install_calls; snprintf(install_from_seen, sizeof(install_from_seen), "%s", from_version);
+    return install_started;
+}
+controller_config_write_result_t controller_config_merge_remote_preferences_if_endpoint_current(
+    const controller_config_endpoint_token_t *token, const controller_remote_preferences_t *preferences,
+    controller_config_snapshot_t *out) {
+    (void)token; (void)preferences; ++merge_calls; *out = fixture; return merge_result;
+}
+static void test_config_fetch_applies_device_settings_and_install(void) {
+    reset("http://192.168.1.2:8088", false);
+    http_ok = true;
+    device_apply_calls = install_calls = merge_calls = 0; merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+    http_body = "{\"config_sha\":\"a1\",\"config\":{\"name\":\"Den\",\"brightness\":30,\"show_ip\":true,"
+                "\"firmware_update\":{\"action\":\"install\",\"from_version\":\"4.0.0-beta.9\"}}}";
+    assert(fetch_knob_config());
+    assert(merge_calls == 1 && device_apply_calls == 1 && install_calls == 1);
+    assert(device_applied.present == (CDS_BRIGHTNESS | CDS_SHOW_IP) && device_applied.brightness == 30);
+    assert(!strcmp(install_from_seen, "4.0.0-beta.9"));
+    /* No new keys: the existing preference path is unchanged and nothing extra runs. */
+    device_apply_calls = install_calls = 0;
+    http_body = "{\"config_sha\":\"a2\",\"config\":{\"name\":\"Den\",\"brightness\":3,\"firmware_update\":null}}";
+    assert(fetch_knob_config());
+    assert(device_apply_calls == 0 && install_calls == 0);
+    /* An uncommitted (stale endpoint) response triggers neither. */
+    merge_result = CONTROLLER_CONFIG_NOT_COMMITTED;
+    http_body = "{\"config_sha\":\"a3\",\"config\":{\"brightness\":30,"
+                "\"firmware_update\":{\"action\":\"install\",\"from_version\":\"\"}}}";
+    assert(!fetch_knob_config());
+    assert(device_apply_calls == 0 && install_calls == 0);
+    merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
+}
 static void test_auto_selection_queues_current_inventory(void) {
     reset("http://192.168.1.2:8088", false);
     http_body="{\"zones\":[{\"zone_id\":\"room\"}]}";
@@ -733,4 +778,4 @@ static void test_volume_prediction_reconciliation(void) {
     assert(fetch_now_playing(&state,&power)); assert(!s_volume_pending && s_last_known_volume_fixed);
 }
 
-int main(void) { test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }
+int main(void) { test_config_fetch_applies_device_settings_and_install(); test_volume_prediction_reconciliation(); test_first_zone_fallback(); test_auto_selection_queues_current_inventory(); test_complete_snapshot_and_authority(); test_full_artwork_identity(); test_response_fences(); test_zone_inventory_contract(); test_response_resource_budget();  test_idle_zone_coexists_with_playing_fixed_volume_zone(); test_playback_metadata_cannot_report_a_connection_error(); test_legacy_automatic_ip_keeps_hostname_recovery(); test_wake_reuses_verified_address(); test_stale_cache_and_network_change(); test_disconnect_fences_inflight_probe(); test_refresh_keeps_working_address(); test_offline_never_queries(); test_now_playing_json_strings(); test_fixed_volume_response_and_zone_switch(); test_discovery_waits_for_initialization(); test_zone_cycle_wraps_without_copying_inventory(); test_partial_api_success_preserves_backoff(); test_zone_refresh_invalidates_old_readiness(); test_volume_uses_current_connection_evidence(); test_unresolved_then_recovered(); test_failed_and_stale_candidates(); }

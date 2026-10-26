@@ -25,6 +25,8 @@ set(SRC_FILES
     "pmic_axp2101.c"
     "../../common/app_main.c"
     "../../common/ota_update.c"
+    "../../common/controller_device_settings.c"
+    "platform_device_settings_frame.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
     "../../common/controller_connection.c"

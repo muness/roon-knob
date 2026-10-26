@@ -34,6 +34,12 @@ void ota_check_for_update(bool force);
 // Start firmware update (non-blocking, runs in background)
 void ota_start_update(void);
 
+// Install request from the bridge (non-blocking). Starts one background job that force-checks the
+// bridge and, only if it offers a strictly newer version, installs it and reboots. Returns false
+// without starting anything when a job is already running, or when from_version is non-empty and
+// differs from the running version (a stale request after the device already updated).
+bool ota_request_install(const char *from_version);
+
 // Get current OTA status
 const ota_info_t* ota_get_info(void);
 

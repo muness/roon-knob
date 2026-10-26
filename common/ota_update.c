@@ -143,7 +143,10 @@ int ota_compare_versions(const char* v1, const char* v2) {
     return 0;  // Identical
 }
 
-static void check_update_task(void *arg) {
+/* The check, update and install bodies are plain functions so the task wrappers stay trivial and
+ * the whole sequence runs under the host test harness. Each returns with s_ota_info holding the
+ * outcome; none of them touches s_ota_task. */
+static void ota_perform_check(void) {
     char bridge_url[128];
     char url[192];
     char response[256];
@@ -156,8 +159,6 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
                 sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -179,8 +180,6 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -191,8 +190,6 @@ static void check_update_task(void *arg) {
         ESP_LOGI(TAG, "No firmware available on server");
         s_ota_info.status = OTA_STATUS_UP_TO_DATE;
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -201,8 +198,6 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Bad server response", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -212,8 +207,6 @@ static void check_update_task(void *arg) {
     if (read_len <= 0) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Read failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     response[read_len] = '\0';
@@ -224,16 +217,12 @@ static void check_update_task(void *arg) {
     if (!ver_start) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Missing version", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     ver_start = strchr(ver_start + 9, '"');  // Find opening quote of value
     if (!ver_start) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid JSON", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     ver_start++;  // Skip opening quote
@@ -241,8 +230,6 @@ static void check_update_task(void *arg) {
     if (!ver_end || (ver_end - ver_start) >= (int)sizeof(s_ota_info.available_version)) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid version", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     size_t ver_len = ver_end - ver_start;
@@ -268,11 +255,9 @@ static void check_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_UP_TO_DATE;
     }
 
-    s_ota_task = NULL;
-    vTaskDelete(NULL);
 }
 
-static void do_update_task(void *arg) {
+static void ota_perform_update(void) {
     char bridge_url[128];
     char url[192];
 
@@ -283,8 +268,6 @@ static void do_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
                 sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -298,8 +281,6 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "No OTA partition found");
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No OTA partition", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -320,8 +301,6 @@ static void do_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Connection failed", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -333,8 +312,6 @@ static void do_update_task(void *arg) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Invalid firmware", sizeof(s_ota_info.error_msg));
         esp_http_client_cleanup(client);
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -344,8 +321,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Out of memory", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -363,8 +338,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Firmware target mismatch", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -376,8 +349,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "OTA begin failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
     err = esp_ota_write(ota_handle, buf, prefix_read);
@@ -387,8 +358,6 @@ static void do_update_task(void *arg) {
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -402,8 +371,6 @@ static void do_update_task(void *arg) {
             esp_http_client_cleanup(client);
             s_ota_info.status = OTA_STATUS_ERROR;
             strncpy(s_ota_info.error_msg, "Invalid firmware length", sizeof(s_ota_info.error_msg));
-            s_ota_task = NULL;
-            vTaskDelete(NULL);
             return;
         }
         err = esp_ota_write(ota_handle, buf, read_len);
@@ -414,8 +381,6 @@ static void do_update_task(void *arg) {
             esp_http_client_cleanup(client);
             s_ota_info.status = OTA_STATUS_ERROR;
             strncpy(s_ota_info.error_msg, "Write failed", sizeof(s_ota_info.error_msg));
-            s_ota_task = NULL;
-            vTaskDelete(NULL);
             return;
         }
 
@@ -434,8 +399,6 @@ static void do_update_task(void *arg) {
         esp_ota_abort(ota_handle);
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Download incomplete", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -444,8 +407,6 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Validation failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -454,8 +415,6 @@ static void do_update_task(void *arg) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "Set boot failed", sizeof(s_ota_info.error_msg));
-        s_ota_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
 
@@ -466,7 +425,35 @@ static void do_update_task(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
 
-    // Never reached
+}
+
+/* The bridge asked for an install: always re-check first (forced, so a prerelease device is not
+ * skipped), and install only an image ota_compare_versions says is strictly newer. Whatever the
+ * bridge claimed, nothing older or equal is ever written. */
+static void ota_perform_install(void) {
+    ota_perform_check();
+    if (s_ota_info.status != OTA_STATUS_AVAILABLE) return;
+    if (ota_compare_versions(s_ota_info.available_version, ota_get_current_version()) <= 0) {
+        s_ota_info.status = OTA_STATUS_UP_TO_DATE;
+        return;
+    }
+    ota_perform_update();
+}
+
+static void check_update_task(void *arg) {
+    ota_perform_check();
+    s_ota_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void do_update_task(void *arg) {
+    ota_perform_update();
+    s_ota_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void install_task(void *arg) {
+    ota_perform_install();
     s_ota_task = NULL;
     vTaskDelete(NULL);
 }
@@ -527,6 +514,22 @@ void ota_start_update(void) {
     }
 
     xTaskCreate(do_update_task, "ota_update", 8192, NULL, 1, &s_ota_task);  // Low priority to not block UI
+}
+
+bool ota_request_install(const char *from_version) {
+    if (s_ota_task != NULL) {
+        ESP_LOGW(TAG, "OTA task already running; install request ignored");
+        return false;
+    }
+    /* The bridge's request names the version the device reported when it was made. A mismatch means
+     * the device has since updated (or been re-flashed), so the request is stale. */
+    if (from_version && from_version[0] != '\0' &&
+        strcmp(from_version, ota_get_current_version()) != 0) {
+        ESP_LOGI(TAG, "Stale install request from %s (running %s); ignored", from_version,
+                 ota_get_current_version());
+        return false;
+    }
+    return xTaskCreate(install_task, "ota_install", 8192, NULL, 1, &s_ota_task) == pdPASS;
 }
 
 const ota_info_t* ota_get_info(void) {

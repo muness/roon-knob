@@ -36,6 +36,7 @@ _Static_assert(sizeof(esp_app_desc_t) == 256, "IDF descriptor layout");
 _Static_assert(offsetof(esp_app_desc_t, project_name) == 48, "IDF project offset");
 typedef void *TaskHandle_t;
 #define pdMS_TO_TICKS(ms) (ms)
+#define pdPASS 1
 void vTaskDelete(TaskHandle_t task);
 void vTaskDelay(int ticks);
 int xTaskCreate(void (*task)(void *), const char *, unsigned, void *, unsigned, TaskHandle_t *);

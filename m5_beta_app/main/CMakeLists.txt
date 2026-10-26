@@ -20,6 +20,8 @@ set(SRC_FILES
     "../../tough_app/main/dns_server.c"
     "../../common/app_main.c"
     "../../common/ota_update.c"
+    "../../common/controller_device_settings.c"
+    "platform_device_settings_beta.c"
     "../../common/bridge_command_plan.c"
     "../../common/bridge_client.c"
     "../../common/controller_connection.c"

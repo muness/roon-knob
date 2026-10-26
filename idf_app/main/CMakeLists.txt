@@ -21,6 +21,8 @@ set(SRC_FILES
     "platform_provisioning_dial.c"
     "battery.c"
     "../../common/ota_update.c"
+    "../../common/controller_device_settings.c"
+    "../../common/platform/platform_device_settings_touch_brightness.c"
     "controller_input_profile_dial.c"
     "controller_presentation_dial.c"
     "ble_hid_host_dial.c"
