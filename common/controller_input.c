@@ -46,6 +46,12 @@ static bool action_is_valid(const controller_action_t *action) {
         return action->value.picker_delta == 0;
     case CONTROLLER_ACTION_SCROLL_ZONE_PICKER:
         return action->value.picker_delta != 0;
+    case CONTROLLER_ACTION_SHORTCUT:
+        return action->value.shortcut.usage != 0 &&
+               action->value.shortcut.gesture >=
+                   CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS &&
+               action->value.shortcut.gesture <=
+                   CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE;
     case CONTROLLER_ACTION_SYSTEM:
         return false;
     case CONTROLLER_ACTION_NONE:

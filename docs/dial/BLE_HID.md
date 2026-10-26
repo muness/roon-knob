@@ -33,6 +33,51 @@ explicit mute command. Unknown report formats and usages are ignored safely.
 HOGP remotes are not perfectly uniform, so support must be verified with the
 specific remote.
 
+## Shortcuts from remote keys
+
+A paired remote's keys can also start a Library shortcut on the bridge. The
+controller never stores what a key does: it reports the key and gesture to the
+bridge (`POST /knob/input`, identified by `X-Knob-Id`), and the bridge plays the
+mapped Library item on this controller's own zone. Maps and shortcuts are edited
+in the bridge web UI (Library → "Pin as shortcut", Controllers → Config), so
+they survive a re-flash and are shared across controllers.
+
+| Key | Gestures that can start a shortcut |
+| --- | --- |
+| Volume up/down, mute | none: volume always means volume |
+| Play/pause, next, previous | long press only. The key's normal action still runs on the press itself |
+| Any other Consumer Control key | press, long press (600 ms) or double press (350 ms) |
+
+Keys this firmware has no name for are reported as `usage_XXXX` (the HID usage
+in hex), so any key a remote sends can be mapped. A press with no shortcut is
+reported as `unmapped` and is not an error.
+
+When the bridge cannot play a shortcut, the controller shows one short fixed
+message: "Pick a zone first", "Zone unavailable", "Not for this zone", "Item not
+found", "Shortcut was deleted" or "Shortcut failed". It never plays on another
+zone instead. A successful press shows nothing; the music is the feedback.
+
+A recognised gesture is semantic input, not a physical event: it becomes a
+`CONTROLLER_ACTION_SHORTCUT` and enters the shared action router like any other
+action (`controller_action_router.c`). The router honours it only in the media
+context, so a key pressed while the zone picker or settings are open does nothing
+rather than start music from under a menu. The backend adapter (`bridge_client`)
+owns the `/knob/input` request: it runs on a short-lived background task, off the
+UI task, one at a time. A press that arrives while one is still running, or while
+the bridge connection is not ready, is dropped (with "Not ready" in the second
+case), not queued.
+
+If the BLE session ends (disconnect, disable, sleep) the host signals it and any
+held or half-recognised key is dropped, so a gesture never outlives a session. A
+release report (`00 00`) names no key, so the host tracks which key is held and
+turns raw reports into key-down/key-up edges that carry the real usage.
+
+Only reports ESP-IDF classifies as Consumer Control (or that the bounded mapper
+accepts despite a GENERIC label) are considered, so keyboard and mouse reports
+from a remote are never read as keys. A Consumer Control key ESP-IDF mislabels
+as GENERIC and the mapper does not know is therefore not seen; the raw HID log
+shows it, and that is the evidence needed to extend the mapper.
+
 ## Target behavior
 
 - **HiPhi Frame:** enabled by default to preserve its established behavior.

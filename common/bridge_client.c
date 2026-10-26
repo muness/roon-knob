@@ -13,6 +13,7 @@
 #include "platform/platform_time.h"
 #include "os_mutex.h"
 #include "controller_presentation.h"
+#include "controller_shortcut_key.h"
 #include "controller_view.h"
 #include "controller_view_compat.h"
 #include "wifi_manager.h"
@@ -1620,6 +1621,90 @@ bool bridge_client_execute_command(const controller_command_t *command) {
         post_ui_message(feedback_text[plan.failure_feedback]);
     }
     return sent;
+}
+
+static bool send_shortcut_blocking(const controller_shortcut_event_t *event) {
+    char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
+    if (!controller_shortcut_build_body(event, body, sizeof(body))) return false;
+
+    response_context_t request;
+    if (!capture_response_context(&request) || !request.bridge[0]) {
+        post_ui_message("Not ready");
+        return false;
+    }
+    char url[256];
+    snprintf(url, sizeof(url), "%s/knob/input", request.bridge);
+    char *resp = NULL;
+    size_t resp_len = 0;
+    int ret = platform_http_post_json(url, body, &resp, &resp_len);
+    if (ret != 0 || !response_context_current(&request)) {
+        platform_http_free(resp);
+        if (ret != 0) post_ui_message("Shortcut failed");
+        return false;
+    }
+
+    /* A reply we cannot read is a failure, never a silent success. */
+    const char *code = NULL;
+    cJSON *root = resp_len ? response_document(resp, resp_len) : NULL;
+    if (root) {
+        const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "code");
+        if (cJSON_IsString(item) && item->valuestring) code = item->valuestring;
+    }
+    const char *feedback = controller_shortcut_feedback_for_code(code);
+    if (feedback) post_ui_message(feedback);
+    const bool ok = code && (!strcmp(code, "accepted") || !strcmp(code, "unmapped"));
+    cJSON_Delete(root);
+    platform_http_free(resp);
+    return ok;
+}
+
+static atomic_bool s_shortcut_busy;
+
+typedef struct {
+    controller_shortcut_event_t event;
+} shortcut_job_t;
+
+static void shortcut_task(void *arg) {
+    shortcut_job_t *job = arg;
+    (void)send_shortcut_blocking(&job->event);
+    free(job);
+    atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+}
+
+bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+    const controller_shortcut_event_t event = {
+        .usage = usage,
+        .gesture = (controller_shortcut_gesture_t)gesture,
+    };
+    char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
+    if (!controller_shortcut_build_body(&event, body, sizeof(body))) {
+        return false; /* no key or no gesture: nothing to send */
+    }
+    controller_connection_t connection;
+    bridge_client_connection_snapshot(&connection);
+    if (!controller_connection_ready(&connection)) {
+        post_ui_message("Not ready");
+        return false;
+    }
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&s_shortcut_busy, &expected, true)) {
+        LOGW("Shortcut still in flight; key %04x dropped", (unsigned)usage);
+        return false;
+    }
+    shortcut_job_t *job = malloc(sizeof(*job));
+    if (!job) {
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+        return false;
+    }
+    job->event = event;
+    if (platform_task_start_external_stack("shortcut_input", 6144,
+                                           shortcut_task, job) != 0) {
+        free(job);
+        atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+        post_ui_message("Shortcut failed");
+        return false;
+    }
+    return true;
 }
 
 void bridge_client_set_network_ready(bool ready) {

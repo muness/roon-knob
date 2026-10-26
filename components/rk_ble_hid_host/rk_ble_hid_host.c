@@ -165,6 +165,8 @@ typedef struct {
     /* The callback updates this registry before IDF invalidates event pointers. */
     tracked_device_t devices[MAX_HID_DEVS];
     size_t close_events_pending;
+    /* Which Consumer Control key the remote holds; owner task only. */
+    rk_ble_consumer_tracker_t consumer;
     bool have_active_bda;
     uint8_t active_bda[6];
     uint8_t bonded_bda[6];
@@ -248,6 +250,17 @@ static void status_set_sleep_quiesced(bool quiesced) {
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
     s.status.quiesced_for_sleep = quiesced;
     xSemaphoreGive(s.status_lock);
+}
+
+/* A BLE session ended (disconnect, disable, sleep teardown) or is starting:
+ * forget the held key and tell the controller to drop any half-recognised
+ * gesture, so a press never survives into the next session. Usage 0 with
+ * pressed=false is the "everything is up" signal. */
+static void end_consumer_session(void) {
+    rk_ble_consumer_tracker_reset(&s.consumer);
+    if (s.config.on_consumer_event) {
+        s.config.on_consumer_event(0, false, s.config.callback_context);
+    }
 }
 
 static void status_set_connection(bool connected, const char *name) {
@@ -872,6 +885,7 @@ static void request_stop(void) {
         return;
     }
     const bool was_scanning = s.status.state == RK_BLE_HID_HOST_STATE_SCANNING;
+    end_consumer_session();
     set_state(RK_BLE_HID_HOST_STATE_STOPPING, RK_BLE_HID_HOST_ERROR_NONE);
     s.stop_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(STOP_TIMEOUT_MS);
     if (was_scanning) {
@@ -1137,6 +1151,7 @@ static void finalize_open_connection(uint32_t generation) {
         return;
     }
     s.reconnect_attempts = 0;
+    end_consumer_session();
     status_set_connection(true, s.opening_name);
     if (nvs_save_bond(s.active_bda, s.opening_addr_type,
                       s.opening_name) != ESP_OK) {
@@ -1248,6 +1263,7 @@ static void process_event(const service_event_t *event) {
                    sizeof(s.active_bda)) == 0) {
             s.have_active_bda = false;
             memset(s.active_bda, 0, sizeof(s.active_bda));
+            end_consumer_session();
             status_set_connection(false, NULL);
         }
         if (is_stopping()) {
@@ -1265,6 +1281,33 @@ static void process_event(const service_event_t *event) {
         rk_ble_media_key_t key;
         const bool mapped = rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
+
+        /* Report every Consumer Control key down and up, known or not, so the
+         * controller can recognise long and double presses and a person can
+         * map a key this firmware has no name for. Only reports ESP-IDF
+         * classified as Consumer Control, or that the bounded mapper accepted
+         * despite a GENERIC label: a keyboard or mouse report would otherwise
+         * decode its first two bytes as a "usage". This runs in addition to
+         * the media-key path below, which is unchanged. */
+        const bool release_of_held_key =
+            rk_ble_consumer_tracker_holding(&s.consumer) &&
+            event->data.input.len >= 2 && event->data.input.data[0] == 0 &&
+            event->data.input.data[1] == 0;
+        if (s.config.on_consumer_event && s.status.connected && !is_stopping() &&
+            (mapped || event->data.input.usage == ESP_HID_USAGE_CCONTROL ||
+             release_of_held_key)) {
+            /* `00 00` releases whichever key was held; the tracker supplies its
+             * usage. A GENERIC-labelled release of a held key is accepted too,
+             * otherwise the key would stay down forever. */
+            rk_ble_consumer_edge_t edges[2];
+            const size_t count = rk_ble_consumer_tracker_update(
+                &s.consumer, event->data.input.data, event->data.input.len,
+                edges);
+            for (size_t i = 0; i < count; ++i) {
+                s.config.on_consumer_event(edges[i].usage, edges[i].pressed,
+                                           s.config.callback_context);
+            }
+        }
 
         /* ESP-IDF 5.5 can classify a valid Consumer Control report as GENERIC
          * when its HID report-map metadata is incomplete. The proven Frame

@@ -28,7 +28,25 @@ typedef enum {
      * so the router must reject this kind.
      */
     CONTROLLER_ACTION_ADAPTIVE_REF,
+    /*
+     * A paired remote's key + gesture, for the bridge to resolve to a Library
+     * shortcut on this controller's zone. Semantic input, not a physical
+     * event: it enters the router like any other action and is honoured only
+     * in the media context.
+     */
+    CONTROLLER_ACTION_SHORTCUT,
 } controller_action_kind_t;
+
+/* Matches controller_shortcut_gesture_t (controller_shortcut_key.h); kept as
+ * plain integers so this header stays free of that dependency. */
+#define CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS 1u
+#define CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG 2u
+#define CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE 3u
+
+typedef struct {
+    uint16_t usage;   /* HID Consumer Control usage; never 0 */
+    uint8_t gesture;  /* CONTROLLER_SHORTCUT_ACTION_GESTURE_* */
+} controller_shortcut_action_t;
 
 typedef struct {
     controller_action_kind_t kind;
@@ -37,6 +55,7 @@ typedef struct {
         int32_t picker_delta;
         controller_system_action_t system;
         uint32_t adaptive_ref;
+        controller_shortcut_action_t shortcut;
     } value;
 } controller_action_t;
 
@@ -67,6 +86,16 @@ static inline controller_action_t controller_action_picker_scroll(int delta) {
     controller_action_t action;
     action.kind = CONTROLLER_ACTION_SCROLL_ZONE_PICKER;
     action.value.picker_delta = delta;
+    return action;
+}
+
+static inline controller_action_t controller_action_shortcut(
+    uint16_t usage, uint8_t gesture) {
+    controller_action_t action;
+    action.kind = CONTROLLER_ACTION_SHORTCUT;
+    action.value.command = controller_command_make(CONTROLLER_COMMAND_NONE);
+    action.value.shortcut.usage = usage;
+    action.value.shortcut.gesture = gesture;
     return action;
 }
 
