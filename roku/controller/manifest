@@ -1,7 +1,7 @@
 title=HiPhi Control
 major_version=2
 minor_version=8
-build_version=0
+build_version=1
 ui_resolutions=fhd
 playonly_aware=1
 rsg_version=1.3
