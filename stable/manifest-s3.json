@@ -1,16 +1,14 @@
 {
-  "name": "HiPhi Dial (Stable)",
-  "version": "2.5.2",
+  "name": "HiPhi Dial (Alpha)",
+  "version": "2.8.0",
   "new_install_prompt_erase": true,
-  "builds": [
-    {
-      "chipFamily": "ESP32-S3",
-      "parts": [
-        {
-          "path": "hiphi_dial_merged-v2.5.2.bin",
-          "offset": 0
-        }
-      ]
-    }
-  ]
+  "builds": [{
+    "chipFamily": "ESP32-S3",
+    "parts": [
+      { "path": "hiphi_dial_bootloader.bin", "offset": 0 },
+      { "path": "hiphi_dial_partition-table.bin", "offset": 32768 },
+      { "path": "hiphi_dial_ota_data_initial.bin", "offset": 53248 },
+      { "path": "hiphi_dial.bin", "offset": 65536 }
+    ]
+  }]
 }
