@@ -62,7 +62,7 @@ bool controller_shortcut_build_body(const controller_shortcut_event_t *event,
                                     char *out, size_t len);
 
 /* Short, fixed, ASCII text for a bridge outcome `code` (the `code` field of the
- * /knob/input reply). NULL when nothing should be shown: `played` (the music is
+ * /knob/input reply). NULL when nothing should be shown: `accepted` (the music is
  * the feedback) and `unmapped` (most presses are not shortcuts). An unknown code
  * gets a generic failure so a newer bridge never reads as success. The bridge's
  * own sentence is for the web UI; this must fit a small display and its font. */

@@ -80,7 +80,7 @@ bool controller_shortcut_build_body(const controller_shortcut_event_t *event,
 
 const char *controller_shortcut_feedback_for_code(const char *code) {
     if (!code) return "Shortcut failed";
-    if (!strcmp(code, "played") || !strcmp(code, "unmapped")) return NULL;
+    if (!strcmp(code, "accepted") || !strcmp(code, "unmapped")) return NULL;
     if (!strcmp(code, "no_zone")) return "Pick a zone first";
     if (!strcmp(code, "zone_missing")) return "Zone unavailable";
     if (!strcmp(code, "provider_mismatch")) return "Not for this zone";

@@ -1652,7 +1652,7 @@ bool bridge_client_send_shortcut(const controller_shortcut_event_t *event) {
     }
     const char *feedback = controller_shortcut_feedback_for_code(code);
     if (feedback) post_ui_message(feedback);
-    const bool ok = code && (!strcmp(code, "played") || !strcmp(code, "unmapped"));
+    const bool ok = code && (!strcmp(code, "accepted") || !strcmp(code, "unmapped"));
     cJSON_Delete(root);
     platform_http_free(resp);
     return ok;

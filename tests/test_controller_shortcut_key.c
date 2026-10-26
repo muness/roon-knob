@@ -197,7 +197,10 @@ static void the_clock_may_wrap(void) {
 }
 
 static void feedback(void) {
-    assert(controller_shortcut_feedback_for_code("played") == NULL);
+    assert(controller_shortcut_feedback_for_code("accepted") == NULL);
+    /* The old word is not a success any more: a bridge that still says it is not the one
+     * this firmware was written against, and silence there would hide the mismatch. */
+    assert(strcmp(controller_shortcut_feedback_for_code("played"), "Shortcut failed") == 0);
     assert(controller_shortcut_feedback_for_code("unmapped") == NULL);
     assert(strcmp(controller_shortcut_feedback_for_code("zone_missing"), "Zone unavailable") == 0);
     assert(strcmp(controller_shortcut_feedback_for_code("no_zone"), "Pick a zone first") == 0);

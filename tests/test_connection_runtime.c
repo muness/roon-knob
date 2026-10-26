@@ -229,7 +229,7 @@ static void test_shortcut_input_reports_what_the_bridge_says(void) {
     controller_connection_api(&s_connection, true, 1, true, clock_ms);
 
     shortcut_posts = 0;
-    shortcut_send("{\"ok\":true,\"code\":\"played\"}", true, true, "");
+    shortcut_send("{\"ok\":true,\"code\":\"accepted\"}", true, true, "");
     assert(strcmp(shortcut_url, "http://192.168.1.2:8088/knob/input") == 0);
     assert(strcmp(shortcut_body, "{\"key\":\"home\",\"gesture\":\"long\"}") == 0);
     shortcut_send("{\"ok\":true,\"code\":\"unmapped\"}", true, true, "");
