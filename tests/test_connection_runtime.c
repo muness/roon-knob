@@ -376,6 +376,11 @@ static void test_named_shortcuts_are_bounded_and_fenced(void) {
     }
     assert(!strcmp(shortcut_url, "http://192.168.1.2:8088/api/shortcuts/sc_album/play"));
     assert(!strcmp(shortcut_body, "{\"zone_id\":\"roon:room\"}"));
+    shortcut_reply = "{\"code\":\"accepted\",\"show_notice\":true,\"message\":\"Multiple matches found. Playing the first exact match.\"}";
+    assert(bridge_client_shortcuts_play(&context, "sc_album", &page));
+    assert(page.accepted && page.show_notice);
+    assert(strstr(page.notice, "Multiple matches"));
+
     assert(!bridge_client_shortcuts_play(&context, "sc_../../control", &page));
     shortcut_posts = 0;
     atomic_store(&s_shortcut_busy, true);

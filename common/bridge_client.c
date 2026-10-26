@@ -1803,6 +1803,7 @@ bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
     const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
     if (!cJSON_IsString(message)) message = cJSON_GetObjectItemCaseSensitive(root, "error");
     out->accepted = cJSON_IsString(code) && !strcmp(code->valuestring, "accepted");
+    out->show_notice = out->accepted && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "show_notice"));
     shortcut_text(out->notice, sizeof(out->notice), cJSON_IsString(message) ? message->valuestring :
                   "Playback uncertain. Check now playing.");
     cJSON_Delete(root); platform_http_free(response);

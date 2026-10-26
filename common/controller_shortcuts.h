@@ -11,5 +11,5 @@ typedef struct {
     controller_shortcuts_item_t items[CONTROLLER_SHORTCUTS_PAGE_SIZE];
     int count, next_offset;
     char notice[256];
-    bool accepted;
+    bool accepted, show_notice;
 } controller_shortcuts_page_t;

@@ -961,7 +961,7 @@ static void render(void) {
         lv_obj_set_style_text_font(message, platform_touch_font_small(), 0);
         lv_obj_set_style_text_color(message, lv_color_hex(0xb8c4cd), 0);
         lv_label_set_text(message, shortcuts->notice);
-        list_row("Retry", NULL, ACTION_REFRESH, 0);
+        if (!shortcuts->accepted) list_row("Retry", NULL, ACTION_REFRESH, 0);
       }
       if (shortcut_offset > 0) list_row("Previous", NULL, ACTION_PREVIOUS, shortcuts->count);
       if (shortcuts->next_offset >= 0) list_row("More shortcuts", NULL, ACTION_NEXT, shortcuts->count + (shortcut_offset > 0));
@@ -1328,8 +1328,9 @@ void controller_touch_navigation_process(void) {
         shortcuts_context = result->request.shortcuts_context;
         render();
       } else if (result->request.kind == SHORTCUTS_PLAY) {
-        if (result->ok) change_screen(CONTROLLER_SCREEN_ARTWORK);
+        if (result->ok && !result->shortcuts.show_notice) change_screen(CONTROLLER_SCREEN_ARTWORK);
         else {
+          *shortcuts = result->shortcuts;
           shortcuts->count = 0;
           shortcuts->next_offset = -1;
           snprintf(shortcuts->notice, sizeof(shortcuts->notice), "%s", result->shortcuts.notice);

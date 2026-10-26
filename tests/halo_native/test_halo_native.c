@@ -346,6 +346,20 @@ int main(int argc, char **argv) {
   snapshot(dir, "shortcut-uncertain");
   controller_touch_navigation_process();
   assert(!requests->occupied); /* no automatic replay */
+  /* An accepted duplicate selection shows its notice without offering a replay. */
+  shortcut_result = calloc(1, sizeof(*shortcut_result));
+  shortcut_result->request = shortcut_request;
+  shortcut_result->ok = true;
+  shortcut_result->shortcuts.accepted = true;
+  shortcut_result->shortcuts.show_notice = true;
+  shortcut_result->shortcuts.next_offset = -1;
+  strcpy(shortcut_result->shortcuts.notice, "Multiple matches found. Playing the first exact match.");
+  xQueueSend(results, &shortcut_result, 0);
+  controller_touch_navigation_process();
+  assert(screen == CONTROLLER_SCREEN_SHORTCUTS && shortcuts->accepted);
+  assert(strstr(shortcuts->notice, "Multiple matches"));
+  assert(!rows[0]); /* no Retry that would send another play */
+  snapshot(dir, "shortcut-multiple-matches");
   click(back);
   assert(screen == CONTROLLER_SCREEN_MENU);
   busy = mutation_locked = pending_shortcuts = false;
