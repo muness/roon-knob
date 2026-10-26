@@ -94,7 +94,7 @@ Controllers find the bridge automatically over mDNS. Each controller remembers t
 - Velocity-sensitive volume control on encoder targets
 - Multi-zone support across Roon, LMS, and OpenHome
 - Automatic display dimming and sleep
-- Stable firmware update checks and user-started OTA installation on HiPhi Dial; other targets use USB unless their guide documents OTA
+- Bridge-served OTA on every controller after a one-time browser reflash of the new partition table, started from UHC (or on the Dial itself), with rollback; implemented but unverified on hardware
 - Wi-Fi setup via captive portal
 
 Kizz voice and wake detection are currently compiled out because no voice endpoint is available. Its touch playback controls, room selection, expressions, motion, and speaker cues remain enabled. See the [experimental voice build notes](docs/dev/KIZZ_VOICE.md).

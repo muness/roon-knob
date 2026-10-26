@@ -16,6 +16,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Bridge-served OTA on every controller (implemented, unverified on hardware):
+  all targets get factory + `ota_0` + `ota_1` slots, app rollback with a 45 s
+  boot confirmation, and the shared OTA client. UHC's Update button requests an
+  install through `config.firmware_update`; the device ignores stale requests,
+  installs only a strictly newer version, and follows its own prerelease
+  channel. Needs a one-time browser reflash of the new partition table that
+  declines erase (settings are kept).
+- Device-specific settings sync from the bridge config (implemented,
+  unverified on hardware): `show_ip` (Frame), `brightness` 5..100 (Dial,
+  HALO), `body_enabled`, `sound_enabled`, `sound_volume` 0..2 (Kizz). Missing,
+  null, wrong-typed or out-of-range values are ignored; unchanged values are
+  not rewritten.
 - Now-playing header: demote the zone label to a darker caption grey and fade
   it to a small dim glyph after ~35s in a stable single-zone household,
   reappearing for 5s on zone-name changes or leaving art mode/picker/settings.
