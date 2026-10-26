@@ -14,6 +14,16 @@ extern "C" {
 
 /* Reads the already-published controller configuration snapshot. */
 void bridge_client_start(void);
+/* Immutable transport authority for a deferred system operation. No zone or
+ * renderer state: endpoint replacement/reconnect invalidates the token. */
+typedef struct {
+    char base[128];
+    uint32_t endpoint_generation;
+    unsigned network_epoch;
+} bridge_request_endpoint_t;
+bool bridge_client_capture_request_endpoint(bridge_request_endpoint_t *out);
+bool bridge_client_request_endpoint_current(const bridge_request_endpoint_t *endpoint);
+
 /* Wake the polling worker after a display sleep/power-save interval. */
 void bridge_client_request_poll(void);
 bool bridge_client_execute_command(const controller_command_t *command);

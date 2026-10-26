@@ -362,6 +362,26 @@ static bool response_context_current(const response_context_t *context) {
     return atomic_load_explicit(&s_network_ready, memory_order_acquire) && response_context_matches(context);
 }
 
+bool bridge_client_capture_request_endpoint(bridge_request_endpoint_t *out) {
+    response_context_t a, b;
+    if (!out || !capture_response_context(&a) || !capture_response_context(&b) ||
+        a.revision != b.revision || a.endpoint.generation != b.endpoint.generation ||
+        a.network_epoch != b.network_epoch || strcmp(a.bridge, b.bridge) ||
+        !b.bridge[0] || !atomic_load_explicit(&s_network_ready, memory_order_acquire)) return false;
+    memset(out, 0, sizeof(*out));
+    rk_strlcpy(out->base, b.bridge, sizeof(out->base));
+    out->endpoint_generation = b.endpoint.generation;
+    out->network_epoch = b.network_epoch;
+    return true;
+}
+
+bool bridge_client_request_endpoint_current(const bridge_request_endpoint_t *endpoint) {
+    bridge_request_endpoint_t current;
+    return endpoint && bridge_client_capture_request_endpoint(&current) &&
+        current.endpoint_generation == endpoint->endpoint_generation &&
+        current.network_epoch == endpoint->network_epoch && !strcmp(current.base, endpoint->base);
+}
+
 static bool fetch_now_playing(struct now_playing_state *state,
                               const platform_power_snapshot_t *power);
 static bool refresh_zone_label(bool prefer_zone_id);
@@ -1716,6 +1736,7 @@ static void shortcut_task(void *arg) {
     (void)send_shortcut_blocking(&job->event, &job->authority);
     free(job);
     atomic_store_explicit(&s_shortcut_busy, false, memory_order_release);
+    platform_task_finish();
 }
 
 bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {

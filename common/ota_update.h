@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 #pragma once
 
 #include <stdbool.h>
@@ -42,8 +43,13 @@ void ota_start_update(void);
 // not fit.
 bool ota_request_install(const char *from_version);
 
-// Get current OTA status
-const ota_info_t* ota_get_info(void);
+typedef enum {
+    OTA_REQUEST_ACCEPTED, OTA_REQUEST_COALESCED, OTA_REQUEST_BUSY,
+    OTA_REQUEST_STALE, OTA_REQUEST_START_FAILED
+} ota_request_result_t;
+ota_request_result_t ota_request_install_result(const char *from_version);
+/* Copy the published status. The caller never observes the worker's mutable buffer. */
+bool ota_get_info(ota_info_t *out);
 
 // Get current app version string
 const char* ota_get_current_version(void);

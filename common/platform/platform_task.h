@@ -24,6 +24,8 @@ int platform_task_start_external_stack(const char *name, uint32_t stack_size,
  * into internal RAM so cache-off SPI-flash operations are safe. */
 int platform_task_start_internal_stack(const char *name, uint32_t stack_size,
                                        platform_task_fn_t fn, void *arg);
+/* Finish a task created by the explicit-capability stack APIs above. */
+void platform_task_finish(void);
 size_t platform_task_current_stack_free_bytes(void);
 size_t platform_task_internal_heap_free_bytes(void);
 size_t platform_task_internal_heap_largest_free_block_bytes(void);

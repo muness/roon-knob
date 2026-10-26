@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 #include "ota_update.h"
 #include "bridge_client.h"
 #include "platform/platform_identity.h"
+#include "platform/platform_task.h"
+#include "os_critical.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -15,8 +18,30 @@
 
 static const char *TAG = "ota";
 
-static ota_info_t s_ota_info = {0};
-static TaskHandle_t s_ota_task = NULL;
+/* Only the admitted worker mutates its working result. Readers get a copy of
+ * the separately published result under the short admission lock. */
+static ota_info_t s_ota_info;
+static ota_info_t s_published;
+static os_critical_t s_ota_lock = OS_CRITICAL_INITIALIZER;
+typedef enum { OTA_JOB_CHECK, OTA_JOB_UPDATE, OTA_JOB_INSTALL } ota_job_kind_t;
+typedef struct {
+    ota_job_kind_t kind;
+    bridge_request_endpoint_t endpoint;
+    char from_version[32];
+    char selected_version[32];
+} ota_job_t;
+static bool s_initialized, s_ota_busy, s_have_pending;
+static ota_job_t s_active_job, s_pending_job;
+static void ota_publish(void) {
+    os_critical_enter(&s_ota_lock);
+    s_published = s_ota_info;
+    os_critical_leave(&s_ota_lock);
+}
+static bool ota_job_current(const ota_job_t *job) {
+    return bridge_client_request_endpoint_current(&job->endpoint) &&
+        (!job->from_version[0] || !strcmp(job->from_version, ota_get_current_version()));
+}
+
 
 #if __has_include("sdkconfig.h")
 #include "sdkconfig.h"
@@ -165,16 +190,17 @@ int ota_compare_versions(const char* v1, const char* v2) {
 
 /* The check, update and install bodies are plain functions so the task wrappers stay trivial and
  * the whole sequence runs under the host test harness. Each returns with s_ota_info holding the
- * outcome; none of them touches s_ota_task. */
-static void ota_perform_check(void) {
+ * outcome; none of them changes worker ownership. */
+static void ota_perform_check(const ota_job_t *job) {
     char bridge_url[128];
     char url[192];
     char response[256];
 
     s_ota_info.status = OTA_STATUS_CHECKING;
+    ota_publish();
     strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
 
-    if (!bridge_client_get_request_base(bridge_url, sizeof(bridge_url))) {
+    if (!ota_job_current(job)) {
         ESP_LOGE(TAG, "No Unified Hi-Fi Control URL configured");
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
@@ -182,6 +208,7 @@ static void ota_perform_check(void) {
         return;
     }
 
+    snprintf(bridge_url, sizeof(bridge_url), "%s", job->endpoint.base);
     snprintf(url, sizeof(url), "%s/firmware/version?channel=%s", bridge_url,
              ota_channel_for_version(ota_get_current_version()));
     ESP_LOGI(TAG, "Checking for updates at %s", url);
@@ -277,20 +304,22 @@ static void ota_perform_check(void) {
 
 }
 
-static void ota_perform_update(void) {
+static void ota_perform_update(const ota_job_t *job) {
     char bridge_url[128];
     char url[192];
 
     s_ota_info.status = OTA_STATUS_DOWNLOADING;
     s_ota_info.progress_percent = 0;
+    ota_publish();
 
-    if (!bridge_client_get_request_base(bridge_url, sizeof(bridge_url))) {
+    if (!ota_job_current(job)) {
         s_ota_info.status = OTA_STATUS_ERROR;
         strncpy(s_ota_info.error_msg, "No Hi-Fi Control configured",
                 sizeof(s_ota_info.error_msg));
         return;
     }
 
+    snprintf(bridge_url, sizeof(bridge_url), "%s", job->endpoint.base);
     snprintf(url, sizeof(url), "%s/firmware/download?channel=%s", bridge_url,
              ota_channel_for_version(ota_get_current_version()));
     ESP_LOGI(TAG, "Downloading firmware from %s", url);
@@ -368,6 +397,14 @@ static void ota_perform_update(void) {
         return;
     }
 
+    /* Erase admission: a bridge replaced during metadata/download cannot grant
+     * an install. After this point the captured image transaction may finish. */
+    if (!ota_job_current(job)) {
+        free(buf); esp_http_client_cleanup(client);
+        s_ota_info.status = OTA_STATUS_ERROR;
+        snprintf(s_ota_info.error_msg, sizeof(s_ota_info.error_msg), "Update request expired");
+        return;
+    }
     esp_ota_handle_t ota_handle;
     err = esp_ota_begin(update_partition, content_length, &ota_handle);
     if (err != ESP_OK) {
@@ -413,6 +450,7 @@ static void ota_perform_update(void) {
 
         total_read += read_len;
         s_ota_info.progress_percent = (total_read * 100) / content_length;
+        ota_publish();
 
         // Yield to other tasks
         vTaskDelay(1);
@@ -437,6 +475,11 @@ static void ota_perform_update(void) {
         return;
     }
 
+    if (!ota_job_current(job)) {
+        s_ota_info.status = OTA_STATUS_ERROR;
+        snprintf(s_ota_info.error_msg, sizeof(s_ota_info.error_msg), "Update request expired");
+        return;
+    }
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
@@ -448,6 +491,7 @@ static void ota_perform_update(void) {
     ESP_LOGI(TAG, "OTA update complete! Rebooting in 2 seconds...");
     s_ota_info.status = OTA_STATUS_COMPLETE;
     s_ota_info.progress_percent = 100;
+    ota_publish();
 
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
@@ -457,48 +501,96 @@ static void ota_perform_update(void) {
 /* The bridge asked for an install: always re-check first (forced, so a prerelease device is not
  * skipped), and install only an image ota_compare_versions says is strictly newer. Whatever the
  * bridge claimed, nothing older or equal is ever written. */
-static void ota_perform_install(void) {
-    ota_perform_check();
+static void ota_perform_install(const ota_job_t *job) {
+    ota_perform_check(job);
     if (s_ota_info.status != OTA_STATUS_AVAILABLE) return;
     if (ota_compare_versions(s_ota_info.available_version, ota_get_current_version()) <= 0) {
         s_ota_info.status = OTA_STATUS_UP_TO_DATE;
         return;
     }
-    ota_perform_update();
+    ota_perform_update(job);
 }
 
-/* An install request that arrives while another OTA job is running is remembered rather than
- * dropped. The bridge has already had its config hash accepted by then and will not serve the same
- * request again, so the job that finishes is what delivers it. One slot: repeated requests
- * coalesce, and the stale-version check is applied again when it finally runs. */
-static bool s_install_deferred;
-static char s_deferred_from[32]; /* same width as ota_info_t versions */
-
-/* Every OTA job ends here. */
-static void ota_task_finished(void) {
-    s_ota_task = NULL;
-    if (s_install_deferred) {
-        s_install_deferred = false;
-        ota_request_install(s_deferred_from);
+static void ota_worker(void *arg) {
+    (void)arg;
+    for (;;) {
+        os_critical_enter(&s_ota_lock);
+        ota_job_t job = s_active_job;
+        os_critical_leave(&s_ota_lock);
+        memset(&s_ota_info, 0, sizeof(s_ota_info));
+        snprintf(s_ota_info.current_version, sizeof(s_ota_info.current_version), "%s", ota_get_current_version());
+        snprintf(s_ota_info.available_version, sizeof(s_ota_info.available_version), "%s", job.selected_version);
+        if (!ota_job_current(&job)) {
+            s_ota_info.status = OTA_STATUS_ERROR;
+            snprintf(s_ota_info.error_msg, sizeof(s_ota_info.error_msg), "Update request expired");
+        } else if (job.kind == OTA_JOB_CHECK) {
+            ota_perform_check(&job);
+        } else if (job.kind == OTA_JOB_UPDATE) {
+            ota_perform_update(&job);
+        } else {
+            ota_perform_install(&job);
+        }
+        /* Publication, pending transfer and idle are one transaction. A caller
+         * either joins this worker or reserves a new one after it publishes idle. */
+        os_critical_enter(&s_ota_lock);
+        s_published = s_ota_info;
+        bool again = s_have_pending;
+        if (again) {
+            s_active_job = s_pending_job;
+            s_have_pending = false;
+        } else {
+            s_ota_busy = false;
+        }
+        os_critical_leave(&s_ota_lock);
+        if (!again) break;
     }
+    platform_task_finish();
 }
 
-static void check_update_task(void *arg) {
-    ota_perform_check();
-    ota_task_finished();
-    vTaskDelete(NULL);
+static bool same_install(const ota_job_t *a, const ota_job_t *b) {
+    return a->kind == OTA_JOB_INSTALL && b->kind == OTA_JOB_INSTALL &&
+        a->endpoint.endpoint_generation == b->endpoint.endpoint_generation &&
+        a->endpoint.network_epoch == b->endpoint.network_epoch &&
+        !strcmp(a->endpoint.base, b->endpoint.base) && !strcmp(a->from_version, b->from_version);
 }
 
-static void do_update_task(void *arg) {
-    ota_perform_update();
-    ota_task_finished();
-    vTaskDelete(NULL);
-}
-
-static void install_task(void *arg) {
-    ota_perform_install();
-    ota_task_finished();
-    vTaskDelete(NULL);
+static ota_request_result_t ota_submit(ota_job_kind_t kind, const char *from) {
+    ota_job_t job = {.kind = kind};
+    size_t n = from ? strlen(from) : 0;
+    if (n >= sizeof(job.from_version) || (n && strcmp(from, ota_get_current_version())))
+        return OTA_REQUEST_STALE;
+    if (from) memcpy(job.from_version, from, n + 1);
+    if (!bridge_client_capture_request_endpoint(&job.endpoint)) return OTA_REQUEST_STALE;
+    os_critical_enter(&s_ota_lock);
+    if (s_ota_busy) {
+        ota_request_result_t result = OTA_REQUEST_BUSY;
+        if (same_install(&job, &s_active_job) ||
+            (s_have_pending && same_install(&job, &s_pending_job))) {
+            result = OTA_REQUEST_COALESCED;
+        } else if (kind == OTA_JOB_INSTALL && !s_have_pending) {
+            s_pending_job = job; s_have_pending = true; result = OTA_REQUEST_ACCEPTED;
+        }
+        os_critical_leave(&s_ota_lock);
+        return result;
+    }
+    if (kind == OTA_JOB_UPDATE) {
+        if (s_published.status != OTA_STATUS_AVAILABLE) {
+            os_critical_leave(&s_ota_lock); return OTA_REQUEST_STALE;
+        }
+        memcpy(job.selected_version, s_published.available_version, sizeof(job.selected_version));
+    }
+    /* Reserve before creation: the task may run and finish before create returns. */
+    s_ota_busy = true;
+    s_active_job = job;
+    os_critical_leave(&s_ota_lock);
+    if (platform_task_start_internal_stack("ota_worker", 8192, ota_worker, NULL) == 0)
+        return OTA_REQUEST_ACCEPTED;
+    os_critical_enter(&s_ota_lock);
+    s_ota_busy = s_have_pending = false;
+    s_published.status = OTA_STATUS_ERROR;
+    snprintf(s_published.error_msg, sizeof(s_published.error_msg), "Could not start update");
+    os_critical_leave(&s_ota_lock);
+    return OTA_REQUEST_START_FAILED;
 }
 
 /* A freshly installed image is only trusted once it has stayed up for a while. A crash or watchdog
@@ -507,78 +599,53 @@ static void install_task(void *arg) {
  * network problem never rolls back a good image. */
 #define OTA_CONFIRM_DELAY_MS 45000
 
-static bool s_confirm_task_started;
 
 static void confirm_boot_task(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(OTA_CONFIRM_DELAY_MS));
     ota_confirm_boot();
-    vTaskDelete(NULL);
+    platform_task_finish();
 }
 
 void ota_init(void) {
-    memset(&s_ota_info, 0, sizeof(s_ota_info));
-    strncpy(s_ota_info.current_version, ota_get_current_version(), sizeof(s_ota_info.current_version) - 1);
-    s_ota_info.status = OTA_STATUS_IDLE;
-    ESP_LOGI(TAG, "OTA initialized, current version: %s", s_ota_info.current_version);
-    if (!s_confirm_task_started) {
-        s_confirm_task_started = true;
-        xTaskCreate(confirm_boot_task, "ota_confirm", 3072, NULL, 1, NULL);
+    os_critical_enter(&s_ota_lock);
+    bool first = !s_initialized;
+    s_initialized = true;
+    if (first) {
+        memset(&s_published, 0, sizeof(s_published));
+        snprintf(s_published.current_version, sizeof(s_published.current_version), "%s", ota_get_current_version());
+        s_published.status = OTA_STATUS_IDLE;
+    }
+    os_critical_leave(&s_ota_lock);
+    if (first) {
+        /* Boot confirmation also writes flash: use an internal stack. */
+        if (platform_task_start_internal_stack("ota_confirm", 3072, confirm_boot_task, NULL) != 0) {
+            ESP_LOGW(TAG, "Could not start boot confirmation");
+            /* Initialization remains idempotent even if confirmation cannot start.
+             * Leave the image unconfirmed for bootloader recovery. */
+        }
     }
 }
 
 void ota_check_for_update(bool force) {
-    if (s_ota_task != NULL) {
-        ESP_LOGW(TAG, "OTA task already running");
-        return;
-    }
-
-    // Skip OTA checks for development/beta versions (unless forced by user)
-    if (!force) {
-        const char *current = ota_get_current_version();
-        if (strstr(current, "-dev") || strstr(current, "-beta") || strstr(current, "-alpha")) {
-            ESP_LOGI(TAG, "Skipping OTA check for development version: %s", current);
-            s_ota_info.status = OTA_STATUS_UP_TO_DATE;
-            return;
-        }
-    }
-
-    xTaskCreate(check_update_task, "ota_check", 8192, NULL, 1, &s_ota_task);  // Low priority to not block UI
+    const char *current = ota_get_current_version();
+    if (!force && (strstr(current, "-dev") || strstr(current, "-beta") || strstr(current, "-alpha"))) return;
+    (void)ota_submit(OTA_JOB_CHECK, NULL);
 }
 
-void ota_start_update(void) {
-    if (s_ota_task != NULL) {
-        ESP_LOGW(TAG, "OTA task already running");
-        return;
-    }
+void ota_start_update(void) { (void)ota_submit(OTA_JOB_UPDATE, NULL); }
 
-    if (s_ota_info.status != OTA_STATUS_AVAILABLE) {
-        ESP_LOGW(TAG, "No update available");
-        return;
-    }
-
-    xTaskCreate(do_update_task, "ota_update", 8192, NULL, 1, &s_ota_task);  // Low priority to not block UI
+ota_request_result_t ota_request_install_result(const char *from_version) {
+    return ota_submit(OTA_JOB_INSTALL, from_version);
 }
-
 bool ota_request_install(const char *from_version) {
-    /* The bridge's request names the version the device reported when it was made. A mismatch means
-     * the device has since updated (or been re-flashed), so the request is stale. */
-    if (from_version && from_version[0] != '\0' &&
-        strcmp(from_version, ota_get_current_version()) != 0) {
-        ESP_LOGI(TAG, "Stale install request from %s (running %s); ignored", from_version,
-                 ota_get_current_version());
-        return false;
-    }
-    if (s_ota_task != NULL) {
-        size_t length = from_version ? strlen(from_version) : 0;
-        if (length >= sizeof(s_deferred_from)) return false; /* malformed, never retryable */
-        ESP_LOGI(TAG, "OTA job running; install request deferred until it finishes");
-        memcpy(s_deferred_from, from_version ? from_version : "", length + 1);
-        s_install_deferred = true;
-        return true;
-    }
-    return xTaskCreate(install_task, "ota_install", 8192, NULL, 1, &s_ota_task) == pdPASS;
+    ota_request_result_t result = ota_request_install_result(from_version);
+    return result == OTA_REQUEST_ACCEPTED || result == OTA_REQUEST_COALESCED;
 }
 
-const ota_info_t* ota_get_info(void) {
-    return &s_ota_info;
+bool ota_get_info(ota_info_t *out) {
+    if (!out) return false;
+    os_critical_enter(&s_ota_lock);
+    *out = s_published;
+    os_critical_leave(&s_ota_lock);
+    return true;
 }

@@ -274,7 +274,9 @@ static void check_ota_status(void) {
     static ota_status_t last_status = OTA_STATUS_IDLE;
     static int last_progress = -1;
 
-    const ota_info_t *info = ota_get_info();
+    ota_info_t snapshot;
+    if (!ota_get_info(&snapshot)) return;
+    const ota_info_t *info = &snapshot;
 
     // Update UI when status changes
     if (info->status != last_status) {

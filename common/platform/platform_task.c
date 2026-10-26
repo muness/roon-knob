@@ -66,6 +66,12 @@ int platform_task_start_internal_stack(const char *name, uint32_t stack_size,
     return err;
 }
 
+void platform_task_finish(void) {
+#ifdef ESP_PLATFORM
+    vTaskDeleteWithCaps(NULL);
+#endif
+}
+
 size_t platform_task_current_stack_free_bytes(void) {
     return os_thread_current_stack_free_bytes();
 }

@@ -37,7 +37,20 @@ static const char *device_slug = "hiphi-dial";
 
 void vTaskDelete(TaskHandle_t task) {}
 void vTaskDelay(int ticks) {}
-int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *handle) { task_creates++; task(arg); return 1; }
+static bool hold_worker, fail_worker_start;
+static platform_task_fn_t held_worker;
+static void *held_worker_arg;
+static void (*during_start)(void);
+void platform_task_finish(void) {}
+int platform_task_start_internal_stack(const char *name, uint32_t stack, platform_task_fn_t fn, void *arg) {
+    (void)stack;
+    if (!strcmp(name,"ota_confirm")) { fn(arg); return 0; }
+    ++task_creates;
+    if (during_start) { void (*hook)(void) = during_start; during_start = NULL; hook(); }
+    if (fail_worker_start) return -1;
+    if (hold_worker) { held_worker = fn; held_worker_arg = arg; return 0; }
+    fn(arg); return 0;
+}
 const char *esp_err_to_name(esp_err_t error) { return "test"; }
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *cfg) { snprintf(last_url, sizeof(last_url), "%s", cfg->url); return (void *)1; }
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t client, const char *key, const char *value) {
@@ -79,7 +92,19 @@ esp_err_t esp_ota_end(esp_ota_handle_t handle) { end_calls++; return ESP_OK; }
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t *p) { boot_calls++; return ESP_OK; }
 const esp_app_desc_t *esp_app_get_description(void) { return &running; }
 void esp_restart(void) { restarted++; }
-bool bridge_client_get_request_base(char *out, size_t capacity) { snprintf(out,capacity,"http://bridge"); return true; }
+static uint32_t endpoint_generation;
+bool bridge_client_capture_request_endpoint(bridge_request_endpoint_t *out) {
+    *out = (bridge_request_endpoint_t){.endpoint_generation=endpoint_generation};
+    snprintf(out->base,sizeof(out->base),"http://bridge"); return true;
+}
+bool bridge_client_request_endpoint_current(const bridge_request_endpoint_t *out) {
+    return out->endpoint_generation == endpoint_generation;
+}
+static void do_update_task(void *arg) {
+    (void)arg;
+    ota_job_t job={0}; bridge_client_capture_request_endpoint(&job.endpoint);
+    ota_perform_update(&job);
+}
 void platform_http_get_knob_id(char *out, size_t capacity) { snprintf(out,capacity,"aabbccddeeff"); }
 const char *platform_device_slug(void) { return device_slug; }
 esp_err_t esp_ota_mark_app_valid_cancel_rollback(void) { mark_valid_calls++; return mark_valid_result; }
@@ -162,41 +187,34 @@ static void test_downloaded_version_is_enforced(void) {
 
 /* An install request that arrives while another OTA job runs is not lost: the job that finishes
  * starts it, even though the bridge's config hash was already accepted and will not be re-served. */
+static void submit_during_start(void) {
+    assert(ota_request_install_result("2.7.0") == OTA_REQUEST_ACCEPTED);
+    assert(ota_request_install_result("2.7.0") == OTA_REQUEST_COALESCED);
+    assert(s_have_pending && s_ota_busy);
+}
 static void test_busy_install_is_delivered_when_idle(void) {
-    static char json[96];
     set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.7.0");
-    snprintf(json,sizeof(json),"{\"version\":\"2.8.0\",\"size\":1024}");
-    version_json = json;
-    setup(OTA_TEST_PROJECT, TARGET_FLASH); task_creates = 0;
-    s_ota_task = (TaskHandle_t)1; /* a Dial update check is running */
-    assert(ota_request_install("2.7.0"));
-    assert(task_creates == 0 && begin_calls == 0 && restarted == 0);
-    /* Asking again while still busy coalesces into the one pending request. */
-    assert(ota_request_install("2.7.0") && task_creates == 0);
-    ota_task_finished();
-    assert(task_creates == 1 && s_ota_info.status == OTA_STATUS_COMPLETE && restarted == 1);
-    assert(!s_install_deferred);
-    /* Delivered exactly once: finishing again starts nothing. */
-    int creates = task_creates;
-    ota_task_finished();
-    assert(task_creates == creates);
-    /* A stale request is refused at once, never parked behind a busy job. */
-    setup(OTA_TEST_PROJECT, TARGET_FLASH); task_creates = 0;
-    s_ota_task = (TaskHandle_t)1;
-    assert(!ota_request_install("2.6.0") && !s_install_deferred);
-    s_ota_task = NULL;
-    /* A request whose version does not fit is malformed, not retryable. */
-    s_ota_task = (TaskHandle_t)1;
-    assert(!ota_request_install("2.7.0-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") && !s_install_deferred);
-    s_ota_task = NULL;
-    /* A deferred request is judged again when it runs: still-matching version installs. */
+    version_json="{\"version\":\"2.8.0\",\"size\":1024}";
     setup(OTA_TEST_PROJECT, TARGET_FLASH);
-    s_ota_task = (TaskHandle_t)1;
-    assert(ota_request_install("2.7.0"));
-    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.8.0"); /* the device moved on meanwhile */
-    task_creates = 0; ota_task_finished();
-    assert(task_creates == 0 && restarted == 0);
-    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.7.0");
+    hold_worker=true; task_creates=0; during_start=submit_during_start;
+    ota_check_for_update(true);
+    assert(task_creates==1 && s_ota_busy && s_have_pending);
+    ota_info_t before, after; ota_get_info(&before); ota_init(); ota_get_info(&after);
+    assert(!memcmp(&before,&after,sizeof(before)) && s_have_pending);
+    hold_worker=false; held_worker(held_worker_arg);
+    assert(task_creates==1 && restarted==1 && !s_ota_busy && !s_have_pending);
+    /* Failure after a caller reserved pending work terminates both requests. */
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); fail_worker_start=true; during_start=submit_during_start;
+    ota_check_for_update(true); fail_worker_start=false;
+    ota_get_info(&after); assert(after.status==OTA_STATUS_ERROR && !s_ota_busy && !s_have_pending);
+    /* Deferred request keeps its endpoint, including A->B->A invalidation. */
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); hold_worker=true;
+    ota_check_for_update(true); assert(ota_request_install("2.7.0"));
+    endpoint_generation+=2; hold_worker=false; held_worker(held_worker_arg);
+    assert(begin_calls==0 && restarted==0 && !s_ota_busy);
+    /* An immediate task completion cannot be overwritten by create returning. */
+    setup(OTA_TEST_PROJECT,TARGET_FLASH); assert(ota_request_install("2.7.0"));
+    assert(!s_ota_busy && restarted==1);
 }
 static void test_install_trigger(void) {
     static char json[96];
@@ -229,12 +247,12 @@ static void test_install_trigger(void) {
     /* A job already running ignores the request. */
     snprintf(json,sizeof(json),"{\"version\":\"2.8.0\",\"size\":1024}");
     version_json=json; setup(OTA_TEST_PROJECT,TARGET_FLASH); task_creates=0; last_url[0]=0;
-    s_ota_task=(TaskHandle_t)1;
+    s_ota_busy=true; s_active_job.kind=OTA_JOB_CHECK;
     assert(ota_request_install("2.7.0") && task_creates==0 && last_url[0]==0 && restarted==0);
-    s_ota_task=NULL; s_install_deferred=false;
+    s_ota_busy=false; s_have_pending=false;
     /* Failures leave ERROR, do not reboot, and free the slot for a later attempt. */
     version_status=500; run_install(json,"2.7.0",true); version_status=200;
-    assert(s_ota_info.status==OTA_STATUS_ERROR && begin_calls==0 && restarted==0 && s_ota_task==NULL);
+    assert(s_ota_info.status==OTA_STATUS_ERROR && begin_calls==0 && restarted==0 && !s_ota_busy);
     version_json=json; setup("hiphi_nonexistent_sibling",TARGET_FLASH); task_creates=0;
     assert(ota_request_install("2.7.0") && task_creates==1);
     assert(s_ota_info.status==OTA_STATUS_ERROR && begin_calls==0 && boot_calls==0 && restarted==0);

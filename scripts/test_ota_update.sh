@@ -14,7 +14,7 @@ run_target() {
   local project=$1 slug=$2 chip=$3 flash=$4
   shift 4
   cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable \
-    -fsanitize=address,undefined -I"$ota_fixture" -Itests/fixtures/ota_update -Icommon \
+    -pthread -Iinclude -fsanitize=address,undefined -I"$ota_fixture" -Itests/fixtures/ota_update -Icommon \
     -DCONFIG_IDF_TARGET_"$chip"=1 -DCONFIG_ESPTOOLPY_FLASHSIZE_"$flash"=1 \
     -DOTA_TEST_PROJECT="\"$project\"" -DOTA_TEST_SLUG="\"$slug\"" "$@" \
     tests/test_ota_update.c -o "$ota_fixture/test"

@@ -99,6 +99,7 @@ int platform_http_get(const char *url, char **out, size_t *len) {
 }
 void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
 void platform_http_free(char *value) { free(value); }
+void platform_task_finish(void) {}
 static bool hold_shortcut_task, shortcut_task_start_fails;
 static void (*held_shortcut_fn)(void *);
 static void *held_shortcut_arg;
