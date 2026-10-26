@@ -89,12 +89,18 @@ typedef struct {
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
 typedef void (*rk_ble_hid_host_status_callback_t)(const rk_ble_hid_host_status_t *status,
                                                    void *context);
-/** Every Consumer Control key edge, with the real usage on a release too.
- * `usage == 0, pressed == false` means the BLE session ended (disconnect,
- * disable, sleep): drop any held or pending key. Runs on the BLE service task,
- * in addition to (never instead of) the media-key callback. */
-typedef void (*rk_ble_hid_host_consumer_callback_t)(uint16_t usage, bool pressed,
-                                                     void *context);
+/* Occurrence time is assigned at HID ingress, under the same ordering lock as
+ * queue insertion. TICK is a FIFO watermark, never the UI's current clock.
+ * CANCEL is delivered out of band and invalidates all older-session work. */
+typedef enum { RK_BLE_CONSUMER_EDGE, RK_BLE_CONSUMER_TICK, RK_BLE_CONSUMER_CANCEL } rk_ble_consumer_kind_t;
+typedef struct {
+    rk_ble_consumer_kind_t kind;
+    uint32_t time_ms, session, sequence;
+    uint16_t usage;
+    bool pressed;
+} rk_ble_consumer_event_t;
+typedef void (*rk_ble_hid_host_consumer_callback_t)(const rk_ble_consumer_event_t *event,
+                                                   void *context);
 
 typedef struct {
     /** Used only when the local `ble_remote/enabled` key has not been written. */

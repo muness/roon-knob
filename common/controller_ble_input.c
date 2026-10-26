@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 #include "controller_ble_input.h"
 
 #include "controller_input.h"
@@ -7,7 +8,7 @@
 #include "platform/platform_time.h"
 
 #include <esp_log.h>
-#include <esp_timer.h>
+#include "os_critical.h"
 #include <stdint.h>
 
 static const char *TAG = "controller_ble";
@@ -46,99 +47,92 @@ void controller_ble_input_on_media_key(rk_ble_media_key_t key, void *context) {
     }
 }
 
-/*
- * Remote keys as bridge shortcuts.
- *
- * The recogniser (controller_shortcut_key.c) is single-threaded, so it lives on
- * the UI actor: BLE callbacks and the long-press timer only post to it. Its
- * timestamps are taken when the UI actor handles an event, a few milliseconds
- * after the radio saw it, which is far inside the 600 ms / 350 ms windows.
- *
- * The router accepts the action only in the media context, and the backend
- * adapter owns the request: it runs off the UI task, one at a time, and a press
- * that arrives while one is in flight is dropped rather than queued.
- */
+/* A bounded, timestamped FIFO between the HID owner and the UI actor. Only a
+ * producer watermark can advance time. Queue loss invalidates the entire
+ * uncertain gesture out of band, never by synthesizing a release. */
+#define CONSUMER_MAILBOX_SIZE 32
+static os_critical_t s_mailbox_lock = OS_CRITICAL_INITIALIZER;
+static rk_ble_consumer_event_t s_mailbox[CONSUMER_MAILBOX_SIZE];
+static unsigned s_head, s_count;
+static uint32_t s_session, s_cancel_revision, s_seen_cancel, s_last_sequence;
+static bool s_wake_queued, s_have_sequence, s_faulted;
+static controller_ble_input_stats_t s_stats;
 static controller_shortcut_gesture_state_t s_gesture; /* UI actor only */
-static esp_timer_handle_t s_timer;                    /* UI actor only */
 
-static uint32_t now_ms(void) { return (uint32_t)platform_millis(); }
-
-/* A recognised gesture is semantic input like any other: it enters the shared
- * action router, which decides by context whether to honour it and hands it to
- * the backend adapter. Nothing here knows the bridge or its transport. */
-static void dispatch_shortcut(const controller_shortcut_event_t *event) {
-    const controller_action_t action = controller_action_shortcut(
-        event->usage, (uint8_t)event->gesture);
-    if (!controller_input_dispatch_action(&action)) {
-        ESP_LOGI(TAG, "Shortcut key %04x gesture %d not dispatched",
-                 (unsigned)event->usage, (int)event->gesture);
-    }
+static void dispatch_shortcut(const controller_shortcut_event_t *event, uint32_t revision) {
+    os_critical_enter(&s_mailbox_lock);
+    bool current = revision == s_cancel_revision;
+    os_critical_leave(&s_mailbox_lock);
+    if (!current) return;
+    const controller_action_t action = controller_action_shortcut(event->usage, (uint8_t)event->gesture);
+    (void)controller_input_dispatch_action(&action);
 }
 
-static void on_tick_ui(void *arg);
-
-static void timer_fired(void *arg) {
-    (void)arg;
-    (void)platform_task_post_to_ui(on_tick_ui, NULL);
-}
-
-/* Re-arm a one-shot for the next long press or double window, or leave it off. */
-static void arm_timer(void) {
-    const uint32_t due =
-        controller_shortcut_gesture_next_due_ms(&s_gesture, now_ms());
-    if (!s_timer) {
-        const esp_timer_create_args_t args = {
-            .callback = timer_fired,
-            .name = "shortcut_gesture",
-        };
-        if (esp_timer_create(&args, &s_timer) != ESP_OK) {
-            s_timer = NULL;
-            ESP_LOGW(TAG, "Could not create shortcut timer");
-            return;
+void controller_ble_input_service(void) {
+    for (unsigned n = 0; n < CONSUMER_MAILBOX_SIZE; ++n) {
+        os_critical_enter(&s_mailbox_lock);
+        if (s_seen_cancel != s_cancel_revision) {
+            controller_shortcut_gesture_reset(&s_gesture);
+            s_seen_cancel = s_cancel_revision;
+            s_have_sequence = false;
+        }
+        if (!s_count) { os_critical_leave(&s_mailbox_lock); break; }
+        rk_ble_consumer_event_t edge = s_mailbox[s_head];
+        s_head = (s_head + 1) % CONSUMER_MAILBOX_SIZE; --s_count;
+        uint32_t revision = s_cancel_revision;
+        os_critical_leave(&s_mailbox_lock);
+        if (s_have_sequence && (int32_t)(edge.sequence - s_last_sequence) <= 0) {
+            controller_shortcut_gesture_reset(&s_gesture);
+            continue;
+        }
+        s_last_sequence = edge.sequence; s_have_sequence = true;
+        controller_shortcut_event_t events[2];
+        for (unsigned i = 0; i < 2; ++i) {
+            if (!controller_shortcut_gesture_poll(&s_gesture, edge.time_ms, &events[0])) break;
+            dispatch_shortcut(&events[0], revision);
+        }
+        if (edge.kind == RK_BLE_CONSUMER_EDGE) {
+            size_t count = controller_shortcut_gesture_on_key(&s_gesture,
+                edge.usage, edge.pressed, edge.time_ms, events);
+            for (size_t i=0; i<count; ++i) dispatch_shortcut(&events[i], revision);
         }
     }
-    (void)esp_timer_stop(s_timer); /* not running is fine */
-    if (due != UINT32_MAX) {
-        (void)esp_timer_start_once(s_timer, ((uint64_t)due + 1u) * 1000u);
-    }
 }
-
-static void on_tick_ui(void *arg) {
+static void drain_on_ui(void *arg) {
     (void)arg;
-    controller_shortcut_event_t event;
-    for (int i = 0; i < 2; ++i) {
-        if (controller_shortcut_gesture_poll(&s_gesture, now_ms(), &event) == 0) {
-            break;
-        }
-        dispatch_shortcut(&event);
-    }
-    arm_timer();
+    os_critical_enter(&s_mailbox_lock); s_wake_queued = false; os_critical_leave(&s_mailbox_lock);
+    controller_ble_input_service();
 }
-
-static void on_key_ui(void *arg) {
-    const uintptr_t packed = (uintptr_t)arg;
-    const uint16_t usage = (uint16_t)(packed >> 1);
-    const bool pressed = (packed & 1u) != 0;
-    if (usage == 0) {
-        /* The BLE session ended: a held or pending key must not outlive it. */
-        controller_shortcut_gesture_reset(&s_gesture);
-        arm_timer();
-        return;
-    }
-    controller_shortcut_event_t events[2];
-    const size_t count = controller_shortcut_gesture_on_key(
-        &s_gesture, usage, pressed, now_ms(), events);
-    for (size_t i = 0; i < count; ++i) {
-        dispatch_shortcut(&events[i]);
-    }
-    arm_timer();
-}
-
-void controller_ble_input_on_consumer_event(uint16_t usage, bool pressed,
-                                            void *context) {
+void controller_ble_input_on_consumer_event(const rk_ble_consumer_event_t *event, void *context) {
     (void)context;
-    const uintptr_t packed = ((uintptr_t)usage << 1) | (pressed ? 1u : 0u);
-    if (!platform_task_post_to_ui(on_key_ui, (void *)packed)) {
-        ESP_LOGW(TAG, "UI queue full; remote key %04x dropped", (unsigned)usage);
+    if (!event) return;
+    os_critical_enter(&s_mailbox_lock);
+    if ((int32_t)(event->session - s_session) < 0) {
+        ++s_stats.dropped; os_critical_leave(&s_mailbox_lock); return;
     }
+    if (event->session != s_session || event->kind == RK_BLE_CONSUMER_CANCEL) {
+        s_session = event->session; ++s_cancel_revision; ++s_stats.cancelled;
+        s_head = s_count = 0; s_faulted = false;
+    }
+    if (s_count == CONSUMER_MAILBOX_SIZE) {
+        ++s_cancel_revision; ++s_stats.overflow; ++s_stats.cancelled;
+        s_head = s_count = 0; s_faulted = true;
+    }
+    /* After loss, require a release before trusting another held-key history.
+     * Drop that release too; it cannot authorize a gesture. */
+    if (s_faulted && event->kind == RK_BLE_CONSUMER_EDGE && !event->pressed) s_faulted = false;
+    else if (!s_faulted && event->kind != RK_BLE_CONSUMER_CANCEL) {
+        s_mailbox[(s_head+s_count)%CONSUMER_MAILBOX_SIZE] = *event;
+        ++s_count; ++s_stats.accepted;
+    } else if (event->kind != RK_BLE_CONSUMER_CANCEL) ++s_stats.dropped;
+    bool wake = !s_wake_queued;
+    if (wake) s_wake_queued = true;
+    os_critical_leave(&s_mailbox_lock);
+    if (wake && !platform_task_post_to_ui(drain_on_ui, NULL)) {
+        os_critical_enter(&s_mailbox_lock); s_wake_queued = false; os_critical_leave(&s_mailbox_lock);
+    }
+}
+void controller_ble_input_stats(controller_ble_input_stats_t *out) {
+    if (!out) return;
+    os_critical_enter(&s_mailbox_lock); *out=s_stats; os_critical_leave(&s_mailbox_lock);
 }

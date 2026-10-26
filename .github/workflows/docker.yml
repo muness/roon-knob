@@ -68,6 +68,7 @@ jobs:
             -o /tmp/test-controller-shortcut-key
           /tmp/test-controller-shortcut-key
           bash scripts/test_controller_ble_shortcut.sh
+          python3 scripts/test_ble_consumer_ingress.py
           python3 scripts/check_bridge_recovery_contract.py
           python3 tests/test_firmware_stack_audit.py
           python3 tests/test_firmware_site_assets.py

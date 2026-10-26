@@ -1,3 +1,4 @@
+#include "controller_ble_input.h"
 #include "app.h"
 #include "battery.h"
 #include "ble_hid_host_dial.h"
@@ -344,6 +345,7 @@ static void ui_loop_task(void *arg) {
 
         // Run LVGL task handler
         ui_loop_iter();
+    controller_ble_input_service();
         controller_touch_navigation_process();
 
         // Check OTA status periodically (every 500ms = 50 iterations at 10ms)
