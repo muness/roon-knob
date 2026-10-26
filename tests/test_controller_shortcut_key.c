@@ -176,15 +176,41 @@ static void reserved_keys_never_produce_anything(void) {
     assert(ev[0].usage == HOME);
 }
 
-static void stray_releases_and_second_keys_are_ignored(void) {
+static void stray_releases_are_ignored_and_a_second_key_means_the_first_was_released(void) {
     controller_shortcut_gesture_reset(&g);
     assert(key(HOME, false, 10) == 0);
     assert(key(0, true, 10) == 0);
     key(HOME, true, 100);
-    assert(key(UNKNOWN, true, 120) == 0); /* second key while one is down */
-    assert(key(UNKNOWN, false, 130) == 0);
-    assert(poll(100 + CONTROLLER_SHORTCUT_LONG_PRESS_MS) == 1);
-    assert(ev[0].usage == HOME);
+    /* A remote reports one key at a time: a second press means HOME's release
+     * was lost. HOME is released (a short tap, so its single press is flushed)
+     * and the new key is tracked. */
+    assert(key(UNKNOWN, true, 120) == 1);
+    assert(ev[0].usage == HOME && ev[0].gesture == CONTROLLER_SHORTCUT_GESTURE_PRESS);
+    assert(g.usage == UNKNOWN && g.down);
+    key(UNKNOWN, false, 130);
+    assert(poll(130 + CONTROLLER_SHORTCUT_DOUBLE_WINDOW_MS) == 1);
+    assert(ev[0].usage == UNKNOWN);
+}
+
+static void a_lost_release_does_not_jam_later_keys(void) {
+    controller_shortcut_gesture_reset(&g);
+    /* HOME goes down, its release report never arrives, then BACK is pressed. */
+    key(HOME, true, 0);
+    assert(poll(CONTROLLER_SHORTCUT_LONG_PRESS_MS) == 1); /* held that long: a long */
+    assert(ev[0].usage == HOME && ev[0].gesture == CONTROLLER_SHORTCUT_GESTURE_LONG);
+    key(0x0224, true, 5000);
+    assert(g.usage == 0x0224 && g.down);
+    assert(poll(5000 + CONTROLLER_SHORTCUT_LONG_PRESS_MS) == 1);
+    assert(ev[0].usage == 0x0224);
+
+    /* A lost release of a short tap still reports that tap as a press, once. */
+    controller_shortcut_gesture_reset(&g);
+    key(HOME, true, 0);
+    /* HOME is released implicitly as a short tap; the new key's arrival flushes
+     * it at once, exactly once. */
+    assert(key(UNKNOWN, true, 80) == 1);
+    assert(ev[0].usage == HOME && ev[0].gesture == CONTROLLER_SHORTCUT_GESTURE_PRESS);
+    assert(poll(80 + CONTROLLER_SHORTCUT_DOUBLE_WINDOW_MS) == 0);
 }
 
 static void the_clock_may_wrap(void) {
@@ -231,7 +257,8 @@ int main(void) {
     long_press_fires_while_held_and_nothing_else_follows();
     transport_keys_only_ever_report_long();
     reserved_keys_never_produce_anything();
-    stray_releases_and_second_keys_are_ignored();
+    stray_releases_are_ignored_and_a_second_key_means_the_first_was_released();
+    a_lost_release_does_not_jam_later_keys();
     the_clock_may_wrap();
     puts("controller shortcut key tests passed");
     return 0;

@@ -89,8 +89,10 @@ typedef struct {
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
 typedef void (*rk_ble_hid_host_status_callback_t)(const rk_ble_hid_host_status_t *status,
                                                    void *context);
-/** Every decoded Consumer Control report, releases included. Runs on the BLE
- * service task, in addition to (never instead of) the media-key callback. */
+/** Every Consumer Control key edge, with the real usage on a release too.
+ * `usage == 0, pressed == false` means the BLE session ended (disconnect,
+ * disable, sleep): drop any held or pending key. Runs on the BLE service task,
+ * in addition to (never instead of) the media-key callback. */
 typedef void (*rk_ble_hid_host_consumer_callback_t)(uint16_t usage, bool pressed,
                                                      void *context);
 
@@ -149,6 +151,35 @@ rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *o
  */
 bool rk_ble_hid_host_map_consumer_report(const uint8_t *data, size_t len,
                                          rk_ble_media_key_t *key);
+
+/** One key transition derived from a report. */
+typedef struct {
+    uint16_t usage;
+    bool pressed;
+} rk_ble_consumer_edge_t;
+
+/**
+ * Remembers which key a remote holds down. A Consumer Control release is the
+ * report `00 00` (no usage), so the key it releases is only known from the
+ * previous report. Owned and called by one thread (the BLE service task).
+ */
+typedef struct {
+    uint16_t down;
+} rk_ble_consumer_tracker_t;
+
+void rk_ble_consumer_tracker_reset(rk_ble_consumer_tracker_t *tracker);
+bool rk_ble_consumer_tracker_holding(const rk_ble_consumer_tracker_t *tracker);
+
+/**
+ * Turn one report into 0..2 key edges, each naming its real usage:
+ *   - a new key while another is held: the old key's release, then the press;
+ *   - the same key again (auto-repeat while held): nothing;
+ *   - `00 00`: the held key's release, or nothing if none is held.
+ * Short or NULL input yields nothing and leaves the tracker alone.
+ */
+size_t rk_ble_consumer_tracker_update(rk_ble_consumer_tracker_t *tracker,
+                                      const uint8_t *data, size_t len,
+                                      rk_ble_consumer_edge_t out[2]);
 
 /**
  * Pure decode of a Consumer Control report into its raw usage and whether a

@@ -46,7 +46,23 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) {
 
 enum { HOME = 0x0223, PLAY_PAUSE = 0x00cd, VOL_UP = 0x00e9 };
 
+/* The production ingress: raw Consumer Control reports -> the host's tracker ->
+ * the controller callback. A release is `00 00` and carries no usage. */
+static rk_ble_consumer_tracker_t tracker;
+static void report(uint16_t usage) {
+    const uint8_t bytes[2] = {(uint8_t)(usage & 0xff), (uint8_t)(usage >> 8)};
+    rk_ble_consumer_edge_t edges[2];
+    size_t count = rk_ble_consumer_tracker_update(&tracker, bytes, 2, edges);
+    for (size_t i = 0; i < count; ++i)
+        controller_ble_input_on_consumer_event(edges[i].usage, edges[i].pressed, NULL);
+}
+static void session_ends(void) {
+    rk_ble_consumer_tracker_reset(&tracker);
+    controller_ble_input_on_consumer_event(0, false, NULL);
+}
+
 static void reset(void) {
+    rk_ble_consumer_tracker_reset(&tracker);
     controller_shortcut_gesture_reset(&s_gesture);
     clock_ms = 100000; sent_count = 0; timer_armed = false; hold_send_tasks = false;
     held_fn = NULL; held_arg = NULL; posted_controls = 0;
@@ -135,7 +151,69 @@ static void one_shortcut_in_flight_at_a_time_and_none_are_queued(void) {
     assert(sent_count == 2 && sent[1].usage == 0x0224);
 }
 
+static void a_short_tap_from_real_reports_is_a_press_never_a_long(void) {
+    reset();
+    report(HOME);
+    clock_ms += 60;
+    report(0); /* the actual release report: no usage */
+    assert(sent_count == 0 && timer_armed); /* waiting out the double window */
+    advance_to_timer();
+    assert(sent_count == 1 && sent[0].usage == HOME &&
+           sent[0].gesture == CONTROLLER_SHORTCUT_GESTURE_PRESS);
+    /* ...and the recognizer is free: the next key is tracked and works. */
+    clock_ms += 1000;
+    report(0x0224);
+    advance_to_timer();
+    assert(sent_count == 2 && sent[1].usage == 0x0224 &&
+           sent[1].gesture == CONTROLLER_SHORTCUT_GESTURE_LONG);
+}
+
+static void a_short_play_pause_tap_never_fires_its_long_shortcut(void) {
+    reset();
+    report(PLAY_PAUSE);
+    clock_ms += 80;
+    report(0);
+    clock_ms += 5000;
+    assert(sent_count == 0 && !timer_armed);
+}
+
+static void real_double_tap_from_reports(void) {
+    reset();
+    report(HOME); clock_ms += 50; report(0);
+    clock_ms += 120; report(HOME);
+    assert(sent_count == 1 && sent[0].gesture == CONTROLLER_SHORTCUT_GESTURE_DOUBLE);
+    clock_ms += 50; report(0);
+    clock_ms += 2000;
+    assert(sent_count == 1);
+}
+
+static void the_session_ending_drops_a_held_key_and_a_pending_press(void) {
+    reset();
+    report(HOME);
+    assert(timer_armed);
+    session_ends(); /* disconnect while the key is held */
+    assert(!timer_armed);
+    clock_ms += 5000;
+    assert(sent_count == 0);
+
+    reset();
+    report(HOME); clock_ms += 40; report(0); /* pending single press */
+    assert(timer_armed);
+    session_ends();
+    assert(!timer_armed);
+    clock_ms += 5000;
+    assert(sent_count == 0);
+    /* A key pressed in the next session is tracked from scratch. */
+    report(0x0224);
+    advance_to_timer();
+    assert(sent_count == 1 && sent[0].usage == 0x0224);
+}
+
 int main(void) {
+    a_short_tap_from_real_reports_is_a_press_never_a_long();
+    a_short_play_pause_tap_never_fires_its_long_shortcut();
+    real_double_tap_from_reports();
+    the_session_ending_drops_a_held_key_and_a_pending_press();
     long_press_fires_from_the_timer_without_a_release();
     a_tap_waits_for_the_timer_and_a_double_cancels_it();
     volume_and_transport_taps_never_reach_the_bridge();

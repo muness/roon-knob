@@ -71,3 +71,47 @@ bool rk_ble_hid_host_decode_consumer_event(const uint8_t *data, size_t len,
     *pressed = *usage != 0;
     return true;
 }
+
+void rk_ble_consumer_tracker_reset(rk_ble_consumer_tracker_t *tracker) {
+    if (tracker) {
+        tracker->down = 0;
+    }
+}
+
+bool rk_ble_consumer_tracker_holding(const rk_ble_consumer_tracker_t *tracker) {
+    return tracker && tracker->down != 0;
+}
+
+size_t rk_ble_consumer_tracker_update(rk_ble_consumer_tracker_t *tracker,
+                                      const uint8_t *data, size_t len,
+                                      rk_ble_consumer_edge_t out[2]) {
+    uint16_t usage = 0;
+    bool pressed = false;
+    if (!tracker || !out ||
+        !rk_ble_hid_host_decode_consumer_event(data, len, &usage, &pressed)) {
+        return 0;
+    }
+    size_t count = 0;
+    if (!pressed) {
+        if (tracker->down != 0) {
+            out[count].usage = tracker->down;
+            out[count].pressed = false;
+            ++count;
+            tracker->down = 0;
+        }
+        return count;
+    }
+    if (tracker->down == usage) {
+        return 0; /* auto-repeat of a held key */
+    }
+    if (tracker->down != 0) {
+        out[count].usage = tracker->down;
+        out[count].pressed = false;
+        ++count;
+    }
+    out[count].usage = usage;
+    out[count].pressed = true;
+    ++count;
+    tracker->down = usage;
+    return count;
+}

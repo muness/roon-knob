@@ -56,6 +56,37 @@ int main(void) {
     assert(!rk_ble_hid_host_decode_consumer_event(
         (const uint8_t[]){0xcd, 0}, 2, NULL, &pressed));
 
+    /* The tracker turns raw reports into edges that name the key, so a release
+     * (`00 00`, no usage) releases the key that was actually down. */
+    rk_ble_consumer_tracker_t tracker;
+    rk_ble_consumer_edge_t edges[2];
+    rk_ble_consumer_tracker_reset(&tracker);
+    assert(!rk_ble_consumer_tracker_holding(&tracker));
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0x23, 0x02}, 2, edges) == 1);
+    assert(edges[0].usage == 0x0223 && edges[0].pressed);
+    assert(rk_ble_consumer_tracker_holding(&tracker));
+    /* Auto-repeat of a held key is not a new press. */
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0x23, 0x02}, 2, edges) == 0);
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0, 0}, 2, edges) == 1);
+    assert(edges[0].usage == 0x0223 && !edges[0].pressed);
+    assert(!rk_ble_consumer_tracker_holding(&tracker));
+    /* A release with nothing held is nothing. */
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0, 0}, 2, edges) == 0);
+    /* A different key without a release in between releases the old one first. */
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0xcd, 0}, 2, edges) == 1);
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0x24, 0x02}, 2, edges) == 2);
+    assert(edges[0].usage == 0x00cd && !edges[0].pressed);
+    assert(edges[1].usage == 0x0224 && edges[1].pressed);
+    /* Three-byte reports and junk. */
+    rk_ble_consumer_tracker_reset(&tracker);
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0xb5, 0, 0}, 3, edges) == 1);
+    assert(rk_ble_consumer_tracker_update(&tracker, (const uint8_t[]){0xb5}, 1, edges) == 0);
+    assert(rk_ble_consumer_tracker_update(&tracker, NULL, 0, edges) == 0);
+    assert(rk_ble_consumer_tracker_update(NULL, (const uint8_t[]){0, 0}, 2, edges) == 0);
+    assert(rk_ble_consumer_tracker_holding(&tracker)); /* junk left it alone */
+    rk_ble_consumer_tracker_reset(&tracker);
+    assert(!rk_ble_consumer_tracker_holding(&tracker));
+
     puts("rk_ble_hid_host report mapping tests passed");
     return 0;
 }

@@ -114,7 +114,15 @@ size_t controller_shortcut_gesture_on_key(
     if (key_class == CONTROLLER_SHORTCUT_KEY_RESERVED) return 0;
 
     if (pressed) {
-        if (state->down) return 0; /* one key at a time; a second is ignored */
+        if (state->down) {
+            /* A remote reports one key at a time, so a new press while one is
+             * still down means that key's release was lost (a dropped BLE
+             * report or UI message). Release it now rather than ignore every
+             * later key forever. */
+            controller_shortcut_event_t scratch[2];
+            (void)controller_shortcut_gesture_on_key(state, state->usage, false,
+                                                     now_ms, scratch);
+        }
         if (state->single_pending && state->single_usage == usage &&
             !reached(now_ms, state->single_deadline_ms)) {
             state->single_pending = false;

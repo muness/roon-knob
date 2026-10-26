@@ -140,6 +140,12 @@ static void on_key_ui(void *arg) {
     const uintptr_t packed = (uintptr_t)arg;
     const uint16_t usage = (uint16_t)(packed >> 1);
     const bool pressed = (packed & 1u) != 0;
+    if (usage == 0) {
+        /* The BLE session ended: a held or pending key must not outlive it. */
+        controller_shortcut_gesture_reset(&s_gesture);
+        arm_timer();
+        return;
+    }
     controller_shortcut_event_t events[2];
     const size_t count = controller_shortcut_gesture_on_key(
         &s_gesture, usage, pressed, now_ms(), events);
