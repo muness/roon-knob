@@ -128,3 +128,8 @@ CONFIG_ESP_WIFI_WNM_SUPPORT=y
 
 # A new OTA image must confirm itself (ota_confirm_boot) or the bootloader returns to the previous one.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Capture a panic for next-boot diagnosis (only this exact target layout opts in).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_STACK_SIZE=2048
+CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64

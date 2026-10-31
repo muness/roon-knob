@@ -3,6 +3,7 @@
 
 #include "eink_ui.h"
 #include "eink_display.h"
+#include "frame_display_health.h"
 #include "eink_font.h"
 #include "bridge_client.h"
 #include "controller_utf8.h"
@@ -226,20 +227,24 @@ static void draw_bridge_icon(uint16_t x, uint16_t y, uint8_t color) {
 // ── Full screen render ──────────────────────────────────────────────────────
 
 static bool render_full_screen(void) {
+    frame_display_health_attempt(s_ui.image_key, platform_millis());
     ESP_LOGI(TAG, "Rendering full screen...");
 
     // ── Artwork (centered, flush to top) ─────────────────────────────────
     if (s_ui.art_dirty && s_ui.image_key[0]) {
         if (!render_artwork()) {
+            frame_display_health_fail("artwork download or validation failed");
             ESP_LOGW(TAG, "New artwork unavailable; preserving the current panel");
             return false;
         }
+        frame_display_health_downloaded(s_ui.image_key);
         s_ui.art_dirty = false;
     }
 
     // If we have an image key but no cached artwork, skip the render entirely.
     // It's e-ink — whatever's on screen stays. Better than blanking it out.
     if (s_ui.image_key[0] && !s_art_cache) {
+        frame_display_health_fail("artwork cache unavailable");
         ESP_LOGW(TAG, "No artwork cache available, skipping render to preserve display");
         return false;
     }
@@ -314,7 +319,11 @@ static bool render_full_screen(void) {
     }
 
     // Refresh the physical display
-    eink_display_refresh();
+    if (!eink_display_refresh()) {
+        s_ui.display_pref_dirty = true; // keep cached frame pending through backoff
+        return false;
+    }
+    frame_display_health_complete(platform_millis());
     ESP_LOGI(TAG, "Full screen render complete");
     return true;
 }
@@ -510,7 +519,7 @@ void eink_ui_process(void) {
     const bool artwork_changed = s_ui.art_dirty && s_ui.image_key[0];
     const bool urgent_refresh = artwork_changed || s_ui.display_pref_dirty;
 
-    if (artwork_changed && now < s_ui.art_retry_after) return;
+    if (now < s_ui.art_retry_after) return;
 
     // A media snapshot applies metadata before its artwork key, so a new key
     // is already coherent and can begin downloading on the next UI tick.

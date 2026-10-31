@@ -15,6 +15,7 @@
 
 #if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
 #include "frame_display_preferences.h"
+#include "frame_display_health_web.h"
 #endif
 
 #ifndef PLATFORM_PORTAL_PRODUCT_NAME
@@ -847,6 +848,9 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
       "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Settings</title><style>%s</style>%s</head><body>"
       "%s"
       "<h1>Settings</h1>"
+#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+      "<p><a href='/display-health'>Display status</a> · <a href='/power-debug'>Power and crash report</a></p>"
+#endif
       "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
       "<a href='/settings'>Settings</a><a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Unified Hi-Fi Control</h2>"
@@ -1521,6 +1525,7 @@ static esp_err_t sta_restart_handler(httpd_req_t *req) {
 
 // ── STA-mode root redirect ──────────────────────────────────────────────────
 
+
 static esp_err_t sta_root_handler(httpd_req_t *req) {
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/zones");
@@ -1596,6 +1601,9 @@ bool captive_portal_start_sta(void) {
   httpd_uri_t wifi_add = {.uri = "/api/wifi", .method = HTTP_POST, .handler = sta_wifi_add_handler};
   if (!register_uri_handler(&wifi_add)) goto fail;
 
+#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+  if (!frame_display_health_web_register(s_server)) goto fail;
+#endif
   if (!power_debug_web_register(s_server)) goto fail;
 
   s_server_mode = WEB_SERVER_STA_CONFIG;
