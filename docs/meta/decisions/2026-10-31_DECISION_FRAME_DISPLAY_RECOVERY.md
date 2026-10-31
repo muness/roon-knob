@@ -29,6 +29,8 @@ The shared next-boot crash collector retains a versioned, checksummed NVS
 summary. A dump's ELF identity is recorded independently from the firmware
 version that captured it. Failed summary creation, persistence or readback must
 leave the raw dump intact. Normal boots do not replace the last crash record.
+The Frame CI archive also retains its exact ELF so reported addresses can be
+symbolized against the matching build, rather than a similar local binary.
 The shared report appears under the existing power diagnostics, without adding
 maintenance routes on every target.
 
