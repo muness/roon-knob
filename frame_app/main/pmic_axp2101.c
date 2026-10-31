@@ -64,10 +64,15 @@ static bool release_scl(void) {
 static bool recover_bus(void) {
     gpio_set_level(I2C_SDA_PIN, 1);
     gpio_set_level(I2C_SCL_PIN, 1);
-    gpio_set_direction(I2C_SDA_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
-    gpio_set_direction(I2C_SCL_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
-    gpio_set_pull_mode(I2C_SDA_PIN, GPIO_PULLUP_ONLY);
-    gpio_set_pull_mode(I2C_SCL_PIN, GPIO_PULLUP_ONLY);
+    // gpio_set_direction alone leaves GPIO47/48 in their reset IOMUX
+    // function (SPICLK_P/N). gpio_config selects GPIO as well as enabling input.
+    gpio_config_t pins = {
+        .pin_bit_mask = (1ULL << I2C_SDA_PIN) | (1ULL << I2C_SCL_PIN),
+        .mode = GPIO_MODE_INPUT_OUTPUT_OD,
+        .pull_up_en = GPIO_PULLUP_ENABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&pins) != ESP_OK) return false;
     bool ok = release_scl();
     for (int i = 0; ok && i < 9; ++i) {
         gpio_set_level(I2C_SCL_PIN, 0);
@@ -85,6 +90,8 @@ static bool recover_bus(void) {
         esp_rom_delay_us(5);
         ok = ok && gpio_get_level(I2C_SDA_PIN);
     }
+    if (!ok) ESP_LOGE(TAG, "Bus clear failed: SCL=%d SDA=%d",
+        gpio_get_level(I2C_SCL_PIN), gpio_get_level(I2C_SDA_PIN));
     gpio_reset_pin(I2C_SDA_PIN);
     gpio_reset_pin(I2C_SCL_PIN);
     if (!ok) ESP_LOGE(TAG, "I2C bus remains held low after bounded recovery");
