@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix long song titles and artist text restarting their scroll during playback updates on HiPhi Dial and HALO. New text pauses for 1.2 seconds before scrolling, then pauses for 2 seconds between complete scrolling cycles (#317, #319).
 - Paired BLE remote keys can start a Library shortcut: the controller reports each key and its gesture (press, long press, double press) to the bridge, which plays the shortcut mapped to that button on the controller's own zone. Maps and shortcuts live on the bridge (Library → Pin as shortcut; Controllers → Config), so they survive a re-flash and are shared across controllers. Volume and mute never become shortcuts; play/pause, next and previous only on a long press, after their normal action. A failed press shows one short message ("Zone unavailable", "Item not found", …) and never plays on another zone. Needs a bridge with shortcut support (the bridge release that adds Pin as shortcut): on an older bridge a long press, or a press of a key other than play/pause, next, previous and volume, shows "Shortcut failed" because that bridge has no `/knob/input`; play/pause, next, previous and volume are unaffected. See `docs/dial/BLE_HID.md`.
 
 ## 2.8.0-alpha.2
