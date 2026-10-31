@@ -11,6 +11,7 @@ typedef int esp_err_t;
 #define I2C_CLK_SRC_DEFAULT 0
 #define I2C_ADDR_BIT_LEN_7 0
 #define GPIO_MODE_OUTPUT_OD 1
+#define GPIO_MODE_INPUT_OUTPUT_OD 4
 #define GPIO_MODE_INPUT 2
 #define GPIO_MODE_OUTPUT 3
 #define GPIO_PULLUP_ONLY 1
