@@ -692,6 +692,7 @@ jobs:
         env:
           FIRMWARE_FILES: |
             frame_app/build/stack-audit.json
+            frame_app/build/hiphi_frame.elf
             frame_app/build/hiphi_frame.bin
             frame_app/build/bootloader/bootloader.bin
             frame_app/build/partition_table/partition-table.bin
