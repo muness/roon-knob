@@ -24,4 +24,4 @@ typedef struct {char exc_task[16];uint32_t exc_pc;struct {uint32_t depth,bt[16];
 int nvs_open(const char*,int,nvs_handle_t*);int nvs_get_blob(nvs_handle_t,const char*,void*,size_t*);int nvs_set_blob(nvs_handle_t,const char*,const void*,size_t);int nvs_commit(nvs_handle_t);void nvs_close(nvs_handle_t);
 int esp_reset_reason(void);const esp_app_desc_t *esp_app_get_description(void);
 const esp_partition_t *esp_partition_find_first(int,int,const char*);
-int esp_core_dump_image_check(void);int esp_core_dump_get_summary(esp_core_dump_summary_t*);void esp_core_dump_image_erase(void);
+int esp_core_dump_image_check(void);int esp_core_dump_get_summary(esp_core_dump_summary_t*);int esp_core_dump_image_erase(void);

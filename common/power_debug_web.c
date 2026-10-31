@@ -217,13 +217,14 @@ static char *last_crash_json(void) {
     cJSON *root = cJSON_CreateObject();
     if (!root) return NULL;
     cJSON_AddStringToObject(root, "status", status);
+    cJSON_AddStringToObject(root, "capture_status", crash_report_capture_status());
     cJSON_AddBoolToObject(root, "dump_enabled", CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH);
     if (!strcmp(status, "available")) {
         cJSON_AddStringToObject(root, "target", r.target);
         cJSON_AddStringToObject(root, "captured_by_version", r.capture_version);
         cJSON_AddStringToObject(root, "crashed_elf_sha256", r.crashed_elf_sha);
         cJSON_AddStringToObject(root, "task", r.task);
-        cJSON_AddNumberToObject(root, "reset_reason", r.reset_reason);
+        cJSON_AddNumberToObject(root, "capture_boot_reset_reason", r.reset_reason);
         cJSON_AddNumberToObject(root, "pc", r.pc);
         cJSON_AddBoolToObject(root, "has_dump", r.has_dump);
         cJSON *trace = cJSON_AddArrayToObject(root, "backtrace");

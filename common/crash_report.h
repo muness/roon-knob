@@ -5,3 +5,6 @@
 void crash_report_capture_boot(void);
 // available, none, corrupt, storage_error, unsupported
 const char *crash_report_read(crash_record_t *record);
+
+// Outcome of this boot capture, independent of an older retained record.
+const char *crash_report_capture_status(void);

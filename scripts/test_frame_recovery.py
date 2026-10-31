@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='hiphi-frame-check-') as directory:
         subprocess.run([str(build(name, sources, 'frame'))], check=True)
     capture = build('capture', ['tests/test_crash_capture.c', 'common/crash_report.c',
                                'common/crash_record.c'], 'crash', ['-DESP_PLATFORM'])
-    for scenario in ['success', 'commit', 'summary', 'corrupt', 'old-layout']:
+    for scenario in ['success', 'commit', 'summary', 'corrupt', 'old-layout', 'normal']:
         subprocess.run([str(capture), scenario], check=True)
 
     (tmp/'frame'/'esp_http_server.h').write_text('#include "frame_web_sdk.h"\n')
