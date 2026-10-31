@@ -4,10 +4,13 @@
 #include "pmic_axp2101.h"
 
 #include <driver/i2c_master.h>
+#include <driver/gpio.h>
+#include <esp_rom_sys.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
+#include <stdatomic.h>
 
 static const char *TAG = "pmic";
 
@@ -34,7 +37,7 @@ static const char *TAG = "pmic";
 
 static i2c_master_bus_handle_t s_bus = NULL;
 static i2c_master_dev_handle_t s_dev = NULL;
-static bool s_initialized = false;
+static atomic_bool s_initialized = false;
 
 static esp_err_t pmic_read_reg(uint8_t reg, uint8_t *val) {
     return i2c_master_transmit_receive(s_dev, &reg, 1, val, 1, 100);
@@ -45,81 +48,120 @@ static esp_err_t pmic_write_reg(uint8_t reg, uint8_t val) {
     return i2c_master_transmit(s_dev, buf, 2, 100);
 }
 
-bool pmic_init(void) {
-    // Configure I2C bus
-    i2c_master_bus_config_t bus_cfg = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = I2C_SDA_PIN,
-        .scl_io_num = I2C_SCL_PIN,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-    };
-    bus_cfg.flags.enable_internal_pullup = true;
-
-    esp_err_t ret = i2c_new_master_bus(&bus_cfg, &s_bus);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C bus init failed: %s", esp_err_to_name(ret));
-        return false;
+// Bus clear before handing the pins to the controller. Release (never drive)
+// a high level; a device holding SCL/SDA low must fail closed, not be powered
+// through another pin. Bounded clock-stretch wait also covers a stuck slave.
+static bool release_scl(void) {
+    gpio_set_level(I2C_SCL_PIN, 1);
+    for (int i = 0; i < 100; ++i) {
+        if (gpio_get_level(I2C_SCL_PIN)) return true;
+        esp_rom_delay_us(10);
     }
+    return false;
+}
 
-    // Add AXP2101 device
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = AXP2101_ADDR,
-        .scl_speed_hz = 100000,
+// Input must remain enabled: gpio_get_level() reads zero on output-only pins.
+static bool recover_bus(void) {
+    gpio_set_level(I2C_SDA_PIN, 1);
+    gpio_set_level(I2C_SCL_PIN, 1);
+    // gpio_set_direction alone leaves GPIO47/48 in their reset IOMUX
+    // function (SPICLK_P/N). gpio_config selects GPIO as well as enabling input.
+    gpio_config_t pins = {
+        .pin_bit_mask = (1ULL << I2C_SDA_PIN) | (1ULL << I2C_SCL_PIN),
+        .mode = GPIO_MODE_INPUT_OUTPUT_OD,
+        .pull_up_en = GPIO_PULLUP_ENABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
     };
-
-    ret = i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C device add failed: %s", esp_err_to_name(ret));
-        return false;
+    if (gpio_config(&pins) != ESP_OK) return false;
+    bool ok = release_scl();
+    for (int i = 0; ok && i < 9; ++i) {
+        gpio_set_level(I2C_SCL_PIN, 0);
+        esp_rom_delay_us(5);
+        ok = release_scl();
+        esp_rom_delay_us(5);
     }
+    if (ok) {
+        gpio_set_level(I2C_SCL_PIN, 0);
+        gpio_set_level(I2C_SDA_PIN, 0);
+        esp_rom_delay_us(5);
+        ok = release_scl();
+        esp_rom_delay_us(5);
+        gpio_set_level(I2C_SDA_PIN, 1); // STOP
+        esp_rom_delay_us(5);
+        ok = ok && gpio_get_level(I2C_SDA_PIN);
+    }
+    if (!ok) ESP_LOGE(TAG, "Bus clear failed: SCL=%d SDA=%d",
+        gpio_get_level(I2C_SCL_PIN), gpio_get_level(I2C_SDA_PIN));
+    gpio_reset_pin(I2C_SDA_PIN);
+    gpio_reset_pin(I2C_SCL_PIN);
+    if (!ok) ESP_LOGE(TAG, "I2C bus remains held low after bounded recovery");
+    return ok;
+}
 
-    // Verify device is responding
+static bool configure_panel_power(void) {
+    // Preserve the established board voltages; each required rail must read
+    // back before the display may be treated as powered.
+    const uint8_t settings[][2] = {
+        {AXP2101_DC1_VOL, 0x12}, {AXP2101_ALDO1_VOL, 0x1C},
+        {AXP2101_ALDO2_VOL, 0x1C}, {AXP2101_ALDO3_VOL, 0x1C},
+        {AXP2101_ALDO4_VOL, 0x1C},
+    };
     uint8_t status;
-    ret = pmic_read_reg(AXP2101_STATUS1, &status);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "AXP2101 not responding");
+    if (pmic_read_reg(AXP2101_STATUS1, &status) != ESP_OK) return false;
+    for (unsigned i = 0; i < sizeof(settings) / sizeof(settings[0]); ++i) {
+        uint8_t value;
+        if (pmic_write_reg(settings[i][0], settings[i][1]) != ESP_OK ||
+            pmic_read_reg(settings[i][0], &value) != ESP_OK || value != settings[i][1]) {
+            ESP_LOGE(TAG, "Panel rail voltage verification failed (reg 0x%02x)", settings[i][0]);
+            return false;
+        }
+    }
+    uint8_t enabled;
+    if (pmic_read_reg(AXP2101_LDO_ONOFF0, &enabled) != ESP_OK ||
+        pmic_write_reg(AXP2101_LDO_ONOFF0, enabled | 0x0F) != ESP_OK ||
+        pmic_read_reg(AXP2101_LDO_ONOFF0, &enabled) != ESP_OK || (enabled & 0x0F) != 0x0F) {
+        ESP_LOGE(TAG, "Panel rail enable verification failed");
         return false;
     }
-
-    // Set VBUS current limit to 2A
-    if (pmic_write_reg(0x15, 0x05) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set VBUS current limit");
-
-    // Set charge current to 200mA
-    if (pmic_write_reg(0x62, 0x04) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set charge current");
-
-    // Configure power outputs (matching original PhotoPainter firmware)
-    // DC1 = 3.3V: (3300 - 1500) / 100 = 18 = 0x12
-    if (pmic_write_reg(AXP2101_DC1_VOL, 0x12) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set DC1 voltage");
-
-    // ALDO1-4 = 3.3V each: (3300 - 500) / 100 = 28 = 0x1C
-    if (pmic_write_reg(AXP2101_ALDO1_VOL, 0x1C) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set ALDO1 voltage");
-    if (pmic_write_reg(AXP2101_ALDO2_VOL, 0x1C) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set ALDO2 voltage");
-    if (pmic_write_reg(AXP2101_ALDO3_VOL, 0x1C) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set ALDO3 voltage");
-    if (pmic_write_reg(AXP2101_ALDO4_VOL, 0x1C) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to set ALDO4 voltage");
-
-    // Enable ALDO1-4 (bits 0-3 of register 0x90)
-    uint8_t ldo_ctrl = 0;
-    if (pmic_read_reg(AXP2101_LDO_ONOFF0, &ldo_ctrl) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to read LDO control register, using 0");
-    }
-    ldo_ctrl |= 0x0F;  // Enable ALDO1-4
-    if (pmic_write_reg(AXP2101_LDO_ONOFF0, ldo_ctrl) != ESP_OK)
-        ESP_LOGW(TAG, "Failed to enable ALDO1-4");
-
-    ESP_LOGI(TAG, "Power outputs configured: DC1=3.3V, ALDO1-4=3.3V (LDO ctrl=0x%02x)", ldo_ctrl);
-
-    s_initialized = true;
-    ESP_LOGI(TAG, "AXP2101 PMIC initialized (status=0x%02x)", status);
     return true;
+}
+
+bool pmic_init(void) {
+    s_initialized = false;
+    if (!s_bus) {
+        if (!recover_bus()) return false;
+        i2c_master_bus_config_t cfg = {
+            .i2c_port = I2C_NUM_0, .sda_io_num = I2C_SDA_PIN,
+            .scl_io_num = I2C_SCL_PIN, .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7, .flags.enable_internal_pullup = true,
+        };
+        if (i2c_new_master_bus(&cfg, &s_bus) != ESP_OK) return false;
+    }
+    if (!s_dev) {
+        i2c_device_config_t cfg = {.dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = AXP2101_ADDR, .scl_speed_hz = 100000};
+        if (i2c_master_bus_add_device(s_bus, &cfg, &s_dev) != ESP_OK) return false;
+    }
+    // AXP2101 occasionally NACKs a read; retry a bounded number of times.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (configure_panel_power()) { s_initialized = true; break; }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "AXP2101/panel power verification failed");
+        return false;
+    }
+    if (pmic_write_reg(0x15, 0x05) != ESP_OK) ESP_LOGW(TAG, "VBUS limit write failed");
+    if (pmic_write_reg(0x62, 0x04) != ESP_OK) ESP_LOGW(TAG, "Charge current write failed");
+    ESP_LOGI(TAG, "AXP2101 panel rails verified");
+    return true;
+}
+
+bool pmic_ensure_panel_power(void) {
+    if (!s_initialized) return pmic_init();
+    bool ok = configure_panel_power();
+    if (!ok) s_initialized = false;
+    return ok;
 }
 
 pmic_power_source_t pmic_power_source(void) {

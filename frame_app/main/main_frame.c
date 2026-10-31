@@ -8,6 +8,7 @@
 #include "controller_config.h"
 #include "captive_portal.h"
 #include "eink_display.h"
+#include "crash_report.h"
 #include "eink_ui.h"
 #include "frame_power_manager.h"
 #include "frame_display_preferences.h"
@@ -209,12 +210,13 @@ void app_main(void) {
     err = nvs_flash_init();
   }
   ESP_ERROR_CHECK(err);
+  crash_report_capture_boot();
   frame_display_preferences_init();
 
   // Initialize PMIC first — enables ALDO power rails needed by e-ink panel
   ESP_LOGI(TAG, "Initializing PMIC...");
   if (!pmic_init()) {
-    ESP_LOGW(TAG, "PMIC init failed, continuing without battery monitoring");
+    ESP_LOGW(TAG, "PMIC/panel power unavailable; networking remains available for recovery");
   }
   vTaskDelay(pdMS_TO_TICKS(100));  // Let power rails stabilize
 

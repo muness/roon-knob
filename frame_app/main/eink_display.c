@@ -2,6 +2,8 @@
 // Adapted from PhotoPainter display_bsp.cpp — rewritten as C
 
 #include "eink_display.h"
+#include "pmic_axp2101.h"
+#include "frame_display_health.h"
 
 #include <string.h>
 #include <driver/gpio.h>
@@ -15,7 +17,8 @@ static const char *TAG = "eink";
 
 static spi_device_handle_t s_spi;
 static uint8_t *s_fb;  // Framebuffer in PSRAM
-static bool s_in_deep_sleep = false;
+static bool s_in_deep_sleep = true;
+static bool s_transport_ok = true;
 
 // ── Low-level GPIO + SPI ────────────────────────────────────────────────────
 
@@ -24,16 +27,33 @@ static void set_cs(uint8_t level)  { gpio_set_level(EINK_PIN_CS, level ? 1 : 0);
 static void set_dc(uint8_t level)  { gpio_set_level(EINK_PIN_DC, level ? 1 : 0); }
 static int  get_busy(void)         { return gpio_get_level(EINK_PIN_BUSY); }
 
-static void wait_busy(void) {
+static bool wait_busy(void) {
+    if (!s_transport_ok) return false;
     int timeout_ms = 30000;
     while (!get_busy()) {
         vTaskDelay(pdMS_TO_TICKS(10));
         timeout_ms -= 10;
         if (timeout_ms <= 0) {
             ESP_LOGW(TAG, "wait_busy timeout!");
-            return;
+            frame_display_health_fail("panel BUSY timeout");
+            s_in_deep_sleep = true;
+            return false;
         }
     }
+    return true;
+}
+
+// A pulled-up/disconnected BUSY line is not evidence of a refresh. Require
+// the panel to acknowledge DISPLAY_REFRESH before waiting for completion.
+static bool wait_refresh(void) {
+    if (!s_transport_ok) return false;
+    for (int i = 0; i < 100; ++i) {
+        if (!get_busy()) return wait_busy();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    frame_display_health_fail("panel did not assert BUSY for refresh");
+    s_in_deep_sleep = true;
+    return false;
 }
 
 static void spi_write_byte(uint8_t data) {
@@ -41,7 +61,11 @@ static void spi_write_byte(uint8_t data) {
         .length = 8,
         .tx_buffer = &data,
     };
-    spi_device_polling_transmit(s_spi, &t);
+    if (s_transport_ok && spi_device_polling_transmit(s_spi, &t) != ESP_OK) {
+        s_transport_ok = false;
+        s_in_deep_sleep = true;
+        frame_display_health_fail("panel SPI transfer failed");
+    }
 }
 
 static void send_cmd(uint8_t cmd) {
@@ -71,7 +95,11 @@ static void send_buffer(const uint8_t *data, int len) {
         int chunk = (remaining > 5000) ? 5000 : remaining;
         t.length = 8 * chunk;
         t.tx_buffer = ptr;
-        spi_device_polling_transmit(s_spi, &t);
+        if (s_transport_ok && spi_device_polling_transmit(s_spi, &t) != ESP_OK) {
+        s_transport_ok = false;
+        s_in_deep_sleep = true;
+        frame_display_health_fail("panel SPI transfer failed");
+    }
         ptr += chunk;
         remaining -= chunk;
     }
@@ -90,9 +118,10 @@ static void panel_reset(void) {
     vTaskDelay(pdMS_TO_TICKS(50));
 }
 
-static void panel_turn_on(void) {
+static bool panel_turn_on(void) {
+    frame_display_health_phase("power_on");
     send_cmd(0x04);  // POWER_ON
-    wait_busy();
+    if (!wait_busy()) return false;
 
     send_cmd(0x06);
     send_data(0x6F);
@@ -100,27 +129,41 @@ static void panel_turn_on(void) {
     send_data(0x17);
     send_data(0x49);
 
+    frame_display_health_phase("refresh");
     ESP_LOGI(TAG, "DISPLAY_REFRESH — waiting for panel...");
     send_cmd(0x12);  // DISPLAY_REFRESH
     send_data(0x00);
-    wait_busy();
+    if (!wait_refresh()) return false;
     ESP_LOGI(TAG, "Panel refresh complete");
 
+    frame_display_health_phase("power_off");
     send_cmd(0x02);  // POWER_OFF
     send_data(0x00);
-    wait_busy();
+    if (!wait_busy()) return false;
 
     // Enter deep sleep to minimize power between refreshes (~µA)
     // Exit requires hardware reset (panel_reset)
+    frame_display_health_phase("sleep");
     send_cmd(0x07);
     send_data(0xA5);
     s_in_deep_sleep = true;
+    if (!s_transport_ok) return false;
     ESP_LOGI(TAG, "Panel entered deep sleep");
+    return true;
 }
 
-void eink_display_init_panel(void) {
+bool eink_display_init_panel(void) {
+    frame_display_health_phase("panel_init");
+    s_transport_ok = true;
+    bool power = pmic_ensure_panel_power();
+    frame_display_health_power(power);
+    if (!power) {
+        frame_display_health_fail("PMIC/panel rail verification failed");
+        s_in_deep_sleep = true;
+        return false;
+    }
     panel_reset();
-    wait_busy();
+    if (!wait_busy()) return false;
     vTaskDelay(pdMS_TO_TICKS(50));
 
     send_cmd(0xAA);
@@ -155,8 +198,10 @@ void eink_display_init_panel(void) {
     send_cmd(0xE3); send_data(0x2F);
 
     send_cmd(0x04);  // POWER_ON
-    wait_busy();
+    if (!wait_busy()) return false;
     // Don't clear or refresh — caller owns the framebuffer contents.
+    s_in_deep_sleep = false;
+    return s_transport_ok;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -289,17 +334,25 @@ static void fb_rotate_180(uint8_t *buf) {
     }
 }
 
-void eink_display_refresh(void) {
-    if (!s_fb) return;
+bool eink_display_refresh(void) {
+    if (!s_fb) { frame_display_health_fail("framebuffer unavailable"); return false; }
+    s_transport_ok = true;
+    bool power = pmic_ensure_panel_power();
+    frame_display_health_power(power);
+    if (!power) {
+        s_in_deep_sleep = true;
+        frame_display_health_fail("PMIC/panel rail verification failed");
+        return false;
+    }
     ESP_LOGI(TAG, "Refreshing e-ink display...");
 
     // Wake panel from deep sleep — requires hardware reset + full re-init
     if (s_in_deep_sleep) {
         ESP_LOGI(TAG, "Waking panel from deep sleep...");
-        eink_display_init_panel();
-        s_in_deep_sleep = false;
+        if (!eink_display_init_panel()) return false;
     }
 
+    frame_display_health_phase("transfer");
     // Rotate 180 into a temp buffer so set_pixel coordinates stay normal
     uint8_t *rotated = heap_caps_malloc(EINK_FB_SIZE, MALLOC_CAP_SPIRAM);
     if (rotated) {
@@ -316,6 +369,7 @@ void eink_display_refresh(void) {
         fb_rotate_180(s_fb);
     }
 
-    panel_turn_on();
+    if (!s_transport_ok || !panel_turn_on()) return false;
     ESP_LOGI(TAG, "E-ink refresh complete");
+    return true;
 }

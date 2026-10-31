@@ -37,6 +37,8 @@ set(SRC_FILES
     "fonts/material_icons_60.c"
     "fonts/lucide_battery_22.c"
     "../../common/app_main.c"
+    "../../common/crash_report.c"
+    "../../common/crash_record.c"
     "../../common/bridge_command_plan.c"
     "../../common/controller_shortcut_key.c"
     "../../common/bridge_client.c"
@@ -85,7 +87,7 @@ idf_component_register(
         espressif__esp_lcd_sh8601
         i2c_bsp
         lcd_touch_bsp
-    PRIV_REQUIRES
+    PRIV_REQUIRES espcoredump
         nvs_flash
         esp_http_client
         esp_http_server
