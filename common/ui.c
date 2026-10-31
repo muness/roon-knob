@@ -109,7 +109,10 @@ static void configure_marquee(lv_obj_t *label)
 {
     if(!s_marquee_anim_ready) {
         lv_anim_init(&s_marquee_anim);
-        lv_anim_set_repeat_delay(&s_marquee_anim, 700);
+        /* Let new metadata settle before moving, then rest between cycles. */
+        lv_anim_set_delay(&s_marquee_anim, 1200);
+        lv_anim_set_repeat_delay(&s_marquee_anim, 2000);
+        lv_anim_set_repeat_count(&s_marquee_anim, LV_ANIM_REPEAT_INFINITE);
         s_marquee_anim_ready = true;
     }
     lv_obj_set_style_anim(label, &s_marquee_anim, LV_PART_MAIN);
@@ -121,11 +124,15 @@ static void set_marquee_text(lv_obj_t *label, const char *text)
 {
     const char *next = text ? text : "";
     const char *current = lv_label_get_text(label);
-    if(current && strcmp(current, next) == 0) return;
-
-    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
-    lv_label_set_text(label, next);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    if(!current || strcmp(current, next) != 0) {
+        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
+        lv_label_set_text(label, next);
+    }
+    /* The setter resets the offset even when the mode is unchanged. Preserve
+     * animation progress on polls, but restore scrolling after recovery. */
+    if(lv_label_get_long_mode(label) != LV_LABEL_LONG_MODE_SCROLL_CIRCULAR) {
+        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    }
 }
 
 // Reusable styles - smart-knob inspired
@@ -710,12 +717,12 @@ static void apply_state(const struct ui_state *state) {
         if (state->online) {
             if (s_controls_visible) lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_to_index(s_artist_label, 1);
-            lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+            /* A redundant font refresh also restarts LVGL's delay countdown. */
+            if(lv_obj_get_style_text_font(s_track_label, LV_PART_MAIN) != font_normal()) {
+                lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+            }
             set_marquee_text(s_track_label, state->line1);
             set_marquee_text(s_artist_label, state->line2);
-            /* Restore scrolling even if the text did not change at recovery. */
-            lv_label_set_long_mode(s_track_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-            lv_label_set_long_mode(s_artist_label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
         } else {
             lv_obj_add_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_to_index(s_track_label, 1);

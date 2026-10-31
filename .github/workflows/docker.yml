@@ -48,6 +48,7 @@ jobs:
           cmake --build /tmp/halo-native-build -j2
           /tmp/halo-native-build/halo_native_checks
           /tmp/halo-native-build/dial_native_checks
+          /tmp/halo-native-build/dial_marquee_checks
 
       - name: Test shared configuration contracts
         run: |
