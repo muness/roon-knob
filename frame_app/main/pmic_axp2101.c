@@ -60,11 +60,12 @@ static bool release_scl(void) {
     return false;
 }
 
+// Input must remain enabled: gpio_get_level() reads zero on output-only pins.
 static bool recover_bus(void) {
     gpio_set_level(I2C_SDA_PIN, 1);
     gpio_set_level(I2C_SCL_PIN, 1);
-    gpio_set_direction(I2C_SDA_PIN, GPIO_MODE_OUTPUT_OD);
-    gpio_set_direction(I2C_SCL_PIN, GPIO_MODE_OUTPUT_OD);
+    gpio_set_direction(I2C_SDA_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
+    gpio_set_direction(I2C_SCL_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
     gpio_set_pull_mode(I2C_SDA_PIN, GPIO_PULLUP_ONLY);
     gpio_set_pull_mode(I2C_SCL_PIN, GPIO_PULLUP_ONLY);
     bool ok = release_scl();

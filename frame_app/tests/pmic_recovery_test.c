@@ -6,9 +6,14 @@
 static uint8_t regs[256];
 static bool stuck_scl, stuck_sda, missing, bad_readback;
 static int writes, pulses, fail_reg = -1;
+static int scl_mode, sda_mode;
 int gpio_set_level(int p,int v){if(p==48&&v)pulses++;return 0;}
-int gpio_get_level(int p){return p==48?!stuck_scl:!stuck_sda;}
-int gpio_set_direction(int p,int m){return 0;}int gpio_set_pull_mode(int p,int m){return 0;}int gpio_reset_pin(int p){return 0;}
+int gpio_get_level(int p){
+ // ESP32 reads zero when GPIO input is disabled, even if an output pin is high.
+ if((p==48?scl_mode:sda_mode)!=GPIO_MODE_INPUT_OUTPUT_OD)return 0;
+ return p==48?!stuck_scl:!stuck_sda;
+}
+int gpio_set_direction(int p,int m){if(p==48)scl_mode=m;else sda_mode=m;return 0;}int gpio_set_pull_mode(int p,int m){return 0;}int gpio_reset_pin(int p){return 0;}
 void esp_rom_delay_us(int n){}void vTaskDelay(int n){}
 int i2c_new_master_bus(const i2c_master_bus_config_t*c,void**b){*b=(void*)1;return 0;}
 int i2c_master_bus_add_device(void*b,const i2c_device_config_t*c,void**d){*d=(void*)2;return 0;}
