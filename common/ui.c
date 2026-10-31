@@ -109,7 +109,9 @@ static void configure_marquee(lv_obj_t *label)
 {
     if(!s_marquee_anim_ready) {
         lv_anim_init(&s_marquee_anim);
-        lv_anim_set_repeat_delay(&s_marquee_anim, 700);
+        /* Let new metadata settle before moving, then rest between cycles. */
+        lv_anim_set_delay(&s_marquee_anim, 1200);
+        lv_anim_set_repeat_delay(&s_marquee_anim, 2000);
         lv_anim_set_repeat_count(&s_marquee_anim, LV_ANIM_REPEAT_INFINITE);
         s_marquee_anim_ready = true;
     }
@@ -715,7 +717,10 @@ static void apply_state(const struct ui_state *state) {
         if (state->online) {
             if (s_controls_visible) lv_obj_clear_flag(s_volume_label_large, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_to_index(s_artist_label, 1);
-            lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+            /* A redundant font refresh also restarts LVGL's delay countdown. */
+            if(lv_obj_get_style_text_font(s_track_label, LV_PART_MAIN) != font_normal()) {
+                lv_obj_set_style_text_font(s_track_label, font_normal(), 0);
+            }
             set_marquee_text(s_track_label, state->line1);
             set_marquee_text(s_artist_label, state->line2);
         } else {
