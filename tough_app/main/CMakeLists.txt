@@ -16,6 +16,8 @@ set(SRC_FILES
     "captive_portal.c"
     "dns_server.c"
     "../../common/app_main.c"
+    "../../common/crash_report.c"
+    "../../common/crash_record.c"
     "../../common/ota_update.c"
     "../../common/controller_device_settings.c"
     "../../common/platform/platform_device_settings_none.c"
@@ -59,7 +61,7 @@ idf_component_register(
         esp_wifi
         wpa_supplicant
         m5_platform
-    PRIV_REQUIRES
+    PRIV_REQUIRES espcoredump
         app_update nvs_flash
         esp_http_client
         esp_http_server

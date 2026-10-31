@@ -4,6 +4,8 @@ set(SRC_FILES
     "frame_power_policy.c"
     "frame_display_preferences.c"
     "eink_display.c"
+    "frame_display_health.c"
+    "frame_display_health_web.c"
     "eink_ui.c"
     "../../common/assets/hiphi_logo_mono.c"
     "eink_font.c"
@@ -24,6 +26,8 @@ set(SRC_FILES
     "dns_server.c"
     "pmic_axp2101.c"
     "../../common/app_main.c"
+    "../../common/crash_report.c"
+    "../../common/crash_record.c"
     "../../common/ota_update.c"
     "../../common/controller_device_settings.c"
     "platform_device_settings_frame.c"
@@ -66,7 +70,7 @@ idf_component_register(
         esp_timer
         esp_wifi
         wpa_supplicant
-    PRIV_REQUIRES
+    PRIV_REQUIRES espcoredump
         app_update nvs_flash
         esp_http_client
         esp_http_server

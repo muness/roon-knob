@@ -6,6 +6,8 @@
 // Initialize AXP2101 PMIC via I2C
 // SDA=47, SCL=48 (PhotoPainter board), address=0x34
 bool pmic_init(void);
+// Verify required rail voltages and enable bits before each panel transaction.
+bool pmic_ensure_panel_power(void);
 
 typedef enum {
     PMIC_POWER_SOURCE_UNKNOWN = 0,

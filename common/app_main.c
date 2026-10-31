@@ -1,4 +1,5 @@
 #include "app.h"
+#include "crash_report.h"
 
 #include "platform/platform_log.h"
 #include "platform/platform_mdns.h"
@@ -24,6 +25,7 @@ void app_controller_init(void) {
 }
 
 void app_entry(void) {
+    crash_report_capture_boot();
     if (!controller_config_init()) {
         LOGE("configuration owner initialization failed");
         return;

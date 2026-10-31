@@ -46,7 +46,7 @@ uint8_t eink_display_get_pixel(uint16_t x, uint16_t y);
 uint8_t *eink_display_get_fb(void);
 
 // Send framebuffer to panel and trigger full refresh (~15-25s for ACeP)
-void eink_display_refresh(void);
+bool eink_display_refresh(void);
 
 // Initialize panel registers (called by eink_display_init)
-void eink_display_init_panel(void);
+bool eink_display_init_panel(void);
