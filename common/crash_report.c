@@ -16,6 +16,8 @@
 #include "esp_core_dump.h"
 #include "esp_partition.h"
 #endif
+static const char *capture_status = "not_checked";
+const char *crash_report_capture_status(void) { return capture_status; }
 static const char *const namespace_name = "rk_crash";
 const char *crash_report_read(crash_record_t *record) {
     nvs_handle_t handle;
@@ -33,6 +35,7 @@ void crash_report_capture_boot(void) {
     static bool captured;
     if (captured) return;
     captured = true;
+    capture_status = "no_new_crash";
     crash_record_t record = {0};
     record.reset_reason = (uint32_t)esp_reset_reason();
     snprintf(record.target, sizeof(record.target), "%s", platform_device_slug());
@@ -43,7 +46,9 @@ void crash_report_capture_boot(void) {
         ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
     if (partition && esp_core_dump_image_check() == ESP_OK) {
         esp_core_dump_summary_t summary = {0};
-        if (esp_core_dump_get_summary(&summary) != ESP_OK) return; // preserve the raw dump
+        if (esp_core_dump_get_summary(&summary) != ESP_OK) {
+            capture_status = "summary_failed"; return; // preserve the raw dump
+        }
         record.has_dump = 1; record.pc = summary.exc_pc;
         memcpy(record.task, summary.exc_task, sizeof(summary.exc_task));
         snprintf(record.crashed_elf_sha, sizeof(record.crashed_elf_sha), "%.*s",
@@ -59,20 +64,28 @@ void crash_report_capture_boot(void) {
         record.reset_reason != ESP_RST_WDT) return; // normal boots keep the last crash
     crash_record_seal(&record);
     nvs_handle_t handle;
+    capture_status = "storage_failed";
     if (nvs_open(namespace_name, NVS_READWRITE, &handle) != ESP_OK) return;
     esp_err_t err = nvs_set_blob(handle, "last", &record, sizeof(record));
     if (err == ESP_OK) err = nvs_commit(handle);
     nvs_close(handle);
 #if HIPHI_DUMP_SUMMARY
     // The saved summary is checksum checked before removing the only raw evidence.
-    crash_record_t saved;
-    if (err == ESP_OK && record.has_dump && !strcmp(crash_report_read(&saved), "available") &&
-        !memcmp(&saved, &record, sizeof(record))) esp_core_dump_image_erase();
+    if (err == ESP_OK) {
+        crash_record_t saved;
+        capture_status = "readback_failed";
+        if (!strcmp(crash_report_read(&saved), "available") && !memcmp(&saved, &record, sizeof(record))) {
+            capture_status = record.has_dump ? "captured" : "reset_only";
+            if (record.has_dump && esp_core_dump_image_erase() != ESP_OK)
+                capture_status = "captured_dump_erase_failed";
+        }
+    }
 #else
-    (void)err;
+    if (err == ESP_OK) capture_status = "reset_only";
 #endif
 }
 #else
 void crash_report_capture_boot(void) {}
+const char *crash_report_capture_status(void) { return "unsupported"; }
 const char *crash_report_read(crash_record_t *record) { (void)record; return "unsupported"; }
 #endif
