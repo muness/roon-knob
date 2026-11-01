@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Frame Settings now offers Full cover (complete artwork with margins) and Fill panel (subject-aware cropping). The choice persists across reboot and recomposes the current album; Fill panel preserves the existing default (#324).
+
 ## 2.8.1 — 2026-10-31
 
 - Frame: clear the I²C bus before PMIC initialization, verify panel rail register settings and report power or BUSY-handshake failures instead of claiming a successful refresh. Pending artwork is retained for bounded retries (#323).

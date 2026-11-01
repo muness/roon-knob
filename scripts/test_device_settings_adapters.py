@@ -37,6 +37,10 @@ void platform_touch_set_brightness(int p) { effective_brightness=p; }
     code+=r'''
 #undef platform_device_settings_apply
 static bool durable_ip=true,effective_ip=false;
+static bool durable_cover=false,effective_cover=false;
+bool frame_display_preferences_full_cover(void){return durable_cover;}
+bool frame_display_preferences_set_full_cover(bool v){++saves;if(!save_ok)return false;durable_cover=v;return true;}
+void eink_ui_apply_full_cover(bool v){effective_cover=v;}
 bool frame_display_preferences_show_ip(void) { return durable_ip; }
 bool frame_display_preferences_set_show_ip(bool value) { ++saves; if(!save_ok)return false; durable_ip=value; return true; }
 void eink_ui_apply_show_ip(bool value) { effective_ip=value; }
@@ -58,6 +62,11 @@ int main(void) {
     assert(!frame_apply(&value) && effective_ip && durable_ip);
     save_ok=true; assert(frame_apply(&value) && !effective_ip && !durable_ip);
     before=saves; assert(frame_apply(&value) && saves==before);
+    value=(controller_device_settings_t){.present=CDS_FRAME_FULL_COVER,.frame_full_cover=true};
+    save_ok=false;assert(!frame_apply(&value)&&!durable_cover&&!effective_cover);
+    save_ok=true;assert(frame_apply(&value)&&durable_cover&&effective_cover);
+    before=saves;assert(frame_apply(&value)&&saves==before);
+    value.frame_full_cover=false;assert(frame_apply(&value)&&!durable_cover&&!effective_cover);
     puts("Dial/HALO and Frame adapters distinguish durable/effective state and storage failure");
 }
 '''

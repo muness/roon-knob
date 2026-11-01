@@ -63,3 +63,6 @@ void eink_ui_process(void);
 bool eink_ui_power_state_known(void);
 bool eink_ui_is_playing(void);
 bool eink_ui_has_pending_refresh(void);
+
+// UI actor only; recompose the current album when the layout changes.
+void eink_ui_apply_full_cover(bool full_cover);
