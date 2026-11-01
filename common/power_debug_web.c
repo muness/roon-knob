@@ -1,4 +1,9 @@
 #include "power_debug_web.h"
+#include "crash_report.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#include "cJSON.h"
 
 #include "portal_brand.h"
 
@@ -200,6 +205,43 @@ static void render_trace(const platform_power_diagnostics_t *power,
         }
     }
     append_text(buffer, capacity, &used, json ? "]" : "</table>");
+}
+
+#ifndef CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#define CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH 0
+#endif
+
+static char *last_crash_json(void) {
+    crash_record_t r = {0};
+    const char *status = crash_report_read(&r);
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return NULL;
+    cJSON_AddStringToObject(root, "status", status);
+    cJSON_AddStringToObject(root, "capture_status", crash_report_capture_status());
+    cJSON_AddBoolToObject(root, "dump_enabled", CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH);
+    if (!strcmp(status, "available")) {
+        cJSON_AddStringToObject(root, "target", r.target);
+        cJSON_AddStringToObject(root, "captured_by_version", r.capture_version);
+        cJSON_AddStringToObject(root, "crashed_elf_sha256", r.crashed_elf_sha);
+        cJSON_AddStringToObject(root, "task", r.task);
+        cJSON_AddNumberToObject(root, "capture_boot_reset_reason", r.reset_reason);
+        cJSON_AddNumberToObject(root, "pc", r.pc);
+        cJSON_AddBoolToObject(root, "has_dump", r.has_dump);
+        cJSON *trace = cJSON_AddArrayToObject(root, "backtrace");
+        for (unsigned i = 0; i < r.depth; ++i) cJSON_AddItemToArray(trace, cJSON_CreateNumber(r.backtrace[i]));
+    }
+    char *result = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return result;
+}
+
+static void send_escaped_report(httpd_req_t *req, const char *text) {
+    for (const char *p = text; *p; ++p) {
+        if (*p == '<') httpd_resp_sendstr_chunk(req, "&lt;");
+        else if (*p == '>') httpd_resp_sendstr_chunk(req, "&gt;");
+        else if (*p == '&') httpd_resp_sendstr_chunk(req, "&amp;");
+        else { char one[] = {*p, 0}; httpd_resp_sendstr_chunk(req, one); }
+    }
 }
 
 static esp_err_t power_debug_get_handler(httpd_req_t *req) {
@@ -405,14 +447,25 @@ static esp_err_t power_debug_get_handler(httpd_req_t *req) {
                   "not yet implement the early, radio/UI-free voltage-sampling path.</p>");
     }
 
+    char *crash = last_crash_json();
     if (wants_json) {
-        httpd_resp_send(req, body, strlen(body));
+        size_t length = strlen(body);
+        if (length && body[length - 1] == '}') body[length - 1] = 0;
+        httpd_resp_sendstr_chunk(req, body);
+        httpd_resp_sendstr_chunk(req, ",\"last_crash\":");
+        httpd_resp_sendstr_chunk(req, crash ? crash : "{\"status\":\"unavailable\"}");
+        httpd_resp_sendstr_chunk(req, "}");
+        httpd_resp_send_chunk(req, NULL, 0);
     } else {
         httpd_resp_sendstr_chunk(req, body);
+        httpd_resp_sendstr_chunk(req, "<h2>Last crash</h2><p>Retained across restarts. No record means no crash has been captured, not proof none occurred. Panic backtraces require a USB flash with a dump partition on supported targets.</p><details><summary>Report details</summary><pre>");
+        send_escaped_report(req, crash ? crash : "Report unavailable");
+        httpd_resp_sendstr_chunk(req, "</pre></details>");
         httpd_resp_sendstr_chunk(req, portal_brand_footer_html());
         httpd_resp_sendstr_chunk(req, "</body></html>");
         httpd_resp_send_chunk(req, NULL, 0);
     }
+    free(crash);
     free(body);
     free(trace);
     return ESP_OK;

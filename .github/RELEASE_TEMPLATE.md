@@ -1,14 +1,18 @@
 # HiPhi v{{VERSION}}
 
-## Stable controller family release
+## v2.8.1: Frame recovery diagnostics and Dial scrolling
+
+Frame now verifies its PMIC rail settings and panel BUSY handshake before recording a displayed image. Settings links to a display-health page with downloaded versus displayed artwork, failures and refresh timing. Shared firmware retains crash identity and backtrace evidence for post-reboot diagnostics. Dial metadata scrolling survives normal playback updates and includes initial and repeat pauses.
+
+Pair with **Unified Hi-Fi Control v4.0.1** for the improved Frame renderer.
+
+## Stable controller family baseline
 
 Pair with **Unified Hi-Fi Control v4.0.0**. This release promotes the combined integration to stable across all ten ESP controller variants, the Dial auxiliary parking image, and the Roku controller and artwork screensaver.
 
 - **Saved shortcuts:** Shortcuts is first in the round touch Music menu, above Library. Tap once to play in the current zone. Exact Roon duplicates use the first title/subtitle match and show a notice. UHC also exposes Shortcuts above Library in its web UI.
 - **Controller settings and OTA:** UHC exposes supported device settings and explicit per-controller updates. Shared firmware validates target, version, image layout and endpoint authority; queued work cannot silently change rooms or replay an uncertain command.
 - **Shared foundations:** preserves the adaptive controller core, BLE media-remote capability, playback recovery, power controls and target-specific display/input profiles developed throughout the prereleases.
-
-Build/test evidence covers the full family. Physical evidence for this release work covers the Waveshare HiPhi Dial, including actual shortcut playback. Other targets are included in stable at the maintainer's direction; this does not claim new physical testing on those devices. Stable publishing proceeds without an additional per-target hardware gate.
 
 Use the exact target's installer at [firmware.hiphi.audio](https://firmware.hiphi.audio/). OTA application images and merged fresh-install images have different purposes; the manifest chooses the matching layout. Roku controller/screensaver ZIP packages are separate release assets. Voice/wake capabilities remain limited to their documented target profiles.
 

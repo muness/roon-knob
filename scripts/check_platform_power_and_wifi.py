@@ -216,7 +216,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "Unexpected packed artwork size",
         "Packed artwork ready for panel",
         "New artwork unavailable; preserving the current panel",
-        "if (artwork_changed && now < s_ui.art_retry_after)",
+        "if (now < s_ui.art_retry_after)",
         "#define ART_RETRY_MAX_MS 60000",
         "s_ui.art_retry_after = platform_millis() + s_ui.art_retry_delay",
         "s_ui.art_retry_delay = next_delay > ART_RETRY_MAX_MS",

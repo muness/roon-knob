@@ -80,6 +80,7 @@ jobs:
           bash scripts/test_platform_http_esp.sh
           bash scripts/test_ota_update.sh
           python3 tests/test_ota_layout.py
+          python3 scripts/test_frame_recovery.py
           sh tests/run_portal_trace.sh
           python3 tests/test_dial_wake_dispatch.py
           python3 tests/test_firmware_artifact_cache.py
@@ -692,6 +693,7 @@ jobs:
         env:
           FIRMWARE_FILES: |
             frame_app/build/stack-audit.json
+            frame_app/build/hiphi_frame.elf
             frame_app/build/hiphi_frame.bin
             frame_app/build/bootloader/bootloader.bin
             frame_app/build/partition_table/partition-table.bin

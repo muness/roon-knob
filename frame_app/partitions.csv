@@ -8,3 +8,6 @@ phy_init, data, phy,     0xf000,   0x1000,
 factory,  app,  factory, 0x10000,  0x280000,
 ota_0,    app,  ota_0,   0x290000, 0x280000,
 ota_1,    app,  ota_1,   0x510000, 0x280000,
+
+# Retained panic evidence; old OTA layouts are detected at runtime. NVS/app offsets stay fixed.
+coredump, data, coredump, 0x790000, 0x20000,
