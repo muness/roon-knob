@@ -1,6 +1,12 @@
 # HiPhi v{{VERSION}}
 
-## Stable controller family release
+## v2.8.1: Frame recovery diagnostics and Dial scrolling
+
+Frame now verifies its PMIC rail settings and panel BUSY handshake before recording a displayed image. Settings links to a display-health page with downloaded versus displayed artwork, failures and refresh timing. Shared firmware retains crash identity and backtrace evidence for post-reboot diagnostics. Dial metadata scrolling survives normal playback updates and includes initial and repeat pauses.
+
+Pair with **Unified Hi-Fi Control v4.0.1** for the improved Frame renderer. The Frame CI image was physically flashed and completed a refresh after a full power cycle; the owner confirmed the NAS renderer works. A latched PMIC may still need USB unplugged and PWR held for five seconds before restarting. No automatic recovery from that fault, deliberate hardware crash test, or new physical test of every target is claimed.
+
+## Stable controller family baseline
 
 Pair with **Unified Hi-Fi Control v4.0.0**. This release promotes the combined integration to stable across all ten ESP controller variants, the Dial auxiliary parking image, and the Roku controller and artwork screensaver.
 
