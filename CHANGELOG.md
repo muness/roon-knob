@@ -9,7 +9,7 @@
 - Shared firmware: retain crash identity and backtrace evidence across reboot, expose capture status in power diagnostics, and retain the matching Frame ELF in CI artifacts (#323).
 - Dial: keep metadata marquees scrolling through playback updates, with initial and repeat pauses (#319, #321).
 
-The exact CI Frame image completed a refresh after a full power cycle; the owner also confirmed the new UHC renderer. A latched PMIC may still require unplugging USB and holding PWR for five seconds before restarting. This release does not claim automatic recovery from that fault or new physical qualification of every controller. Pair with UHC v4.0.1 for the new Frame artwork renderer.
+Pair with UHC v4.0.1 for the new Frame artwork renderer.
 
 
 - Fix long song titles and artist text restarting their scroll during playback updates on HiPhi Dial and HALO. New text pauses for 1.2 seconds before scrolling, then pauses for 2 seconds between complete scrolling cycles (#317, #319).
