@@ -210,9 +210,9 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "frame_app/main/eink_ui.c": (
         '"controller_utf8.h"',
         "controller_utf8_decode_next(&cursor)",
-        "ART_CROP_LIMIT_PERCENT 10",
+        "s_ui.full_cover = frame_display_preferences_full_cover()",
         "ART_CACHE_SIZE ((ART_W * ART_H) / 2)",
-        '"eink_acep6", "smart"',
+        '"eink_acep6", s_ui.full_cover ? "fit" : "cover", 0',
         "Unexpected packed artwork size",
         "Packed artwork ready for panel",
         "New artwork unavailable; preserving the current panel",
