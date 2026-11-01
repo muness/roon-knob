@@ -1,5 +1,11 @@
 # HiPhi v{{VERSION}}
 
+## v2.8.2: choose your Frame artwork layout
+
+Frame Settings now offers **Full cover**, which centers the complete artwork on a near-white mat, and **Fill panel**, which crops around the subject to fill the artwork area. Fill panel remains the default. The choice persists across reboot and recomposes the current album when changed. The metadata strip, measured-palette renderer and high-quality resizer are retained.
+
+Open Frame Settings → Artwork layout to choose.
+
 ## v2.8.1: Frame recovery diagnostics and Dial scrolling
 
 Frame now verifies its PMIC rail settings and panel BUSY handshake before recording a displayed image. Settings links to a display-health page with downloaded versus displayed artwork, failures and refresh timing. Shared firmware retains crash identity and backtrace evidence for post-reboot diagnostics. Dial metadata scrolling survives normal playback updates and includes initial and repeat pauses.

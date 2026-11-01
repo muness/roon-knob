@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.8.2 — 2026-10-31
+
 - Frame Settings now offers Full cover (complete artwork with margins) and Fill panel (subject-aware cropping). The choice persists across reboot and recomposes the current album; Fill panel preserves the existing default (#324).
 
 ## 2.8.1 — 2026-10-31
