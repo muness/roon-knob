@@ -54,6 +54,7 @@ jobs:
       group: firmware-pages
       cancel-in-progress: false
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -101,6 +102,12 @@ jobs:
           destination_dir: pr/${{ github.event.pull_request.number }}/site
           keep_files: false
           cname: firmware.hiphi.audio
+
+      # A GITHUB_TOKEN push cannot trigger the publisher's push event.
+      - name: Trigger Pages publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages-publisher.yml --repo "$GITHUB_REPOSITORY" --ref gh-pages
 
       - name: Verify deployed site preview
         env:
