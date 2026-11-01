@@ -30,6 +30,7 @@ extern "C" {
 #define CONTROLLER_FIRMWARE_VERSION_MAX 32 /* including the terminator */
 
 enum {
+    CDS_FRAME_FULL_COVER = 1u << 5, /* local Frame portal only; no bridge schema change */
     CDS_SHOW_IP = 1u << 0,
     CDS_BRIGHTNESS = 1u << 1,
     CDS_BODY_ENABLED = 1u << 2,
@@ -40,6 +41,7 @@ enum {
 typedef struct {
     uint32_t present; /* CDS_* mask: only these fields carry a valid value */
     bool show_ip;
+    bool frame_full_cover;
     uint8_t brightness;
     bool body_enabled;
     bool sound_enabled;

@@ -267,6 +267,21 @@ static void test_firmware_update(void) {
     assert(!controller_firmware_update_parse(NULL, NULL, 0));
 }
 
+static void test_local_frame_layout_survives_remote_snapshot(void) {
+    drain(); defer_ui=true; reject_ui=false; hook_result=true;
+    controller_device_settings_t local={.present=CDS_FRAME_FULL_COVER,.frame_full_cover=true};
+    controller_device_settings_t remote={.present=CDS_SHOW_IP,.show_ip=false};
+    assert(controller_device_settings_submit_local(&local));
+    controller_device_settings_submit(&remote, endpoint);
+    drain();
+    assert((hook_last.present & CDS_FRAME_FULL_COVER) && hook_last.frame_full_cover);
+    assert((hook_last.present & CDS_SHOW_IP) && !hook_last.show_ip);
+    local.frame_full_cover=false;
+    assert(controller_device_settings_submit_local(&local));drain();
+    assert(!hook_last.frame_full_cover);
+    defer_ui=false;
+}
+
 int main(void) {
     test_valid_values();
     test_absent_and_unknown();
@@ -280,6 +295,7 @@ int main(void) {
     test_actor_authority();
     test_old_completion_cannot_complete_new_desire();
     test_firmware_update();
+    test_local_frame_layout_survives_remote_snapshot();
     puts("controller device settings checks passed");
     return 0;
 }

@@ -827,11 +827,18 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
                                   ? snapshot.value.art_mode_battery_timeout_sec
                                   : 0;
 #if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
-  char ip_setting[192] = {0};
+  char ip_setting[768] = {0};
   snprintf(ip_setting, sizeof(ip_setting),
            "<label><input type='checkbox' name='show_ip' value='1' %s> "
-           "Show IP address on the Frame</label>",
-           frame_display_preferences_show_ip() ? "checked" : "");
+           "Show IP address on the Frame</label>"
+           "<label for='artwork_layout'>Artwork layout</label>"
+           "<select id='artwork_layout' name='artwork_layout'>"
+           "<option value='cover' %s>Fill panel</option>"
+           "<option value='fit' %s>Full cover</option></select>"
+           "<p>Fill panel crops around the subject. Full cover keeps the whole image visible.</p>",
+           frame_display_preferences_show_ip() ? "checked" : "",
+           frame_display_preferences_full_cover() ? "" : "selected",
+           frame_display_preferences_full_cover() ? "selected" : "");
 #else
   const char *ip_setting = "";
 #endif
@@ -928,6 +935,14 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
   }
   body[received] = '\0';
 
+#if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
+  char layout[16] = {0};
+  bool has_layout = get_form_field(body, "artwork_layout", layout, sizeof(layout));
+  if (has_layout && strcmp(layout, "fit") != 0 && strcmp(layout, "cover") != 0) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Choose Full cover or Fill panel");
+    return ESP_FAIL;
+  }
+#endif
   char timeout_text[16] = {0};
   if (!get_form_field(body, "art_mode_timeout_sec", timeout_text,
                       sizeof(timeout_text))) {
@@ -959,9 +974,13 @@ static esp_err_t sta_display_set_handler(httpd_req_t *req) {
                                       sizeof(show_ip_text)) &&
                        strcmp(show_ip_text, "1") == 0;
   controller_device_settings_t display_settings = {.present = CDS_SHOW_IP, .show_ip = show_ip};
+  if (has_layout) {
+    display_settings.present |= CDS_FRAME_FULL_COVER;
+    display_settings.frame_full_cover = strcmp(layout, "fit") == 0;
+  }
   if (!controller_device_settings_submit_local(&display_settings)) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                        "Display timeout saved, but IP visibility was not");
+                        "Display timeout saved, but Frame preferences could not be queued");
     return ESP_FAIL;
   }
 

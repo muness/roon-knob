@@ -99,6 +99,7 @@ static bool wake_settings(void) {
 
 static void copy_fields(controller_device_settings_t *to,
                         const controller_device_settings_t *from) {
+    if (from->present & CDS_FRAME_FULL_COVER) to->frame_full_cover = from->frame_full_cover;
     if (from->present & CDS_SHOW_IP) to->show_ip = from->show_ip;
     if (from->present & CDS_BRIGHTNESS) to->brightness = from->brightness;
     if (from->present & CDS_BODY_ENABLED) to->body_enabled = from->body_enabled;

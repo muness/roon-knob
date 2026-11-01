@@ -4,6 +4,7 @@
 #include "eink_ui.h"
 #include "eink_display.h"
 #include "frame_display_health.h"
+#include "frame_display_preferences.h"
 #include "eink_font.h"
 #include "bridge_client.h"
 #include "controller_utf8.h"
@@ -32,9 +33,7 @@ static const char *TAG = "eink_ui";
 #define ART_X            0   // Flush left
 #define ART_Y            0   // Flush to top
 #define TEXT_Y         (EINK_HEIGHT - TEXT_BAR_H)       // Text bar at bottom
-/* UHC composes directly for this viewport: up to 10% crop, then a complete
- * proportional fit on a quiet gallery mat. */
-#define ART_CROP_LIMIT_PERCENT 10
+// UHC composes either complete fit or subject-aware fill for this viewport.
 
 // Debounce: wait 3s after last state change before rendering
 #define RENDER_DEBOUNCE_MS 3000
@@ -59,6 +58,7 @@ static struct {
     bool ble_connected;
     bool power_state_known;
     bool show_ip;
+    bool full_cover;
 
     // Dirty flags
     bool dirty;             // Any state changed — needs re-render
@@ -110,14 +110,14 @@ static bool render_artwork(void) {
     char *img_data = NULL;
     size_t img_len = 0;
     const char *art_url = bridge_client_get_artwork_url_for_format_and_scale(
-        url, sizeof(url), ART_W, ART_H, 0, "eink_acep6", "smart",
-        ART_CROP_LIMIT_PERCENT);
+        url, sizeof(url), ART_W, ART_H, 0, "eink_acep6", s_ui.full_cover ? "fit" : "cover", 0);
     if (!art_url || !art_url[0]) {
         ESP_LOGW(TAG, "No artwork URL available");
         return false;
     }
 
-    ESP_LOGI(TAG, "Downloading packed Frame artwork (10%% crop budget): %s", art_url);
+    ESP_LOGI(TAG, "Downloading packed Frame artwork (%s): %s",
+             s_ui.full_cover ? "Full cover" : "Fill panel", art_url);
     if (platform_http_get_image(art_url, &img_data, &img_len) != 0 || !img_data) {
         ESP_LOGE(TAG, "Packed artwork download failed");
         platform_http_free(img_data);
@@ -332,6 +332,7 @@ static bool render_full_screen(void) {
 
 void eink_ui_init(void) {
     memset(&s_ui, 0, sizeof(s_ui));
+    s_ui.full_cover = frame_display_preferences_full_cover();
     s_ui.volume = -999.0f;  // Sentinel: no volume yet
 
     // Don't render at boot — wait for artwork to arrive.
@@ -417,6 +418,16 @@ void eink_ui_post_device_ip(const char *ip) {
     if (!platform_task_post_to_ui(set_device_ip_on_ui, copy)) {
         free(copy);
     }
+}
+
+void eink_ui_apply_full_cover(bool full_cover) {
+    if (s_ui.full_cover == full_cover) return;
+    s_ui.full_cover = full_cover;
+    s_ui.art_dirty = s_ui.image_key[0] != '\0';
+    s_ui.display_pref_dirty = true;
+    s_ui.dirty = true;
+    s_ui.art_retry_after = 0;
+    s_ui.last_change = platform_millis();
 }
 
 void eink_ui_apply_show_ip(bool show) {
