@@ -2352,7 +2352,7 @@ jobs:
             -e "s/{{VERSION}}/${VERSION}/g" \
             -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
             -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
-            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Changelog and checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/index.html
           sed 's|{{REDIRECT_URL}}|./|g' web/redirect.html \
@@ -2361,21 +2361,21 @@ jobs:
             -e "s/{{VERSION}}/${VERSION}/g" \
             -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
             -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
-            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Changelog and checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-dial.html
           sed -e 's/{{TARGET_FILTER}}/frame/g' \
             -e "s/{{VERSION}}/${VERSION}/g" \
             -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
             -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
-            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Changelog and checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-frame.html
           sed -e 's/{{TARGET_FILTER}}/rlcd/g' \
             -e "s/{{VERSION}}/${VERSION}/g" \
             -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
             -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
-            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
+            -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Changelog and checksums ↗</a>|g" \
             -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
             > gh-pages-build/flash-rlcd.html
           for target in joy halo tough m5dial sticks3 stopwatch stackchan knobaux; do
@@ -2383,7 +2383,7 @@ jobs:
               -e "s/{{VERSION}}/${VERSION}/g" \
               -e "s/{{RELEASE_CHANNEL}}/${CHANNEL}/g" \
               -e "s/{{RELEASE_CHANNEL_NAME}}/${CHANNEL_NAME}/g" \
-              -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Release notes and SHA-256 checksums ↗</a>|g" \
+              -e "s|{{RELEASE_LINK}}|<a href=\"https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}\">Changelog and checksums ↗</a>|g" \
               -e "s|{{RELEASE_CHANNEL_NOTICE}}|${CHANNEL_NOTICE}|g" web/flash.html \
               > "gh-pages-build/flash-${target}.html"
           done
