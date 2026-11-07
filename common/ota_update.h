@@ -42,6 +42,12 @@ void ota_start_update(void);
 // False also reports stale authority/version, capacity rejection, or task-start failure.
 bool ota_request_install(const char *from_version);
 
+/* Explicit exception to same-channel OTA, scoped to the config response's
+ * bridge and exact source/destination versions. The caller verifies device ID. */
+struct bridge_request_endpoint;
+bool ota_request_move_to_stable(const struct bridge_request_endpoint *origin,
+                                const char *from_version, const char *to_version);
+
 typedef enum {
     OTA_REQUEST_ACCEPTED, OTA_REQUEST_COALESCED, OTA_REQUEST_BUSY,
     OTA_REQUEST_STALE, OTA_REQUEST_START_FAILED

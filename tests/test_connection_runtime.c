@@ -104,6 +104,10 @@ int platform_http_get_bounded(const char *url, size_t max_bytes, char **out, siz
     *out = strdup(catalog_reply); *length = strlen(*out);
     return 0;
 }
+int platform_http_get_controller(const char *url, char **out, size_t *len) {
+    assert(strstr(url, "/now_playing?") || strstr(url, "/config/"));
+    return platform_http_get(url, out, len);
+}
 void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
 void platform_http_free(char *value) { free(value); }
 void platform_task_finish(void) {}
@@ -796,9 +800,9 @@ static void test_response_fences(void) {
 }
 /* GET /config/<id>: device settings and a firmware request ride along, and are acted on only after
  * the remote preferences commit. */
-static unsigned device_apply_calls, install_calls, merge_calls;
+static unsigned device_apply_calls, install_calls, switch_calls, merge_calls;
 static controller_device_settings_t device_applied;
-static char install_from_seen[40];
+static char install_from_seen[40], switch_to_seen[40];
 static bool install_started = true;
 static controller_config_write_result_t merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
 void platform_display_set_rotation(uint16_t rotation) { (void)rotation; }
@@ -811,6 +815,14 @@ bool platform_device_settings_apply(const controller_device_settings_t *settings
 }
 bool ota_request_install(const char *from_version) {
     ++install_calls; snprintf(install_from_seen, sizeof(install_from_seen), "%s", from_version);
+    return install_started;
+}
+bool ota_request_move_to_stable(const bridge_request_endpoint_t *origin,
+                                const char *from_version, const char *to_version) {
+    if (!bridge_client_request_endpoint_current(origin)) return false;
+    ++switch_calls;
+    snprintf(install_from_seen, sizeof(install_from_seen), "%s", from_version);
+    snprintf(switch_to_seen, sizeof(switch_to_seen), "%s", to_version);
     return install_started;
 }
 controller_config_write_result_t controller_config_merge_remote_preferences_if_endpoint_current(
@@ -841,6 +853,25 @@ static void test_config_fetch_applies_device_settings_and_install(void) {
     assert(device_apply_calls == 0 && install_calls == 0);
     merge_result = CONTROLLER_CONFIG_COMMITTED_VERIFIED;
 }
+static void test_config_fetch_binds_stable_move_to_device_and_endpoint(void) {
+    reset("http://192.168.1.2:8088", false);
+    switch_calls = install_calls = 0;
+    static const char *wrong_id = "{\"config_sha\":\"s1\",\"config\":{\"name\":\"Den\","
+        "\"firmware_update\":{\"action\":\"move_to_stable\",\"device_id\":\"other\","
+        "\"from_version\":\"2.8.3-beta.1\",\"to_version\":\"2.8.3\"}}}";
+    static const char *correct_id = "{\"config_sha\":\"s2\",\"config\":{\"name\":\"Den\","
+        "\"firmware_update\":{\"action\":\"move_to_stable\",\"device_id\":\"abc\","
+        "\"from_version\":\"2.8.3-beta.1\",\"to_version\":\"2.8.3\"}}}";
+    http_body = wrong_id;
+    assert(fetch_knob_config() && !switch_calls && !install_calls);
+    http_body = correct_id;
+    response_race = 3;  /* The old network epoch cannot authorize a new install. */
+    assert(fetch_knob_config() && !switch_calls && !install_calls);
+    response_race = 0;
+    assert(fetch_knob_config() && switch_calls == 1 && !install_calls);
+    assert(!strcmp(install_from_seen, "2.8.3-beta.1") && !strcmp(switch_to_seen, "2.8.3"));
+}
+
 /* A target that failed to apply a setting keeps it: the config hash is already committed and will
  * not be fetched again, so the poll loop's retry is what delivers it. */
 static void test_failed_device_setting_is_retried_without_a_refetch(void) {
@@ -1002,6 +1033,7 @@ int main(void) {
     test_shortcut_authority_at_admission();
     test_named_shortcuts_are_bounded_and_fenced();
     test_config_fetch_applies_device_settings_and_install();
+    test_config_fetch_binds_stable_move_to_device_and_endpoint();
     test_failed_device_setting_is_retried_without_a_refetch();
     test_volume_prediction_reconciliation();
     test_first_zone_fallback();

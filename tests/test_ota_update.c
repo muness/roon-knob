@@ -285,6 +285,81 @@ static void test_concurrent_admission_and_status(void) {
     atomic_store(&read_snapshots,false); pthread_join(reader,NULL);
     assert(begin_calls==1 && boot_calls==1 && !s_ota_busy);
 }
+static void test_move_to_stable(void) {
+    static const char *beta = "2.8.0-beta.4";
+    static const char *stable = "2.8.0";
+    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, beta);
+    bridge_request_endpoint_t endpoint;
+    assert(bridge_client_capture_request_endpoint(&endpoint));
+    version_json = "{\"version\":\"v2.8.0\",\"size\":1024}";
+    image_version = stable;
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    /* Ordinary Update keeps the prerelease channel even if that feed is misconfigured. */
+    assert(ota_request_install(beta));
+    assert(strstr(last_url, "/firmware/download?channel=beta") && !begin_calls && !boot_calls);
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    last_url[0] = '\0';
+    assert(!ota_request_move_to_stable(&endpoint, "2.8.0-beta.3", stable));
+    assert(!ota_request_move_to_stable(&endpoint, "", stable));
+    assert(!ota_request_move_to_stable(&endpoint, beta, "2.7.9"));
+    assert(!ota_request_move_to_stable(&endpoint, beta, "2.8.0-beta.5"));
+    assert(!ota_request_move_to_stable(&endpoint, beta, "2.8.1.0"));
+    assert(!ota_request_move_to_stable(&endpoint, beta, "999999999999999999.8.0"));
+    assert(!last_url[0] && !begin_calls);
+    assert(ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(strstr(last_url, "/firmware/download?channel=stable"));
+    assert(begin_calls == 1 && boot_calls == 1 && restarted == 1);
+
+    /* The newer release became current before the device fetched metadata. */
+    version_json = "{\"version\":\"2.8.1\"}";
+    image_version = "2.8.1";
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    assert(ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(strstr(last_url, "/firmware/version?channel=stable") && !begin_calls && !boot_calls);
+
+    /* The release changed between the check and download. */
+    version_json = "{\"version\":\"2.8.0\"}";
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    assert(ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(strstr(last_url, "/firmware/download?channel=stable") && !begin_calls && !boot_calls);
+
+    image_version = stable;
+    setup("hiphi_nonexistent_sibling", TARGET_FLASH);
+    assert(ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(!begin_calls && !boot_calls);
+
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    http_status = 404;
+    assert(ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(!begin_calls && !boot_calls);
+
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    version_status = 404;
+    assert(ota_request_move_to_stable(&endpoint, beta, stable));
+    version_status = 200;
+    assert(strstr(last_url, "/firmware/version?channel=stable") && !begin_calls && !boot_calls);
+    assert(s_ota_info.status == OTA_STATUS_ERROR);
+
+    /* A config response cannot authorize a move on a replacement bridge. */
+    replace_endpoint();
+    assert(!ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(bridge_client_capture_request_endpoint(&endpoint));
+
+    /* After reboot, the old request is stale and ordinary checks follow Stable. */
+    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, stable);
+    assert(!ota_request_move_to_stable(&endpoint, beta, stable));
+    assert(!ota_request_move_to_stable(&endpoint, stable, "2.8.1"));
+    ota_check_for_update(true);
+    assert(strstr(last_url, "/firmware/version?channel=stable"));
+
+    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.8.0-dev");
+    assert(!ota_request_move_to_stable(&endpoint, "2.8.0-dev", stable));
+    set_running(OTA_TEST_PROJECT, OTA_TEST_SLUG, "2.8.0-alpha.2");
+    setup(OTA_TEST_PROJECT, TARGET_FLASH);
+    assert(ota_request_move_to_stable(&endpoint, "2.8.0-alpha.2", stable));
+    assert(begin_calls == 1 && boot_calls == 1 && restarted == 1);
+}
+
 static void test_install_trigger(void) {
     static char json[96];
     /* Stale request: the device already moved on, so nothing is checked or installed. */
@@ -367,6 +442,7 @@ int main(void) {
     test_busy_install_is_delivered_when_idle();
     test_endpoint_replacement_during_effect();
     test_concurrent_admission_and_status();
+    test_move_to_stable();
 #endif
 #if defined(OTA_TEST_LEGACY_DIAL)
     /* Dial keeps accepting its historical project name. */

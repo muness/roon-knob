@@ -76,6 +76,10 @@ The firmware sends `X-Device-Type` (the device slug) and `?channel=` so a bridge
 
 The bridge may also add `firmware_update` (`{"action":"install","from_version":"<version>"}`) to a controller's `GET /config/<knob_id>` response while an install is pending, and optional device settings keys (`show_ip`, `brightness`, `body_enabled`, `sound_enabled`, `sound_volume`). Absent or invalid values are ignored.
 
+Firmware that understands **Move to Stable** advertises `X-Firmware-Channel-Switch: 1` on playback polls and configuration requests. After an explicit confirmation, a compatible bridge sends `firmware_update` with `action: "move_to_stable"`, `device_id` matching the controller's `knob_id`, `from_version` matching its running version exactly, and `to_version` holding the confirmed Stable version without a leading `v`. The firmware accepts this action only from an Alpha or Beta release with a strictly newer Stable destination. It asks for the same hardware target on the Stable feed, and checks the confirmed version in both the response metadata and the application descriptor before erasing the inactive slot. If the feed advances, the owner must review and confirm the new version.
+
+This request uses the normal OTA boot confirmation and rollback. The installed version selects the channel for later updates. Controllers with older firmware can keep updating in their current channel or install Stable for their hardware over USB. The physical Frame migration test is tracked in [#333](https://github.com/muness/roon-knob/issues/333).
+
 The bridge downloads firmware for the requested channel from GitHub Releases. It does not use the web installer pages as an OTA feed. See the [UHC firmware service](https://github.com/open-horizon-labs/unified-hifi-control/blob/main/src/firmware.rs) for the current server implementation.
 
 ## Troubleshooting

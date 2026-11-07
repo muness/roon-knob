@@ -83,6 +83,11 @@ bool platform_device_settings_apply(const controller_device_settings_t *settings
  * be empty). Any other shape, or a version that does not fit, yields false and an empty string. */
 bool controller_firmware_update_parse(const cJSON *config, char *from_version, size_t capacity);
 
+/* Parse a move addressed to this device, with both version fields present. */
+bool controller_firmware_move_parse(const cJSON *config, const char *device_id,
+                                    char from_version[CONTROLLER_FIRMWARE_VERSION_MAX],
+                                    char to_version[CONTROLLER_FIRMWARE_VERSION_MAX]);
+
 #ifdef __cplusplus
 }
 #endif

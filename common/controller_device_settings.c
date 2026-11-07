@@ -158,18 +158,40 @@ controller_device_settings_status_t controller_device_settings_status(void) {
     return status;
 }
 
-bool controller_firmware_update_parse(const cJSON *config, char *from_version, size_t capacity) {
-    if (from_version && capacity) from_version[0] = '\0';
-    if (!from_version || capacity == 0 || !cJSON_IsObject(config)) return false;
+static const char *firmware_string(const cJSON *request, const char *key) {
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(request, key);
+    return cJSON_IsString(value) ? value->valuestring : NULL;
+}
+
+static const cJSON *firmware_request(const cJSON *config, const char *action) {
+    if (!cJSON_IsObject(config)) return NULL;
     const cJSON *request = cJSON_GetObjectItemCaseSensitive(config, "firmware_update");
-    if (!cJSON_IsObject(request)) return false;
-    const cJSON *action = cJSON_GetObjectItemCaseSensitive(request, "action");
-    const cJSON *from = cJSON_GetObjectItemCaseSensitive(request, "from_version");
-    if (!cJSON_IsString(action) || !action->valuestring || strcmp(action->valuestring, "install") != 0)
-        return false;
-    if (!cJSON_IsString(from) || !from->valuestring) return false;
-    size_t length = strlen(from->valuestring);
-    if (length >= capacity) return false;
-    memcpy(from_version, from->valuestring, length + 1);
+    if (!cJSON_IsObject(request)) return NULL;
+    const char *received_action = firmware_string(request, "action");
+    return received_action && strcmp(received_action, action) == 0 ? request : NULL;
+}
+
+bool controller_firmware_update_parse(const cJSON *config, char *from_version, size_t capacity) {
+    if (!from_version || capacity == 0) return false;
+    from_version[0] = '\0';
+    const cJSON *request = firmware_request(config, "install");
+    const char *from = firmware_string(request, "from_version");
+    if (!from || strlen(from) >= capacity) return false;
+    strcpy(from_version, from);
+    return true;
+}
+
+bool controller_firmware_move_parse(const cJSON *config, const char *device_id,
+                                    char from_version[CONTROLLER_FIRMWARE_VERSION_MAX],
+                                    char to_version[CONTROLLER_FIRMWARE_VERSION_MAX]) {
+    const cJSON *request = firmware_request(config, "move_to_stable");
+    const char *id = firmware_string(request, "device_id");
+    const char *from = firmware_string(request, "from_version");
+    const char *to = firmware_string(request, "to_version");
+    if (!id || !device_id || !device_id[0] || strcmp(id, device_id) != 0 ||
+        !from || !from[0] || strlen(from) >= CONTROLLER_FIRMWARE_VERSION_MAX ||
+        !to || !to[0] || strlen(to) >= CONTROLLER_FIRMWARE_VERSION_MAX) return false;
+    strcpy(from_version, from);
+    strcpy(to_version, to);
     return true;
 }

@@ -17,7 +17,7 @@ extern "C" {
 void bridge_client_start(void);
 /* Immutable transport authority for a deferred system operation. No zone or
  * renderer state: endpoint replacement/reconnect invalidates the token. */
-typedef struct {
+typedef struct bridge_request_endpoint {
     char base[128];
     uint32_t endpoint_generation;
     unsigned network_epoch;

@@ -5,6 +5,7 @@
 #include "platform/platform_task.h"
 #include "os_critical.h"
 
+#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -24,7 +25,7 @@ static ota_info_t s_ota_info;
 static ota_info_t s_published;
 static bridge_request_endpoint_t s_result_endpoint;
 static os_critical_t s_ota_lock = OS_CRITICAL_INITIALIZER;
-typedef enum { OTA_JOB_CHECK, OTA_JOB_UPDATE, OTA_JOB_INSTALL } ota_job_kind_t;
+typedef enum { OTA_JOB_CHECK, OTA_JOB_UPDATE, OTA_JOB_INSTALL, OTA_JOB_MOVE_TO_STABLE } ota_job_kind_t;
 typedef struct {
     ota_job_kind_t kind;
     bridge_request_endpoint_t endpoint;
@@ -104,23 +105,30 @@ static bool ota_image_matches_running(const void *prefix) {
 }
 
 /* The downloaded bytes have to be the release the bridge advertised, newer than what is running,
- * and on the same channel. The version endpoint is metadata about a different request; only the
- * descriptor inside the image says what would actually be flashed. */
+ * and on the requested channel. Only the explicit move job can request Stable from a prerelease.
+ * The version endpoint is metadata about a different request. The descriptor
+ * inside the image says what would actually be flashed. */
 static const char *ota_skip_v(const char *version) {
     return (version[0] == 'v' || version[0] == 'V') ? version + 1 : version;
 }
 
-static bool ota_image_version_acceptable(const void *prefix) {
+static const char *ota_job_channel(const ota_job_t *job) {
+    return job->kind == OTA_JOB_MOVE_TO_STABLE ? "stable" :
+        ota_channel_for_version(ota_get_current_version());
+}
+
+static bool ota_image_version_acceptable(const ota_job_t *job, const void *prefix) {
     esp_app_desc_t app;
     memcpy(&app, (const unsigned char *)prefix + sizeof(esp_image_header_t) +
                      sizeof(esp_image_segment_header_t), sizeof(app));
     if (memchr(app.version, '\0', sizeof(app.version)) == NULL) return false;
     const char *image = ota_skip_v(app.version);
-    const char *advertised = ota_skip_v(s_ota_info.available_version);
+    const char *expected = job->kind == OTA_JOB_MOVE_TO_STABLE ? job->selected_version :
+        ota_skip_v(s_ota_info.available_version);
     const char *running = ota_get_current_version();
-    if (image[0] == '\0' || strcmp(image, advertised) != 0) return false;
+    if (image[0] == '\0' || strcmp(image, expected) != 0) return false;
     if (ota_compare_versions(image, running) <= 0) return false;
-    return strcmp(ota_channel_for_version(image), ota_channel_for_version(running)) == 0;
+    return strcmp(ota_channel_for_version(image), ota_job_channel(job)) == 0;
 }
 
 /* Prerelease builds are published to their own channel. Asking the Stable feed would never
@@ -211,7 +219,7 @@ static void ota_perform_check(const ota_job_t *job) {
 
     snprintf(bridge_url, sizeof(bridge_url), "%s", job->endpoint.base);
     snprintf(url, sizeof(url), "%s/firmware/version?channel=%s", bridge_url,
-             ota_channel_for_version(ota_get_current_version()));
+             ota_job_channel(job));
     ESP_LOGI(TAG, "Checking for updates at %s", url);
 
     esp_http_client_config_t config = {
@@ -236,7 +244,12 @@ static void ota_perform_check(const ota_job_t *job) {
 
     if (status_code == 404) {
         ESP_LOGI(TAG, "No firmware available on server");
-        s_ota_info.status = OTA_STATUS_UP_TO_DATE;
+        if (job->kind == OTA_JOB_MOVE_TO_STABLE) {
+            s_ota_info.status = OTA_STATUS_ERROR;
+            snprintf(s_ota_info.error_msg, sizeof(s_ota_info.error_msg), "Confirmed Stable version unavailable");
+        } else {
+            s_ota_info.status = OTA_STATUS_UP_TO_DATE;
+        }
         esp_http_client_cleanup(client);
         return;
     }
@@ -284,6 +297,13 @@ static void ota_perform_check(const ota_job_t *job) {
     memcpy(s_ota_info.available_version, ver_start, ver_len);
     s_ota_info.available_version[ver_len] = '\0';
 
+    if (job->kind == OTA_JOB_MOVE_TO_STABLE &&
+        strcmp(ota_skip_v(s_ota_info.available_version), job->selected_version) != 0) {
+        s_ota_info.status = OTA_STATUS_ERROR;
+        snprintf(s_ota_info.error_msg, sizeof(s_ota_info.error_msg), "Confirmed Stable version unavailable");
+        return;
+    }
+
     // Extract size (optional)
     char *size_start = strstr(response, "\"size\"");
     if (size_start) {
@@ -322,7 +342,7 @@ static void ota_perform_update(const ota_job_t *job) {
 
     snprintf(bridge_url, sizeof(bridge_url), "%s", job->endpoint.base);
     snprintf(url, sizeof(url), "%s/firmware/download?channel=%s", bridge_url,
-             ota_channel_for_version(ota_get_current_version()));
+             ota_job_channel(job));
     ESP_LOGI(TAG, "Downloading firmware from %s", url);
 
     // Get the next OTA partition
@@ -390,7 +410,7 @@ static void ota_perform_update(const ota_job_t *job) {
         strncpy(s_ota_info.error_msg, "Firmware target mismatch", sizeof(s_ota_info.error_msg));
         return;
     }
-    if (!ota_image_version_acceptable(buf)) {
+    if (!ota_image_version_acceptable(job, buf)) {
         free(buf);
         esp_http_client_cleanup(client);
         s_ota_info.status = OTA_STATUS_ERROR;
@@ -549,27 +569,39 @@ static void ota_worker(void *arg) {
     platform_task_finish();
 }
 
+static bool is_install(ota_job_kind_t kind) {
+    return kind == OTA_JOB_INSTALL || kind == OTA_JOB_MOVE_TO_STABLE;
+}
+
 static bool same_install(const ota_job_t *a, const ota_job_t *b) {
-    return a->kind == OTA_JOB_INSTALL && b->kind == OTA_JOB_INSTALL &&
+    return is_install(a->kind) && a->kind == b->kind &&
+        !strcmp(a->selected_version, b->selected_version) &&
         a->endpoint.endpoint_generation == b->endpoint.endpoint_generation &&
         a->endpoint.network_epoch == b->endpoint.network_epoch &&
         !strcmp(a->endpoint.base, b->endpoint.base) && !strcmp(a->from_version, b->from_version);
 }
 
-static ota_request_result_t ota_submit(ota_job_kind_t kind, const char *from) {
+static ota_request_result_t ota_submit(ota_job_kind_t kind, const char *from,
+                                       const char *selected, const bridge_request_endpoint_t *origin) {
     ota_job_t job = {.kind = kind};
     size_t n = from ? strlen(from) : 0;
     if (n >= sizeof(job.from_version) || (n && strcmp(from, ota_get_current_version())))
         return OTA_REQUEST_STALE;
     if (from) memcpy(job.from_version, from, n + 1);
-    if (!bridge_client_capture_request_endpoint(&job.endpoint)) return OTA_REQUEST_STALE;
+    if (selected) snprintf(job.selected_version, sizeof(job.selected_version), "%s", selected);
+    if (origin) {
+        if (!bridge_client_request_endpoint_current(origin)) return OTA_REQUEST_STALE;
+        job.endpoint = *origin;
+    } else if (!bridge_client_capture_request_endpoint(&job.endpoint)) {
+        return OTA_REQUEST_STALE;
+    }
     os_critical_enter(&s_ota_lock);
     if (s_ota_busy) {
         ota_request_result_t result = OTA_REQUEST_BUSY;
         if (same_install(&job, &s_active_job) ||
             (s_have_pending && same_install(&job, &s_pending_job))) {
             result = OTA_REQUEST_COALESCED;
-        } else if (kind == OTA_JOB_INSTALL && s_active_job.kind == OTA_JOB_CHECK && !s_have_pending) {
+        } else if (is_install(kind) && s_active_job.kind == OTA_JOB_CHECK && !s_have_pending) {
             /* A check returns to this worker. An install/update may reboot,
              * so never accept distinct work behind a flash operation. */
             s_pending_job = job; s_have_pending = true; result = OTA_REQUEST_ACCEPTED;
@@ -636,16 +668,55 @@ void ota_init(void) {
 void ota_check_for_update(bool force) {
     const char *current = ota_get_current_version();
     if (!force && (strstr(current, "-dev") || strstr(current, "-beta") || strstr(current, "-alpha"))) return;
-    (void)ota_submit(OTA_JOB_CHECK, NULL);
+    (void)ota_submit(OTA_JOB_CHECK, NULL, NULL, NULL);
 }
 
-void ota_start_update(void) { (void)ota_submit(OTA_JOB_UPDATE, NULL); }
+void ota_start_update(void) { (void)ota_submit(OTA_JOB_UPDATE, NULL, NULL, NULL); }
 
 ota_request_result_t ota_request_install_result(const char *from_version) {
-    return ota_submit(OTA_JOB_INSTALL, from_version);
+    return ota_submit(OTA_JOB_INSTALL, from_version, NULL, NULL);
 }
 bool ota_request_install(const char *from_version) {
     ota_request_result_t result = ota_request_install_result(from_version);
+    return result == OTA_REQUEST_ACCEPTED || result == OTA_REQUEST_COALESCED;
+}
+
+/* Switch consent uses the published version grammar. Bound numeric fields to
+ * the int range before using the existing OTA version comparison. */
+static bool ota_version_number(const char **version) {
+    const char *start = *version;
+    if (*start < '0' || *start > '9') return false;
+    char *end;
+    unsigned long number = strtoul(start, &end, 10);
+    if (number > INT_MAX || (*start == '0' && end != start + 1)) return false;
+    *version = end;
+    return true;
+}
+
+static bool ota_published_version(const char *version, bool prerelease) {
+    for (unsigned part = 0; part < 3; ++part) {
+        if (!ota_version_number(&version)) return false;
+        if (part < 2) {
+            if (*version != '.') return false;
+            ++version;
+        }
+    }
+    if (!prerelease) return *version == '\0';
+    if (strncmp(version, "-alpha.", 7) == 0) version += 7;
+    else if (strncmp(version, "-beta.", 6) == 0) version += 6;
+    else return false;
+    return ota_version_number(&version) && *version == '\0';
+}
+
+bool ota_request_move_to_stable(const bridge_request_endpoint_t *origin,
+                                const char *from_version, const char *to_version) {
+    if (!origin || !from_version || !to_version ||
+        strlen(to_version) >= sizeof(s_ota_info.available_version) ||
+        strcmp(from_version, ota_get_current_version()) != 0 ||
+        !ota_published_version(ota_skip_v(from_version), true) ||
+        !ota_published_version(to_version, false) ||
+        ota_compare_versions(to_version, from_version) <= 0) return false;
+    ota_request_result_t result = ota_submit(OTA_JOB_MOVE_TO_STABLE, from_version, to_version, origin);
     return result == OTA_REQUEST_ACCEPTED || result == OTA_REQUEST_COALESCED;
 }
 

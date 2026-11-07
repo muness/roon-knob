@@ -15,7 +15,7 @@ static struct {
     int status, read_error, write_limit, writes, closed, cleaned, callback_count;
     bool complete, no_psram, no_memory, fail_grow, init_failure, open_failure;
     int internal_allocations, psram_allocations, method;
-    char id[32], version[32], device[32], connection[32], accept_encoding[32], sent[128];
+    char id[32], version[32], device[32], connection[32], accept_encoding[32], channel_switch[32], sent[128];
     size_t sent_len;
 } fixture;
 
@@ -40,6 +40,7 @@ int esp_http_client_set_header(void *client, const char *name, const char *value
     if (!strcmp(name, "X-Device-Type")) dest = fixture.device;
     if (!strcmp(name, "Connection")) dest = fixture.connection;
     if (!strcmp(name, "Accept-Encoding")) dest = fixture.accept_encoding;
+    if (!strcmp(name, "X-Firmware-Channel-Switch")) dest = fixture.channel_switch;
     if (dest) snprintf(dest, 32, "%s", value);
     return 0;
 }
@@ -156,6 +157,11 @@ static void test_limits(void) {
     reset("abcde", 5, INT64_MAX); expect_result(-1);
     reset("", 0, 0);
     assert(!platform_http_get("x", &out, &n) && !n); free(out);
+    assert(!fixture.channel_switch[0]);
+    reset("{}", 2, 2);
+    assert(!platform_http_get_controller("http://bridge/config/001122334455", &out, &n));
+    assert(!strcmp(fixture.channel_switch, "1") && n == 2); free(out);
+    reset("", 0, 0);
     fixture.status = 204;
     assert(!platform_http_post_json("x", "{}", &out, &n) && !n); free(out);
     reset("ok", 2, 2); fixture.status = 206;
