@@ -12,6 +12,8 @@ typedef int (*platform_http_stream_callback_t)(const void *data, size_t len,
                                                void *ctx);
 
 int platform_http_get(const char *url, char **out, size_t *out_len);
+/* Controller config and playback polling advertise support for explicit Stable OTA moves. */
+int platform_http_get_controller(const char *url, char **out, size_t *out_len);
 /* Fetches a complete 2xx response with a hard ceiling. ESP targets prefer
  * PSRAM; targets without PSRAM may enable internal RAM fallback. Adaptive-screen callers
  * should select the smallest limit their schema permits. */

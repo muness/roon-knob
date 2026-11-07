@@ -1107,7 +1107,7 @@ static bool fetch_now_playing_snapshot(struct now_playing_state *state,
         strcmp(request.zone, zone_id)) return response_failed(RESPONSE_STALE);
     char *resp = NULL;
     size_t resp_len = 0;
-    int ret = platform_http_get(url, &resp, &resp_len);
+    int ret = platform_http_get_controller(url, &resp, &resp_len);
     if (!response_context_current(&request)) {
         platform_http_free(resp); return response_failed(RESPONSE_STALE);
     }
@@ -2492,9 +2492,13 @@ static bool fetch_knob_config(void) {
     snprintf(url, sizeof(url), "%s/config/%s", bridge_base, knob_id);
     LOGI("Fetching config from %s", url);
 
+    /* Bind a switch to the bridge that supplied the request, even across reconnects. */
+    bridge_request_endpoint_t origin;
+    bool captured_origin = bridge_client_capture_request_endpoint(&origin) &&
+        origin.endpoint_generation == token.generation && strcmp(origin.base, bridge_base) == 0;
     char *resp = NULL;
     size_t resp_len = 0;
-    if (platform_http_get(url, &resp, &resp_len) != 0 || !resp) {
+    if (platform_http_get_controller(url, &resp, &resp_len) != 0 || !resp) {
         LOGW("fetch_knob_config: HTTP request failed");
         platform_http_free(resp);
         return false;
@@ -2512,12 +2516,16 @@ static bool fetch_knob_config(void) {
      * object. They never fail the preference parse; they are acted on only after it commits. */
     controller_device_settings_t device_settings = {0};
     char install_from[CONTROLLER_FIRMWARE_VERSION_MAX] = {0};
+    char switch_to[CONTROLLER_FIRMWARE_VERSION_MAX] = {0};
     bool install_requested = false;
+    bool switch_requested = false;
     if (parsed) {
         cJSON *config = cJSON_GetObjectItemCaseSensitive(root, "config");
         controller_device_settings_parse(config, &device_settings);
         install_requested = controller_firmware_update_parse(config, install_from,
                                                              sizeof(install_from));
+        switch_requested = captured_origin &&
+            controller_firmware_move_parse(config, knob_id, install_from, switch_to);
     }
     cJSON_Delete(root);
     if (!parsed) {
@@ -2538,7 +2546,11 @@ static bool fetch_knob_config(void) {
     }
     apply_knob_config(&committed.value);
     controller_device_settings_submit(&device_settings, token.generation);
-    if (install_requested) {
+    if (switch_requested) {
+        bool started = ota_request_move_to_stable(&origin, install_from, switch_to);
+        LOGI("Bridge requested Stable move from '%s' to '%s': %s", install_from, switch_to,
+             started ? "started" : "ignored");
+    } else if (install_requested) {
         bool started = ota_request_install(install_from);
         LOGI("Bridge requested firmware install from '%s': %s", install_from,
              started ? "started" : "ignored");
