@@ -1,5 +1,9 @@
 # HiPhi v{{VERSION}}
 
+## v2.8.3 — Frame panel power recovery
+
+Frame now reports whether its display power check failed because of the I²C bus, the power controller, or a rail setting. It retries recoverable bus faults and records whether artwork, a settings change, or a retry triggered each refresh. If both I²C lines stay low, Display status shows how to power cycle the Frame.
+
 ## v2.8.2: choose your Frame artwork layout
 
 Frame Settings now offers **Full cover**, which centers the complete artwork on a near-white mat, and **Fill panel**, which crops around the subject to fill the artwork area. Fill panel remains the default. The choice persists across reboot and recomposes the current album when changed. The metadata strip, measured-palette renderer and high-quality resizer are retained.

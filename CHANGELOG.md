@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.8.3 — 2026-11-07
+
+- Frame reports the cause of failed panel power checks, retries recoverable I²C bus faults, and records what triggered each refresh (#332).
+
 ## 2.8.2 — 2026-10-31
 
 - Frame Settings now offers Full cover (complete artwork with margins) and Fill panel (subject-aware cropping). The choice persists across reboot and recomposes the current album; Fill panel preserves the existing default (#324).
