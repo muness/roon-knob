@@ -8,7 +8,7 @@ static bool power_ok=true,busy_high=true,spi_fail,no_ack;
 static int acknowledge_ticks;
 static unsigned refresh_commands;
 static uint64_t tick;
-bool pmic_ensure_panel_power(void){return power_ok;}
+const char *pmic_verify_panel_power(void){return power_ok?NULL:"I2C SCL and SDA held low";}
 int gpio_set_level(int p,int v){return 0;}
 int gpio_get_level(int p){return busy_high;}
 int gpio_config(const gpio_config_t*c){return 0;}
@@ -21,14 +21,15 @@ void *heap_caps_malloc(size_t n,int cap){return malloc(n);}
 void heap_caps_free(void*p){free(p);}const char *esp_err_to_name(int e){return "error";}
 int main(void){
  assert(eink_display_init());
- frame_display_health_attempt("first",0);assert(eink_display_refresh());frame_display_health_complete(20000);
+ frame_display_health_attempt("first","artwork",0);assert(eink_display_refresh());frame_display_health_complete(20000);
  frame_display_health_t h;frame_display_health_snapshot(&h);assert(h.completed==1&&!strcmp(h.displayed,"first"));
  unsigned commands=refresh_commands;
- frame_display_health_attempt("stuck",20001);busy_high=false;assert(!eink_display_refresh());frame_display_health_complete(60000);
+ frame_display_health_attempt("stuck","artwork",20001);busy_high=false;assert(!eink_display_refresh());frame_display_health_complete(60000);
  frame_display_health_snapshot(&h);assert(h.completed==1&&!strcmp(h.displayed,"first")&&strstr(h.error,"BUSY"));assert(commands==refresh_commands);
- busy_high=true;power_ok=false;frame_display_health_attempt("unpowered",60001);assert(!eink_display_refresh());frame_display_health_snapshot(&h);assert(!h.power_verified&&strstr(h.error,"rail"));assert(commands==refresh_commands);
- power_ok=true;spi_fail=true;frame_display_health_attempt("spi",60002);assert(!eink_display_refresh());frame_display_health_snapshot(&h);assert(strstr(h.error,"SPI"));assert(h.completed==1);
- spi_fail=false;no_ack=true;frame_display_health_attempt("no-ack",65000);assert(!eink_display_refresh());frame_display_health_complete(66000);frame_display_health_snapshot(&h);assert(h.completed==1&&strstr(h.error,"assert BUSY"));
- no_ack=false;frame_display_health_attempt("recovered",70000);assert(eink_display_refresh());frame_display_health_complete(90000);frame_display_health_snapshot(&h);assert(h.completed==2&&!strcmp(h.displayed,"recovered")&&!h.error[0]);
+ busy_high=true;power_ok=false;frame_display_health_attempt("unpowered","artwork",60001);assert(!eink_display_refresh());frame_display_health_snapshot(&h);assert(!h.power_verified&&strstr(h.error,"rail"));
+ assert(!strcmp(h.phase,"panel_power")&&!strcmp(h.power_error,"I2C SCL and SDA held low"));assert(commands==refresh_commands);
+ power_ok=true;spi_fail=true;frame_display_health_attempt("spi","artwork",60002);assert(!eink_display_refresh());frame_display_health_snapshot(&h);assert(strstr(h.error,"SPI")&&h.power_verified&&!h.power_error[0]);assert(h.completed==1);
+ spi_fail=false;no_ack=true;frame_display_health_attempt("no-ack","artwork",65000);assert(!eink_display_refresh());frame_display_health_complete(66000);frame_display_health_snapshot(&h);assert(h.completed==1&&strstr(h.error,"assert BUSY"));
+ no_ack=false;frame_display_health_attempt("recovered","artwork",70000);assert(eink_display_refresh());frame_display_health_complete(90000);frame_display_health_snapshot(&h);assert(h.completed==2&&!strcmp(h.displayed,"recovered")&&!h.error[0]);
  free(s_fb);puts("display_failure_test: ok");
 }

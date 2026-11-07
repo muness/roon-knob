@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FRAME_HEADERS = ['driver/gpio.h', 'driver/i2c_master.h', 'driver/spi_master.h',
-                 'freertos/FreeRTOS.h', 'freertos/task.h', 'esp_log.h',
+                 'freertos/FreeRTOS.h', 'freertos/task.h', 'freertos/semphr.h', 'esp_log.h',
                  'esp_heap_caps.h', 'esp_rom_sys.h', 'esp_timer.h']
 CRASH_HEADERS = ['esp_idf_version.h', 'sdkconfig.h', 'nvs.h', 'esp_system.h', 'esp_app_desc.h',
                  'esp_core_dump.h', 'esp_partition.h']
@@ -58,6 +58,8 @@ with tempfile.TemporaryDirectory(prefix='hiphi-frame-check-') as directory:
     health = json.loads(report)
     assert health['displayed'] == 'art:12345678:1' and health['attempted'] == 'art:87654321:2'
     assert health['error'] == 'panel BUSY timeout' and health['completed'] == 1
+    assert health['power_error'] == '' and health['trigger'] == 'artwork'
+    assert b'power_help' in page
     if output := os.environ.get('FRAME_HEALTH_PREVIEW_DIR'):
         destination = pathlib.Path(output)
         destination.mkdir(parents=True, exist_ok=True)

@@ -152,16 +152,22 @@ static bool panel_turn_on(void) {
     return true;
 }
 
-bool eink_display_init_panel(void) {
-    frame_display_health_phase("panel_init");
-    s_transport_ok = true;
-    bool power = pmic_ensure_panel_power();
-    frame_display_health_power(power);
-    if (!power) {
+static bool verify_panel_power(void) {
+    frame_display_health_phase("panel_power");
+    const char *error = pmic_verify_panel_power();
+    frame_display_health_power(error);
+    if (error) {
         frame_display_health_fail("PMIC/panel rail verification failed");
         s_in_deep_sleep = true;
         return false;
     }
+    return true;
+}
+
+bool eink_display_init_panel(void) {
+    s_transport_ok = true;
+    if (!verify_panel_power()) return false;
+    frame_display_health_phase("panel_init");
     panel_reset();
     if (!wait_busy()) return false;
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -337,21 +343,14 @@ static void fb_rotate_180(uint8_t *buf) {
 bool eink_display_refresh(void) {
     if (!s_fb) { frame_display_health_fail("framebuffer unavailable"); return false; }
     s_transport_ok = true;
-    bool power = pmic_ensure_panel_power();
-    frame_display_health_power(power);
-    if (!power) {
-        s_in_deep_sleep = true;
-        frame_display_health_fail("PMIC/panel rail verification failed");
-        return false;
-    }
-    ESP_LOGI(TAG, "Refreshing e-ink display...");
-
-    // Wake panel from deep sleep — requires hardware reset + full re-init
     if (s_in_deep_sleep) {
         ESP_LOGI(TAG, "Waking panel from deep sleep...");
         if (!eink_display_init_panel()) return false;
+    } else if (!verify_panel_power()) {
+        return false;
     }
 
+    ESP_LOGI(TAG, "Refreshing e-ink display...");
     frame_display_health_phase("transfer");
     // Rotate 180 into a temp buffer so set_pixel coordinates stay normal
     uint8_t *rotated = heap_caps_malloc(EINK_FB_SIZE, MALLOC_CAP_SPIRAM);

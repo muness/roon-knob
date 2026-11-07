@@ -226,9 +226,9 @@ static void draw_bridge_icon(uint16_t x, uint16_t y, uint8_t color) {
 
 // ── Full screen render ──────────────────────────────────────────────────────
 
-static bool render_full_screen(void) {
-    frame_display_health_attempt(s_ui.image_key, platform_millis());
-    ESP_LOGI(TAG, "Rendering full screen...");
+static bool render_full_screen(const char *trigger) {
+    frame_display_health_attempt(s_ui.image_key, trigger, platform_millis());
+    ESP_LOGI(TAG, "Rendering full screen (%s)", trigger);
 
     // ── Artwork (centered, flush to top) ─────────────────────────────────
     if (s_ui.art_dirty && s_ui.image_key[0]) {
@@ -560,7 +560,11 @@ void eink_ui_process(void) {
         return;
     }
 
-    if (render_full_screen()) {
+    const char *trigger = "settings";
+    if (s_ui.art_retry_after) trigger = "retry";
+    else if (artwork_changed) trigger = "artwork";
+
+    if (render_full_screen(trigger)) {
         s_ui.dirty = false;
         s_ui.display_pref_dirty = false;
         s_ui.art_retry_after = 0;
