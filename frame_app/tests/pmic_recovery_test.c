@@ -5,7 +5,8 @@
 #include "../main/pmic_axp2101.c"
 static uint8_t regs[256];
 static bool stuck_scl, stuck_sda, missing, bad_readback;
-static int writes, pulses, fail_reg = -1;
+static int writes, pulses, resets, fail_reg = -1;
+static bool recover_after_reset, reset_failed;
 static int scl_mode, sda_mode;
 static bool scl_gpio, sda_gpio;
 int gpio_set_level(int p,int v){if(p==48&&v)pulses++;return 0;}
@@ -19,9 +20,18 @@ int gpio_set_direction(int p,int m){if(p==48)scl_mode=m;else sda_mode=m;return 0
 void esp_rom_delay_us(int n){}void vTaskDelay(int n){}
 int i2c_new_master_bus(const i2c_master_bus_config_t*c,void**b){*b=(void*)1;return 0;}
 int i2c_master_bus_add_device(void*b,const i2c_device_config_t*c,void**d){*d=(void*)2;return 0;}
+SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *lock) {*lock = 0; return lock;}
+int xSemaphoreTake(SemaphoreHandle_t lock, int wait) {assert(*lock == 0); *lock = 1; return 1;}
+int xSemaphoreGive(SemaphoreHandle_t lock) {assert(*lock == 1); *lock = 0; return 1;}
+int i2c_master_bus_reset(void *bus) {
+    assert(*s_bus_lock == 1);
+    resets++;
+    if (recover_after_reset) missing = false;
+    return reset_failed ? ESP_FAIL : ESP_OK;
+}
 int i2c_master_transmit_receive(void*d,const uint8_t*r,size_t nr,uint8_t*v,size_t n,int t){if(missing)return -1;*v=regs[*r];if(bad_readback&&*r==0x94)*v=0;return 0;}
 int i2c_master_transmit(void*d,const uint8_t*b,size_t n,int t){writes++;if(b[0]==fail_reg)return -1;regs[b[0]]=b[1];return 0;}
-static void reset(void){memset(regs,0,sizeof(regs));missing=stuck_scl=stuck_sda=bad_readback=false;writes=pulses=0;fail_reg=-1;s_initialized=false;s_bus=NULL;s_dev=NULL;scl_mode=sda_mode=0;scl_gpio=sda_gpio=false;}
+static void reset(void){memset(regs,0,sizeof(regs));missing=stuck_scl=stuck_sda=bad_readback=false;writes=pulses=resets=0;recover_after_reset=reset_failed=false;fail_reg=-1;s_initialized=false;s_bus=NULL;s_dev=NULL;scl_mode=sda_mode=0;scl_gpio=sda_gpio=false;}
 int main(void){
  reset();assert(pmic_init());assert((regs[0x90]&15)==15);assert(pulses>=9);
  reset();fail_reg=0x94;assert(!pmic_init());assert(pmic_power_source()==PMIC_POWER_SOURCE_UNKNOWN);
@@ -29,5 +39,15 @@ int main(void){
  reset();stuck_scl=true;assert(!pmic_init());assert(writes==0);
  reset();stuck_sda=true;assert(!pmic_init());assert(writes==0);
  reset();missing=true;assert(!pmic_init());assert(writes==0);
+ reset();stuck_scl=stuck_sda=true;assert(!pmic_init());
+ assert(!strcmp(pmic_verify_panel_power(),"I2C SCL and SDA held low")&&resets==0&&writes==0);
+ reset();assert(pmic_init());
+ missing=true;recover_after_reset=true;
+ assert(pmic_verify_panel_power()==NULL&&resets==1);
+ missing=true;recover_after_reset=false;reset_failed=true;
+ assert(!strcmp(pmic_verify_panel_power(),"I2C controller could not clear the bus")&&resets==2);
+ assert(pmic_power_source()==PMIC_POWER_SOURCE_UNKNOWN);
+ reset_failed=false;
+ assert(!strcmp(pmic_verify_panel_power(),"AXP2101 did not respond")&&resets==3);
  puts("pmic_recovery_test: ok");
 }

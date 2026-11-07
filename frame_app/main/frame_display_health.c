@@ -5,9 +5,10 @@
 #include <string.h>
 static os_critical_t lock = OS_CRITICAL_INITIALIZER;
 static frame_display_health_t state;
-void frame_display_health_attempt(const char *key, uint64_t now) {
+void frame_display_health_attempt(const char *key, const char *trigger, uint64_t now) {
     os_critical_enter(&lock);
     snprintf(state.attempted, sizeof(state.attempted), "%s", key ? key : "");
+    snprintf(state.trigger, sizeof(state.trigger), "%s", trigger);
     snprintf(state.phase, sizeof(state.phase), "download");
     state.error[0] = 0; state.busy = true; state.started_ms = now; state.attempts++;
     os_critical_leave(&lock);
@@ -22,8 +23,11 @@ void frame_display_health_phase(const char *phase) {
     snprintf(state.phase, sizeof(state.phase), "%s", phase);
     os_critical_leave(&lock);
 }
-void frame_display_health_power(bool verified) {
-    os_critical_enter(&lock); state.power_verified = verified; os_critical_leave(&lock);
+void frame_display_health_power(const char *error) {
+    os_critical_enter(&lock);
+    state.power_verified = error == NULL;
+    snprintf(state.power_error, sizeof(state.power_error), "%s", error ? error : "");
+    os_critical_leave(&lock);
 }
 void frame_display_health_fail(const char *error) {
     os_critical_enter(&lock);

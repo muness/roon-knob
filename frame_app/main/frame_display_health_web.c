@@ -19,8 +19,10 @@ static esp_err_t display_health_handler(httpd_req_t *req) {
     cJSON_AddStringToObject(root, "downloaded", h.downloaded);
     cJSON_AddStringToObject(root, "displayed", h.displayed);
     cJSON_AddStringToObject(root, "phase", h.phase);
+    cJSON_AddStringToObject(root, "trigger", h.trigger);
     cJSON_AddStringToObject(root, "error", h.error);
     cJSON_AddBoolToObject(root, "power_verified", h.power_verified);
+    cJSON_AddStringToObject(root, "power_error", h.power_error);
     cJSON_AddBoolToObject(root, "busy", h.busy);
     cJSON_AddNumberToObject(root, "attempts", h.attempts);
     cJSON_AddNumberToObject(root, "completed", h.completed);
@@ -44,10 +46,13 @@ static esp_err_t display_health_handler(httpd_req_t *req) {
     "<h1>Display status</h1><p id='status' role='status' aria-live='polite'>Checking display...</p>"
     "<p>Downloading artwork and completing a panel refresh are separate steps. These records cover this boot.</p>"
     "<table><tbody><tr><th scope='row'>Panel rail settings</th><td id='power'></td></tr>"
+    "<tr><th scope='row'>Refresh trigger</th><td id='trigger'></td></tr>"
     "<tr><th scope='row'>Refresh phase</th><td id='phase'></td></tr>"
     "<tr><th scope='row'>Last completed refresh</th><td id='completed'></td></tr>"
     "<tr><th scope='row'>Refresh duration</th><td id='duration'></td></tr>"
+    "<tr><th scope='row'>Panel power check</th><td id='power_error'></td></tr>"
     "<tr><th scope='row'>Failure</th><td id='error'></td></tr></tbody></table>"
+    "<p id='power_help' hidden>If the power check keeps failing, unplug USB, hold PWR for five seconds, then reconnect USB and tap PWR if needed.</p>"
     "<details><summary>Artwork identities</summary><p>Requested: <code id='attempted'></code></p>"
     "<p>Downloaded: <code id='downloaded'></code></p><p>Last refreshed: <code id='displayed'></code></p></details>"
     "<p><a href='/display-health?format=json'>Export display report</a></p>"
@@ -58,7 +63,8 @@ static esp_err_t display_health_handler(httpd_req_t *req) {
     "put('power',h.power_verified?'Verified in PMIC':'Not verified');put('phase',h.phase||'Not started');"
     "put('completed',h.completed?h.completed+' completed; last at '+Math.round(h.last_completed_uptime_ms/1000)+' seconds after boot':'None this boot');"
     "put('duration',h.completed?(h.duration_ms/1000).toFixed(1)+' seconds':'Not available');"
-    "for(const id of ['error','attempted','downloaded','displayed'])put(id,h[id]||'None');"
+    "for(const id of ['error','power_error','trigger','attempted','downloaded','displayed'])put(id,h[id]||'None');"
+    "document.getElementById('power_help').hidden=!h.power_error;"
     "}catch(e){document.getElementById('status').textContent='Device unavailable. Check its connection and reload.';}finally{pending=false;}}"
     "refresh();setInterval(refresh,5000);</script>");
   httpd_resp_sendstr_chunk(req, portal_brand_footer_html());

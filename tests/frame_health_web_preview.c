@@ -13,7 +13,7 @@ int httpd_resp_set_type(httpd_req_t*r,const char*s){return 0;}
 int httpd_resp_set_hdr(httpd_req_t*r,const char*a,const char*b){return 0;}
 int httpd_register_uri_handler(void*s,const httpd_uri_t*r){return 0;}
 int main(int argc,char**argv){
- frame_display_health_attempt("art:12345678:1",2000);frame_display_health_downloaded("art:12345678:1");frame_display_health_power(true);frame_display_health_complete(22000);
- frame_display_health_attempt("art:87654321:2",24000);frame_display_health_phase("refresh");frame_display_health_fail("panel BUSY timeout");
+ frame_display_health_attempt("art:12345678:1","artwork",2000);frame_display_health_downloaded("art:12345678:1");frame_display_health_power(NULL);frame_display_health_complete(22000);
+ frame_display_health_attempt("art:87654321:2","artwork",24000);frame_display_health_phase("refresh");frame_display_health_fail("panel BUSY timeout");
  httpd_req_t r={stdout,argc>1&&!strcmp(argv[1],"json")};return display_health_handler(&r);
 }

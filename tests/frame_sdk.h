@@ -37,6 +37,7 @@ typedef struct {int miso_io_num,mosi_io_num,sclk_io_num,quadwp_io_num,quadhd_io_
 typedef struct {int spics_io_num,clock_speed_hz,mode,queue_size,flags;} spi_device_interface_config_t;
 typedef struct {int length;const void *tx_buffer;} spi_transaction_t;
 int i2c_new_master_bus(const i2c_master_bus_config_t*,void**);
+int i2c_master_bus_reset(void *);
 int i2c_master_bus_add_device(void*,const i2c_device_config_t*,void**);
 int i2c_master_transmit_receive(void*,const uint8_t*,size_t,uint8_t*,size_t,int);
 int i2c_master_transmit(void*,const uint8_t*,size_t,int);
@@ -45,3 +46,10 @@ void esp_rom_delay_us(int);void vTaskDelay(int);int64_t esp_timer_get_time(void)
 int spi_bus_initialize(int,const spi_bus_config_t*,int);int spi_bus_add_device(int,const spi_device_interface_config_t*,void**);int spi_device_polling_transmit(void*,spi_transaction_t*);
 void *heap_caps_calloc(size_t,size_t,int);void *heap_caps_malloc(size_t,int);void heap_caps_free(void*);
 const char *esp_err_to_name(int);
+
+typedef int StaticSemaphore_t;
+typedef StaticSemaphore_t *SemaphoreHandle_t;
+#define portMAX_DELAY 0
+SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *);
+int xSemaphoreTake(SemaphoreHandle_t, int);
+int xSemaphoreGive(SemaphoreHandle_t);
