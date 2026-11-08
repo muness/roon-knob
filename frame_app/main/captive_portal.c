@@ -37,6 +37,7 @@
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <esp_system.h>
+#include <nvs.h>
 #include <stdlib.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -1285,8 +1286,30 @@ static esp_err_t sta_ble_shortcuts_handler(httpd_req_t *req) {
   return send_ble_json(req, root);
 }
 
+/* Button names are local to this controller, like the input history. The
+ * bridge continues to identify assignments by the stable Consumer usage. */
+#define BLE_BUTTON_NAME_BYTES 97
+
+static const char *ble_button_standard_label(uint16_t usage) {
+  return usage == 0x0043 ? "Down arrow" : NULL;
+}
+
+static bool ble_button_custom_name(uint16_t usage, char *name, bool save) {
+  char key[12];
+  snprintf(key, sizeof(key), "usage_%04x", (unsigned)usage);
+  nvs_handle_t handle;
+  if (nvs_open("ble_btn_names", save ? NVS_READWRITE : NVS_READONLY, &handle) != ESP_OK)
+    return false;
+  size_t size = BLE_BUTTON_NAME_BYTES;
+  esp_err_t result = save ? nvs_set_str(handle, key, name) :
+                           nvs_get_str(handle, key, name, &size);
+  if (save && result == ESP_OK) result = nvs_commit(handle);
+  nvs_close(handle);
+  return result == ESP_OK;
+}
+
 static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
-  char type[32], body[160];
+  char type[32], body[768];
   if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
       strcmp(type, "application/json") != 0 || req->content_len >= sizeof(body)) {
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected a small JSON request");
@@ -1311,6 +1334,7 @@ static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
     const cJSON *at = cJSON_GetObjectItemCaseSensitive(request, "at");
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(request, "shortcut");
     const cJSON *key = cJSON_GetObjectItemCaseSensitive(request, "usage");
+    const cJSON *name = cJSON_GetObjectItemCaseSensitive(request, "name");
     rk_ble_hid_host_status_t status;
     if (cJSON_IsNumber(at) && at->valuedouble >= 0 && at->valuedouble <= UINT32_MAX &&
         cJSON_IsNumber(key) && key->valuedouble >= 1 && key->valuedouble <= UINT16_MAX &&
@@ -1323,7 +1347,23 @@ static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
             at->valuedouble != report->time_ms || now - report->time_ms > 120000) continue;
         const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
         if (key->valuedouble != usage) continue;
+        char button[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+        char custom[BLE_BUTTON_NAME_BYTES] = "";
+        if (name) {
+          if (!cJSON_IsString(name) || !name->valuestring[0] ||
+              strlen(name->valuestring) >= sizeof(custom) ||
+              ble_button_standard_label(usage) ||
+              !controller_shortcut_key_name(usage, button, sizeof(button)) ||
+              strncmp(button, "usage_", 6) != 0) {
+            error = "Choose a shorter name for this button.";
+            break;
+          }
+          snprintf(custom, sizeof(custom), "%s", name->valuestring);
+        }
         error = bridge_client_assign_shortcut(usage, id->valuestring);
+        if (!error && custom[0] && !ble_button_custom_name(usage, custom, true)) {
+          cJSON_AddStringToObject(root, "notice", "Assignment saved. The button name couldn’t be saved.");
+        }
         break;
       }
     }
@@ -1368,7 +1408,14 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
       char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
       if (controller_shortcut_key_name(usage, key, sizeof(key))) {
         cJSON_AddNumberToObject(input, "usage", usage);
-        if (usage == 0x0043) cJSON_AddStringToObject(input, "label", "Down arrow");
+        const char *label = ble_button_standard_label(usage);
+        char custom[BLE_BUTTON_NAME_BYTES];
+        if (label) cJSON_AddStringToObject(input, "label", label);
+        else if (strncmp(key, "usage_", 6) == 0) {
+          cJSON_AddBoolToObject(input, "canName", true);
+          if (ble_button_custom_name(usage, custom, false))
+            cJSON_AddStringToObject(input, "label", custom);
+        }
         cJSON_AddStringToObject(input, "key", key);
         cJSON_AddBoolToObject(input, "assignable",
             controller_shortcut_key_class(usage) == CONTROLLER_SHORTCUT_KEY_FREE);
@@ -1612,6 +1659,8 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "<p id='button-assign-status' role='status'>Choose a spare remote button to play a saved Library shortcut.</p>"
       "<button id='button-assign-start' type='button'>Learn a button</button>"
       "<div id='button-assign-picker' hidden>"
+      "<div id='button-assign-name-row' hidden><label for='button-assign-name'>Button name (optional)</label>"
+      "<input id='button-assign-name' type='text' maxlength='24' placeholder='e.g. Star'></div>"
       "<label for='button-assign-shortcut'>Library shortcut</label>"
       "<select id='button-assign-shortcut'></select>"
       "<button id='button-assign-more' type='button' hidden>Load more shortcuts</button> "
@@ -1622,7 +1671,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "const get=id=>document.getElementById('button-assign-'+id);"
       "const start=get('start'),status=get('status'),picker=get('picker'),"
       "shortcut=get('shortcut'),save=get('save'),more=get('more'),report=get('report');"
-      "let learned,label,next;"
+      "const name=get('name'),nameRow=get('name-row');let learned,label,next;"
       "const read=async(url,body)=>{const r=await fetch(url,{cache:'no-store',"
       "signal:AbortSignal.timeout(body?9000:5000),...(body?{method:'POST',"
       "headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});"
@@ -1652,6 +1701,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "input.key[0].toUpperCase()+input.key.slice(1).replaceAll('_',' '));"
       "await load(0);"
       "if(!shortcut.options.length){status.textContent='Pin a shortcut in Hi-Fi Control’s Library, then try again.';return;}"
+      "nameRow.hidden=!input.canName;name.value=input.canName?(input.label||''):'';"
       "picker.hidden=false;status.textContent=label+' learned. Choose what it should play.';shortcut.focus();return;}"
       "await new Promise(resolve=>setTimeout(resolve,250));}"
       "if(!skipped)status.textContent='No button received. Try again.';"
@@ -1661,9 +1711,11 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "catch(e){status.textContent=e.message;}finally{start.disabled=false;more.disabled=false;save.disabled=!shortcut.options.length;}};"
       "save.onclick=async()=>{if(!learned||!shortcut.value)return;"
       "start.disabled=true;save.disabled=true;more.disabled=true;shortcut.disabled=true;"
-      "const title=shortcut.selectedOptions[0].text;"
-      "try{await read('/api/ble-assign',{at:learned.at,usage:learned.usage,shortcut:shortcut.value});"
-      "status.textContent=label+' assigned to '+title+'.';picker.hidden=true;learned=null;start.focus();"
+      "const title=shortcut.selectedOptions[0].text,custom=learned.canName?name.value.trim():'';"
+      "try{const {notice}=await read('/api/ble-assign',{at:learned.at,usage:learned.usage,"
+      "shortcut:shortcut.value,...(custom?{name:custom}:{})});"
+      "status.textContent=notice||(custom||label)+' assigned to '+title+'.';"
+      "picker.hidden=true;learned=null;start.focus();"
       "}catch(e){status.textContent=e.message;}"
       "finally{start.disabled=false;save.disabled=false;more.disabled=false;shortcut.disabled=false;}};"
       "})();</script>");
@@ -1696,10 +1748,15 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
         const rk_ble_recent_report_t *report = &status.recent_reports[i];
         const char *command = ble_media_command_name(report->media_key);
         char button[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+        char custom[BLE_BUTTON_NAME_BYTES], escaped[6 * BLE_BUTTON_NAME_BYTES];
         if (!command && report->consumer_control && report->length >= 2) {
           const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
-          if (controller_shortcut_key_name(usage, button, sizeof(button)) &&
-              strncmp(button, "usage_", 6) != 0) {
+          command = ble_button_standard_label(usage);
+          if (!command && ble_button_custom_name(usage, custom, false)) {
+            html_escape(custom, escaped, sizeof(escaped));
+            command = escaped;
+          } else if (!command && controller_shortcut_key_name(usage, button, sizeof(button)) &&
+                     strncmp(button, "usage_", 6) != 0) {
             button[0] = (char)(button[0] - 'a' + 'A');
             for (char *c = button; *c; ++c) {
               if (*c == '_') *c = ' ';
@@ -1714,7 +1771,8 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
         }
         pos += snprintf(html + pos, html_size - pos,
           "<li>%s <small>· Report %u · <code>%s</code></small></li>",
-          command ? command : report->consumer_control ? "Consumer control input" : "Unmapped input",
+          command ? command : report->pointer ? "Pointer input" :
+          report->consumer_control ? "Consumer control input" : "Unmapped input",
           (unsigned)report->report_id, payload);
         if (pos >= (int)html_size) pos = (int)html_size - 1;
       }
