@@ -1284,6 +1284,9 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     ".remote-nav a{margin:0;white-space:nowrap}"
     ".remote-nav [aria-current]{font-weight:600}"
     "#remote-status{margin-top:0}"
+    ".remote-steps{display:flex;flex-wrap:wrap;gap:4px 28px;margin:0 0 12px;"
+    "padding-left:22px;color:var(--pb-muted);font-size:14px}"
+    ".remote-steps [aria-current]{color:var(--pb-text);font-weight:600}"
     "</style>%s%s</head><body><main>"
     "%s"
     "<h1>Bluetooth Remote</h1>"
@@ -1361,6 +1364,20 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       : "Put your remote in pairing mode, then scan for it here.";
   }
 
+  const bool selecting = ready && result_count &&
+      status.last_error != RK_BLE_HID_HOST_ERROR_CONNECT &&
+      status.last_error != RK_BLE_HID_HOST_ERROR_SECURITY &&
+      status.last_error != RK_BLE_HID_HOST_ERROR_SCAN;
+  if (status.enabled && !status.bonded && !status.connected &&
+      (ready || scanning || connecting)) {
+    const bool pairing = connecting || selecting;
+    pos += snprintf(html + pos, html_size - pos,
+      "<ol class='remote-steps' aria-label='Pairing steps'>"
+      "<li%s>Find remote</li><li%s>Pair remote</li></ol>",
+      pairing ? "" : " aria-current='step'", pairing ? " aria-current='step'" : "");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+  }
+
   pos += snprintf(html + pos, html_size - pos,
     "<section class='card' aria-labelledby='remote-status'>"
     "<div role='status'><h2 id='remote-status'>%s</h2>%s%s%s<p>%s</p></div>",
@@ -1393,9 +1410,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   if (ready && !status.bonded && status.enabled) {
-    if (status.last_error != RK_BLE_HID_HOST_ERROR_CONNECT &&
-        status.last_error != RK_BLE_HID_HOST_ERROR_SECURITY &&
-        status.last_error != RK_BLE_HID_HOST_ERROR_SCAN) {
+    if (selecting) {
       for (size_t i = 0; i < result_count; i++) {
         html_escape(results[i].name, esc_name, sizeof(esc_name));
         pos += snprintf(html + pos, html_size - pos,
@@ -1420,6 +1435,20 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   }
   pos += snprintf(html + pos, html_size - pos, "</section>");
   if (pos >= (int)html_size) pos = (int)html_size - 1;
+
+  if (status.bonded || status.connected) {
+    pos += snprintf(html + pos, html_size - pos,
+      "<details><summary>Connection details</summary>"
+      "<dl><dt>Bluetooth link</dt><dd>%s</dd>"
+      "<dt>Saved for next time</dt><dd>%s</dd>%s%s%s</dl></details>",
+      status.connected ? "Connected" : connecting ? "Connecting" : "Disconnected",
+      status.bonded ? "Yes" : "No",
+      status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" : "<dt>Diagnostic code</dt><dd><code>",
+      status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" :
+        rk_ble_hid_host_error_name(status.last_error),
+      status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" : "</code></dd>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+  }
 
   if (!busy && status.enabled && (ready || status.connected)) {
     pos += snprintf(html + pos, html_size - pos,

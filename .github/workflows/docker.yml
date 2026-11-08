@@ -405,6 +405,12 @@ jobs:
             -o /tmp/test-rk-ble-hid-policy
           /tmp/test-rk-ble-hid-policy
           cc -std=c11 -Wall -Wextra -Werror \
+            -Icomponents/rk_ble_hid_host \
+            tests/test_rk_ble_pairing_machine.c \
+            components/rk_ble_hid_host/rk_ble_pairing_machine.c \
+            -o /tmp/test-rk-ble-pairing-machine
+          /tmp/test-rk-ble-pairing-machine
+          cc -std=c11 -Wall -Wextra -Werror \
             -Icomponents/rk_ble_hid_host/include \
             tests/test_rk_ble_hid_stub.c \
             components/rk_ble_hid_host/rk_ble_hid_host_stub.c \

@@ -1,5 +1,6 @@
 #include "rk_ble_hid_host.h"
 #include "rk_ble_hid_policy.h"
+#include "rk_ble_pairing_machine.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,9 +37,6 @@
 #define MAX_HID_DEVS 4
 #define SCAN_DURATION_MS 5000
 #define STOP_TIMEOUT_MS 45000
-#define RECONNECT_INITIAL_DELAY_MS 2000
-#define RECONNECT_MAX_DELAY_MS 30000
-#define MAX_RECONNECT_ATTEMPTS 20
 #define START_RETRY_INITIAL_DELAY_MS 1000
 #define START_RETRY_MAX_DELAY_MS 30000
 #define MAX_START_RETRY_ATTEMPTS 5
@@ -148,23 +146,17 @@ typedef struct {
     rk_ble_hid_host_error_t stop_completion_error;
     uint8_t own_addr_type;
     uint32_t operation_generation;
-    uint32_t opening_generation;
+    rk_pair_machine_t pairing;
     uint8_t opening_addr_type;
     char opening_name[RK_BLE_HID_HOST_NAME_MAX_LEN];
-    volatile uint32_t callback_scan_generation;
     TickType_t scan_deadline;
     TickType_t stop_deadline;
     TickType_t reconnect_due;
     uint32_t reconnect_generation;
-    uint8_t reconnect_attempts;
     TickType_t start_retry_due;
     uint8_t start_retry_attempts;
     bool start_retry_reload_nvs;
     rk_ble_hid_host_error_t start_retry_error;
-    bool connect_worker_active;
-    bool connect_callback_pending;
-    uint32_t connect_callback_generation;
-    uint32_t open_event_seen_generation;
     /* The callback updates this registry before IDF invalidates event pointers. */
     tracked_device_t devices[MAX_HID_DEVS];
     size_t close_events_pending;
@@ -632,7 +624,7 @@ static void hidh_event(void *handler_args, esp_event_base_t base, int32_t id, vo
 }
 
 static int scan_event(struct ble_gap_event *gap_event, void *arg) {
-    (void)arg;
+    const uint32_t generation = (uint32_t)(uintptr_t)arg;
     service_event_t event = {0};
     if (gap_event->type == BLE_GAP_EVENT_DISC) {
         event.type = EVENT_DISCOVERY;
@@ -643,11 +635,11 @@ static int scan_event(struct ble_gap_event *gap_event, void *arg) {
             event.data.discovery.len = sizeof(event.data.discovery.data);
         }
         memcpy(event.data.discovery.data, gap_event->disc.data, event.data.discovery.len);
-        event.data.discovery.generation = s.callback_scan_generation;
+        event.data.discovery.generation = generation;
         enqueue_event(&event);
     } else if (gap_event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         event.type = EVENT_DISCOVERY_DONE;
-        event.data.generation = s.callback_scan_generation;
+        event.data.generation = generation;
         enqueue_event(&event);
     }
     return 0;
@@ -833,9 +825,7 @@ static void fail_teardown(const char *step, int error) {
 
 static void finish_stop_if_ready(void) {
     if (!is_stopping() ||
-        !rk_ble_hid_policy_stop_ready(s.connect_worker_active,
-                                      s.connect_callback_pending,
-                                      have_devices())) {
+        (rk_pair_draining(&s.pairing) || have_devices())) {
         return;
     }
     if (s.hidh_started) {
@@ -905,7 +895,7 @@ static void finish_stop_if_ready(void) {
 static void request_stop(void) {
     if (is_stopping()) return;
     ++s.operation_generation;
-    s.callback_scan_generation = 0;
+    rk_pair_step(&s.pairing, RK_PAIR_CANCEL, 0);
     s.reconnect_due = 0;
     if (!s.stack_started) {
         if (s.sleep_quiesce_pending) {
@@ -936,58 +926,41 @@ static bool scanned_identity_exists(const rk_ble_hid_host_device_t *device) {
 }
 
 static void schedule_reconnect(void) {
-    if (s.status.enabled && s.status.bonded && !s.forget_pending && !is_stopping()) {
-        if (s.reconnect_attempts >= MAX_RECONNECT_ATTEMPTS) {
-            ESP_LOGW(TAG, "Reconnect stopped after %u attempts",
-                     (unsigned)s.reconnect_attempts);
-            s.reconnect_due = 0;
-            return;
-        }
-        uint32_t delay_ms =
-            RECONNECT_INITIAL_DELAY_MS << (s.reconnect_attempts < 4
-                                               ? s.reconnect_attempts
-                                               : 4);
-        if (delay_ms > RECONNECT_MAX_DELAY_MS) {
-            delay_ms = RECONNECT_MAX_DELAY_MS;
-        }
-        ++s.reconnect_attempts;
-        s.reconnect_generation = s.operation_generation;
+    const uint32_t delay_ms = rk_pair_arm_retry(&s.pairing,
+        s.status.enabled && s.status.bonded && !s.forget_pending && !is_stopping());
+    if (delay_ms) {
+        s.reconnect_generation = s.pairing.generation;
         s.reconnect_due = xTaskGetTickCount() + pdMS_TO_TICKS(delay_ms);
     }
 }
 
 static void connect_device(const rk_ble_hid_host_device_t *device) {
-    if (s.connect_worker_active || s.connect_callback_pending) {
-        set_state(RK_BLE_HID_HOST_STATE_READY,
-                  RK_BLE_HID_HOST_ERROR_CONNECT);
-        return;
-    }
-    ++s.operation_generation;
-    s.opening_generation = s.operation_generation;
+    if (!rk_pair_can_start(&s.pairing) || have_devices()) return;
+    const uint32_t generation = ++s.operation_generation;
+    rk_pair_step(&s.pairing, RK_PAIR_BEGIN, generation);
     s.opening_addr_type = device->addr_type;
     copy_name(s.opening_name, device->name);
     set_state(RK_BLE_HID_HOST_STATE_CONNECTING, RK_BLE_HID_HOST_ERROR_NONE);
     connect_job_t *job = calloc(1, sizeof(*job));
     if (!job) {
+        rk_pair_step(&s.pairing, RK_PAIR_WORKER_FAILED, generation);
         set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_CONNECT);
         schedule_reconnect();
         return;
     }
     job->device = *device;
-    job->generation = s.opening_generation;
-    s.connect_worker_active = true;
+    job->generation = generation;
     if (xTaskCreatePinnedToCore(connect_worker_task, "rk_ble_connect", 5120,
                                 job, 4, NULL, BLE_CORE) != pdPASS) {
-        s.connect_worker_active = false;
+        rk_pair_step(&s.pairing, RK_PAIR_WORKER_FAILED, generation);
         free(job);
         set_state(RK_BLE_HID_HOST_STATE_READY,
                   RK_BLE_HID_HOST_ERROR_CONNECT);
         schedule_reconnect();
         return;
     }
-    ESP_LOGI(TAG, "HID connection attempt %u/%u",
-             (unsigned)s.reconnect_attempts,
-             (unsigned)MAX_RECONNECT_ATTEMPTS);
+    ESP_LOGI(TAG, "HID connection attempt, retry count %u",
+             (unsigned)s.pairing.retry_attempts);
 }
 
 static void process_command(const command_t *command) {
@@ -1010,7 +983,7 @@ static void process_command(const command_t *command) {
             break;
         }
         status_set_enabled(command->data.enabled);
-        s.reconnect_attempts = 0;
+        rk_pair_reset_retry(&s.pairing);
         s.reconnect_due = 0;
         s.start_retry_attempts = 0;
         s.start_retry_due = 0;
@@ -1034,7 +1007,7 @@ static void process_command(const command_t *command) {
         }
         s.sleep_quiesce_pending = true;
         status_set_sleep_quiesced(false);
-        s.reconnect_attempts = 0;
+        rk_pair_reset_retry(&s.pairing);
         s.reconnect_due = 0;
         s.start_retry_attempts = 0;
         s.start_retry_due = 0;
@@ -1049,7 +1022,7 @@ static void process_command(const command_t *command) {
         }
         s.sleep_quiesce_pending = false;
         status_set_sleep_quiesced(false);
-        s.reconnect_attempts = 0;
+        rk_pair_reset_retry(&s.pairing);
         s.reconnect_due = 0;
         s.start_retry_attempts = 0;
         s.start_retry_due = 0;
@@ -1064,14 +1037,15 @@ static void process_command(const command_t *command) {
         }
         break;
     case COMMAND_SCAN: {
-        if (s.status.state != RK_BLE_HID_HOST_STATE_READY) {
-            set_state(s.status.state, RK_BLE_HID_HOST_ERROR_INVALID_STATE);
+        if (s.status.state != RK_BLE_HID_HOST_STATE_READY ||
+            !rk_pair_can_start(&s.pairing) || have_devices()) {
+            ESP_LOGD(TAG, "Ignoring scan after pairing state changed");
             break;
         }
         ++s.operation_generation;
+        s.reconnect_due = 0;
         xSemaphoreTake(s.status_lock, portMAX_DELAY);
         ++s.status.scan_generation;
-        s.callback_scan_generation = s.status.scan_generation;
         s.status.scan_count = 0;
         xSemaphoreGive(s.status_lock);
         memset(s_scan_results, 0, sizeof(s_scan_results));
@@ -1083,8 +1057,12 @@ static void process_command(const command_t *command) {
             .filter_policy = 0,
             .limited = 0,
         };
-        if (ble_gap_disc(s.own_addr_type, SCAN_DURATION_MS, &parameters, scan_event, NULL) != 0) {
+        rk_pair_step(&s.pairing, RK_PAIR_SCAN, s.status.scan_generation);
+        if (ble_gap_disc(s.own_addr_type, SCAN_DURATION_MS, &parameters, scan_event,
+                         (void *)(uintptr_t)s.status.scan_generation) != 0) {
+            rk_pair_step(&s.pairing, RK_PAIR_SCAN_DONE, s.status.scan_generation);
             set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_SCAN);
+            schedule_reconnect();
         } else {
             s.scan_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(SCAN_DURATION_MS + 1000);
             set_state(RK_BLE_HID_HOST_STATE_SCANNING, RK_BLE_HID_HOST_ERROR_NONE);
@@ -1092,24 +1070,29 @@ static void process_command(const command_t *command) {
         break;
     }
     case COMMAND_PAIR:
-        if (s.status.state != RK_BLE_HID_HOST_STATE_READY) {
-            set_state(s.status.state, RK_BLE_HID_HOST_ERROR_INVALID_STATE);
+        if (s.status.state != RK_BLE_HID_HOST_STATE_READY ||
+            !rk_pair_can_start(&s.pairing) || have_devices()) {
+            ESP_LOGD(TAG, "Ignoring pair after pairing state changed");
         } else if (!scanned_identity_exists(&command->data.device)) {
             set_state(s.status.state, RK_BLE_HID_HOST_ERROR_STALE_SCAN);
         } else {
-            s.reconnect_attempts = 0;
+            rk_pair_reset_retry(&s.pairing);
             connect_device(&command->data.device);
         }
         break;
     case COMMAND_FORGET:
         ++s.operation_generation;
+        rk_pair_step(&s.pairing, RK_PAIR_CANCEL, 0);
+        if (s.status.state == RK_BLE_HID_HOST_STATE_SCANNING) ble_gap_disc_cancel();
         s.reconnect_due = 0;
-        s.reconnect_attempts = 0;
-        s.callback_scan_generation = 0;
+        rk_pair_reset_retry(&s.pairing);
         if (!s.status.bonded) {
             if (nvs_clear_bond() != ESP_OK) {
                 set_state(RK_BLE_HID_HOST_STATE_ERROR,
                           RK_BLE_HID_HOST_ERROR_NVS);
+            } else if (rk_pair_draining(&s.pairing) || have_devices()) {
+                s.forget_pending = true;
+                close_all_devices();
             } else {
                 set_state(s.status.enabled ? RK_BLE_HID_HOST_STATE_READY
                                            : RK_BLE_HID_HOST_STATE_DISABLED,
@@ -1128,10 +1111,8 @@ static void process_command(const command_t *command) {
                 break;
             }
             s.forget_pending = true;
-            if (s.status.state == RK_BLE_HID_HOST_STATE_SCANNING) ble_gap_disc_cancel();
             close_all_devices();
-            if (!s.connect_worker_active && !s.connect_callback_pending &&
-                !have_devices()) {
+            if (!rk_pair_draining(&s.pairing) && !have_devices()) {
                 s.forget_pending = false;
                 set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_NONE);
             }
@@ -1175,12 +1156,7 @@ static void process_discovery(const service_event_t *event) {
     publish_status();
 }
 
-static void finalize_open_connection(uint32_t generation) {
-    if (generation != s.opening_generation ||
-        generation != s.operation_generation || !s.have_active_bda ||
-        is_stopping() || s.status.connected) {
-        return;
-    }
+static void finalize_open_connection(void) {
     /* IDF can finish HID discovery even after pairing failed. Do not persist
      * the peer or accept reports until the link is actually encrypted. */
     ble_addr_t peer = {.type = s.opening_addr_type};
@@ -1191,10 +1167,16 @@ static void finalize_open_connection(uint32_t generation) {
         ESP_LOGW(TAG, "HID opened without an encrypted link (lookup rc=%d)", rc);
         set_state(RK_BLE_HID_HOST_STATE_CONNECTING,
                   rc == 0 ? RK_BLE_HID_HOST_ERROR_SECURITY : RK_BLE_HID_HOST_ERROR_CONNECT);
-        close_device_once_by_bda(s.active_bda);
+        if (rk_pair_step(&s.pairing, rc == 0 ? RK_PAIR_LINK_REJECTED : RK_PAIR_LINK_FAILED,
+                         s.pairing.generation) ==
+            RK_PAIR_CLOSE_LINK) {
+            close_device_once_by_bda(s.active_bda);
+        }
         return;
     }
-    s.reconnect_attempts = 0;
+    if (rk_pair_step(&s.pairing, RK_PAIR_LINK_OK, s.pairing.generation) !=
+        RK_PAIR_PUBLISH_CONNECTED) return;
+    rk_pair_reset_retry(&s.pairing);
     end_consumer_session();
     status_set_connection(true, s.opening_name);
     if (nvs_save_bond(s.active_bda, s.opening_addr_type,
@@ -1204,6 +1186,18 @@ static void finalize_open_connection(uint32_t generation) {
     } else {
         set_state(RK_BLE_HID_HOST_STATE_CONNECTED,
                   RK_BLE_HID_HOST_ERROR_NONE);
+    }
+}
+
+static void settle_pairing(rk_pair_effect_t effect, rk_ble_hid_host_error_t error) {
+    if (is_stopping()) {
+        finish_stop_if_ready();
+    } else if (s.forget_pending && !rk_pair_draining(&s.pairing) && !have_devices()) {
+        s.forget_pending = false;
+        set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_NONE);
+    } else if (effect == RK_PAIR_FINISHED) {
+        set_state(RK_BLE_HID_HOST_STATE_READY, error);
+        schedule_reconnect();
     }
 }
 
@@ -1230,101 +1224,54 @@ static void process_event(const service_event_t *event) {
             schedule_reconnect();
         }
         break;
-    case EVENT_OPEN:
-        s.open_event_seen_generation = s.opening_generation;
-        if (s.connect_callback_pending &&
-            s.connect_callback_generation == s.opening_generation) {
-            s.connect_callback_pending = false;
-        }
-        if (event->data.open.status != ESP_OK || !event->data.open.tracked ||
-            is_stopping() ||
-            s.opening_generation != s.operation_generation) {
-            if (event->data.open.tracked) {
-                close_device_once_by_bda(event->data.open.bda);
+    case EVENT_OPEN: {
+        const bool opened = event->data.open.status == ESP_OK && event->data.open.tracked;
+        const rk_pair_effect_t effect = rk_pair_step(
+            &s.pairing, opened ? RK_PAIR_OPEN_OK : RK_PAIR_OPEN_FAILED, s.pairing.generation);
+        if (opened && effect != RK_PAIR_IGNORED) {
+            memcpy(s.active_bda, event->data.open.bda, sizeof(s.active_bda));
+            s.have_active_bda = true;
+            if (event->data.open.name[0]) {
+                copy_name(s.opening_name, event->data.open.name);
+            } else if (!s.opening_name[0]) {
+                format_bda_name(s.opening_name, event->data.open.bda);
             }
-            if (!is_stopping()) {
-                set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_CONNECT);
-                schedule_reconnect();
-            }
-            break;
         }
-        memcpy(s.active_bda, event->data.open.bda, sizeof(s.active_bda));
-        s.have_active_bda = true;
-        char resolved_name[RK_BLE_HID_HOST_NAME_MAX_LEN];
-        if (event->data.open.name[0]) {
-            copy_name(resolved_name, event->data.open.name);
-        } else if (s.opening_name[0]) {
-            copy_name(resolved_name, s.opening_name);
-        } else {
-            format_bda_name(resolved_name, event->data.open.bda);
+        if (event->data.open.tracked &&
+            (!opened || effect == RK_PAIR_CLOSE_LINK || effect == RK_PAIR_IGNORED)) {
+            close_device_once_by_bda(event->data.open.bda);
         }
-        copy_name(s.opening_name, resolved_name);
-        /* OPEN is posted before IDF subscribes to report notifications. Only
-         * publish Connected after esp_hidh_dev_open() returns as well. */
-        if (!s.connect_worker_active) {
-            finalize_open_connection(s.opening_generation);
-        }
-        break;
-    case EVENT_CONNECT_CALL_DONE: {
-        const bool current =
-            event->data.connect_done.generation == s.opening_generation &&
-            event->data.connect_done.generation == s.operation_generation;
-        s.connect_worker_active = false;
-        if (event->data.connect_done.succeeded) {
-            if (s.open_event_seen_generation !=
-                event->data.connect_done.generation) {
-                s.connect_callback_pending = true;
-                s.connect_callback_generation =
-                    event->data.connect_done.generation;
-            } else if (current) {
-                finalize_open_connection(event->data.connect_done.generation);
-            }
-        } else {
-            s.connect_callback_pending = false;
-        }
-        if (!event->data.connect_done.succeeded && current &&
-            !is_stopping()) {
-            set_state(RK_BLE_HID_HOST_STATE_READY,
-                      RK_BLE_HID_HOST_ERROR_CONNECT);
-            schedule_reconnect();
-        }
-        if (is_stopping()) {
-            finish_stop_if_ready();
-        } else if (s.forget_pending && !s.connect_callback_pending &&
-                   !have_devices()) {
-            s.forget_pending = false;
-            set_state(RK_BLE_HID_HOST_STATE_READY,
-                      RK_BLE_HID_HOST_ERROR_NONE);
-        }
+        if (effect == RK_PAIR_VERIFY_LINK) finalize_open_connection();
+        settle_pairing(effect, RK_BLE_HID_HOST_ERROR_CONNECT);
         break;
     }
-    case EVENT_CLOSE:
-        if (event->data.close.tracked) {
-            acknowledge_close_event();
-        }
+    case EVENT_CONNECT_CALL_DONE: {
+        const rk_pair_effect_t effect = rk_pair_step(
+            &s.pairing, event->data.connect_done.succeeded ? RK_PAIR_WORKER_OK : RK_PAIR_WORKER_FAILED,
+            event->data.connect_done.generation);
+        if (effect == RK_PAIR_VERIFY_LINK) finalize_open_connection();
+        if (effect == RK_PAIR_CLOSE_LINK) close_device_once_by_bda(s.active_bda);
+        settle_pairing(effect, RK_BLE_HID_HOST_ERROR_CONNECT);
+        break;
+    }
+    case EVENT_CLOSE: {
+        rk_pair_effect_t effect = RK_PAIR_IGNORED;
+        const bool was_connected = s.status.connected;
+        if (event->data.close.tracked) acknowledge_close_event();
         if (s.have_active_bda && event->data.close.tracked &&
-            memcmp(s.active_bda, event->data.close.bda,
-                   sizeof(s.active_bda)) == 0) {
+            memcmp(s.active_bda, event->data.close.bda, sizeof(s.active_bda)) == 0) {
             s.have_active_bda = false;
             memset(s.active_bda, 0, sizeof(s.active_bda));
             end_consumer_session();
             status_set_connection(false, NULL);
+            effect = rk_pair_step(&s.pairing, RK_PAIR_CLOSED, s.pairing.generation);
         }
-        if (is_stopping()) {
-            finish_stop_if_ready();
-        } else if (s.forget_pending && !s.connect_callback_pending &&
-                   !have_devices()) {
-            s.forget_pending = false;
-            set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_NONE);
-        } else if (!s.status.connected) {
-            const rk_ble_hid_host_error_t error = s.status.last_error;
-            set_state(RK_BLE_HID_HOST_STATE_READY, error);
-            /* A rejected handshake needs the user to wake or re-pair the remote. */
-            if (error != RK_BLE_HID_HOST_ERROR_SECURITY) {
-                schedule_reconnect();
-            }
-        }
+        const rk_ble_hid_host_error_t error = s.status.last_error == RK_BLE_HID_HOST_ERROR_SECURITY
+            ? RK_BLE_HID_HOST_ERROR_SECURITY
+            : (was_connected ? RK_BLE_HID_HOST_ERROR_NONE : RK_BLE_HID_HOST_ERROR_CONNECT);
+        settle_pairing(effect, error);
         break;
+    }
     case EVENT_CONSUMER_TICK: {
         portENTER_CRITICAL(&s_input_lock);
         bool current = event->input_session == s_input_session;
@@ -1426,10 +1373,10 @@ static void process_event(const service_event_t *event) {
         process_discovery(event);
         break;
     case EVENT_DISCOVERY_DONE:
-        if (s.status.state == RK_BLE_HID_HOST_STATE_SCANNING &&
-            event->data.generation == s.status.scan_generation) {
-            s.callback_scan_generation = 0;
+        if (rk_pair_step(&s.pairing, RK_PAIR_SCAN_DONE, event->data.generation) ==
+            RK_PAIR_FINISHED) {
             set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_NONE);
+            schedule_reconnect();
         }
         break;
     }
@@ -1471,11 +1418,13 @@ static void owner_task(void *arg) {
         } else if (s.status.state == RK_BLE_HID_HOST_STATE_SCANNING &&
                    (int32_t)(now - s.scan_deadline) >= 0) {
             ble_gap_disc_cancel();
-            s.callback_scan_generation = 0;
+            rk_pair_step(&s.pairing, RK_PAIR_SCAN_DONE, s.status.scan_generation);
             set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_SCAN);
+            schedule_reconnect();
         } else if (s.reconnect_due && (int32_t)(now - s.reconnect_due) >= 0 &&
-                   s.reconnect_generation == s.operation_generation &&
-                   s.status.state == RK_BLE_HID_HOST_STATE_READY) {
+                   s.status.state == RK_BLE_HID_HOST_STATE_READY && !have_devices() &&
+                   rk_pair_step(&s.pairing, RK_PAIR_RETRY_DUE, s.reconnect_generation) ==
+                       RK_PAIR_ACCEPTED) {
             s.reconnect_due = 0;
             rk_ble_hid_host_device_t bonded = {0};
             memcpy(bonded.bda, s.bonded_bda, sizeof(bonded.bda));
