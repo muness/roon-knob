@@ -304,27 +304,25 @@ static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
         cJSON_IsString(id) &&
         rk_ble_hid_host_status_copy(&status) == RK_BLE_HID_HOST_OK && status.connected) {
       const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-      for (size_t i = 0; i < status.recent_report_count; ++i) {
-        const rk_ble_recent_report_t *report = &status.recent_reports[i];
-        if (!report->learned || !report->consumer_control || report->length < 2 ||
-            at->valuedouble != report->time_ms || now - report->time_ms > 120000) continue;
-        const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
-        if (key->valuedouble != usage) continue;
-        char custom[BLE_BUTTON_NAME_BYTES] = "";
-        if (name) {
-          if (!cJSON_IsString(name) || !name->valuestring[0] ||
-              strlen(name->valuestring) >= sizeof(custom) ||
-              controller_shortcut_key_label(usage)) {
-            error = "Choose a shorter name for this button.";
-            break;
+      const rk_ble_recent_report_t *report = &status.learned_report;
+      const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
+      if (report->learned && report->time_ms == at->valuedouble &&
+          now - report->time_ms <= 120000 && key->valuedouble == usage) {
+        const char *custom = cJSON_IsString(name) ? name->valuestring : NULL;
+        if (name && (!custom || !custom[0] || strlen(custom) >= BLE_BUTTON_NAME_BYTES ||
+                     controller_shortcut_key_label(usage))) {
+          error = "Choose a shorter name for this button.";
+        } else {
+          error = bridge_client_assign_shortcut(usage, id->valuestring);
+          if (!error && custom) {
+            char button_name[BLE_BUTTON_NAME_BYTES];
+            snprintf(button_name, sizeof(button_name), "%s", custom);
+            if (!ble_button_custom_name(usage, button_name, true)) {
+              cJSON_AddStringToObject(root, "notice",
+                                     "Assignment saved. The button name couldn’t be saved.");
+            }
           }
-          snprintf(custom, sizeof(custom), "%s", name->valuestring);
         }
-        error = bridge_client_assign_shortcut(usage, id->valuestring);
-        if (!error && custom[0] && !ble_button_custom_name(usage, custom, true)) {
-          cJSON_AddStringToObject(root, "notice", "Assignment saved. The button name couldn’t be saved.");
-        }
-        break;
       }
     }
   }
@@ -344,8 +342,18 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
   cJSON_AddNumberToObject(root, "now", (uint32_t)(esp_timer_get_time() / 1000));
   cJSON_AddBoolToObject(root, "connected", status.connected);
   cJSON *inputs = cJSON_AddArrayToObject(root, "inputs");
-  for (size_t i = status.recent_report_count; inputs && i > 0; --i) {
-    const rk_ble_recent_report_t *report = &status.recent_reports[i - 1];
+  /* Keep the selected press available even if other media reports have
+   * replaced it in the rolling history before the browser's next poll. */
+  const size_t count = status.recent_report_count;
+  const rk_ble_recent_report_t *capture = &status.learned_report;
+  for (size_t i = count + 1; inputs && i > 0; --i) {
+    const rk_ble_recent_report_t *report =
+        i > count ? capture : &status.recent_reports[i - 1];
+    if (report == capture && !capture->learned) continue;
+    if (report != capture && capture->learned && report->learned &&
+        report->time_ms == capture->time_ms && report->report_id == capture->report_id &&
+        report->length == capture->length &&
+        !memcmp(report->data, capture->data, report->length)) continue;
     char payload[3 * RK_BLE_HID_HOST_REPORT_BYTES + 1] = "";
     bool nonzero = false;
     for (size_t j = 0; j < report->length; ++j) {

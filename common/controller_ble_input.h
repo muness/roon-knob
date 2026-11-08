@@ -8,6 +8,7 @@ extern "C" {
 
 /* Start a host without a target-specific status display. Call after STA joins. */
 bool controller_ble_input_start(void);
+bool controller_ble_input_can_learn(uint16_t usage);
 
 // Shared adapter from BLE media semantics to the controller actor queue.
 // Safe to call from the BLE service task or ESP-IDF callbacks.
