@@ -47,6 +47,7 @@ typedef enum {
     RK_BLE_HID_HOST_ERROR_STALE_SCAN,
     RK_BLE_HID_HOST_ERROR_TEARDOWN,
     RK_BLE_HID_HOST_ERROR_TEARDOWN_TIMEOUT,
+    RK_BLE_HID_HOST_ERROR_SECURITY,
 } rk_ble_hid_host_error_t;
 
 /** Immediate command result. Completion and detailed failures arrive in status. */

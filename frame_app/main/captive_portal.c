@@ -164,13 +164,6 @@ static void apply_committed_wifi(bool reconnect) {
   }
 }
 
-static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
-  httpd_resp_set_status(req, "409 Conflict");
-  httpd_resp_set_type(req, "text/plain");
-  httpd_resp_sendstr(req, message ? message : "Request conflicts with BLE state");
-  return ESP_FAIL;
-}
-
 // Favicon data URI (same icon as unified-hifi-control)
 static const char *FAVICON_LINK =
     "<link rel='icon' type='image/x-icon' href='data:image/x-icon;base64,"
@@ -858,7 +851,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
 #if PLATFORM_PORTAL_FRAME_DISPLAY_SETTINGS
       "<p><a href='/display-health'>Display status</a> · <a href='/power-debug'>Power and crash report</a></p>"
 #endif
-      "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+      "<nav><a href='/zones'>Zones</a><a href='/ble'>Bluetooth Remote</a>"
       "<a href='/settings'>Settings</a><a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Unified Hi-Fi Control</h2>"
       "<div id='connection-status'><p>%s</p><details><summary>Connection details</summary>%s</details></div>"
@@ -1042,7 +1035,7 @@ static esp_err_t sta_wifi_handler(httpd_req_t *req) {
       "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
       "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - Wi-Fi</title><style>%s"
       "</style>%s</head><body>"
-      "%s<h1>Wi-Fi</h1><nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a>"
+      "%s<h1>Wi-Fi</h1><nav><a href='/zones'>Zones</a><a href='/ble'>Bluetooth Remote</a>"
       "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
       "<a href='/power-debug'>Power</a></nav>"
       "<div class='card'><h2>Saved Wi-Fi networks</h2>%s</div>"
@@ -1139,7 +1132,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "<style>%s</style>%s</head><body>"
     "%s"
     "<h1>Zones</h1>"
-    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
+    "<nav><a href='/zones'>Zones</a><a href='/ble'>Bluetooth Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -1225,6 +1218,16 @@ static esp_err_t sta_zone_set_handler(httpd_req_t *req) {
 
 // ── STA-mode BLE config page (GET /ble) ─────────────────────────────────────
 
+static void ble_selected_zone_name(const bridge_zone_t *zones, int count,
+                                   const char *current, void *ctx) {
+  for (int i = 0; i < count; ++i) {
+    if (strcmp(zones[i].id, current) == 0) {
+      html_escape(zones[i].name, ctx, 128);
+      return;
+    }
+  }
+}
+
 static esp_err_t sta_ble_handler(httpd_req_t *req) {
   rk_ble_hid_host_status_t status = {0};
   if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
@@ -1233,18 +1236,19 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "BLE media remote is unavailable");
     return ESP_FAIL;
   }
-  bool scanning = status.state == RK_BLE_HID_HOST_STATE_SCANNING;
-  char watch_query[32] = "";
-  char watch_value[4] = "";
-  bool watch_requested =
-      httpd_req_get_url_query_str(req, watch_query, sizeof(watch_query)) == ESP_OK &&
-      httpd_query_key_value(watch_query, "watch", watch_value,
-                            sizeof(watch_value)) == ESP_OK &&
-      watch_value[0] == '1';
-  bool auto_updates = watch_requested || scanning ||
+  const bool ready = status.state == RK_BLE_HID_HOST_STATE_READY;
+  const bool scanning = status.state == RK_BLE_HID_HOST_STATE_SCANNING;
+  const bool connecting = status.state == RK_BLE_HID_HOST_STATE_CONNECTING;
+  const bool busy = scanning || connecting ||
       status.state == RK_BLE_HID_HOST_STATE_STARTING ||
-      status.state == RK_BLE_HID_HOST_STATE_CONNECTING ||
       status.state == RK_BLE_HID_HOST_STATE_STOPPING;
+  char query[32] = "";
+  char notice[12] = "";
+  char watch[4] = "";
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+    httpd_query_key_value(query, "notice", notice, sizeof(notice));
+    httpd_query_key_value(query, "watch", watch, sizeof(watch));
+  }
   const char *dev_name =
       status.active_name[0] ? status.active_name : status.bonded_name;
 
@@ -1270,23 +1274,30 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     html_escape(bridge_url, esc_bridge_url, sizeof(esc_bridge_url));
   }
 
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   int pos = snprintf(html, html_size,
-    "<!DOCTYPE html><html><head>"
+    "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>" PLATFORM_PORTAL_PRODUCT_SLUG " - BLE Remote</title>"
-    "<style>%s</style>%s%s</head><body>"
+    "<title>Bluetooth Remote · " PLATFORM_PORTAL_PRODUCT_NAME "</title>"
+    "<style>%s"
+    ".remote-nav{display:flex;flex-wrap:wrap;gap:6px 14px}"
+    ".remote-nav a{margin:0;white-space:nowrap}"
+    ".remote-nav [aria-current]{font-weight:600}"
+    "#remote-status{margin-top:0}"
+    "</style>%s%s</head><body><main>"
     "%s"
-    "<h1>BLE Remote</h1>"
-    "<nav><a href='/zones'>Zones</a><a href='/ble'>BLE Remote</a><a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a><a href='/power-debug'>Power</a>"
-    "%s%s%s"
-    "</nav>"
-    "<div class='card'><h2>BLE Media Remote</h2>",
+    "<h1>Bluetooth Remote</h1>"
+    "<nav class='remote-nav' aria-label='Device settings'><a href='/zones'>Zones</a>"
+    "<a href='/ble' aria-current='page'>Bluetooth Remote</a>"
+    "<a href='/wifi'>Wi-Fi</a><a href='/settings'>Settings</a>"
+    "<a href='/power-debug'>Power</a>%s%s%s</nav>",
     STA_CSS,
     FAVICON_LINK,
-    auto_updates
-      ? "<script>if(location.search)history.replaceState(null,'','/ble');"
-        "setTimeout(function(){if(!document.hidden)location.reload()},1000);"
-        "document.addEventListener('visibilitychange',function(){if(!document.hidden)location.reload()});</script>"
+    (busy || strcmp(watch, "1") == 0)
+      ? "<script>setTimeout(function(){if(!document.hidden && "
+        "document.activeElement===document.body) location.replace('/ble')},1500);"
+        "document.addEventListener('visibilitychange',function(){"
+        "if(!document.hidden && document.activeElement===document.body) location.replace('/ble')});</script>"
       : "",
     portal_brand_header_html(),
     esc_bridge_url[0] ? "<a href='" : "",
@@ -1294,110 +1305,136 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     esc_bridge_url[0] ? "' target='_blank'>Unified Hi-Fi Control</a>" : "");
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
+  if (strcmp(notice, "changed") == 0 || strcmp(notice, "retry") == 0) {
+    pos += snprintf(html + pos, html_size - pos,
+      "<p role='alert'>%s</p>", strcmp(notice, "changed") == 0
+        ? "The scan results changed. Select your remote from the current list."
+        : "The action could not start. Check the current status below and try again.");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+  }
+
+  char esc_name[128];
+  html_escape(dev_name, esc_name, sizeof(esc_name));
+  const char *name = esc_name[0] ? esc_name : "Your remote";
+  const char *heading;
+  const char *description;
+  if (status.state == RK_BLE_HID_HOST_STATE_ERROR ||
+      status.state == RK_BLE_HID_HOST_STATE_UNAVAILABLE) {
+    heading = "Bluetooth unavailable";
+    description = "Restart this device from Settings, then return here.";
+  } else if (scanning) {
+    heading = "Looking for remotes…";
+    description = "Keep the remote nearby and in pairing mode.";
+  } else if (connecting) {
+    heading = status.bonded ? "Connecting to your remote…" : "Pairing your remote…";
+    description = "Keep the remote awake and close to this device.";
+  } else if (busy) {
+    heading = status.enabled ? "Starting Bluetooth…" : "Turning off Bluetooth…";
+    description = "This takes a few seconds.";
+  } else if (!status.enabled) {
+    heading = "Use a remote to control music";
+    description = "Turn on Bluetooth to connect a media remote to this device.";
+  } else if (status.connected) {
+    heading = "Remote connected";
+    description = "Press a volume button on the remote to try it.";
+  } else if (status.last_error == RK_BLE_HID_HOST_ERROR_SECURITY) {
+    heading = "Could not pair with the remote";
+    description = status.bonded
+      ? "Try Reconnect. If it fails again, forget the remote and pair it again."
+      : "Put the remote back in pairing mode, then scan and pair again.";
+  } else if (status.bonded) {
+    heading = "Remote saved, waiting to connect";
+    description = "Press a button on the remote to wake it, then choose Reconnect.";
+  } else if (status.last_error == RK_BLE_HID_HOST_ERROR_CONNECT) {
+    heading = "Could not connect to the remote";
+    description = "Put it back in pairing mode, keep it close, and scan again.";
+  } else if (status.last_error == RK_BLE_HID_HOST_ERROR_SCAN) {
+    heading = "The scan did not finish";
+    description = "Keep the remote in pairing mode and scan again.";
+  } else if (scan_generation && !result_count) {
+    heading = "No remotes found";
+    description = "Put the remote back in pairing mode and scan again.";
+  } else {
+    heading = result_count ? "Choose your remote" : "Pair a media remote";
+    description = result_count
+      ? "Select your remote while its pairing light is still flashing."
+      : "Put your remote in pairing mode, then scan for it here.";
+  }
+
   pos += snprintf(html + pos, html_size - pos,
-    "<form method='POST' action='/api/ble-enable'>"
-    "<input type='hidden' name='enabled' value='%d'>"
-    "<button type='submit' class='btn%s'>%s BLE Media Remote</button>"
-    "</form>",
-    status.enabled ? 0 : 1,
-    status.enabled ? " btn-danger" : "",
-    status.enabled ? "Disable" : "Enable");
+    "<section class='card' aria-labelledby='remote-status'>"
+    "<div role='status'><h2 id='remote-status'>%s</h2>%s%s%s<p>%s</p></div>",
+    heading, status.bonded ? "<p><strong>" : "", status.bonded ? name : "",
+    status.bonded ? "</strong></p>" : "", description);
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
-  if (status.last_error != RK_BLE_HID_HOST_ERROR_NONE) {
+  if (busy) {
+    pos += snprintf(html + pos, html_size - pos, "<p><a href='/ble'>Refresh status</a></p>");
+  } else if (status.state == RK_BLE_HID_HOST_STATE_DISABLED) {
     pos += snprintf(html + pos, html_size - pos,
-      "<p class='status'>Last BLE error: <strong>%s</strong></p>",
-      rk_ble_hid_host_error_name(status.last_error));
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-  }
-
-  if (!status.enabled) {
+      "<div class='actions'><form method='POST' action='/api/ble-enable'>"
+      "<button name='enabled' value='1'>Turn on Bluetooth</button></form></div>");
+  } else if (ready && status.bonded) {
     pos += snprintf(html + pos, html_size - pos,
-      "<p class='status'>BLE media remote is disabled on this Frame.</p>"
-      "</div></body></html>");
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, html, pos);
-    free(html);
-    return ESP_OK;
-  }
-
-  // Current status
-  if (status.connected && dev_name[0]) {
-    char esc_name[128];
-    html_escape(dev_name, esc_name, sizeof(esc_name));
+      "<div class='actions'><form method='POST' action='/api/ble-enable'>"
+      "<button name='enabled' value='1'>Reconnect</button></form></div>");
+  } else if (status.connected) {
+    char zone[128] = "";
+    bridge_client_visit_zones(ble_selected_zone_name, zone);
     pos += snprintf(html + pos, html_size - pos,
-      "<div class='device'>"
-      "<span><strong>Connected</strong><br>%s</span>"
-      "<form method='POST' action='/api/ble-unpair'>"
-      "<button type='submit' class='btn btn-danger'>Forget remote</button>"
-      "</form></div>",
-      esc_name);
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-  } else if (status.bonded && dev_name[0]) {
-    char esc_name[128];
-    html_escape(dev_name, esc_name, sizeof(esc_name));
-    pos += snprintf(html + pos, html_size - pos,
-      "<p class='status'><strong>Reconnecting</strong><br>%s is paired and will reconnect automatically.</p>"
-      "<form method='POST' action='/api/ble-unpair'>"
-      "<button type='submit' class='btn btn-danger'>Forget remote</button>"
-      "</form>",
-      esc_name);
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-  } else {
-    pos += snprintf(html + pos, html_size - pos,
-      "<p class='status'>No BLE remote paired.</p>");
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-  }
-
-  if (status.bonded) {
-    pos += snprintf(html + pos, html_size - pos,
-      "<p class='status'>To pair a different remote, forget this one first.</p>");
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-  } else {
-    pos += snprintf(html + pos, html_size - pos,
-      "<h2>Pair a remote</h2>"
-      "<p class='status'>Put the remote into pairing mode, then start a scan.</p>"
-      "<form method='POST' action='/api/ble-scan'>"
-      "<button type='submit' class='btn'%s>%s</button>"
-      "</form>",
-      scanning ? " disabled" : "",
-      scanning ? "Scanning..." : "Scan for remotes");
-    if (pos >= (int)html_size) pos = (int)html_size - 1;
-
-    if (!scanning && result_count > 0) {
-      pos += snprintf(html + pos, html_size - pos, "<h2>Discovered remotes</h2>");
+      "<p><a href='/zones'>%s%s</a></p>",
+      zone[0] ? "Controlling " : "Choose a zone", zone);
+    if (status.last_error != RK_BLE_HID_HOST_ERROR_NONE || !status.bonded) {
       if (pos >= (int)html_size) pos = (int)html_size - 1;
-      for (size_t i = 0; i < result_count; i++) {
-        char esc_name[128];
-        html_escape(results[i].name, esc_name, sizeof(esc_name));
-        pos += snprintf(html + pos, html_size - pos,
-          "<div class='device'>"
-          "<span>%s</span>"
-          "<form method='POST' action='/api/ble-pair'>"
-          "<input type='hidden' name='idx' value='%u'>"
-          "<input type='hidden' name='generation' value='%lu'>"
-          "<button type='submit' class='btn'>Pair this remote</button>"
-          "</form></div>",
-          esc_name, (unsigned)i, (unsigned long)scan_generation);
-        if (pos >= (int)html_size) pos = (int)html_size - 1;
-      }
-    } else if (!scanning && scan_generation > 0) {
       pos += snprintf(html + pos, html_size - pos,
-        "<p class='status'>No remotes found. Keep the remote in pairing mode and scan again.</p>");
-      if (pos >= (int)html_size) pos = (int)html_size - 1;
+        "<p role='alert'>This remote could not be saved for next time.</p>");
     }
   }
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
 
-  pos += snprintf(html + pos, html_size - pos,
-    "<p class='status' style='margin-top:20px;font-size:12px;'>"
-    "The Frame connects to a separate physical Bluetooth media remote.</p>"
-    "</div>"
-    "<div class='card' style='margin-top:20px;'>"
-    "<form method='POST' action='/api/restart'>"
-    "<button type='submit' class='btn btn-danger'>Restart Device</button>"
-    "</form></div>"
-    "%s</body></html>", portal_brand_footer_html());
+  if (ready && !status.bonded && status.enabled) {
+    if (status.last_error != RK_BLE_HID_HOST_ERROR_CONNECT &&
+        status.last_error != RK_BLE_HID_HOST_ERROR_SECURITY &&
+        status.last_error != RK_BLE_HID_HOST_ERROR_SCAN) {
+      for (size_t i = 0; i < result_count; i++) {
+        html_escape(results[i].name, esc_name, sizeof(esc_name));
+        pos += snprintf(html + pos, html_size - pos,
+          "<div class='actions'><form method='POST' action='/api/ble-pair'>"
+          "<input type='hidden' name='idx' value='%u'>"
+          "<input type='hidden' name='generation' value='%lu'>"
+          "<button>Pair %s</button></form></div>",
+          (unsigned)i, (unsigned long)scan_generation, esc_name);
+        if (pos >= (int)html_size) pos = (int)html_size - 1;
+      }
+    }
+    pos += snprintf(html + pos, html_size - pos,
+      "<div class='actions'><form method='POST' action='/api/ble-scan'>"
+      "<button>%s</button></form></div>"
+      "<details><summary>How do I put my remote in pairing mode?</summary>"
+      "<p>Follow the remote maker’s instructions. For the FiiO RM3, hold Power "
+      "for about three seconds until the light flashes, then scan and select it.</p>"
+      "<p>Some remotes first appear by Bluetooth address, a string such as "
+      "<code>D8:2C:00:16:4F:F4</code>.</p></details>",
+      scan_generation ? "Scan again" : "Scan for remotes");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+  }
+  pos += snprintf(html + pos, html_size - pos, "</section>");
+  if (pos >= (int)html_size) pos = (int)html_size - 1;
+
+  if (!busy && status.enabled && (ready || status.connected)) {
+    pos += snprintf(html + pos, html_size - pos,
+      "<details><summary>Manage Bluetooth</summary><div class='actions'>%s"
+      "<form method='POST' action='/api/ble-enable'>"
+      "<button name='enabled' value='0' class='btn-danger'>Turn off Bluetooth</button>"
+      "</form></div></details>",
+      status.bonded
+        ? "<form method='POST' action='/api/ble-unpair'>"
+          "<button class='btn-danger'>Forget remote</button></form>"
+        : "");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+  }
+  pos += snprintf(html + pos, html_size - pos, "%s</main></body></html>",
+                  portal_brand_footer_html());
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
   httpd_resp_set_type(req, "text/html");
@@ -1408,17 +1445,19 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
 
 // ── BLE API handlers ────────────────────────────────────────────────────────
 
+static esp_err_t ble_redirect(httpd_req_t *req, const char *location) {
+  httpd_resp_set_status(req, "303 See Other");
+  httpd_resp_set_hdr(req, "Location", location);
+  return httpd_resp_send(req, NULL, 0);
+}
+
 static esp_err_t sta_ble_scan_handler(httpd_req_t *req) {
   ESP_LOGI(TAG, "Web UI: starting BLE scan");
   rk_ble_hid_host_result_t result = rk_ble_hid_host_scan_start();
   if (result != RK_BLE_HID_HOST_OK) {
-    return send_conflict(req, rk_ble_hid_host_result_name(result));
+    return ble_redirect(req, "/ble?notice=retry");
   }
-  // Redirect back after short delay to allow scan to start
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/ble?watch=1");
-  httpd_resp_send(req, NULL, 0);
-  return ESP_OK;
+  return ble_redirect(req, "/ble?watch=1");
 }
 
 static esp_err_t sta_ble_pair_handler(httpd_req_t *req) {
@@ -1462,32 +1501,26 @@ static esp_err_t sta_ble_pair_handler(httpd_req_t *req) {
   size_t count = rk_ble_hid_host_scan_results_copy(
       results, RK_BLE_HID_HOST_MAX_RESULTS, &current_generation);
   if ((size_t)idx >= count || requested_generation != current_generation) {
-    return send_conflict(req, "Scan results changed; scan again");
+    return ble_redirect(req, "/ble?notice=changed");
   }
 
   ESP_LOGI(TAG, "Web UI: pairing with device %ld", idx);
   rk_ble_hid_host_result_t result = rk_ble_hid_host_pair(&results[idx]);
   if (result != RK_BLE_HID_HOST_OK) {
-    return send_conflict(req, rk_ble_hid_host_result_name(result));
+    return ble_redirect(req, "/ble?notice=retry");
   }
 
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/ble?watch=1");
-  httpd_resp_send(req, NULL, 0);
-  return ESP_OK;
+  return ble_redirect(req, "/ble?watch=1");
 }
 
 static esp_err_t sta_ble_unpair_handler(httpd_req_t *req) {
   ESP_LOGI(TAG, "Web UI: forgetting BLE remote");
   rk_ble_hid_host_result_t result = rk_ble_hid_host_forget();
   if (result != RK_BLE_HID_HOST_OK) {
-    return send_conflict(req, rk_ble_hid_host_result_name(result));
+    return ble_redirect(req, "/ble?notice=retry");
   }
 
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/ble?watch=1");
-  httpd_resp_send(req, NULL, 0);
-  return ESP_OK;
+  return ble_redirect(req, "/ble?watch=1");
 }
 
 static esp_err_t sta_ble_enable_handler(httpd_req_t *req) {
@@ -1509,13 +1542,10 @@ static esp_err_t sta_ble_enable_handler(httpd_req_t *req) {
   rk_ble_hid_host_result_t result =
       rk_ble_hid_host_set_enabled(enabled_str[0] == '1');
   if (result != RK_BLE_HID_HOST_OK) {
-    return send_conflict(req, rk_ble_hid_host_result_name(result));
+    return ble_redirect(req, "/ble?notice=retry");
   }
 
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/ble?watch=1");
-  httpd_resp_send(req, NULL, 0);
-  return ESP_OK;
+  return ble_redirect(req, "/ble?watch=1");
 }
 
 // ── STA-mode restart handler (POST /api/restart) ────────────────────────────

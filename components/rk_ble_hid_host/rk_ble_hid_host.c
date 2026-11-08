@@ -1181,6 +1181,19 @@ static void finalize_open_connection(uint32_t generation) {
         is_stopping() || s.status.connected) {
         return;
     }
+    /* IDF can finish HID discovery even after pairing failed. Do not persist
+     * the peer or accept reports until the link is actually encrypted. */
+    ble_addr_t peer = {.type = s.opening_addr_type};
+    memcpy(peer.val, s.active_bda, sizeof(peer.val));
+    struct ble_gap_conn_desc connection;
+    const int rc = ble_gap_conn_find_by_addr(&peer, &connection);
+    if (rc != 0 || !connection.sec_state.encrypted) {
+        ESP_LOGW(TAG, "HID opened without an encrypted link (lookup rc=%d)", rc);
+        set_state(RK_BLE_HID_HOST_STATE_CONNECTING,
+                  rc == 0 ? RK_BLE_HID_HOST_ERROR_SECURITY : RK_BLE_HID_HOST_ERROR_CONNECT);
+        close_device_once_by_bda(s.active_bda);
+        return;
+    }
     s.reconnect_attempts = 0;
     end_consumer_session();
     status_set_connection(true, s.opening_name);
@@ -1304,8 +1317,12 @@ static void process_event(const service_event_t *event) {
             s.forget_pending = false;
             set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_NONE);
         } else if (!s.status.connected) {
-            set_state(RK_BLE_HID_HOST_STATE_READY, RK_BLE_HID_HOST_ERROR_NONE);
-            schedule_reconnect();
+            const rk_ble_hid_host_error_t error = s.status.last_error;
+            set_state(RK_BLE_HID_HOST_STATE_READY, error);
+            /* A rejected handshake needs the user to wake or re-pair the remote. */
+            if (error != RK_BLE_HID_HOST_ERROR_SECURITY) {
+                schedule_reconnect();
+            }
         }
         break;
     case EVENT_CONSUMER_TICK: {

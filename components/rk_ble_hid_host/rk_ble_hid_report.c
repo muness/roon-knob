@@ -27,6 +27,7 @@ const char *rk_ble_hid_host_error_name(rk_ble_hid_host_error_t error) {
     case RK_BLE_HID_HOST_ERROR_STALE_SCAN: return "STALE_SCAN";
     case RK_BLE_HID_HOST_ERROR_TEARDOWN: return "TEARDOWN";
     case RK_BLE_HID_HOST_ERROR_TEARDOWN_TIMEOUT: return "TEARDOWN_TIMEOUT";
+    case RK_BLE_HID_HOST_ERROR_SECURITY: return "SECURITY";
     default: return "UNKNOWN";
     }
 }
