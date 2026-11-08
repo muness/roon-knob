@@ -1319,12 +1319,23 @@ static void process_event(const service_event_t *event) {
         const bool mapped = rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
 
+        /* On the RM3, IDF labels the observed Home report GENERIC even
+         * though report 1 carries Consumer Control. Match the captured
+         * Home payload and peer name so other generic reports stay inert. */
+        const bool rm3_home = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
+            strcmp(s.status.active_name, "FiiO RM3") == 0 &&
+            event->data.input.report_id == 1 && event->data.input.len == 3 &&
+            event->data.input.data[0] == 0x23 && event->data.input.data[1] == 0x02 &&
+            event->data.input.data[2] == 0;
+        const bool consumer_control =
+            event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_home;
+
         if (s.status.connected && !is_stopping()) {
             rk_ble_recent_report_t report = {
                 .media_key = mapped && s.config.on_media_key ? key : RK_BLE_MEDIA_KEY_NONE,
                 .length = event->data.input.len,
                 .report_id = event->data.input.report_id,
-                .consumer_control = event->data.input.usage == ESP_HID_USAGE_CCONTROL,
+                .consumer_control = consumer_control,
             };
             memcpy(report.data, event->data.input.data, report.length);
             xSemaphoreTake(s.status_lock, portMAX_DELAY);
@@ -1341,7 +1352,8 @@ static void process_event(const service_event_t *event) {
          * controller can recognise long and double presses and a person can
          * map a key this firmware has no name for. Only reports ESP-IDF
          * classified as Consumer Control, or that the bounded mapper accepted
-         * despite a GENERIC label: a keyboard or mouse report would otherwise
+         * despite a GENERIC label (including the RM3 quirk above): a keyboard
+         * or mouse report would otherwise
          * decode its first two bytes as a "usage". This runs in addition to
          * the media-key path below, which is unchanged. */
         const bool release_of_held_key =
@@ -1349,8 +1361,7 @@ static void process_event(const service_event_t *event) {
             event->data.input.len >= 2 && event->data.input.data[0] == 0 &&
             event->data.input.data[1] == 0;
         if (s.config.on_consumer_event && s.status.connected && !is_stopping() &&
-            (mapped || event->data.input.usage == ESP_HID_USAGE_CCONTROL ||
-             release_of_held_key)) {
+            (mapped || consumer_control || release_of_held_key)) {
             /* `00 00` releases whichever key was held; the tracker supplies its
              * usage. A GENERIC-labelled release of a held key is accepted too,
              * otherwise the key would stay down forever. */

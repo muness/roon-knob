@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory() as directory:
 #include "common/controller_ble_input.c"
 typedef int esp_err_t;
 typedef int esp_hid_usage_t;
+#define ESP_HID_USAGE_GENERIC 0
 #define ESP_HID_USAGE_CCONTROL 1
 #define ESP_LOGD(...) ((void)0)
 #define portMUX_TYPE int
@@ -137,6 +138,28 @@ int main(void) {
     s.status.connected=false;
     report(0xb5); drain_host();
     assert(s.status.recent_reports[0].data[0]==0x23);
+    /* Replay the captured RM3 Home packet and its generic release. The
+     * exact same bytes from another peer must remain diagnostic input. */
+    s.status.connected=true;
+    for (unsigned rm3=0; rm3<2; ++rm3) {
+        reset();
+        strcpy(s.status.active_name, rm3 ? "FiiO RM3" : "Other remote");
+        service_event_t home={.type=EVENT_INPUT};
+        home.data.input.usage=ESP_HID_USAGE_GENERIC;
+        home.data.input.report_id=1;
+        home.data.input.len=3;
+        home.data.input.data[0]=0x23;
+        home.data.input.data[1]=0x02;
+        enqueue_consumer_event(&home);
+        clock_ms+=50;
+        memset(home.data.input.data, 0, sizeof(home.data.input.data));
+        enqueue_consumer_event(&home);
+        clock_ms+=400; tick();
+        drain_host(); controller_ble_input_service();
+        assert(sent_count==rm3);
+        assert(s.status.recent_reports[1].consumer_control==(bool)rm3);
+        if (rm3) assert(last_gesture==CONTROLLER_SHORTCUT_GESTURE_PRESS);
+    }
     puts("HID ingress and both deferred queues preserve gesture history; loss cancels");
 }
 '''
