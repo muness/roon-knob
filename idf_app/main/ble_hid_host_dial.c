@@ -90,6 +90,7 @@ bool ble_hid_host_dial_start(void) {
         .default_enabled = false,
         .on_media_key = controller_ble_input_on_media_key,
         .on_consumer_event = controller_ble_input_on_consumer_event,
+        .can_learn_usage = controller_ble_input_can_learn,
         .on_status = on_status,
         .callback_context = NULL,
     };

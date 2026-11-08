@@ -255,6 +255,9 @@ static portMUX_TYPE s_input_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_input_session = 1, s_input_sequence, s_tracker_session;
 static bool s_input_faulted;
 static uint32_t s_learn_started, s_learn_until;
+static uint16_t s_learn_held_usage;
+static uint8_t s_learn_held_report_id;
+static uint16_t s_learn_held_length;
 
 static void cancel_consumer_ingress(void) {
     portENTER_CRITICAL(&s_input_lock);
@@ -289,7 +292,10 @@ static void enqueue_consumer_event(service_event_t *event) {
 static void status_set_connection(bool connected, const char *name) {
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
     s.status.connected = connected;
-    if (!connected) s_learn_until = 0;
+    if (!connected) {
+        s_learn_until = 0;
+        s.status.learned_report = (rk_ble_recent_report_t){0};
+    }
     copy_name(s.status.active_name, connected ? name : NULL);
     xSemaphoreGive(s.status_lock);
 }
@@ -1326,11 +1332,24 @@ static void process_event(const service_event_t *event) {
         if (!current || faulted) break;
         if (s_tracker_session != event->input_session) {
             rk_ble_consumer_tracker_reset(&s.consumer);
+            s_learn_held_usage = 0;
             s_tracker_session = event->input_session;
         }
         rk_ble_media_key_t key;
         const bool pointer = event->data.input.usage == ESP_HID_USAGE_MOUSE;
-        const bool consumer_control = event->data.input.usage == ESP_HID_USAGE_CCONTROL;
+        /* The RM3 can label report 1 as Generic even for its captured
+         * Home and Down selectors. Admit only those payloads and a release
+         * while a consumer key is held. Mouse reports remain separate. */
+        const uint8_t *data = event->data.input.data;
+        const bool rm3_shortcut = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
+            strcmp(s.status.active_name, "FiiO RM3") == 0 &&
+            event->data.input.report_id == 1 && event->data.input.len == 3 &&
+            data[2] == 0 &&
+            ((data[0] == 0x23 && data[1] == 0x02) ||
+             (data[0] == 0x43 && data[1] == 0) ||
+             (data[0] == 0 && data[1] == 0 && rk_ble_consumer_tracker_holding(&s.consumer)));
+        const bool consumer_control =
+            event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_shortcut;
         /* Some HID hosts leave standard media selectors classified as Generic.
          * Preserve transport for the fixed media usages without learning an
          * arbitrary shortcut from an unclassified report. */
@@ -1339,6 +1358,18 @@ static void process_event(const service_event_t *event) {
              (event->data.input.len == 3 && event->data.input.data[2] == 0));
         const bool mapped = (consumer_control || generic_media) && rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
+
+        const uint16_t usage = event->data.input.len >= 2 ?
+            (uint16_t)data[0] | ((uint16_t)data[1] << 8) : 0;
+        if (s_learn_held_usage && (consumer_control || generic_media) &&
+            event->data.input.report_id == s_learn_held_report_id &&
+            event->data.input.len == s_learn_held_length) {
+            /* The learned press belongs to the picker, including any repeat
+             * and its release. A different selector may replace it directly. */
+            if (usage == s_learn_held_usage) break;
+            s_learn_held_usage = 0;
+            if (!usage) break;
+        }
 
         bool learning = false;
         if (s.status.connected && !is_stopping()) {
@@ -1355,6 +1386,14 @@ static void process_event(const service_event_t *event) {
                 .pointer = pointer,
             };
             memcpy(report.data, event->data.input.data, report.length);
+            if (learning && consumer_control && s.config.can_learn_usage &&
+                s.config.can_learn_usage(usage)) {
+                s_learn_until = 0;
+                s_learn_held_usage = usage;
+                s_learn_held_report_id = report.report_id;
+                s_learn_held_length = report.length;
+                s.status.learned_report = report;
+            }
             memmove(s.status.recent_reports + 1, s.status.recent_reports,
                     sizeof(s.status.recent_reports) - sizeof(report));
             s.status.recent_reports[0] = report;
@@ -1627,8 +1666,9 @@ rk_ble_hid_host_result_t rk_ble_hid_host_forget(void) {
 bool rk_ble_hid_host_begin_learn(uint32_t *started_ms) {
     if (!s.status_lock || !started_ms) return false;
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
-    const bool connected = s.status.connected;
+    const bool connected = s.status.connected && s.config.can_learn_usage;
     if (connected) {
+        s.status.learned_report = (rk_ble_recent_report_t){0};
         s_learn_started = (uint32_t)(esp_timer_get_time() / 1000);
         s_learn_until = s_learn_started + 12000;
         *started_ms = s_learn_started;

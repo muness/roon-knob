@@ -101,6 +101,8 @@ typedef struct {
     /* Most recent first, including reports that had no matching command. */
     rk_ble_recent_report_t recent_reports[RK_BLE_HID_HOST_RECENT_REPORTS];
     size_t recent_report_count;
+    /* A successful Learn survives unrelated input while the picker is open. */
+    rk_ble_recent_report_t learned_report;
 } rk_ble_hid_host_status_t;
 
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
@@ -125,8 +127,9 @@ typedef struct {
     rk_ble_hid_host_media_callback_t on_media_key;
     rk_ble_hid_host_status_callback_t on_status;
     void *callback_context;
-    /** Optional. Appended last so existing designated initialisers are unchanged. */
+    /** Optional callbacks for Consumer Control and single-press learning. */
     rk_ble_hid_host_consumer_callback_t on_consumer_event;
+    bool (*can_learn_usage)(uint16_t usage);
 } rk_ble_hid_host_config_t;
 
 /**

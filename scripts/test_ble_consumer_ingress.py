@@ -88,7 +88,7 @@ static int xQueueSend(void *q, const service_event_t *event, int timeout) {
     queue[queue_count++] = *event; return pdPASS;
 }
 static bool defer_ui=true;
-static unsigned sent_count;
+static unsigned sent_count, media_count;
 static uint32_t last_press_time;
 static controller_shortcut_gesture_t last_gesture;
 bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg) {
@@ -99,7 +99,9 @@ bool controller_input_dispatch_action(const controller_action_t *action) {
     ++sent_count; last_gesture=action->value.shortcut.gesture;
     last_press_time=action->value.shortcut.press_time_ms; return true;
 }
-bool controller_input_post_control(controller_control_intent_t intent) { (void)intent; return true; }
+bool controller_input_post_control(controller_control_intent_t intent) {
+    (void)intent; ++media_count; return true;
+}
 '''
     code += section('static portMUX_TYPE s_input_lock', '\nstatic void status_set_connection')
     code += '\nstatic void consume(const service_event_t *event) { switch(event->type) {\n'
@@ -124,11 +126,12 @@ static void tick(void) {
 }
 static void reset(void) {
     queue_count=0; end_consumer_session(); controller_ble_input_service();
-    sent_count=0; clock_ms=10000;
+    sent_count=0; media_count=0; clock_ms=10000;
 }
 int main(void) {
     s.events=&queue; s.status.connected=true;
     s.config.on_consumer_event=controller_ble_input_on_consumer_event;
+    s.config.can_learn_usage=controller_ble_input_can_learn;
     for (unsigned ui=0;ui<2;++ui) for (unsigned host=0;host<2;++host)
         for(unsigned hold=599;hold<=601;++hold) {
             reset(); defer_ui=ui;
@@ -211,7 +214,8 @@ int main(void) {
     s_learn_until=clock_ms+12000;
     report(0x223); clock_ms+=50; report(0); clock_ms+=400; tick();
     drain_host(); controller_ble_input_service();
-    assert(s.status.recent_reports[1].learned);
+    assert(s.status.learned_report.learned);
+    assert(s_learn_until==0);
     assert(sent_count==0);
     reset();
     s_learn_until=0;
@@ -228,6 +232,61 @@ int main(void) {
     drain_host(); controller_ble_input_service();
     assert(sent_count==1);
     assert(s.status.recent_reports[1].consumer_control);
+    reset();
+    /* Live RM3 Down report: Learn must admit it without triggering playback.
+     * Outside Learn it must dispatch after its matching release. */
+    strcpy(s.status.active_name, "FiiO RM3");
+    down.data.input.report_id=1;
+    down.data.input.usage=ESP_HID_USAGE_GENERIC;
+    down.data.input.data[0]=0x43;
+    s_learn_started=clock_ms;
+    s_learn_until=clock_ms+12000;
+    enqueue_consumer_event(&down);
+    drain_host(); controller_ble_input_service();
+    assert(s.status.recent_reports[0].learned);
+    assert(s.status.recent_reports[0].consumer_control);
+    assert(sent_count==0);
+    assert(s_learn_until==0 && s.status.learned_report.data[0]==0x43);
+    /* Within the old 12s window, ordinary controls resume. Holding the
+     * captured button cannot launch its existing mapping or a long press. */
+    clock_ms+=100;
+    enqueue_consumer_event(&down);
+    clock_ms+=700; tick();
+    drain_host(); controller_ble_input_service();
+    assert(sent_count==0);
+    service_event_t release=down;
+    release.data.input.data[0]=0;
+    enqueue_consumer_event(&release);
+    report(0xcd);
+    drain_host(); controller_ble_input_service();
+    assert(media_count==1 && sent_count==0);
+    for (size_t i=0; i<RK_BLE_HID_HOST_RECENT_REPORTS; ++i) {
+        report(0xe9);
+        drain_host();
+    }
+    assert(s.status.learned_report.data[0]==0x43);
+    for (unsigned rejected=0; rejected<4; ++rejected) {
+        reset(); s_learn_until=0;
+        service_event_t press=down, release=down;
+        if (rejected==1) press.data.input.report_id=2;
+        if (rejected==2) press.data.input.data[0]=0x44;
+        strcpy(s.status.active_name,rejected==3 ? "Other remote" : "FiiO RM3");
+        enqueue_consumer_event(&press);
+        clock_ms+=50; release.data.input.data[0]=0;
+        enqueue_consumer_event(&release);
+        clock_ms+=400; tick();
+        drain_host(); controller_ble_input_service();
+        assert(sent_count==(rejected==0));
+        assert(s.status.recent_reports[1].consumer_control==(rejected==0));
+    }
+    reset();
+    strcpy(s.status.active_name, "FiiO RM3");
+    service_event_t rm3_home=down;
+    rm3_home.data.input.data[0]=0x23;
+    rm3_home.data.input.data[1]=0x02;
+    enqueue_consumer_event(&rm3_home);
+    drain_host();
+    assert(s.status.recent_reports[0].consumer_control);
     reset();
     down.data.input.usage=ESP_HID_USAGE_GENERIC;
     down.data.input.data[0]=0xcd;
