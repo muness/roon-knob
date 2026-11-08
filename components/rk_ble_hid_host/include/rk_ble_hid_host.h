@@ -169,14 +169,14 @@ rk_ble_hid_host_result_t rk_ble_hid_host_forget(void);
 bool rk_ble_hid_host_begin_learn(uint32_t *started_ms);
 rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *out);
 
-/**
- * Pure payload mapping independent of ESP-IDF's report usage classification.
- * Returns false for releases, unknown usages, and short reports.
- */
 /* Recognize a descriptor-defined 16-bit Consumer selector at bit zero. */
 bool rk_ble_hid_report_is_consumer_array(const uint8_t *map, size_t len,
                                         uint16_t report_id, size_t payload_len);
 
+/**
+ * Pure payload mapping independent of ESP-IDF's report usage classification.
+ * Returns false for releases, unknown usages, and short reports.
+ */
 bool rk_ble_hid_host_map_consumer_report(const uint8_t *data, size_t len,
                                          rk_ble_media_key_t *key);
 

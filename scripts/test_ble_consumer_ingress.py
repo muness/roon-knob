@@ -157,6 +157,9 @@ int main(void) {
     memcpy(pointer_map, consumer_map, sizeof(pointer_map));
     pointer_map[1] = 0x01; /* Generic Desktop */
     assert(!rk_ble_hid_report_is_consumer_array(pointer_map, sizeof(pointer_map), 7, 3));
+    memcpy(pointer_map, consumer_map, sizeof(pointer_map));
+    pointer_map[11] = 1; /* Usage Minimum differs from Logical Minimum */
+    assert(!rk_ble_hid_report_is_consumer_array(pointer_map, sizeof(pointer_map), 7, 3));
     s.status.connected=true;
     for (unsigned classified=0; classified<2; ++classified) {
         reset();
