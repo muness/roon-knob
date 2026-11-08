@@ -80,6 +80,7 @@ typedef struct {
     uint8_t report_id;
     uint8_t data[RK_BLE_HID_HOST_REPORT_BYTES];
     bool consumer_control;
+    bool pointer;
     bool learned;
 } rk_ble_recent_report_t;
 

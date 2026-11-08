@@ -29,6 +29,7 @@ typedef int esp_err_t;
 typedef int esp_hid_usage_t;
 #define ESP_HID_USAGE_GENERIC 0
 #define ESP_HID_USAGE_CCONTROL 1
+#define ESP_HID_USAGE_MOUSE 2
 #define ESP_LOGD(...) ((void)0)
 #define portMUX_TYPE int
 #define portMUX_INITIALIZER_UNLOCKED 0
@@ -172,6 +173,35 @@ int main(void) {
     drain_host(); controller_ble_input_service();
     assert(s.status.recent_reports[1].learned);
     assert(sent_count==0);
+    reset();
+    s_learn_until=0;
+    service_event_t down={.type=EVENT_INPUT};
+    down.data.input.report_id=1;
+    down.data.input.len=3;
+    down.data.input.data[0]=0x43;
+    enqueue_consumer_event(&down);
+    clock_ms+=50;
+    down.data.input.data[0]=0;
+    enqueue_consumer_event(&down);
+    clock_ms+=400; tick();
+    drain_host(); controller_ble_input_service();
+    assert(sent_count==1);
+    assert(s.status.recent_reports[1].consumer_control);
+    reset();
+    down.data.input.report_id=3;
+    down.data.input.usage=ESP_HID_USAGE_MOUSE;
+    down.data.input.data[0]=1;
+    down.data.input.data[1]=255;
+    enqueue_consumer_event(&down);
+    clock_ms+=400; tick();
+    drain_host(); controller_ble_input_service();
+    down.data.input.data[0]=0xcd;
+    down.data.input.data[1]=0;
+    enqueue_consumer_event(&down);
+    clock_ms+=400; tick();
+    drain_host(); controller_ble_input_service();
+    assert(sent_count==0);
+    assert(s.status.recent_reports[0].pointer && !s.status.recent_reports[0].consumer_control);
     puts("HID ingress and both deferred queues preserve gesture history; loss cancels");
 }
 '''

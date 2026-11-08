@@ -1358,6 +1358,7 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
     cJSON_AddItemToArray(inputs, input);
     cJSON_AddNumberToObject(input, "at", report->time_ms);
     cJSON_AddBoolToObject(input, "learned", report->learned);
+    cJSON_AddBoolToObject(input, "pointer", report->pointer);
     cJSON_AddNumberToObject(input, "report", report->report_id);
     cJSON_AddStringToObject(input, "bytes", payload);
     const char *media = ble_media_command_name(report->media_key);
@@ -1367,6 +1368,7 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
       char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
       if (controller_shortcut_key_name(usage, key, sizeof(key))) {
         cJSON_AddNumberToObject(input, "usage", usage);
+        if (usage == 0x0043) cJSON_AddStringToObject(input, "label", "Down arrow");
         cJSON_AddStringToObject(input, "key", key);
         cJSON_AddBoolToObject(input, "assignable",
             controller_shortcut_key_class(usage) == CONTROLLER_SHORTCUT_KEY_FREE);
@@ -1633,22 +1635,26 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "shortcut.replaceChildren();learned=null;more.hidden=true;"
       "try{const {started}=await read('/api/ble-assign',{learn:true});"
       "status.textContent='Press the spare button you want to assign.';"
-      "const until=performance.now()+12000;"
+      "const until=performance.now()+12000;let skipped=false;"
       "while(performance.now()<until){const data=await read('/api/ble-input');"
       "if(!data.connected)throw Error('Remote disconnected. Reconnect it and try again.');"
-      "const input=data.inputs.find(i=>i.learned&&((i.at-started)|0)>=0);"
-      "if(input){"
-      "if(!input.key&&!input.media){report.hidden=false;"
-      "get('bytes').textContent='Report '+input.report+' · '+input.bytes;"
-      "status.textContent='Button received. This device couldn’t identify it. Try another button.';return;}"
-      "if(!input.assignable){status.textContent='That button already controls playback. Try a spare button.';return;}"
-      "learned=input;label=input.key.startsWith('usage_')?'This button':"
-      "input.key[0].toUpperCase()+input.key.slice(1).replaceAll('_',' ');"
+      "const fresh=data.inputs.filter(i=>i.learned&&((i.at-started)|0)>=0);"
+      "const input=fresh.find(i=>i.assignable);"
+      "if(!input&&fresh.length){const last=fresh[fresh.length-1];skipped=true;"
+      "report.hidden=false;get('bytes').textContent='Report '+last.report+' · '+last.bytes;"
+      "const reason=last.pointer?'Pointer input can’t be assigned.':"
+      "last.media||last.key?'That button is reserved for playback controls.':"
+      "'This input can’t be assigned with the current firmware.';"
+      "const hint=reason+' Try another button.';"
+      "if(status.textContent!==hint)status.textContent=hint;}"
+      "if(input){report.hidden=true;"
+      "learned=input;label=input.label||(input.key.startsWith('usage_')?'This button':"
+      "input.key[0].toUpperCase()+input.key.slice(1).replaceAll('_',' '));"
       "await load(0);"
       "if(!shortcut.options.length){status.textContent='Pin a shortcut in Hi-Fi Control’s Library, then try again.';return;}"
       "picker.hidden=false;status.textContent=label+' learned. Choose what it should play.';shortcut.focus();return;}"
       "await new Promise(resolve=>setTimeout(resolve,250));}"
-      "status.textContent='No button received. Try again.';"
+      "if(!skipped)status.textContent='No button received. Try again.';"
       "}catch(e){status.textContent=e.message;}"
       "finally{start.disabled=false;start.textContent='Learn another button';}};"
       "more.onclick=async()=>{start.disabled=true;more.disabled=true;save.disabled=true;try{await load(next);}"

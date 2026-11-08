@@ -1318,19 +1318,19 @@ static void process_event(const service_event_t *event) {
             s_tracker_session = event->input_session;
         }
         rk_ble_media_key_t key;
-        const bool mapped = rk_ble_hid_host_map_consumer_report(
+        const bool pointer = event->data.input.usage == ESP_HID_USAGE_MOUSE;
+        const bool mapped = !pointer && rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
 
-        /* On the RM3, IDF labels the observed Home report GENERIC even
-         * though report 1 carries Consumer Control. Match the captured
-         * Home payload and peer name so other generic reports stay inert. */
-        const bool rm3_home = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
+        /* The RM3 sends Home, menu arrows, and transport in its three-byte
+         * report 1. IDF can label it GENERIC. Keep other report IDs, including
+         * the stream seen in mouse mode, out of the consumer decoder. */
+        const bool rm3_consumer = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
             strcmp(s.status.active_name, "FiiO RM3") == 0 &&
             event->data.input.report_id == 1 && event->data.input.len == 3 &&
-            event->data.input.data[0] == 0x23 && event->data.input.data[1] == 0x02 &&
             event->data.input.data[2] == 0;
         const bool consumer_control =
-            event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_home;
+            event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_consumer;
 
         bool learning = false;
         if (s.status.connected && !is_stopping()) {
@@ -1344,6 +1344,7 @@ static void process_event(const service_event_t *event) {
                 .length = event->data.input.len,
                 .report_id = event->data.input.report_id,
                 .consumer_control = consumer_control,
+                .pointer = pointer,
             };
             memcpy(report.data, event->data.input.data, report.length);
             memmove(s.status.recent_reports + 1, s.status.recent_reports,
@@ -1366,7 +1367,7 @@ static void process_event(const service_event_t *event) {
          * decode its first two bytes as a "usage". This runs in addition to
          * the media-key path below, which is unchanged. */
         const bool release_of_held_key =
-            rk_ble_consumer_tracker_holding(&s.consumer) &&
+            !pointer && rk_ble_consumer_tracker_holding(&s.consumer) &&
             event->data.input.len >= 2 && event->data.input.data[0] == 0 &&
             event->data.input.data[1] == 0;
         if (s.config.on_consumer_event && s.status.connected && !is_stopping() &&
