@@ -44,6 +44,7 @@ typedef enum {
 #define CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE 3u
 
 typedef struct {
+    uint32_t press_time_ms;
     uint16_t usage;   /* HID Consumer Control usage; never 0 */
     uint8_t gesture;  /* CONTROLLER_SHORTCUT_ACTION_GESTURE_* */
 } controller_shortcut_action_t;
@@ -94,6 +95,7 @@ static inline controller_action_t controller_action_shortcut(
     controller_action_t action;
     action.kind = CONTROLLER_ACTION_SHORTCUT;
     action.value.command = controller_command_make(CONTROLLER_COMMAND_NONE);
+    action.value.shortcut.press_time_ms = 0;
     action.value.shortcut.usage = usage;
     action.value.shortcut.gesture = gesture;
     return action;

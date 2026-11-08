@@ -64,13 +64,15 @@ static int xQueueSend(void *q, const service_event_t *event, int timeout) {
 }
 static bool defer_ui=true;
 static unsigned sent_count;
+static uint32_t last_press_time;
 static controller_shortcut_gesture_t last_gesture;
 bool platform_task_post_to_ui(platform_task_fn_t fn, void *arg) {
     if (!defer_ui) fn(arg);
     return true;
 }
 bool controller_input_dispatch_action(const controller_action_t *action) {
-    ++sent_count; last_gesture=action->value.shortcut.gesture; return true;
+    ++sent_count; last_gesture=action->value.shortcut.gesture;
+    last_press_time=action->value.shortcut.press_time_ms; return true;
 }
 bool controller_input_post_control(controller_control_intent_t intent) { (void)intent; return true; }
 '''
@@ -158,7 +160,10 @@ int main(void) {
         drain_host(); controller_ble_input_service();
         assert(sent_count==rm3);
         assert(s.status.recent_reports[1].consumer_control==(bool)rm3);
-        if (rm3) assert(last_gesture==CONTROLLER_SHORTCUT_GESTURE_PRESS);
+        if (rm3) {
+            assert(last_gesture==CONTROLLER_SHORTCUT_GESTURE_PRESS);
+            assert(last_press_time==s.status.recent_reports[1].time_ms);
+        }
     }
     puts("HID ingress and both deferred queues preserve gesture history; loss cancels");
 }

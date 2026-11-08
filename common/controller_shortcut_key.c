@@ -98,9 +98,10 @@ static bool reached(uint32_t now_ms, uint32_t deadline_ms) {
 }
 
 static void emit(controller_shortcut_event_t *out, size_t *count, uint16_t usage,
-                 controller_shortcut_gesture_t gesture) {
+                 controller_shortcut_gesture_t gesture, uint32_t press_time_ms) {
     out[*count].usage = usage;
     out[*count].gesture = gesture;
+    out[*count].press_time_ms = press_time_ms;
     ++*count;
 }
 
@@ -131,11 +132,12 @@ size_t controller_shortcut_gesture_on_key(
             state->long_sent = false;
             state->consumed = true; /* its release and hold must not repeat it */
             state->down_at_ms = now_ms;
-            emit(out, &count, usage, CONTROLLER_SHORTCUT_GESTURE_DOUBLE);
+            emit(out, &count, usage, CONTROLLER_SHORTCUT_GESTURE_DOUBLE, state->single_press_time_ms);
             return count;
         }
         if (state->single_pending) {
-            emit(out, &count, state->single_usage, CONTROLLER_SHORTCUT_GESTURE_PRESS);
+            emit(out, &count, state->single_usage, CONTROLLER_SHORTCUT_GESTURE_PRESS,
+                 state->single_press_time_ms);
             state->single_pending = false;
         }
         state->usage = usage;
@@ -152,6 +154,7 @@ size_t controller_shortcut_gesture_on_key(
         !state->consumed) {
         state->single_pending = true;
         state->single_usage = usage;
+        state->single_press_time_ms = state->down_at_ms;
         state->single_deadline_ms = now_ms + CONTROLLER_SHORTCUT_DOUBLE_WINDOW_MS;
     }
     state->usage = 0;
@@ -167,12 +170,14 @@ size_t controller_shortcut_gesture_poll(
         state->long_sent = true;
         out->usage = state->usage;
         out->gesture = CONTROLLER_SHORTCUT_GESTURE_LONG;
+        out->press_time_ms = state->down_at_ms;
         return 1;
     }
     if (state->single_pending && reached(now_ms, state->single_deadline_ms)) {
         state->single_pending = false;
         out->usage = state->single_usage;
         out->gesture = CONTROLLER_SHORTCUT_GESTURE_PRESS;
+        out->press_time_ms = state->single_press_time_ms;
         return 1;
     }
     return 0;

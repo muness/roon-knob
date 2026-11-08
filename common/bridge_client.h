@@ -52,6 +52,15 @@ bool bridge_client_execute_command(const controller_command_t *command);
  * own refusal is reported on the display when the request completes. `gesture`
  * is a CONTROLLER_SHORTCUT_ACTION_GESTURE_* value. */
 bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture);
+bool bridge_client_submit_shortcut_at(uint16_t usage, uint8_t gesture, uint32_t press_time_ms);
+typedef struct {
+    uint32_t press_time_ms;
+    uint16_t usage;
+    uint8_t gesture;
+    char code[32];
+    char message[192];
+} bridge_shortcut_result_t;
+bool bridge_client_latest_shortcut_result(bridge_shortcut_result_t *out);
 void bridge_client_set_network_ready(bool ready);
 const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height);
 const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_len,

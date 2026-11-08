@@ -64,7 +64,8 @@ static void dispatch_shortcut(const controller_shortcut_event_t *event, uint32_t
     bool current = revision == s_cancel_revision;
     os_critical_leave(&s_mailbox_lock);
     if (!current) return;
-    const controller_action_t action = controller_action_shortcut(event->usage, (uint8_t)event->gesture);
+    controller_action_t action = controller_action_shortcut(event->usage, (uint8_t)event->gesture);
+    action.value.shortcut.press_time_ms = event->press_time_ms;
     (void)controller_input_dispatch_action(&action);
 }
 

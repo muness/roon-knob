@@ -246,7 +246,7 @@ static void shortcut_send(const char *reply, bool http_ok, bool expect_ok,
                           const char *expect_message) {
     shortcut_reply = reply; shortcut_http_ok = http_ok; last_message[0] = 0;
     const unsigned before = shortcut_posts;
-    controller_shortcut_event_t event = {0x0223, CONTROLLER_SHORTCUT_GESTURE_LONG};
+    controller_shortcut_event_t event = {.usage=0x0223, .gesture=CONTROLLER_SHORTCUT_GESTURE_LONG};
     (void)expect_ok; /* the blocking send reports the bridge's verdict */
     shortcut_authority_t authority;
     assert(capture_shortcut_authority(&authority));
@@ -285,13 +285,17 @@ static void test_shortcut_submit_is_single_flight_and_readiness_gated(void) {
     hold_shortcut_task = true; shortcut_task_start_fails = false;
     atomic_store(&s_shortcut_busy, false);
 
-    assert(bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
+    assert(bridge_client_submit_shortcut_at(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG, 417));
     assert(shortcut_posts == 0 && held_shortcut_fn); /* returned before the request ran */
     /* A second press while one is out is dropped, not queued. */
     assert(!bridge_client_submit_shortcut(0x0224, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
     held_shortcut_fn(held_shortcut_arg); /* the first completes */
     assert(shortcut_posts == 1);
     assert(strstr(shortcut_body, "\"home\""));
+    bridge_shortcut_result_t outcome;
+    assert(bridge_client_latest_shortcut_result(&outcome));
+    assert(outcome.usage == 0x0223 && outcome.press_time_ms == 417);
+    assert(strcmp(outcome.code, "accepted") == 0);
     hold_shortcut_task = false;
     /* ...and the adapter is free again. */
     assert(bridge_client_submit_shortcut(0x0224, CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE));

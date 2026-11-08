@@ -44,7 +44,7 @@ static void names(void) {
 
 static void body(void) {
     char out[CONTROLLER_SHORTCUT_BODY_CAPACITY];
-    controller_shortcut_event_t e = {HOME, CONTROLLER_SHORTCUT_GESTURE_LONG};
+    controller_shortcut_event_t e = {.usage=HOME, .gesture=CONTROLLER_SHORTCUT_GESTURE_LONG};
     assert(controller_shortcut_build_body(&e, out, sizeof(out)));
     assert(strcmp(out, "{\"key\":\"home\",\"gesture\":\"long\"}") == 0);
     e.usage = UNKNOWN;

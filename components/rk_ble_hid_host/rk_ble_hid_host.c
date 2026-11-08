@@ -1332,6 +1332,7 @@ static void process_event(const service_event_t *event) {
 
         if (s.status.connected && !is_stopping()) {
             rk_ble_recent_report_t report = {
+                .time_ms = event->input_time_ms,
                 .media_key = mapped && s.config.on_media_key ? key : RK_BLE_MEDIA_KEY_NONE,
                 .length = event->data.input.len,
                 .report_id = event->data.input.report_id,

@@ -74,6 +74,7 @@ typedef struct {
 } rk_ble_hid_host_device_t;
 
 typedef struct {
+    uint32_t time_ms;
     rk_ble_media_key_t media_key;
     uint16_t length;
     uint8_t report_id;

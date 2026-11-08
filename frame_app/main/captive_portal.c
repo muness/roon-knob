@@ -30,6 +30,8 @@
 #include "rk_ble_hid_host.h"
 #include "os_mutex.h"
 
+#include <cJSON.h>
+#include <esp_timer.h>
 #include <esp_err.h>
 #include <esp_heap_caps.h>
 #include <esp_http_server.h>
@@ -1240,6 +1242,63 @@ static const char *ble_media_command_name(rk_ble_media_key_t key) {
   }
 }
 
+static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
+  rk_ble_hid_host_status_t status;
+  if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    return httpd_resp_sendstr(req, "Bluetooth unavailable");
+  }
+  cJSON *root = cJSON_CreateObject();
+  if (!root) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+  cJSON_AddNumberToObject(root, "now", (uint32_t)(esp_timer_get_time() / 1000));
+  cJSON_AddBoolToObject(root, "connected", status.connected);
+  cJSON *inputs = cJSON_AddArrayToObject(root, "inputs");
+  for (size_t i = status.recent_report_count; inputs && i > 0; --i) {
+    const rk_ble_recent_report_t *report = &status.recent_reports[i - 1];
+    char payload[3 * RK_BLE_HID_HOST_REPORT_BYTES + 1] = "";
+    bool nonzero = false;
+    for (size_t j = 0; j < report->length; ++j) {
+      snprintf(payload + 3 * j, sizeof(payload) - 3 * j, "%02X ", (unsigned)report->data[j]);
+      nonzero |= report->data[j] != 0;
+    }
+    if (!nonzero) continue;
+    cJSON *input = cJSON_CreateObject();
+    if (!input) break;
+    cJSON_AddItemToArray(inputs, input);
+    cJSON_AddNumberToObject(input, "at", report->time_ms);
+    cJSON_AddNumberToObject(input, "report", report->report_id);
+    cJSON_AddStringToObject(input, "bytes", payload);
+    const char *media = ble_media_command_name(report->media_key);
+    if (media) cJSON_AddStringToObject(input, "media", media);
+    if (report->consumer_control && report->length >= 2) {
+      const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
+      char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+      if (controller_shortcut_key_name(usage, key, sizeof(key))) {
+        cJSON_AddNumberToObject(input, "usage", usage);
+        cJSON_AddStringToObject(input, "key", key);
+      }
+    }
+  }
+  bridge_shortcut_result_t result;
+  if (bridge_client_latest_shortcut_result(&result)) {
+    cJSON *outcome = cJSON_AddObjectToObject(root, "outcome");
+    if (outcome) {
+      cJSON_AddNumberToObject(outcome, "at", result.press_time_ms);
+      cJSON_AddNumberToObject(outcome, "usage", result.usage);
+      cJSON_AddStringToObject(outcome, "code", result.code);
+      cJSON_AddStringToObject(outcome, "message", result.message);
+    }
+  }
+  char *body = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (!body) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  const esp_err_t rc = httpd_resp_sendstr(req, body);
+  cJSON_free(body);
+  return rc;
+}
+
 static esp_err_t sta_ble_handler(httpd_req_t *req) {
   rk_ble_hid_host_status_t status = {0};
   if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
@@ -1449,6 +1508,48 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   }
   pos += snprintf(html + pos, html_size - pos, "</section>");
   if (pos >= (int)html_size) pos = (int)html_size - 1;
+
+  if (status.connected) {
+    pos += snprintf(html + pos, html_size - pos,
+      "<section class='card' aria-labelledby='button-test-title'>"
+      "<h2 id='button-test-title'>Test a button</h2>"
+      "<p id='button-test-status' role='status'>Check what this device receives. Assigned buttons still run their actions.</p>"
+      "<button id='button-test-start' type='button'>Start button test</button>"
+      "<p id='button-test-map' hidden><a href='%s/knobs'>Assign a shortcut in Hi-Fi Control</a> "
+      "Open this controller’s Buttons and shortcuts and select the button under Recently heard.</p>"
+      "<details id='button-test-report' hidden><summary>Show report details</summary>"
+      "<p><code id='button-test-bytes'></code></p></details></section>"
+      "<script>(()=>{"
+      "const get=id=>document.getElementById('button-test-'+id);"
+      "const start=get('start'), status=get('status'), map=get('map'), report=get('report');"
+      "const read=async()=>{const r=await fetch('/api/ble-input',{cache:'no-store',"
+      "signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error();return r.json()};"
+      "const sleep=()=>new Promise(resolve=>setTimeout(resolve,250));"
+      "start.onclick=async()=>{"
+      "start.disabled=true;map.hidden=true;report.hidden=true;report.open=false;"
+      "try{const baseline=(await read()).now;const until=performance.now()+12000;let button;"
+      "status.textContent='Press the button you expected to work.';"
+      "while(performance.now()<until){const data=await read();"
+      "if(!data.connected){status.textContent='Remote disconnected. Reconnect it and try again.';return;}"
+      "if(!button)button=data.inputs.find(i=>((i.at-baseline)|0)>0);"
+      "if(button){const label=button.media||(button.key&&!button.key.startsWith('usage_')"
+      "?button.key[0].toUpperCase()+button.key.slice(1).replaceAll('_',' '):'Button');"
+      "report.hidden=false;get('bytes').textContent='Report '+button.report+' · '+button.bytes;"
+      "if(!button.key&&!button.media){status.textContent='Button received. This device couldn’t identify it.';return;}"
+      "if(button.media){status.textContent=label+' received.';return;}"
+      "const o=data.outcome;"
+      "if(o&&o.at===button.at&&o.usage===button.usage){"
+      "if(o.code==='unmapped'){status.textContent=label+' received. No action assigned.';map.hidden=%s;}"
+      "else if(o.code==='accepted')status.textContent=label+' received. The bridge accepted the action.';"
+      "else status.textContent=label+' received. '+(o.message||'The action couldn’t be confirmed.');"
+      "return;}status.textContent=label+' received. Waiting for the bridge…';}"
+      "await sleep();}"
+      "status.textContent=button?'Button received. No action result came back.':'No button received.';"
+      "}catch{status.textContent='Couldn’t check remote input. Try again.';}"
+      "finally{start.disabled=false;start.textContent='Test another button';}};})();</script>",
+      esc_bridge_url, esc_bridge_url[0] ? "false" : "true");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+  }
 
   if (status.bonded || status.connected) {
     pos += snprintf(html + pos, html_size - pos,
@@ -1704,6 +1805,9 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t ble = {.uri = "/ble", .method = HTTP_GET, .handler = sta_ble_handler};
   if (!register_uri_handler(&ble)) goto fail;
+
+  httpd_uri_t ble_input = {.uri = "/api/ble-input", .method = HTTP_GET, .handler = sta_ble_input_handler};
+  if (!register_uri_handler(&ble_input)) goto fail;
 
   httpd_uri_t ble_scan = {.uri = "/api/ble-scan", .method = HTTP_POST, .handler = sta_ble_scan_handler};
   if (!register_uri_handler(&ble_scan)) goto fail;

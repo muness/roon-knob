@@ -47,6 +47,7 @@ typedef enum {
 typedef struct {
     uint16_t usage;
     controller_shortcut_gesture_t gesture;
+    uint32_t press_time_ms;
 } controller_shortcut_event_t;
 
 /* Key name the bridge's map uses: lowercase letters, digits, underscores. A
@@ -77,6 +78,7 @@ typedef struct {
     bool single_pending;
     uint16_t single_usage;
     uint32_t single_deadline_ms;
+    uint32_t single_press_time_ms;
 } controller_shortcut_gesture_state_t;
 
 void controller_shortcut_gesture_reset(controller_shortcut_gesture_state_t *state);

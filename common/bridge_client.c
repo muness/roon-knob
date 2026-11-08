@@ -1812,6 +1812,29 @@ bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
     return out->accepted;
 }
 
+static bridge_shortcut_result_t s_latest_shortcut_result;
+
+bool bridge_client_latest_shortcut_result(bridge_shortcut_result_t *out) {
+    lock_state();
+    *out = s_latest_shortcut_result;
+    unlock_state();
+    return out->usage != 0;
+}
+
+static void record_shortcut_result(const controller_shortcut_event_t *event,
+                                   const char *code, const char *message) {
+    bridge_shortcut_result_t result = {
+        .press_time_ms = event->press_time_ms,
+        .usage = event->usage,
+        .gesture = event->gesture,
+    };
+    shortcut_text(result.code, sizeof(result.code), code);
+    shortcut_text(result.message, sizeof(result.message), message);
+    lock_state();
+    s_latest_shortcut_result = result;
+    unlock_state();
+}
+
 static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
                                    const shortcut_authority_t *authority) {
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
@@ -1831,6 +1854,7 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
     }
     if (ret != 0) {
         platform_http_free(resp);
+        record_shortcut_result(event, "uncertain", "The bridge did not confirm the action.");
         post_ui_message("Shortcut failed");
         return false;
     }
@@ -1843,6 +1867,10 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
         if (cJSON_IsString(item) && item->valuestring) code = item->valuestring;
     }
     const char *feedback = controller_shortcut_feedback_for_code(code);
+    const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+    if (!cJSON_IsString(message)) message = cJSON_GetObjectItemCaseSensitive(root, "error");
+    record_shortcut_result(event, code ? code : "uncertain",
+        cJSON_IsString(message) ? message->valuestring : feedback ? feedback : "");
     if (feedback) post_ui_message(feedback);
     const bool ok = code && (!strcmp(code, "accepted") || !strcmp(code, "unmapped"));
     cJSON_Delete(root);
@@ -1864,9 +1892,14 @@ static void shortcut_task(void *arg) {
 }
 
 bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+    return bridge_client_submit_shortcut_at(usage, gesture, 0);
+}
+
+bool bridge_client_submit_shortcut_at(uint16_t usage, uint8_t gesture, uint32_t press_time_ms) {
     const controller_shortcut_event_t event = {
         .usage = usage,
         .gesture = (controller_shortcut_gesture_t)gesture,
+        .press_time_ms = press_time_ms,
     };
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
     if (!controller_shortcut_build_body(&event, body, sizeof(body))) {
