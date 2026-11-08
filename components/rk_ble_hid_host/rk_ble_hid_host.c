@@ -95,7 +95,7 @@ typedef struct {
             int reason;
         } close;
         struct {
-            uint8_t data[16];
+            uint8_t data[RK_BLE_HID_HOST_REPORT_BYTES];
             uint16_t len;
             esp_hid_usage_t usage;
             uint8_t report_id;
@@ -1082,7 +1082,7 @@ static void process_command(const command_t *command) {
         break;
     case COMMAND_FORGET:
         xSemaphoreTake(s.status_lock, portMAX_DELAY);
-        memset(s.status.recent_keys, 0, sizeof(s.status.recent_keys));
+        s.status.recent_report_count = 0;
         xSemaphoreGive(s.status_lock);
         ++s.operation_generation;
         rk_pair_step(&s.pairing, RK_PAIR_CANCEL, 0);
@@ -1126,8 +1126,7 @@ static void process_command(const command_t *command) {
 
 static void process_discovery(const service_event_t *event) {
     if (s.status.state != RK_BLE_HID_HOST_STATE_SCANNING ||
-        event->data.discovery.generation != s.status.scan_generation ||
-        s.status.scan_count >= RK_BLE_HID_HOST_MAX_RESULTS) return;
+        event->data.discovery.generation != s.status.scan_generation) return;
     struct ble_hs_adv_fields fields;
     if (ble_hs_adv_parse_fields(&fields, event->data.discovery.data, event->data.discovery.len) != 0) return;
     bool is_hid = false;
@@ -1137,10 +1136,26 @@ static void process_discovery(const service_event_t *event) {
             break;
         }
     }
-    if (!is_hid) return;
     for (size_t i = 0; i < s.status.scan_count; ++i) {
-        if (memcmp(s_scan_results[i].bda, event->data.discovery.bda, 6) == 0) return;
+        rk_ble_hid_host_device_t *result = &s_scan_results[i];
+        if (result->addr_type != event->data.discovery.addr_type ||
+            memcmp(result->bda, event->data.discovery.bda, 6) != 0) continue;
+        /* Active scanning can deliver the local name in a separate response
+         * that does not repeat the HID service UUID. */
+        char address[RK_BLE_HID_HOST_NAME_MAX_LEN];
+        format_bda_name(address, result->bda);
+        if (fields.name && fields.name_len &&
+            (fields.name_is_complete || strcmp(result->name, address) == 0)) {
+            const size_t len = fields.name_len < sizeof(result->name) - 1
+                ? fields.name_len : sizeof(result->name) - 1;
+            xSemaphoreTake(s.status_lock, portMAX_DELAY);
+            memcpy(result->name, fields.name, len);
+            result->name[len] = '\0';
+            xSemaphoreGive(s.status_lock);
+        }
+        return;
     }
+    if (!is_hid || s.status.scan_count >= RK_BLE_HID_HOST_MAX_RESULTS) return;
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
     rk_ble_hid_host_device_t *result = &s_scan_results[s.status.scan_count];
     memcpy(result->bda, event->data.discovery.bda, 6);
@@ -1304,6 +1319,24 @@ static void process_event(const service_event_t *event) {
         const bool mapped = rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
 
+        if (s.status.connected && !is_stopping()) {
+            rk_ble_recent_report_t report = {
+                .media_key = mapped && s.config.on_media_key ? key : RK_BLE_MEDIA_KEY_NONE,
+                .length = event->data.input.len,
+                .report_id = event->data.input.report_id,
+                .consumer_control = event->data.input.usage == ESP_HID_USAGE_CCONTROL,
+            };
+            memcpy(report.data, event->data.input.data, report.length);
+            xSemaphoreTake(s.status_lock, portMAX_DELAY);
+            memmove(s.status.recent_reports + 1, s.status.recent_reports,
+                    sizeof(s.status.recent_reports) - sizeof(report));
+            s.status.recent_reports[0] = report;
+            if (s.status.recent_report_count < RK_BLE_HID_HOST_RECENT_REPORTS) {
+                ++s.status.recent_report_count;
+            }
+            xSemaphoreGive(s.status_lock);
+        }
+
         /* Report every Consumer Control key down and up, known or not, so the
          * controller can recognise long and double presses and a person can
          * map a key this firmware has no name for. Only reports ESP-IDF
@@ -1349,11 +1382,6 @@ static void process_event(const service_event_t *event) {
             if (s.config.on_media_key && s.status.connected && !is_stopping()) {
                 ESP_LOGI(TAG, "Consumer Control report mapped to media key %d",
                          key);
-                xSemaphoreTake(s.status_lock, portMAX_DELAY);
-                memmove(s.status.recent_keys + 1, s.status.recent_keys,
-                        sizeof(s.status.recent_keys) - sizeof(key));
-                s.status.recent_keys[0] = key;
-                xSemaphoreGive(s.status_lock);
                 s.config.on_media_key(key, s.config.callback_context);
             } else {
                 ESP_LOGW(TAG,

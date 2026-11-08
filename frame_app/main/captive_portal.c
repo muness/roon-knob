@@ -4,6 +4,7 @@
 #include "portal_brand.h"
 #include "dns_server.h"
 #include "controller_config.h"
+#include "controller_shortcut_key.h"
 #include "eink_ui.h"
 #include "wifi_manager.h"
 #include "wifi_portal_form.h"
@@ -1454,7 +1455,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "<details id='connection-details'%s><summary>Connection details</summary>"
       "<dl><dt>Bluetooth link</dt><dd>%s</dd>"
       "<dt>Saved for next time</dt><dd>%s</dd>%s%s%s</dl>"
-      "<h3>Recent remote commands</h3>",
+      "<h3>Recent remote input</h3>",
       strcmp(details, "1") == 0 ? " open" : "",
       status.connected ? "Connected" : connecting ? "Connecting" : "Disconnected",
       status.bonded ? "Yes" : "No",
@@ -1464,24 +1465,44 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" : "</code></dd>");
     if (pos >= (int)html_size) pos = (int)html_size - 1;
 
-    if (status.recent_keys[0] == RK_BLE_MEDIA_KEY_NONE) {
+    if (status.recent_report_count == 0) {
       pos += snprintf(html + pos, html_size - pos,
-        "<p>No commands received since restart. Try a button on the remote.</p>");
+        "<p>No remote input recorded yet. Try a button on the remote.</p>");
     } else {
       pos += snprintf(html + pos, html_size - pos,
         "<p>Received by this device, newest first.</p><ol>");
       if (pos >= (int)html_size) pos = (int)html_size - 1;
-      for (size_t i = 0; i < RK_BLE_HID_HOST_RECENT_KEYS; ++i) {
-        const char *command = ble_media_command_name(status.recent_keys[i]);
-        if (!command) break;
-        pos += snprintf(html + pos, html_size - pos, "<li>%s</li>", command);
+      for (size_t i = 0; i < status.recent_report_count; ++i) {
+        const rk_ble_recent_report_t *report = &status.recent_reports[i];
+        const char *command = ble_media_command_name(report->media_key);
+        char button[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+        if (!command && report->consumer_control && report->length >= 2) {
+          const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
+          if (controller_shortcut_key_name(usage, button, sizeof(button)) &&
+              strncmp(button, "usage_", 6) != 0) {
+            button[0] = (char)(button[0] - 'a' + 'A');
+            for (char *c = button; *c; ++c) {
+              if (*c == '_') *c = ' ';
+            }
+            command = button;
+          }
+        }
+        char payload[3 * RK_BLE_HID_HOST_REPORT_BYTES + 1] = "";
+        for (size_t j = 0; j < report->length; ++j) {
+          snprintf(payload + 3 * j, sizeof(payload) - 3 * j,
+                   "%02X ", (unsigned)report->data[j]);
+        }
+        pos += snprintf(html + pos, html_size - pos,
+          "<li>%s <small>· Report %u · <code>%s</code></small></li>",
+          command ? command : report->consumer_control ? "Consumer control input" : "Unmapped input",
+          (unsigned)report->report_id, payload);
         if (pos >= (int)html_size) pos = (int)html_size - 1;
       }
       pos += snprintf(html + pos, html_size - pos, "</ol>");
     }
     if (pos >= (int)html_size) pos = (int)html_size - 1;
     pos += snprintf(html + pos, html_size - pos,
-      "<p><a href='/ble?details=1#connection-details'>Refresh command history</a></p></details>");
+      "<p><a href='/ble?details=1#connection-details'>Refresh input history</a></p></details>");
     if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
 

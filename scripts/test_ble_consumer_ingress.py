@@ -125,16 +125,18 @@ int main(void) {
     reset();
     s.config.on_media_key=controller_ble_input_on_media_key;
     report(0xe9); report(0xea); report(0xcd); report(0xb5); report(0xb6); report(0xe9);
-    report(0); report(0x223);
+    report(0); report(0x223); queue[queue_count - 1].data.input.usage=0;
     drain_host();
-    assert(s.status.recent_keys[0]==RK_BLE_MEDIA_KEY_VOLUME_UP);
-    assert(s.status.recent_keys[1]==RK_BLE_MEDIA_KEY_PREVIOUS_TRACK);
-    assert(s.status.recent_keys[2]==RK_BLE_MEDIA_KEY_NEXT_TRACK);
-    assert(s.status.recent_keys[3]==RK_BLE_MEDIA_KEY_PLAY_PAUSE);
-    assert(s.status.recent_keys[4]==RK_BLE_MEDIA_KEY_VOLUME_DOWN);
+    assert(s.status.recent_report_count==5);
+    assert(s.status.recent_reports[0].data[0]==0x23);
+    assert(s.status.recent_reports[0].data[1]==0x02);
+    assert(s.status.recent_reports[0].media_key==RK_BLE_MEDIA_KEY_NONE);
+    assert(s.status.recent_reports[1].data[0]==0);
+    assert(s.status.recent_reports[2].media_key==RK_BLE_MEDIA_KEY_VOLUME_UP);
+    assert(s.status.recent_reports[4].media_key==RK_BLE_MEDIA_KEY_NEXT_TRACK);
     s.status.connected=false;
     report(0xb5); drain_host();
-    assert(s.status.recent_keys[0]==RK_BLE_MEDIA_KEY_VOLUME_UP);
+    assert(s.status.recent_reports[0].data[0]==0x23);
     puts("HID ingress and both deferred queues preserve gesture history; loss cancels");
 }
 '''

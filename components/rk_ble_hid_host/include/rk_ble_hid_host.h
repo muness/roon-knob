@@ -9,7 +9,8 @@ extern "C" {
 #endif
 
 #define RK_BLE_HID_HOST_MAX_RESULTS 8
-#define RK_BLE_HID_HOST_RECENT_KEYS 5
+#define RK_BLE_HID_HOST_RECENT_REPORTS 5
+#define RK_BLE_HID_HOST_REPORT_BYTES 16
 #define RK_BLE_HID_HOST_NAME_MAX_LEN 64
 
 /** Stable lifecycle states. STOPPING is observable until the NimBLE host exits. */
@@ -73,6 +74,14 @@ typedef struct {
 } rk_ble_hid_host_device_t;
 
 typedef struct {
+    rk_ble_media_key_t media_key;
+    uint16_t length;
+    uint8_t report_id;
+    uint8_t data[RK_BLE_HID_HOST_REPORT_BYTES];
+    bool consumer_control;
+} rk_ble_recent_report_t;
+
+typedef struct {
     bool enabled;
     bool connected;
     bool bonded;
@@ -86,8 +95,9 @@ typedef struct {
     char active_name[RK_BLE_HID_HOST_NAME_MAX_LEN];
     uint32_t scan_generation;
     size_t scan_count;
-    /* Most recent first. Records dispatch to the local media handler. */
-    rk_ble_media_key_t recent_keys[RK_BLE_HID_HOST_RECENT_KEYS];
+    /* Most recent first, including reports that had no matching command. */
+    rk_ble_recent_report_t recent_reports[RK_BLE_HID_HOST_RECENT_REPORTS];
+    size_t recent_report_count;
 } rk_ble_hid_host_status_t;
 
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
