@@ -845,12 +845,16 @@ static lv_obj_t *list_row(const char *name, const char *detail, int action,
   lv_obj_set_height(b, detail && *detail ? 76 : 56);
   lv_obj_t *t = lv_obj_get_child(b, 0);
   lv_obj_set_width(t, 228);
+  /* DOT only ellipsizes once height is bounded; content height can otherwise
+   * wrap a long title over the artist. Keep both labels to one font line. */
+  lv_obj_set_height(t, lv_font_get_line_height(platform_touch_font_small()));
   lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
   lv_label_set_text(t, name);
   lv_obj_align(t, LV_ALIGN_TOP_LEFT, 8, 3);
   if (detail && *detail) {
     lv_obj_t *d;
     label(&d, b, 34, 228, platform_touch_font_small());
+    lv_obj_set_height(d, lv_font_get_line_height(platform_touch_font_small()));
     lv_obj_set_style_text_color(d, lv_color_hex(0xb8c4cd), 0);
     lv_label_set_text(d, detail);
   }

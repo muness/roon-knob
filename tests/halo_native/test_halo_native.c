@@ -125,7 +125,8 @@ bool wifi_mgr_get_ip(char *out, size_t n) {
   return fixture_has_ip;
 }
 extern const lv_font_t lato_22, notosans_28;
-const lv_font_t *platform_touch_font_small(void) { return &lato_22; }
+static const lv_font_t *fixture_small_font = &lato_22;
+const lv_font_t *platform_touch_font_small(void) { return fixture_small_font; }
 const lv_font_t *platform_touch_font_normal(void) { return &notosans_28; }
 static bool device_controls_visible;
 static int device_scroll_delta;
@@ -414,9 +415,50 @@ int main(int argc, char **argv) {
              "/api/collections/image?ref=art%d", i);
     snprintf(page->items[i].ref, sizeof(page->items[i].ref), "album-ref-%d", i);
   }
+  /* Real provider-shaped metadata must remain in separate single-line boxes.
+   * Include artist-only overflow and explicit line breaks: constraining only
+   * the title or relying on word-wrap behavior would miss these cases. */
+  snprintf(page->items[0].title, sizeof(page->items[0].title),
+           "A Multitude of Angels - CD 1 (Live in Modena, Italy / 1996)");
+  snprintf(page->items[0].subtitle, sizeof(page->items[0].subtitle), "Keith Jarrett");
+  snprintf(page->items[1].subtitle, sizeof(page->items[1].subtitle),
+           "A very long artist credit with orchestra, conductor and guest soloists");
+  snprintf(page->items[2].title, sizeof(page->items[2].title), "Album title\nsecond line");
+  snprintf(page->items[2].subtitle, sizeof(page->items[2].subtitle), "Artist\nsecond line");
   screen = CONTROLLER_SCREEN_LIBRARY;
   pending_browse = false;
   busy = false;
+  /* A second real font prevents a guessed pixel height from passing. */
+  const lv_font_t *fonts[] = {&lato_22, &lv_font_montserrat_20};
+  for (unsigned f = 0; f < sizeof(fonts) / sizeof(fonts[0]); f++) {
+    fixture_small_font = fonts[f];
+    render();
+    advance(300);
+    for (int i = 0; i < page->count; i++) {
+      lv_obj_t *title = lv_obj_get_child(rows[i], 0);
+      assert(lv_label_get_long_mode(title) == LV_LABEL_LONG_DOT);
+      assert(lv_obj_get_height(title) == lv_font_get_line_height(fonts[f]));
+      lv_area_t row_box, title_box;
+      lv_obj_get_content_coords(rows[i], &row_box);
+      lv_obj_get_coords(title, &title_box);
+      assert(title_box.y1 >= row_box.y1 && title_box.y2 <= row_box.y2);
+      if (*page->items[i].subtitle) {
+        lv_obj_t *artist = lv_obj_get_child(rows[i], 1);
+        lv_area_t artist_box;
+        lv_obj_get_coords(artist, &artist_box);
+        assert(lv_label_get_long_mode(artist) == LV_LABEL_LONG_DOT);
+        assert(lv_obj_get_height(artist) == lv_font_get_line_height(fonts[f]));
+        assert(title_box.y2 < artist_box.y1);
+        assert(artist_box.y2 <= row_box.y2);
+      } else {
+        assert(lv_obj_get_child_count(rows[i]) == 1);
+      }
+    }
+    /* LVGL's DOT mode edits the visible string when it actually ellipsizes. */
+    assert(strstr(lv_label_get_text(lv_obj_get_child(rows[0], 0)), "..."));
+    assert(strstr(lv_label_get_text(lv_obj_get_child(rows[1], 1)), "..."));
+  }
+  fixture_small_font = &lato_22;
   render();
   advance(300);
   snapshot(dir, "albums");
