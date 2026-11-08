@@ -2,6 +2,7 @@
  * Only hardware/network/RTOS boundaries are substituted. No music is played. */
 #include "../../common/controller_touch_navigation.c"
 #include "controller_touch_contact.h"
+#include "src/widgets/label/lv_label_private.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -234,9 +235,15 @@ static void click(lv_obj_t *obj) {
   input(x, y, false, 80);
 }
 static void snapshot(const char *dir, const char *name) {
-  if (!dir)
-    return;
   advance(400);
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(lv_display_get_default());
+  if (screen == CONTROLLER_SCREEN_LIBRARY) {
+    /* Check rendered navigation, not just object existence/coordinates. */
+    assert(frame[(50 * 360 + 80) * 3] > 20);
+    assert(frame[(50 * 360 + 280) * 3] > 20);
+  }
+  if (!dir) return;
   char path[512];
   snprintf(path, sizeof(path), "%s/%s.ppm", dir, name);
   FILE *f = fopen(path, "wb");
@@ -436,7 +443,7 @@ int main(int argc, char **argv) {
     advance(300);
     for (int i = 0; i < page->count; i++) {
       lv_obj_t *title = lv_obj_get_child(rows[i], 0);
-      assert(lv_label_get_long_mode(title) == LV_LABEL_LONG_DOT);
+      assert(lv_label_get_long_mode(title) == (i == selected_index ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT));
       assert(lv_obj_get_height(title) == lv_font_get_line_height(fonts[f]));
       lv_area_t row_box, title_box;
       lv_obj_get_content_coords(rows[i], &row_box);
@@ -446,22 +453,46 @@ int main(int argc, char **argv) {
         lv_obj_t *artist = lv_obj_get_child(rows[i], 1);
         lv_area_t artist_box;
         lv_obj_get_coords(artist, &artist_box);
-        assert(lv_label_get_long_mode(artist) == LV_LABEL_LONG_DOT);
+        assert(lv_label_get_long_mode(artist) == (i == selected_index ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT));
         assert(lv_obj_get_height(artist) == lv_font_get_line_height(fonts[f]));
         assert(title_box.y2 < artist_box.y1);
         assert(artist_box.y2 <= row_box.y2);
       } else {
-        assert(lv_obj_get_child_count(rows[i]) == 1);
+        assert(lv_obj_get_child_count(rows[i]) == 2);
+        assert(!strcmp(lv_label_get_text(lv_obj_get_child(rows[i], 1)), "Play / Queue"));
       }
     }
-    /* LVGL's DOT mode edits the visible string when it actually ellipsizes. */
+    /* Unfocused labels still ellipsize; focus restores the original text. */
+    focus_row(3); advance(50);
     assert(strstr(lv_label_get_text(lv_obj_get_child(rows[0], 0)), "..."));
     assert(strstr(lv_label_get_text(lv_obj_get_child(rows[1], 1)), "..."));
+    focus_row(selected_index);
   }
   fixture_small_font = &lato_22;
   render();
   advance(300);
   snapshot(dir, "albums");
+  /* Pointer dragging pauses animation until the viewport settles on one row. */
+  input(180, 210, true, 80); input(180, 130, true, 240);
+  for (int i = 0; i < page->count; i++)
+    assert(lv_label_get_long_mode(lv_obj_get_child(rows[i], 0)) == LV_LABEL_LONG_DOT);
+  input(180, 130, false, 1000);
+  assert(lv_label_get_long_mode(lv_obj_get_child(rows[selected_index], 0)) == LV_LABEL_LONG_SCROLL_CIRCULAR);
+  for (int i = 0; i < page->count; i++)
+    if (i != selected_index) assert(lv_label_get_long_mode(lv_obj_get_child(rows[i], 0)) == LV_LABEL_LONG_DOT);
+  selected_index = 0; focus_row(0); advance(200);
+  assert(lv_obj_get_height(scroller) == 216);
+  click(rows[0]);
+  assert(chooser && primary && secondary && !library_open);
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 0)), page->items[0].title));
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 1)), page->items[0].subtitle));
+  assert(lv_obj_get_height(lv_obj_get_child(scroller, 0)) > lv_font_get_line_height(&notosans_28));
+  controller_touch_navigation_encoder(3);
+  advance(400);
+  assert(lv_obj_get_scroll_y(scroller) > 0);
+  snapshot(dir, "album-details");
+  click(back);
+  assert(!chooser && selected_index == 0);
   controller_touch_navigation_encoder(3);
   advance(500);
   assert(selected_index == 3);
@@ -554,8 +585,9 @@ int main(int argc, char **argv) {
   mutation_locked = false;
   pending_mutation = -1;
   render();
-  /* The collection title is the Open action, separate from playback. */
-  click(lv_obj_get_child(scroller, 0));
+  /* Open is an explicitly labelled control, separate from metadata. */
+  assert(library_open);
+  click(library_open);
   assert(pending_browse && !chooser);
   assert(!strcmp(location, "playlist-location"));
   pending_browse = false;
@@ -586,6 +618,9 @@ int main(int argc, char **argv) {
   controller_touch_navigation_process();
   assert(xQueueReceive(requests, &request, 0));
   assert(request.kind == BROWSE && request.offset == 12);
+  /* Separate actuator events arriving during IO must also survive. */
+  controller_touch_navigation_encoder(2);
+  controller_touch_navigation_encoder(-1);
   result_t *next = calloc(1, sizeof(*next));
   next->request = request;
   next->ok = true;
@@ -593,7 +628,7 @@ int main(int argc, char **argv) {
   next->page.next_offset = -1;
   assert(xQueueSend(results, &next, 0));
   controller_touch_navigation_process();
-  assert(offset == 12 && selected_index == 2);
+  assert(offset == 12 && selected_index == 3);
   /* Duplicate artwork URLs retain the requested card index, never overwrite
    * the first card's owned pixels. */
   busy = false;
@@ -810,6 +845,163 @@ int main(int argc, char **argv) {
   change_screen(CONTROLLER_SCREEN_ARTWORK);
   assert(!device_controls_visible);
 #endif
+  /* Library task lifecycle: Queue continues browsing, Play leaves without
+   * erasing position, and uncertain commands are never retried as mutations. */
+  while (xQueueReceive(requests, &request, 0)) {}
+  busy = pending_browse = false;
+  mutation_locked = false;
+  fixture_ap = false;
+  fixture_ready = fixture_has_ip = true;
+  fixture_connection_override = false;
+  snprintf(fixture_zone, sizeof(fixture_zone), "roon:room0");
+  snprintf(zone, sizeof(zone), "%s", fixture_zone);
+  reset_library();
+  screen = CONTROLLER_SCREEN_LIBRARY;
+  snprintf(location, sizeof(location), "albums-route");
+  snprintf(folder_name, sizeof(folder_name), "Albums");
+  depth = 2;
+  offset = 12;
+  selected_index = 1;
+  page->count = 2;
+  page->next_offset = -1;
+  snprintf(page->items[0].title, sizeof(page->items[0].title), "Evening collection");
+  snprintf(page->items[0].location, sizeof(page->items[0].location), "open-route");
+  snprintf(page->items[0].ref, sizeof(page->items[0].ref), "collection-ref");
+  snprintf(page->items[1].title, sizeof(page->items[1].title), "The complete concert recordings - a very long album title with a distinguishing edition suffix");
+  snprintf(page->items[1].subtitle, sizeof(page->items[1].subtitle), "A long artist credit with orchestra, conductor, guest soloists and recording ensemble");
+  snprintf(page->items[1].ref, sizeof(page->items[1].ref), "album-ref");
+  render(); advance(50);
+  /* Focus is the native equivalent of hover: only that row moves, after a
+   * reading pause. Repeated focus maintenance must not restart its clock. */
+  lv_obj_t *moving_title = lv_obj_get_child(rows[1], 0);
+  lv_obj_t *moving_artist = lv_obj_get_child(rows[1], 1);
+  const lv_anim_t *title_anim = lv_anim_get(moving_title, NULL);
+  assert(title_anim && title_anim->act_time <= -1100);
+  assert(((lv_label_t *)moving_title)->offset.x == 0);
+  advance(600);
+  int32_t before_focus = lv_anim_get(moving_title, NULL)->act_time;
+  focus_row(1); advance(50);
+  assert(lv_anim_get(moving_title, NULL)->act_time > before_focus);
+  assert(lv_anim_get(moving_title, NULL)->act_time < 0);
+  advance(800);
+  assert(((lv_label_t *)moving_title)->offset.x < 0);
+  assert(((lv_label_t *)moving_artist)->offset.x < 0);
+  assert(lv_anim_get(moving_title, NULL)->repeat_delay == 2000);
+  move_item(-1); advance(50);
+  assert(lv_label_get_long_mode(moving_title) == LV_LABEL_LONG_DOT);
+  assert(lv_anim_get(moving_title, NULL) == NULL);
+  assert(lv_anim_get(moving_artist, NULL) == NULL);
+  assert(lv_anim_get(lv_obj_get_child(rows[0], 0), NULL) == NULL); /* short title */
+  move_item(1); advance(50);
+  assert(lv_anim_get(moving_title, NULL)->act_time <= -1100);
+  library_focus_labels(-1); advance(50); /* scroll-begin pauses every row */
+  assert(lv_anim_get(moving_title, NULL) == NULL);
+  library_focus_labels(selected_index); advance(50); /* settled focus resumes */
+  assert(lv_anim_get(moving_title, NULL)->act_time <= -1100);
+  click(rows[1]);
+  assert(chooser && !library_open && primary && secondary);
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 0)), page->items[1].title));
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 1)), page->items[1].subtitle));
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 2)), "Room: Listening room 1"));
+  snapshot(dir, "full-metadata");
+  click(secondary);
+  assert(pending_mutation == QUEUE);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == QUEUE);
+  assert(!strcmp(request.ref, "album-ref"));
+  assert(chooser && lv_obj_get_child_count(scroller) >= 3);
+  assert(lv_obj_has_state(primary, LV_STATE_DISABLED));
+  assert(lv_obj_has_state(secondary, LV_STATE_DISABLED));
+  snapshot(dir, "library-sending");
+  result_t *queued = calloc(1, sizeof(*queued));
+  queued->request = request; queued->ok = true;
+  assert(xQueueSend(results, &queued, 0));
+  controller_touch_navigation_process();
+  assert(screen == CONTROLLER_SCREEN_LIBRARY && !chooser);
+  assert(depth == 2 && offset == 12 && selected_index == 1 && page->count == 2);
+  assert(!strcmp(location, "albums-route"));
+  assert(!strcmp(lv_label_get_text(subtitle), "Queued"));
+  snapshot(dir, "library-queued");
+  advance(2); controller_touch_navigation_process();
+  assert(!mutation_locked);
+  click(rows[1]); click(primary);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PLAY);
+  result_t *failed = calloc(1, sizeof(*failed));
+  failed->request = request;
+  snprintf(failed->page.notice, sizeof(failed->page.notice), "Playback uncertain. Check now playing.");
+  assert(xQueueSend(results, &failed, 0));
+  controller_touch_navigation_process();
+  assert(library_failed && chooser && page->count == 2 && selected_index == 1);
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 0)), library_notice));
+  assert(lv_obj_get_scroll_y(scroller) == 0);
+  assert(depth == 2 && !strcmp(location, "albums-route"));
+  assert(primary && !secondary && library_retry);
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(primary, 0)), "Now playing"));
+  snapshot(dir, "library-uncertain");
+  /* Error recovery refreshes the catalogue; it never replays Play/Queue. */
+  lv_obj_scroll_to_view(library_retry, LV_ANIM_OFF); advance(100);
+  click(library_retry);
+  assert(pending_browse && !chooser);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == BROWSE);
+  assert(!strcmp(request.location, "albums-route") && request.offset == 12);
+  assert(!xQueueReceive(requests, &in_flight, 0));
+  snapshot(dir, "library-loading");
+  assert(page->count == 2 && rows[1]);
+  assert(lv_obj_has_state(rows[1], LV_STATE_DISABLED));
+  result_t *refreshed = calloc(1, sizeof(*refreshed));
+  refreshed->request = request; refreshed->ok = true; refreshed->page = *page;
+  assert(xQueueSend(results, &refreshed, 0));
+  controller_touch_navigation_process();
+  assert(!library_failed && selected_index == 1 && depth == 2);
+  click(rows[1]);
+  advance(2); controller_touch_navigation_process();
+  click(primary); controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PLAY);
+  /* Back does not turn a late uncertain response into a generic browse error. */
+  click(back);
+  assert(!chooser);
+  result_t *late_failure = calloc(1, sizeof(*late_failure));
+  late_failure->request = request;
+  snprintf(late_failure->page.notice, sizeof(late_failure->page.notice), "Playback uncertain. Check now playing.");
+  assert(xQueueSend(results, &late_failure, 0));
+  controller_touch_navigation_process();
+  assert(library_failed && !chooser && primary && library_retry);
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(primary, 0)), "Now playing"));
+  snapshot(dir, "late-command-failure");
+  click(primary);
+  assert(screen == CONTROLLER_SCREEN_NOW_PLAYING);
+  /* Independently qualify successful Play's preserved context. */
+  busy = false; mutation_locked = false; library_failed = false;
+  screen = CONTROLLER_SCREEN_LIBRARY; chooser = true; render();
+  click(primary); controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PLAY);
+  result_t *played_result = calloc(1, sizeof(*played_result));
+  played_result->request = request; played_result->ok = true;
+  assert(xQueueSend(results, &played_result, 0));
+  controller_touch_navigation_process();
+  assert(screen == CONTROLLER_SCREEN_NOW_PLAYING);
+  assert(depth == 2 && offset == 12 && selected_index == 1 && page->count == 2);
+  assert(!strcmp(location, "albums-route"));
+  /* A failed browse retains old content but cannot activate stale rows. */
+  change_screen(CONTROLLER_SCREEN_LIBRARY);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == BROWSE);
+  result_t *browse_failed = calloc(1, sizeof(*browse_failed));
+  browse_failed->request = request;
+  snprintf(browse_failed->page.notice, sizeof(browse_failed->page.notice), "Library unavailable. Refresh to try again.");
+  assert(xQueueSend(results, &browse_failed, 0));
+  controller_touch_navigation_process();
+  assert(library_failed && page->count == 2 && library_retry);
+  assert(!strcmp(lv_label_get_text(lv_obj_get_child(scroller, 0)), library_notice));
+  assert(lv_obj_get_scroll_y(scroller) == 0);
+  lv_obj_send_event(rows[0], LV_EVENT_CLICKED, NULL);
+  assert(!chooser && pending_mutation == -1 && !pending_browse);
+  snapshot(dir, "library-browse-failed");
+  click(library_retry); controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == BROWSE);
+  change_screen(CONTROLLER_SCREEN_ARTWORK);
   lv_mem_monitor_t memory;
   lv_mem_monitor(&memory);
   assert(memory.total_size <= 96 * 1024);

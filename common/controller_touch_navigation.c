@@ -11,6 +11,7 @@
 #include "portal_brand.h"
 #include "platform/platform_identity.h"
 #include <ctype.h>
+#include <limits.h>
 #include "src/misc/cache/instance/lv_image_cache.h"
 #include "src/misc/cache/instance/lv_image_header_cache.h"
 #include "ui.h"
@@ -58,8 +59,7 @@ static struct {
   char location[513];
   int offset, selected_index;
 } history[HISTORY_MAX];
-static int depth, setting_index, menu_index, zone_index, zone_count,
-    action_index;
+static int depth, setting_index, menu_index, zone_index, zone_count;
 static int desired_absolute = -1;
 static bool connection_refresh_pending;
 static uint64_t connection_observed_before;
@@ -78,7 +78,10 @@ static struct {
   char *pixels;
   bool attempted, failed;
 } covers[CONTROLLER_LIBRARY_PAGE_SIZE];
-static bool chooser;
+static bool chooser, library_failed;
+static int library_failed_kind;
+static char library_notice[256];
+static lv_obj_t *library_open, *library_retry;
 static bool settings_about, settings_reset;
 static int settings_detail, edit_kind, forget_index = -1;
 static char edit_ssid[33], forget_ssid[33], displayed_networks[RK_MAX_WIFI][33];
@@ -104,6 +107,8 @@ static void reset_library(void) {
   pending_mutation = -1;
   desired_absolute = -1;
   chooser = false;
+  library_failed = false;
+  library_notice[0] = 0;
   if (page) {
     memset(page, 0, sizeof(*page));
     page->next_offset = -1;
@@ -272,6 +277,34 @@ static void selected_cover(void) {
     }
   }
 }
+static void library_focus_labels(int index) {
+  if (screen != CONTROLLER_SCREEN_LIBRARY || chooser || !page) return;
+  static lv_anim_t marquee;
+  static bool configured;
+  if (!configured) {
+    lv_anim_init(&marquee);
+    lv_anim_set_delay(&marquee, 1200);
+    lv_anim_set_repeat_delay(&marquee, 2000);
+    lv_anim_set_repeat_count(&marquee, LV_ANIM_REPEAT_INFINITE);
+    configured = true;
+  }
+  bool current = !pending_browse && !(busy && busy_kind == BROWSE) && !library_failed;
+  for (int i = 0; i < page->count; i++) {
+    if (!rows[i]) continue;
+    for (int child = 0; child < 2; child++) {
+      lv_obj_t *text = lv_obj_get_child(rows[i], child);
+      if (!text) continue;
+      lv_label_long_mode_t mode = current && i == index ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT;
+      if (lv_label_get_long_mode(text) == mode) continue;
+      if (mode == LV_LABEL_LONG_SCROLL_CIRCULAR)
+        lv_obj_set_style_anim(text, &marquee, LV_PART_MAIN);
+      lv_label_set_long_mode(text, mode);
+    }
+  }
+  if (counter && page->count)
+    lv_label_set_text_fmt(counter, "%d / %d%s", offset + selected_index + 1,
+                         offset + page->count, page->next_offset >= 0 ? "+" : "");
+}
 static void focus_row(int index) {
   if (!scroller || index < 0 || index >= BRIDGE_CLIENT_MAX_ZONES + 1 ||
       !rows[index])
@@ -281,23 +314,35 @@ static void focus_row(int index) {
       lv_obj_set_style_bg_color(
           rows[i], lv_color_hex(i == index ? 0x39434b : 0x181818), 0);
   lv_obj_scroll_to_view(rows[index], LV_ANIM_ON);
+  library_focus_labels(index);
 }
 static void move_item(int delta) {
-  if (pending_browse || (busy && busy_kind != IMAGE) || !page || !page->count)
-    return;
-  if (chooser) {
-    if (!primary || !secondary) return;
-    action_index = delta > 0 ? 1 : 0;
-    lv_obj_set_style_bg_color(
-        primary, lv_color_hex(action_index == 0 ? 0x39434b : 0x252525), 0);
-    lv_obj_set_style_bg_color(
-        secondary, lv_color_hex(action_index == 1 ? 0x39434b : 0x252525), 0);
+  if (!delta || !page) return;
+  if (pending_browse || (busy && busy_kind == BROWSE)) {
+    /* Preserve separate actuator events while a page is in flight, as well
+     * as the excess from one coalesced event crossing a page boundary. */
+    int64_t absolute = desired_absolute >= 0 ? desired_absolute :
+                       (int64_t)offset + selected_index;
+    absolute += delta;
+    desired_absolute = absolute < 0 ? 0 : absolute > INT_MAX ? INT_MAX : (int)absolute;
     return;
   }
-  int next = selected_index + delta;
+  if (chooser || library_failed) {
+    if (scroller) {
+      int64_t distance = -(int64_t)delta * 36;
+      lv_obj_scroll_by(scroller, 0, distance < -360 ? -360 : distance > 360 ? 360 : (int)distance, LV_ANIM_ON);
+    }
+    return;
+  }
+  if ((busy && busy_kind != IMAGE) || !page->count) return;
+  library_notice[0] = 0;
+  if (subtitle) lv_label_set_text(subtitle, "Turn or swipe");
+  int64_t next_wide = (int64_t)selected_index + delta;
+  int next = next_wide > INT_MAX - CONTROLLER_LIBRARY_PAGE_SIZE ? INT_MAX - CONTROLLER_LIBRARY_PAGE_SIZE : next_wide < -INT_MAX ? -INT_MAX : (int)next_wide;
   if (next >= page->count) {
     if (page->next_offset >= 0) {
-      desired_absolute = page->next_offset + next - page->count;
+      int64_t absolute = (int64_t)page->next_offset + next - page->count;
+      desired_absolute = absolute > INT_MAX ? INT_MAX : (int)absolute;
       offset = page->next_offset;
       selected_index = 0;
       pending_browse = true;
@@ -334,6 +379,8 @@ static void move_item(int delta) {
   selected_cover();
 }
 static void back_action(void) {
+  library_failed = false;
+  library_notice[0] = 0;
   pending_mutation = -1;
   desired_absolute = -1;
   if (chooser) {
@@ -362,6 +409,8 @@ static void open_item(void) {
   controller_library_item_t *item = &page->items[selected_index];
   if (*item->ref && !chooser) {
     chooser = true;
+    library_failed = false;
+    library_notice[0] = 0;
     render();
     return;
   }
@@ -415,6 +464,7 @@ enum {
   ACTION_WIFI_DETAILS,
   ACTION_DEVICE_CONTROLS,
   ACTION_FORGET_NETWORK_CONFIRM,
+  ACTION_RETRY_LIBRARY,
   ACTION_USE_NETWORK = 1000,
   ACTION_FORGET_NETWORK = 1100,
   ACTION_ROW = 100
@@ -683,6 +733,16 @@ static void tap(lv_event_t *event) {
   }
   if (pending_browse || (busy && busy_kind != IMAGE) || !page)
     return;
+  if (action == ACTION_RETRY_LIBRARY) {
+    library_failed = false;
+    library_notice[0] = 0;
+    chooser = false;
+    generation++;
+    pending_browse = true;
+    render();
+    return;
+  }
+  if (library_failed) return;
   if (!page->count) {
     generation++;
     pending_browse = true;
@@ -706,6 +766,8 @@ static void tap(lv_event_t *event) {
       *page->items[selected_index].ref) {
     if (mutation_locked || pending_mutation >= 0)
       return;
+    library_failed = false;
+    library_notice[0] = 0;
     pending_mutation = action == ACTION_PLAY ? PLAY : QUEUE;
     pending_mutation_generation = generation;
     snprintf(pending_ref, sizeof(pending_ref), "%s",
@@ -738,6 +800,7 @@ static void list_scroll(lv_event_t *event) {
     lv_indev_t *input = lv_indev_active();
     pointer_scrolling =
         input && lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER;
+    if (pointer_scrolling) library_focus_labels(-1);
     return;
   }
   if (!pointer_scrolling || !scroller)
@@ -772,7 +835,9 @@ static void list_scroll(lv_event_t *event) {
     if (rows[i])
       lv_obj_set_style_bg_color(
           rows[i], lv_color_hex(i == nearest ? 0x39434b : 0x181818), 0);
+  library_focus_labels(nearest);
 }
+
 static void brightness_changed(lv_event_t *event) {
   brightness = lv_slider_get_value(lv_event_get_target(event));
   platform_touch_set_brightness(brightness);
@@ -780,42 +845,6 @@ static void brightness_changed(lv_event_t *event) {
   controller_device_settings_local_edit(CDS_BRIGHTNESS);
     brightness_dirty = true;
   brightness_changed_ms = esp_timer_get_time() / 1000;
-}
-static void carousel_end(lv_event_t *e) {
-  (void)e;
-  if (rebuilding || !carousel || !page || !scroller)
-    return;
-  int center = lv_obj_get_scroll_x(scroller) + lv_obj_get_width(scroller) / 2;
-  int nearest = selected_index, distance = 100000;
-  for (int i = 0; i < page->count; i++)
-    if (rows[i]) {
-      int d =
-          abs(lv_obj_get_x(rows[i]) + lv_obj_get_width(rows[i]) / 2 - center);
-      if (d < distance) {
-        distance = d;
-        nearest = i;
-      }
-    }
-  if (distance > 100) {
-    if (primary)
-      lv_obj_add_flag(primary, LV_OBJ_FLAG_HIDDEN);
-    if (secondary)
-      lv_obj_add_flag(secondary, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
-  selected_index = nearest;
-  if (primary)
-    lv_obj_remove_flag(primary, LV_OBJ_FLAG_HIDDEN);
-  if (primary)
-    button_text(primary, *page->items[nearest].location ? "Open" : "Play");
-  if (secondary) {
-    button_text(secondary, *page->items[nearest].location ? "Play" : "Queue");
-    if (*page->items[nearest].ref)
-      lv_obj_remove_flag(secondary, LV_OBJ_FLAG_HIDDEN);
-    else
-      lv_obj_add_flag(secondary, LV_OBJ_FLAG_HIDDEN);
-  }
-  lv_label_set_text(counter, "");
 }
 static void ensure_overlay(void) {
   if (overlay)
@@ -861,6 +890,148 @@ static lv_obj_t *list_row(const char *name, const char *detail, int action,
   if (index >= 0 && index < BRIDGE_CLIENT_MAX_ZONES + 1)
     rows[index] = b;
   return b;
+}
+/* A compact, visible navigation row leaves the widest part of the circle
+ * to music. The actuator scrolls metadata in Details, never an invisible
+ * "select" operation that these targets cannot complete physically. */
+static lv_obj_t *library_text(const char *text, const lv_font_t *font, uint32_t color) {
+  lv_obj_t *t = lv_label_create(scroller);
+  lv_obj_set_width(t, 252);
+  lv_obj_set_style_text_font(t, font, 0);
+  lv_obj_set_style_text_color(t, lv_color_hex(color), 0);
+  lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(t, text);
+  return t;
+}
+static void render_library(void) {
+  bool loading = pending_browse || (busy && busy_kind == BROWSE);
+  bool sending = pending_mutation >= 0 || (busy && (busy_kind == PLAY || busy_kind == QUEUE));
+  primary = secondary = library_open = library_retry = NULL;
+  carousel = false;
+  back = button(overlay, -86, 40, 72, ACTION_BACK);
+  lv_obj_set_height(back, 44);
+  button_text(back, "Back");
+  lv_obj_t *home = button(overlay, 86, 40, 72, ACTION_HOME);
+  lv_obj_set_height(home, 44);
+  button_text(home, "Home");
+  label(&heading, overlay, 48, 92, platform_touch_font_small());
+  lv_obj_set_height(heading, lv_font_get_line_height(platform_touch_font_small()));
+  lv_label_set_text(heading, library_failed ? "Notice" : chooser ? "Details" : loading ? "Loading" : folder_name);
+  label(&subtitle, overlay, 316, 160, platform_touch_font_small());
+  lv_obj_set_height(subtitle, lv_font_get_line_height(platform_touch_font_small()));
+  label(&counter, overlay, 12, 120, platform_touch_font_small());
+  lv_obj_set_height(counter, lv_font_get_line_height(platform_touch_font_small()));
+  lv_label_set_text(counter, "");
+  scroller = lv_obj_create(overlay);
+  lv_obj_set_size(scroller, 276, chooser || library_failed ? 176 : 216);
+  lv_obj_align(scroller, LV_ALIGN_TOP_MID, 0, 92);
+  lv_obj_set_style_bg_opa(scroller, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(scroller, 0, 0);
+  lv_obj_set_style_pad_all(scroller, 4, 0);
+  lv_obj_set_style_pad_row(scroller, 6, 0);
+  lv_obj_set_flex_flow(scroller, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(scroller, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_scroll_dir(scroller, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(scroller, LV_SCROLLBAR_MODE_AUTO);
+  if (library_failed) library_text(*library_notice ? library_notice : "Could not load library. Try refreshing.", platform_touch_font_small(), 0xeeeeee);
+  if (chooser && page && page->count && selected_index < page->count) {
+    const controller_library_item_t *item = &page->items[selected_index];
+    library_text(item->title, platform_touch_font_normal(), 0xeeeeee);
+    if (*item->subtitle) library_text(item->subtitle, platform_touch_font_small(), 0xb8c4cd);
+    char room[90] = "Selected room";
+    int count = bridge_client_get_zones(zone_rows, BRIDGE_CLIENT_MAX_ZONES);
+    for (int i = 0; i < count; i++)
+      if (!strcmp(zone_rows[i].id, zone)) {
+        snprintf(room, sizeof(room), "Room: %s", zone_rows[i].name);
+        break;
+      }
+    library_text(room, platform_touch_font_small(), 0xb8c4cd);
+    if (library_failed) {
+      library_retry = button(scroller, 0, 0, 188, ACTION_RETRY_LIBRARY);
+      button_text(library_retry, "Retry library");
+      if (library_failed_kind != BROWSE) {
+        primary = button(overlay, 0, 274, 160, ACTION_CONTROLS);
+        button_text(primary, "Now playing");
+        lv_label_set_text(subtitle, "Check playback");
+      }
+    } else {
+      bool can_open = *item->location != 0, can_play = *item->ref != 0;
+      if (can_open) {
+        library_open = button(overlay, can_play ? -84 : 0, 274, can_play ? 80 : 112, ACTION_OPEN);
+        button_text(library_open, "Open");
+      }
+      if (can_play) {
+        primary = button(overlay, can_open ? 0 : -52, 274, can_open ? 80 : 96, ACTION_PLAY);
+        button_text(primary, "Play");
+        secondary = button(overlay, can_open ? 84 : 52, 274, can_open ? 80 : 96, ACTION_QUEUE);
+        button_text(secondary, "Queue");
+      }
+      lv_label_set_text(subtitle, sending ? "Sending…" : "Turn or swipe");
+      if (sending || mutation_locked) {
+        if (primary) lv_obj_add_state(primary, LV_STATE_DISABLED);
+        if (secondary) lv_obj_add_state(secondary, LV_STATE_DISABLED);
+      }
+      if (sending && library_open) lv_obj_add_state(library_open, LV_STATE_DISABLED);
+    }
+  } else {
+    if (page && page->count) {
+      for (int i = 0; i < page->count; i++) {
+        const controller_library_item_t *item = &page->items[i];
+        bool folder = *item->location && !*item->ref;
+        const char *detail = *item->subtitle ? item->subtitle : folder ? "Open collection" : "Play / Queue";
+        char title_line[sizeof(item->title)], detail_line[sizeof(item->subtitle)];
+        snprintf(title_line, sizeof(title_line), "%s", item->title);
+        snprintf(detail_line, sizeof(detail_line), "%s", detail);
+        for (char *c = title_line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
+        for (char *c = detail_line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
+        lv_obj_t *row = list_row(title_line, detail_line, ACTION_ROW + i, i);
+        int line = lv_font_get_line_height(platform_touch_font_small());
+        lv_obj_set_height(row, 2 * line + 8);
+        lv_obj_align(lv_obj_get_child(row, 0), LV_ALIGN_TOP_LEFT, 8, 0);
+        lv_obj_align(lv_obj_get_child(row, 1), LV_ALIGN_TOP_MID, 0, line);
+        if (folder) {
+          lv_obj_set_width(lv_obj_get_child(row, 0), 164);
+          lv_obj_t *cue;
+          label(&cue, row, 0, 56, platform_touch_font_small());
+          lv_obj_set_height(cue, line);
+          lv_obj_align(cue, LV_ALIGN_TOP_RIGHT, 0, 0);
+          lv_label_set_text(cue, "Open");
+        }
+        if (loading || library_failed) lv_obj_add_state(row, LV_STATE_DISABLED);
+      }
+      if (offset > 0) list_row("Previous page", NULL, ACTION_PREVIOUS, -1);
+      if (page->next_offset >= 0) list_row("More items", NULL, ACTION_NEXT, -1);
+      if (library_failed) lv_obj_scroll_to_y(scroller, 0, LV_ANIM_OFF);
+      else focus_row(selected_index);
+      lv_label_set_text_fmt(counter, "%d / %d%s", offset + selected_index + 1,
+                            offset + page->count, page->next_offset >= 0 ? "+" : "");
+    } else {
+      library_text(loading ? "Opening your library…" : page && *page->notice ? page->notice : "No items in this collection.", platform_touch_font_small(), 0xeeeeee);
+      if (!loading) {
+        library_retry = button(scroller, 0, 0, 188, ACTION_RETRY_LIBRARY);
+        button_text(library_retry, "Refresh");
+      }
+    }
+    if (library_failed && page && page->count) {
+      if (library_failed_kind == BROWSE) {
+        library_retry = button(overlay, 0, 274, 160, ACTION_RETRY_LIBRARY);
+        button_text(library_retry, "Retry library");
+      } else {
+        /* A command can finish after Back closes Details. Its uncertainty
+         * still needs a direct verification route from the retained list. */
+        primary = button(overlay, 0, 274, 160, ACTION_CONTROLS);
+        button_text(primary, "Now playing");
+        library_retry = button(scroller, 0, 0, 188, ACTION_RETRY_LIBRARY);
+        button_text(library_retry, "Retry library");
+      }
+    }
+    lv_label_set_text(subtitle, library_failed && library_failed_kind != BROWSE ? "Check playback" : library_failed ? "Refresh library" : loading ? "Loading…" : *library_notice ? library_notice : "Turn or swipe");
+  }
+  if (primary) lv_obj_set_height(primary, 44);
+  if (secondary) lv_obj_set_height(secondary, 44);
+  if (library_open) lv_obj_set_height(library_open, 44);
+  lv_obj_add_event_cb(scroller, list_scroll, LV_EVENT_SCROLL_BEGIN, NULL);
+  lv_obj_add_event_cb(scroller, list_scroll, LV_EVENT_SCROLL_END, NULL);
 }
 static void render(void) {
   ensure_overlay();
@@ -909,6 +1080,11 @@ static void render(void) {
   lv_obj_add_flag(art_touch, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(overlay);
+  if (screen == CONTROLLER_SCREEN_LIBRARY) {
+    render_library();
+    rebuilding = false;
+    return;
+  }
   label(&heading, overlay, 22, 200, platform_touch_font_small());
   label(&subtitle, overlay, 277, 256, platform_touch_font_small());
   label(&counter, overlay, 320, 100, platform_touch_font_small());
@@ -1119,112 +1295,6 @@ static void render(void) {
       list_row("Device controls", "Updates and BLE status", ACTION_DEVICE_CONTROLS, 7);
     lv_label_set_text(subtitle, "Tap connection to refresh");
     focus_row(setting_index);
-  } else {
-    lv_label_set_text(heading, chooser ? "Actions" : folder_name);
-    if (pending_browse || (busy && busy_kind != IMAGE)) {
-      lv_label_set_text(subtitle, busy && busy_kind != BROWSE
-                                      ? "Sending playback…"
-                                      : "Loading library…");
-    } else if (!page || !page->count) {
-      list_row("Retry library", NULL, ACTION_OPEN, 0);
-      lv_obj_t *message = lv_label_create(scroller);
-      lv_obj_set_width(message, 252);
-      lv_obj_set_style_text_font(message, platform_touch_font_small(), 0);
-      lv_obj_set_style_text_color(message, lv_color_hex(0xeeeeee), 0);
-      lv_label_set_long_mode(message, LV_LABEL_LONG_WRAP);
-      lv_label_set_text(message, page && *page->notice ? page->notice : "No items");
-      lv_label_set_text(subtitle, "");
-    } else if (chooser) {
-      lv_obj_set_height(scroller, 120);
-      lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 235);
-      list_row(page->items[selected_index].title,
-               *page->items[selected_index].location ? "Open collection" : NULL,
-               ACTION_OPEN, -1);
-      primary = button(overlay, -52, 278, 96, ACTION_PLAY);
-      button_text(primary, "Play");
-      secondary = button(overlay, 52, 278, 96, ACTION_QUEUE);
-      button_text(secondary, "Queue");
-      lv_label_set_text(subtitle, mutation_locked
-                                      ? "Check now playing before retrying"
-                                      : "Choose playback action");
-    } else {
-      /* A stable text layout avoids asynchronous cover changes and keeps
-       * large collections legible on the round display. */
-      carousel = false;
-      if (carousel) {
-        lv_obj_set_size(scroller, 300, 175);
-        lv_obj_align(scroller, LV_ALIGN_TOP_MID, 0, 101);
-        lv_obj_set_flex_flow(scroller, LV_FLEX_FLOW_ROW);
-        lv_obj_set_scroll_dir(scroller, LV_DIR_HOR);
-        lv_obj_set_scroll_snap_x(scroller, LV_SCROLL_SNAP_CENTER);
-        lv_obj_set_style_pad_left(scroller, 50, 0);
-        lv_obj_set_style_pad_right(scroller, 50, 0);
-        if (offset > 0) {
-          lv_obj_t *b = button(scroller, 0, 0, 192, ACTION_PREVIOUS);
-          lv_obj_set_height(b, 168);
-          lv_obj_add_flag(b, LV_OBJ_FLAG_SNAPPABLE);
-          button_text(b, "Previous page");
-        }
-        for (int i = 0; i < page->count; i++) {
-          lv_obj_t *card =
-              list_row(page->items[i].title, NULL, ACTION_ROW + i, i);
-          lv_obj_set_size(card, 192, 168);
-          lv_obj_add_flag(card, LV_OBJ_FLAG_SNAPPABLE);
-          lv_obj_t *caption = lv_obj_get_child(card, 0);
-          lv_obj_set_width(caption, 176);
-          lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, 0);
-          cover_views[i] = lv_image_create(card);
-          lv_obj_align(cover_views[i], LV_ALIGN_TOP_MID, 0, 0);
-          lv_obj_remove_flag(cover_views[i], LV_OBJ_FLAG_CLICKABLE);
-          if (covers[i].pixels)
-            lv_image_set_src(cover_views[i], &covers[i].descriptor);
-          else {
-            lv_obj_t *placeholder;
-            label(&placeholder, card, 55, 176, platform_touch_font_small());
-            lv_label_set_text(placeholder,
-                              *page->items[i].image && !covers[i].failed
-                                  ? "Loading cover…"
-                              : *page->items[i].location ? "Collection"
-                                                         : "No cover");
-          }
-        }
-        lv_obj_update_layout(scroller);
-        lv_obj_scroll_to_view(rows[selected_index], LV_ANIM_OFF);
-        lv_obj_add_event_cb(scroller, carousel_end, LV_EVENT_SCROLL_END, NULL);
-        primary = button(overlay, -52, 278, 96,
-                         *page->items[selected_index].location ? ACTION_OPEN
-                                                               : ACTION_PLAY);
-        button_text(primary,
-                    *page->items[selected_index].location ? "Open" : "Play");
-        secondary = button(
-            overlay, 52, 278, 96,
-            *page->items[selected_index].location ? ACTION_PLAY : ACTION_QUEUE);
-        button_text(secondary,
-                    *page->items[selected_index].location ? "Play" : "Queue");
-        if (!*page->items[selected_index].ref)
-          lv_obj_add_flag(secondary, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(subtitle, "");
-        lv_label_set_text(counter, "");
-        lv_obj_align(counter, LV_ALIGN_TOP_MID, 0, 78);
-        /* Page boundaries are explicit, never wrap through unrelated content.
-         */
-        if (page->next_offset >= 0) {
-          lv_obj_t *b = button(scroller, 0, 0, 192, ACTION_NEXT);
-          lv_obj_set_height(b, 168);
-          lv_obj_add_flag(b, LV_OBJ_FLAG_SNAPPABLE);
-          button_text(b, "More albums");
-        }
-      } else {
-        for (int i = 0; i < page->count; i++)
-          list_row(page->items[i].title, page->items[i].subtitle,
-                   ACTION_ROW + i, i);
-        if (offset > 0)
-          list_row("Previous page", NULL, ACTION_PREVIOUS, -1);
-        if (page->next_offset >= 0)
-          list_row("More", NULL, ACTION_NEXT, -1);
-        focus_row(selected_index);
-      }
-    }
   }
   lv_obj_add_event_cb(scroller, list_scroll, LV_EVENT_SCROLL_BEGIN, NULL);
   lv_obj_add_event_cb(scroller, list_scroll, LV_EVENT_SCROLL_END, NULL);
@@ -1259,8 +1329,11 @@ static bool submit(int kind, const char *ref, const char *image,
     if (page)
       snprintf(page->notice, sizeof(page->notice),
                "Pick a zone and connect first.");
-    if (page && kind == BROWSE)
-      page->count = 0;
+    if (screen == CONTROLLER_SCREEN_LIBRARY && page) {
+      library_failed = true;
+      library_failed_kind = BROWSE;
+      snprintf(library_notice, sizeof(library_notice), "%s", page->notice);
+    }
     render();
     return false;
   }
@@ -1372,7 +1445,16 @@ void controller_touch_navigation_process(void) {
           }
         }
       } else if (result->request.kind == BROWSE) {
-        *page = result->page;
+        if (result->ok) {
+          *page = result->page;
+          library_failed = false;
+          library_notice[0] = 0;
+        } else {
+          library_failed = true;
+          library_failed_kind = BROWSE;
+          snprintf(library_notice, sizeof(library_notice), "%s", result->page.notice);
+          if (!page->count) snprintf(page->notice, sizeof(page->notice), "%s", library_notice);
+        }
         filter_library(page);
         if (result->ok && !page->count && page->next_offset > offset) {
           offset = page->next_offset;
@@ -1407,20 +1489,28 @@ void controller_touch_navigation_process(void) {
       } else {
         bridge_client_request_poll();
         if (result->ok) {
-          reset_library();
-          change_screen(CONTROLLER_SCREEN_NOW_PLAYING);
+          library_failed = false;
+          if (result->request.kind == QUEUE) {
+            chooser = false;
+            snprintf(library_notice, sizeof(library_notice), "Queued");
+            render();
+          } else {
+            /* Keep the location/selection even when Play leaves browsing. */
+            change_screen(CONTROLLER_SCREEN_NOW_PLAYING);
+          }
         } else {
-          page->count = 0;
-          snprintf(page->notice, sizeof(page->notice), "%s",
-                   result->page.notice);
+          library_failed = true;
+          library_failed_kind = result->request.kind;
+          snprintf(library_notice, sizeof(library_notice), "%s", result->page.notice);
           render();
         }
       }
     } else if (screen == CONTROLLER_SCREEN_LIBRARY && !pending_browse &&
                !result) {
-      page->count = 0;
-      snprintf(page->notice, sizeof(page->notice),
-               "Not enough memory. Tap Retry.");
+      library_failed = true;
+      library_failed_kind = busy_kind;
+      snprintf(library_notice, sizeof(library_notice), "Not enough memory. Refresh library.");
+      if (!page->count) snprintf(page->notice, sizeof(page->notice), "%s", library_notice);
       render();
     }
     if (result && screen == CONTROLLER_SCREEN_SHORTCUTS &&
@@ -1443,8 +1533,10 @@ void controller_touch_navigation_process(void) {
     controller_connection_t c;
     bridge_client_connection_snapshot(&c);
     if (controller_connection_ready(&c) &&
-        c.last_success_ms > (uint64_t)mutation_sent_ms)
+        c.last_success_ms > (uint64_t)mutation_sent_ms) {
       mutation_locked = false;
+      if (screen == CONTROLLER_SCREEN_LIBRARY && chooser && !library_failed) render();
+    }
   }
   if (screen == CONTROLLER_SCREEN_SETTINGS &&
       esp_timer_get_time() / 1000 - connection_status_ms >= 1000) {
