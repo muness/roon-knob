@@ -12,6 +12,15 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'components/rk_ble_hid_host/rk_ble_hid_host.c').read_text()
 
+# A target can learn and save buttons without ever forwarding their input.
+# Verify each BLE-enabled adapter registers the callback and services its queue.
+for directory, target in (('idf_app', 'dial'), ('frame_app', 'frame'), ('rlcd_app', 'rlcd')):
+    main = root / directory / 'main'
+    adapter = (main / f'ble_hid_host_{target}.c').read_text()
+    assert '.on_consumer_event = controller_ble_input_on_consumer_event,' in adapter, target
+    loop = (main / f'main_{"idf" if target == "dial" else target}.c').read_text()
+    assert 'controller_ble_input_service();' in loop, target
+
 def section(start, end):
     return source[source.index(start):source.index(end, source.index(start))]
 

@@ -22,6 +22,7 @@ bool ble_hid_host_rlcd_start(void) {
     const rk_ble_hid_host_config_t config = {
         .default_enabled = true,
         .on_media_key = controller_ble_input_on_media_key,
+        .on_consumer_event = controller_ble_input_on_consumer_event,
         .on_status = on_status,
     };
     rk_ble_hid_host_result_t result = rk_ble_hid_host_init(&config);
