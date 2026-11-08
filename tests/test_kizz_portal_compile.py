@@ -98,6 +98,7 @@ include("${MAIN_COMPONENT}")
 with tempfile.TemporaryDirectory(prefix='hiphi-kizz-portal-') as directory:
     temporary = Path(directory)
     (temporary / 'sdk.h').write_text(SDK)
+    (temporary / 'sdkconfig.h').write_text('#define CONFIG_RK_BLE_HID_HOST 1\n')
     (temporary / 'main.cmake').write_text(CMAKE)
     for header in ('esp_err.h', 'esp_heap_caps.h', 'esp_http_server.h',
                    'esp_log.h', 'esp_system.h', 'freertos/FreeRTOS.h',
@@ -130,6 +131,7 @@ with tempfile.TemporaryDirectory(prefix='hiphi-kizz-portal-') as directory:
                       '/api/wake-config', 'probability_cutoff'):
             assert (token in result) == bool(enabled), (enabled, token)
         for token in ('/api/settings', '/api/zone', 'Sound volume',
-                      'touch_ui_post_stackchan_preferences', 'power_debug_web_register'):
+                      'touch_ui_post_stackchan_preferences', 'power_debug_web_register',
+                      'ble_remote_web_register', 'Bluetooth Remote'):
             assert token in result, (enabled, token)
 print('Actual Kizz portal compiles OFF without wake headers/routes; ON retains calibration; playback/personality/power routes remain.')
