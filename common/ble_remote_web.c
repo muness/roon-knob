@@ -16,6 +16,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if HIPHI_M5_TARGET_ID == 4
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+#endif
+
 #if !CONFIG_RK_BLE_HID_HOST
 #error "The Bluetooth Remote portal requires the ESP32-S3 BLE HID host"
 #endif
@@ -165,7 +171,7 @@ static esp_err_t sta_ble_shortcuts_handler(httpd_req_t *req) {
  * bridge continues to identify assignments by the stable Consumer usage. */
 #define BLE_BUTTON_NAME_BYTES 97
 
-static bool ble_button_custom_name(uint16_t usage, char *name, bool save) {
+static bool access_button_name(uint16_t usage, char *name, bool save) {
   char key[12];
   snprintf(key, sizeof(key), "usage_%04x", (unsigned)usage);
   nvs_handle_t handle;
@@ -177,6 +183,40 @@ static bool ble_button_custom_name(uint16_t usage, char *name, bool save) {
   if (save && result == ESP_OK) result = nvs_commit(handle);
   nvs_close(handle);
   return result == ESP_OK;
+}
+
+#if HIPHI_M5_TARGET_ID == 4
+typedef struct {
+  SemaphoreHandle_t done;
+  uint16_t usage;
+  char *name;
+  bool save;
+  bool ok;
+} button_name_request_t;
+
+static void button_name_task(void *arg) {
+  button_name_request_t *request = arg;
+  SemaphoreHandle_t done = request->done;
+  request->ok = access_button_name(request->usage, request->name, request->save);
+  xSemaphoreGive(done);
+  vTaskDelete(NULL);
+}
+#endif
+
+static bool ble_button_custom_name(uint16_t usage, char *name, bool save) {
+#if HIPHI_M5_TARGET_ID == 4
+  /* The Kizz HTTP server runs on a PSRAM stack. Flash access needs an
+   * internal stack. The HTTP handler waits so its arguments stay alive. */
+  SemaphoreHandle_t done = xSemaphoreCreateBinary();
+  if (!done) return false;
+  button_name_request_t request = {.done = done, .usage = usage, .name = name, .save = save};
+  if (xTaskCreate(button_name_task, "ble_btn_name", 4096, &request, 4, NULL) == pdPASS)
+    xSemaphoreTake(done, portMAX_DELAY);
+  vSemaphoreDelete(done);
+  return request.ok;
+#else
+  return access_button_name(usage, name, save);
+#endif
 }
 
 static esp_err_t sta_ble_bindings_handler(httpd_req_t *req) {

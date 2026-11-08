@@ -1076,11 +1076,15 @@ bool captive_portal_start_sta(void) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 #if CONFIG_RK_BLE_HID_HOST
   config.max_uri_handlers = 11 + BLE_REMOTE_WEB_ROUTE_COUNT;
-  /* Button names are stored in NVS from these handlers. */
   config.stack_size = 12288;
 #else
   config.max_uri_handlers = 10;
   config.stack_size = 16384;
+#endif
+#if HIPHI_M5_TARGET_ID == 4
+  /* Kizz reserves internal heap for Wi-Fi DMA and voice. The BLE portal
+   * moves its NVS operations onto an internal task on this target. */
+  config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 #endif
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
