@@ -11,9 +11,14 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <nvs.h>
+#include "sdkconfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if !CONFIG_RK_BLE_HID_HOST
+#error "The Bluetooth Remote portal requires the ESP32-S3 BLE HID host"
+#endif
 
 static const char *TAG = "ble_remote_web";
 
