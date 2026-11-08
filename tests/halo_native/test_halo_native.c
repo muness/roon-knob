@@ -635,6 +635,17 @@ int main(int argc, char **argv) {
   assert(xQueueSend(results, &next, 0)); controller_touch_navigation_process();
   assert(offset == 0 && selected_index == 15 && page->count == 24);
   assert(!pending_browse && !library_busy());
+  /* Providers may return short responses even though we request 50. */
+  page->next_offset = 24;
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PREFETCH_NEXT && request.offset == 24);
+  result_t *short_third = calloc(1, sizeof(*short_third));
+  short_third->request = request; short_third->ok = true;
+  short_third->page.count = 12; short_third->page.next_offset = -1;
+  assert(xQueueSend(results, &short_third, 0)); controller_touch_navigation_process();
+  assert(page->count == 24 && offset == 12 && selected_index == 3);
+  assert(leading_count == 12 && trailing_offset == 24);
+  assert(selected_source_offset() == 12 && selected_source_index() == 3);
   library_cache_invalidate();
   /* Duplicate artwork URLs retain the requested card index, never overwrite
    * the first card's owned pixels. */

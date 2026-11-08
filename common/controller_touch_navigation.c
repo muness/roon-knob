@@ -1098,7 +1098,9 @@ static bool library_cache_apply(bool backwards) {
     library_data_epoch++;
   } else {
     int add = cached->count;
-    if (page->count + add > CONTROLLER_LIBRARY_CAPACITY) {
+    /* Keep exactly two response chunks, even if a provider returns fewer
+     * than the requested 50. Otherwise source offsets stop matching rows. */
+    if (leading_count) {
       if (!leading_count || selected_index < leading_count || pointer_scrolling || library_pointer_down() || !cached_previous) return false;
       int drop = leading_count;
       cached_previous->count = drop; cached_previous->next_offset = trailing_offset;
