@@ -437,8 +437,9 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   size_t result_count = rk_ble_hid_host_scan_results_copy(
       results, RK_BLE_HID_HOST_MAX_RESULTS, &scan_generation);
 
-  char bridge_url[128] = "";
-  bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
+  bridge_request_endpoint_t library = {0};
+  if (!bridge_client_capture_request_endpoint(&library))
+    bridge_client_get_bridge_url(library.base, sizeof(library.base));
 
   const char *settings_path = req->user_ctx;
   const char *zones_path = !strcmp(settings_path, "/") ? "/" : "/zones";
@@ -455,10 +456,9 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   BLE_SEND(html); \
 } while (0)
 
-  // HTML-escape bridge_url to prevent attribute injection
-  char esc_bridge_url[256] = "";
-  if (is_safe_url(bridge_url)) {
-    html_escape(bridge_url, esc_bridge_url, sizeof(esc_bridge_url));
+  char library_url[256] = "";
+  if (is_safe_url(library.base)) {
+    html_escape(library.base, library_url, sizeof(library_url));
   }
 
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -473,6 +473,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     ".remote-nav [aria-current]{font-weight:600}"
     "#remote-status{margin-top:0}"
     "#button-assign-start[hidden],#button-assign-more[hidden]{display:none}"
+    "#button-assign-status:empty,#button-assign-list-status:empty{margin:0}"
     ".remote-steps{display:flex;flex-wrap:wrap;gap:4px 28px;margin:0 0 12px;"
     "padding-left:22px;color:var(--pb-muted);font-size:14px}"
     ".remote-steps [aria-current]{color:var(--pb-text);font-weight:600}"
@@ -481,17 +482,14 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     "<h1>Bluetooth Remote</h1>"
     "<nav class='remote-nav' aria-label='Device settings'><a href='%s'>Settings</a>"
     "<a href='/ble' aria-current='page'>Bluetooth Remote</a>"
-    "<a href='/power-debug'>Power</a>%s%s%s</nav>",
+    "<a href='/power-debug'>Power</a></nav>",
     (busy || strcmp(watch, "1") == 0)
       ? "<script>setTimeout(function(){if(!document.hidden && "
         "document.activeElement===document.body) location.replace('/ble')},1500);"
         "document.addEventListener('visibilitychange',function(){"
         "if(!document.hidden && document.activeElement===document.body) location.replace('/ble')});</script>"
       : "",
-    portal_brand_header_html(), settings_path,
-    esc_bridge_url[0] ? "<a href='" : "",
-    esc_bridge_url[0] ? esc_bridge_url : "",
-    esc_bridge_url[0] ? "' target='_blank'>Unified Hi-Fi Control</a>" : "");
+    portal_brand_header_html(), settings_path);
 
   if (strcmp(notice, "changed") == 0 || strcmp(notice, "retry") == 0) {
     BLE_FORMAT(
@@ -615,9 +613,10 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     BLE_FORMAT(
       "<section class='card' aria-labelledby='button-assign-title'>"
       "<h2 id='button-assign-title'>Button mappings</h2>"
+      "<p>Save shortcuts in the %s%s%sHi-Fi Control Library%s, then assign them to remote buttons.</p>"
       "<p id='button-assign-list-status' role='status'>Loading saved mappings…</p>"
       "<div id='button-assign-list'></div>"
-      "<p id='button-assign-status' role='status' tabindex='-1'>%s</p>"
+      "<p id='button-assign-status' role='status' tabindex='-1'></p>"
       "<button id='button-assign-start' type='button'%s>Learn a button</button>"
       "<div id='button-assign-picker' hidden>"
       "<div id='button-assign-name-row' hidden><label for='button-assign-name'>Button name (optional)</label>"
@@ -628,8 +627,9 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "<button id='button-assign-save' type='button'>Save assignment</button></div>"
       "<details id='button-assign-report' hidden><summary>Show report details</summary>"
       "<p><code id='button-assign-bytes'></code></p></details></section>",
-      status.connected ? "Choose a spare remote button to play a saved Library shortcut." : "",
-      status.connected ? "" : " hidden");
+      library_url[0] ? "<a href='" : "", library_url,
+      library_url[0] ? "' target='_blank' rel='noopener'>" : "",
+      library_url[0] ? "</a>" : "", status.connected ? "" : " hidden");
     BLE_SEND("<script>(()=>{"
       "const get=id=>document.getElementById('button-assign-'+id);"
       "const start=get('start'),status=get('status'),picker=get('picker'),"
@@ -659,7 +659,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "remove.setAttribute('aria-label','Delete mapping for '+title);"
       "edit.onclick=async()=>{setBusy(true);picker.hidden=true;report.hidden=true;learned=null;"
       "editing=item;nameRow.hidden=true;shortcut.replaceChildren(new Option('Choose a shortcut',''));"
-      "try{await load(0);if(shortcut.options.length===1){status.textContent='No Library shortcuts available.';return;}"
+      "try{await load(0);if(shortcut.options.length===1){status.textContent='Save a shortcut in the Library, then try again.';return;}"
       "status.textContent='Choose a new shortcut for '+title+'.';picker.hidden=false;shortcut.focus();"
       "}catch(e){status.textContent=e.message;}finally{setBusy(false);}};"
       "remove.onclick=async()=>{if(!confirm('Delete the mapping for '+title+'?'))return;"
@@ -689,7 +689,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "learned=input;label=input.label||(input.key.startsWith('usage_')?'This button':"
       "input.key[0].toUpperCase()+input.key.slice(1).replaceAll('_',' '));"
       "await load(0);"
-      "if(!shortcut.options.length){status.textContent='Pin a shortcut in Hi-Fi Control’s Library, then try again.';return;}"
+      "if(!shortcut.options.length){status.textContent='Save a shortcut in the Library, then try again.';return;}"
       "nameRow.hidden=!input.canName;name.value=input.canName?(input.label||''):'';"
       "picker.hidden=false;status.textContent=label+' learned. Choose what it should play.';shortcut.focus();return;}"
       "await new Promise(resolve=>setTimeout(resolve,250));}"
