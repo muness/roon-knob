@@ -613,7 +613,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     BLE_FORMAT(
       "<section class='card' aria-labelledby='button-assign-title'>"
       "<h2 id='button-assign-title'>Button mappings</h2>"
-      "<p>Save shortcuts in the %s%s%sHi-Fi Control Library%s, then assign them to remote buttons.</p>"
+      "<p>Save a shortcut in the %s%s%sHi-Fi Control Library%s, then assign it here.</p>"
       "<p id='button-assign-list-status' role='status'>Loading saved mappings…</p>"
       "<div id='button-assign-list'></div>"
       "<p id='button-assign-status' role='status' tabindex='-1'></p>"
@@ -654,7 +654,8 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "const title=item.label+(gesture==='press'?'':' ('+gesture+' press)');"
       "const text=document.createElement('p');text.textContent=title+' → '+item.name;"
       "const edit=document.createElement('button'),remove=document.createElement('button');"
-      "edit.type=remove.type='button';edit.textContent='Change shortcut';remove.textContent='Delete mapping';"
+      "edit.type=remove.type='button';edit.className=remove.className='btn-sm';"
+      "edit.textContent='Change shortcut';remove.textContent='Delete mapping';"
       "edit.setAttribute('aria-label','Change shortcut for '+title);"
       "remove.setAttribute('aria-label','Delete mapping for '+title);"
       "edit.onclick=async()=>{setBusy(true);picker.hidden=true;report.hidden=true;learned=null;"
