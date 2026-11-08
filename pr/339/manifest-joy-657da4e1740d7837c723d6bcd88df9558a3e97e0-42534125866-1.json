@@ -1,0 +1,11 @@
+{
+  "name": "AtomS3 JoyStick Alpha (PR #339 Preview)",
+  "version": "pr-339",
+  "new_install_prompt_erase": true,
+  "builds": [{"chipFamily": "ESP32-S3", "parts": [
+    {"path": "hiphi_joy_bootloader-657da4e1740d7837c723d6bcd88df9558a3e97e0-42534125866-1.bin", "offset": 0},
+    {"path": "hiphi_joy_partition-table-657da4e1740d7837c723d6bcd88df9558a3e97e0-42534125866-1.bin", "offset": 32768},
+    {"path": "hiphi_joy_ota_data_initial-657da4e1740d7837c723d6bcd88df9558a3e97e0-42534125866-1.bin", "offset": 53248},
+    {"path": "hiphi_joy-657da4e1740d7837c723d6bcd88df9558a3e97e0-42534125866-1.bin", "offset": 65536}
+  ]}]
+}
