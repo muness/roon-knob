@@ -1228,6 +1228,17 @@ static void ble_selected_zone_name(const bridge_zone_t *zones, int count,
   }
 }
 
+static const char *ble_media_command_name(rk_ble_media_key_t key) {
+  switch (key) {
+    case RK_BLE_MEDIA_KEY_PLAY_PAUSE: return "Play / pause";
+    case RK_BLE_MEDIA_KEY_NEXT_TRACK: return "Next track";
+    case RK_BLE_MEDIA_KEY_PREVIOUS_TRACK: return "Previous track";
+    case RK_BLE_MEDIA_KEY_VOLUME_UP: return "Volume up";
+    case RK_BLE_MEDIA_KEY_VOLUME_DOWN: return "Volume down";
+    default: return NULL;
+  }
+}
+
 static esp_err_t sta_ble_handler(httpd_req_t *req) {
   rk_ble_hid_host_status_t status = {0};
   if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
@@ -1245,9 +1256,11 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   char query[32] = "";
   char notice[12] = "";
   char watch[4] = "";
+  char details[4] = "";
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
     httpd_query_key_value(query, "notice", notice, sizeof(notice));
     httpd_query_key_value(query, "watch", watch, sizeof(watch));
+    httpd_query_key_value(query, "details", details, sizeof(details));
   }
   const char *dev_name =
       status.active_name[0] ? status.active_name : status.bonded_name;
@@ -1438,15 +1451,37 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
 
   if (status.bonded || status.connected) {
     pos += snprintf(html + pos, html_size - pos,
-      "<details><summary>Connection details</summary>"
+      "<details id='connection-details'%s><summary>Connection details</summary>"
       "<dl><dt>Bluetooth link</dt><dd>%s</dd>"
-      "<dt>Saved for next time</dt><dd>%s</dd>%s%s%s</dl></details>",
+      "<dt>Saved for next time</dt><dd>%s</dd>%s%s%s</dl>"
+      "<h3>Recent remote commands</h3>",
+      strcmp(details, "1") == 0 ? " open" : "",
       status.connected ? "Connected" : connecting ? "Connecting" : "Disconnected",
       status.bonded ? "Yes" : "No",
       status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" : "<dt>Diagnostic code</dt><dd><code>",
       status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" :
         rk_ble_hid_host_error_name(status.last_error),
       status.last_error == RK_BLE_HID_HOST_ERROR_NONE ? "" : "</code></dd>");
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+
+    if (status.recent_keys[0] == RK_BLE_MEDIA_KEY_NONE) {
+      pos += snprintf(html + pos, html_size - pos,
+        "<p>No commands received since restart. Try a button on the remote.</p>");
+    } else {
+      pos += snprintf(html + pos, html_size - pos,
+        "<p>Received by this device, newest first.</p><ol>");
+      if (pos >= (int)html_size) pos = (int)html_size - 1;
+      for (size_t i = 0; i < RK_BLE_HID_HOST_RECENT_KEYS; ++i) {
+        const char *command = ble_media_command_name(status.recent_keys[i]);
+        if (!command) break;
+        pos += snprintf(html + pos, html_size - pos, "<li>%s</li>", command);
+        if (pos >= (int)html_size) pos = (int)html_size - 1;
+      }
+      pos += snprintf(html + pos, html_size - pos, "</ol>");
+    }
+    if (pos >= (int)html_size) pos = (int)html_size - 1;
+    pos += snprintf(html + pos, html_size - pos,
+      "<p><a href='/ble?details=1#connection-details'>Refresh command history</a></p></details>");
     if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
 

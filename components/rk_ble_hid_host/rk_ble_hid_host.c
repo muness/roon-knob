@@ -1081,6 +1081,9 @@ static void process_command(const command_t *command) {
         }
         break;
     case COMMAND_FORGET:
+        xSemaphoreTake(s.status_lock, portMAX_DELAY);
+        memset(s.status.recent_keys, 0, sizeof(s.status.recent_keys));
+        xSemaphoreGive(s.status_lock);
         ++s.operation_generation;
         rk_pair_step(&s.pairing, RK_PAIR_CANCEL, 0);
         if (s.status.state == RK_BLE_HID_HOST_STATE_SCANNING) ble_gap_disc_cancel();
@@ -1346,6 +1349,11 @@ static void process_event(const service_event_t *event) {
             if (s.config.on_media_key && s.status.connected && !is_stopping()) {
                 ESP_LOGI(TAG, "Consumer Control report mapped to media key %d",
                          key);
+                xSemaphoreTake(s.status_lock, portMAX_DELAY);
+                memmove(s.status.recent_keys + 1, s.status.recent_keys,
+                        sizeof(s.status.recent_keys) - sizeof(key));
+                s.status.recent_keys[0] = key;
+                xSemaphoreGive(s.status_lock);
                 s.config.on_media_key(key, s.config.callback_context);
             } else {
                 ESP_LOGW(TAG,
