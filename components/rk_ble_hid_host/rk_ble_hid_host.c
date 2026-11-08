@@ -1330,7 +1330,19 @@ static void process_event(const service_event_t *event) {
         }
         rk_ble_media_key_t key;
         const bool pointer = event->data.input.usage == ESP_HID_USAGE_MOUSE;
-        const bool consumer_control = event->data.input.usage == ESP_HID_USAGE_CCONTROL;
+        /* The RM3 can label report 1 as Generic even for its captured
+         * Home and Down selectors. Admit only those payloads and a release
+         * while a consumer key is held. Mouse reports remain separate. */
+        const uint8_t *data = event->data.input.data;
+        const bool rm3_shortcut = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
+            strcmp(s.status.active_name, "FiiO RM3") == 0 &&
+            event->data.input.report_id == 1 && event->data.input.len == 3 &&
+            data[2] == 0 &&
+            ((data[0] == 0x23 && data[1] == 0x02) ||
+             (data[0] == 0x43 && data[1] == 0) ||
+             (data[0] == 0 && data[1] == 0 && rk_ble_consumer_tracker_holding(&s.consumer)));
+        const bool consumer_control =
+            event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_shortcut;
         /* Some HID hosts leave standard media selectors classified as Generic.
          * Preserve transport for the fixed media usages without learning an
          * arbitrary shortcut from an unclassified report. */

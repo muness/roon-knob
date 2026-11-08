@@ -229,6 +229,42 @@ int main(void) {
     assert(sent_count==1);
     assert(s.status.recent_reports[1].consumer_control);
     reset();
+    /* Live RM3 Down report: Learn must admit it without triggering playback.
+     * Outside Learn it must dispatch after its matching release. */
+    strcpy(s.status.active_name, "FiiO RM3");
+    down.data.input.report_id=1;
+    down.data.input.usage=ESP_HID_USAGE_GENERIC;
+    down.data.input.data[0]=0x43;
+    s_learn_started=clock_ms;
+    s_learn_until=clock_ms+12000;
+    enqueue_consumer_event(&down);
+    drain_host(); controller_ble_input_service();
+    assert(s.status.recent_reports[0].learned);
+    assert(s.status.recent_reports[0].consumer_control);
+    assert(sent_count==0);
+    for (unsigned rejected=0; rejected<4; ++rejected) {
+        reset(); s_learn_until=0;
+        service_event_t press=down, release=down;
+        if (rejected==1) press.data.input.report_id=2;
+        if (rejected==2) press.data.input.data[0]=0x44;
+        strcpy(s.status.active_name,rejected==3 ? "Other remote" : "FiiO RM3");
+        enqueue_consumer_event(&press);
+        clock_ms+=50; release.data.input.data[0]=0;
+        enqueue_consumer_event(&release);
+        clock_ms+=400; tick();
+        drain_host(); controller_ble_input_service();
+        assert(sent_count==(rejected==0));
+        assert(s.status.recent_reports[1].consumer_control==(rejected==0));
+    }
+    reset();
+    strcpy(s.status.active_name, "FiiO RM3");
+    service_event_t rm3_home=down;
+    rm3_home.data.input.data[0]=0x23;
+    rm3_home.data.input.data[1]=0x02;
+    enqueue_consumer_event(&rm3_home);
+    drain_host();
+    assert(s.status.recent_reports[0].consumer_control);
+    reset();
     down.data.input.usage=ESP_HID_USAGE_GENERIC;
     down.data.input.data[0]=0xcd;
     enqueue_consumer_event(&down);
