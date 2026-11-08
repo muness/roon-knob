@@ -34,6 +34,9 @@ typedef int esp_hid_usage_t;
 #define portENTER_CRITICAL(lock) ((void)(lock))
 #define portEXIT_CRITICAL(lock) ((void)(lock))
 #define pdPASS 1
+#define portMAX_DELAY 0
+#define xSemaphoreTake(lock, timeout) ((void)(lock), (void)(timeout))
+#define xSemaphoreGive(lock) ((void)(lock))
 static uint32_t clock_ms;
 static int64_t esp_timer_get_time(void) { return (int64_t)clock_ms * 1000; }
 static bool is_stopping(void) { return false; }
@@ -46,6 +49,7 @@ static bool is_stopping(void) { return false; }
     code += r'''
 static struct {
     void *events;
+    int status_lock;
     rk_ble_hid_host_config_t config;
     rk_ble_hid_host_status_t status;
     rk_ble_consumer_tracker_t consumer;
@@ -118,6 +122,19 @@ int main(void) {
     drain_host(); controller_ble_input_service(); assert(sent_count==1);
     reset(); report(0x223); clock_ms+=700; tick();
     cancel_consumer_ingress(); drain_host(); controller_ble_input_service(); assert(sent_count==0);
+    reset();
+    s.config.on_media_key=controller_ble_input_on_media_key;
+    report(0xe9); report(0xea); report(0xcd); report(0xb5); report(0xb6); report(0xe9);
+    report(0); report(0x223);
+    drain_host();
+    assert(s.status.recent_keys[0]==RK_BLE_MEDIA_KEY_VOLUME_UP);
+    assert(s.status.recent_keys[1]==RK_BLE_MEDIA_KEY_PREVIOUS_TRACK);
+    assert(s.status.recent_keys[2]==RK_BLE_MEDIA_KEY_NEXT_TRACK);
+    assert(s.status.recent_keys[3]==RK_BLE_MEDIA_KEY_PLAY_PAUSE);
+    assert(s.status.recent_keys[4]==RK_BLE_MEDIA_KEY_VOLUME_DOWN);
+    s.status.connected=false;
+    report(0xb5); drain_host();
+    assert(s.status.recent_keys[0]==RK_BLE_MEDIA_KEY_VOLUME_UP);
     puts("HID ingress and both deferred queues preserve gesture history; loss cancels");
 }
 '''
