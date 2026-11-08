@@ -12,6 +12,30 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'components/rk_ble_hid_host/rk_ble_hid_host.c').read_text()
 
+# A target can learn and save buttons without ever forwarding their input.
+# Verify each BLE-enabled adapter registers the callback and services its queue.
+for directory, target in (('idf_app', 'dial'), ('frame_app', 'frame'), ('rlcd_app', 'rlcd')):
+    main = root / directory / 'main'
+    adapter = (main / f'ble_hid_host_{target}.c').read_text()
+    assert '.on_consumer_event = controller_ble_input_on_consumer_event,' in adapter, target
+    loop = (main / f'main_{"idf" if target == "dial" else target}.c').read_text()
+    assert 'controller_ble_input_service();' in loop, target
+
+# The HALO loop is independent. Joy and all M5 betas reuse the Tough loop
+# and STA portal, while the original ESP32 Tough does not link the BLE host.
+for directory in ('idf_app', 'frame_app', 'rlcd_app', 'halo_app', 'atom_app', 'm5_beta_app'):
+    cmake = (root / directory / 'main/CMakeLists.txt').read_text()
+    assert 'common/ble_remote_web.c' in cmake, directory
+    assert 'common/controller_ble_input.c' in cmake, directory
+    assert 'rk_ble_hid_host' in cmake, directory
+for main in ('halo_app/main/main_halo.c', 'tough_app/main/main_tough.c'):
+    loop = (root / main).read_text()
+    assert 'controller_ble_input_start()' in loop, main
+    assert 'controller_ble_input_service();' in loop, main
+for portal in ('idf_app/main/config_server.c', 'frame_app/main/captive_portal.c',
+               'tough_app/main/captive_portal.c'):
+    assert 'ble_remote_web_register(s_server,' in (root / portal).read_text(), portal
+
 def section(start, end):
     return source[source.index(start):source.index(end, source.index(start))]
 

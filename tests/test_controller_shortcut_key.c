@@ -249,7 +249,21 @@ static void feedback(void) {
     }
 }
 
+static void saved_binding_events_use_canonical_keys(void) {
+    assert(controller_shortcut_bindable_usage("home:press") == 0x0223);
+    assert(controller_shortcut_bindable_usage("usage_0042:double") == 0x0042);
+    assert(controller_shortcut_bindable_usage("usage_cafe:long") == 0xcafe);
+    assert(controller_shortcut_bindable_usage("play_pause:long") == 0x00cd);
+    assert(!controller_shortcut_bindable_usage("play_pause:press"));
+    assert(!controller_shortcut_bindable_usage("volume_up:long"));
+    assert(!controller_shortcut_bindable_usage("usage_00e9:press"));
+    assert(!controller_shortcut_bindable_usage("usage_0223:press"));
+    assert(!controller_shortcut_bindable_usage("usage_0000:press"));
+    assert(!controller_shortcut_bindable_usage("home:press:long"));
+}
+
 int main(void) {
+    saved_binding_events_use_canonical_keys();
     feedback();
     names();
     body();

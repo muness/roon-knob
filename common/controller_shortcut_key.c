@@ -56,6 +56,33 @@ const char *controller_shortcut_key_name(uint16_t usage, char *buf, size_t len) 
     return buf;
 }
 
+uint16_t controller_shortcut_bindable_usage(const char *event) {
+    if (!event) return 0;
+    const char *separator = strchr(event, ':');
+    if (!separator || (strcmp(separator, ":press") && strcmp(separator, ":long") &&
+                       strcmp(separator, ":double"))) return 0;
+    const size_t length = separator - event;
+    for (size_t i = 0; i < sizeof(kKeys) / sizeof(kKeys[0]); ++i) {
+        const char *name = kKeys[i].name;
+        if (name && strlen(name) == length && !memcmp(event, name, length)) {
+            return kKeys[i].key_class == CONTROLLER_SHORTCUT_KEY_FREE ||
+                (kKeys[i].key_class == CONTROLLER_SHORTCUT_KEY_TRANSPORT &&
+                 !strcmp(separator, ":long")) ? kKeys[i].usage : 0;
+        }
+    }
+    if (length != 10 || memcmp(event, "usage_", 6)) return 0;
+    uint16_t usage = 0;
+    for (size_t i = 6; i < length; ++i) {
+        const char digit = event[i];
+        if (digit >= '0' && digit <= '9') usage = (usage << 4) | (digit - '0');
+        else if (digit >= 'a' && digit <= 'f') usage = (usage << 4) | (digit - 'a' + 10);
+        else return 0;
+    }
+    char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+    return controller_shortcut_key_name(usage, key, sizeof(key)) &&
+        strlen(key) == length && !memcmp(event, key, length) ? usage : 0;
+}
+
 const char *controller_shortcut_key_label(uint16_t usage) {
     const key_entry_t *known = find_key(usage);
     return known ? known->label : NULL;

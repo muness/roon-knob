@@ -38,6 +38,7 @@ set(SRC_FILES
     "../../common/controller_action_router.c"
     "../../common/controller_config.c"
     "../../common/controller_ble_input.c"
+    "../../common/ble_remote_web.c"
     "../../common/controller_input.c"
     "../../common/controller_input_mailbox.c"
     "../../common/controller_view.c"

@@ -5,6 +5,11 @@
 #include "bridge_client.h"
 #include "controller_config.h"
 #include "captive_portal.h"
+
+#include "sdkconfig.h"
+#if CONFIG_RK_BLE_HID_HOST
+#include "controller_ble_input.h"
+#endif
 #include "platform/platform_identity.h"
 #include "platform/platform_input.h"
 #include "platform/platform_mdns.h"
@@ -128,8 +133,14 @@ static void ui_loop_task(void *arg) {
   (void)arg;
   ESP_LOGI(TAG, "UI loop task started");
 
+#if CONFIG_RK_BLE_HID_HOST
+  bool ble_ready = false;
+#endif
   while (true) {
     platform_task_run_pending();
+#if CONFIG_RK_BLE_HID_HOST
+    controller_ble_input_service();
+#endif
     platform_input_process_events();
     platform_display_process_pending();
     ui_loop_iter();
@@ -148,6 +159,9 @@ static void ui_loop_task(void *arg) {
     if (atomic_exchange_explicit(&s_sta_server_pending, false,
                                  memory_order_acq_rel)) {
       if (!wifi_mgr_is_ap_mode()) {
+#if CONFIG_RK_BLE_HID_HOST
+        if (!ble_ready) ble_ready = controller_ble_input_start();
+#endif
         ESP_LOGI(TAG, "Starting STA web server...");
         if (!captive_portal_start_sta()) {
           ESP_LOGE(TAG, "Failed to start STA web server; will retry on next network event");

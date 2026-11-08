@@ -1,8 +1,5 @@
-// captive_portal.h implementation for hiphi tough -- adapted from
-// frame_app/main/captive_portal.c. Unlike Frame, this target has no BLE
-// media remote (see tough_capabilities.h / #193 / #191), so the BLE
-// pairing/config web UI and its API routes do not exist here at all --
-// this is not a stub, there is nothing to configure.
+// Shared Tough-family settings server. ESP32-S3 profiles can register the
+// Bluetooth Remote routes through their BLE HID host build setting.
 
 #include "captive_portal.h"
 #include "portal_trace.h"
@@ -17,6 +14,14 @@
 #include "platform/platform_identity.h"
 #include "platform/platform_power.h"
 #include "power_debug_web.h"
+#include "sdkconfig.h"
+
+#if CONFIG_RK_BLE_HID_HOST
+#include "ble_remote_web.h"
+#define BLE_REMOTE_LINK "<a href='/ble'>Bluetooth Remote</a> "
+#else
+#define BLE_REMOTE_LINK ""
+#endif
 #include "os_mutex.h"
 #if HIPHI_M5_TARGET_ID == 4 && HIPHI_KIZZ_WAKE_WORD
 #include "kizz_wake_word.h"
@@ -687,7 +692,7 @@ static esp_err_t sta_zones_handler(httpd_req_t *req) {
     "%s"
     "<h1>Zones</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
-    "<a href='/power-debug'>Power</a>"
+    BLE_REMOTE_LINK "<a href='/power-debug'>Power</a>"
     "%s%s%s"
     "</nav>"
     "<div class='card'><h2>Zone Selection</h2>",
@@ -826,7 +831,7 @@ static esp_err_t sta_settings_handler(httpd_req_t *req) {
     "small{color:var(--pb-muted);}"
     "</style></head><body>%s<h1>Settings</h1>"
     "<nav><a href='/zones'>Zones</a> <a href='/settings'>Settings</a> "
-    "<a href='/power-debug'>Power</a></nav>"
+    BLE_REMOTE_LINK "<a href='/power-debug'>Power</a></nav>"
     "<div class='card'><h2>Display and power</h2>"
     "<p class='status'>Artwork mode keeps the album visible; dim and sleep are the subsequent power-saving stages.</p>"
     "<form method='POST' action='/api/settings'><h3>On battery</h3>"
@@ -1069,15 +1074,17 @@ bool captive_portal_start_sta(void) {
   }
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 10;
-#if HIPHI_M5_TARGET_ID == 4
-  /* STA handlers keep large response bodies on the heap, so a 6 KiB server
-   * stack is sufficient. Keep it in PSRAM to preserve internal heap for Wi-Fi
-   * DMA and socket control blocks, including experimental voice builds. */
-  config.stack_size = 6144;
-  config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+#if CONFIG_RK_BLE_HID_HOST
+  config.max_uri_handlers = 11 + BLE_REMOTE_WEB_ROUTE_COUNT;
+  config.stack_size = 12288;
 #else
+  config.max_uri_handlers = 10;
   config.stack_size = 16384;
+#endif
+#if HIPHI_M5_TARGET_ID == 4
+  /* Kizz reserves internal heap for Wi-Fi DMA and voice. The BLE portal
+   * moves its NVS operations onto an internal task on this target. */
+  config.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 #endif
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
@@ -1116,6 +1123,9 @@ bool captive_portal_start_sta(void) {
   if (!register_uri_handler(&wake_config_post)) goto fail;
 #endif
 
+#if CONFIG_RK_BLE_HID_HOST
+  if (!ble_remote_web_register(s_server, "/settings")) goto fail;
+#endif
   if (!power_debug_web_register(s_server)) goto fail;
 
   s_server_mode = WEB_SERVER_STA_CONFIG;

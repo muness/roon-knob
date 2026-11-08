@@ -2,6 +2,7 @@
 #include "ble_hid_host_rlcd.h"
 #include "bridge_client.h"
 #include "captive_portal.h"
+#include "controller_ble_input.h"
 #include "platform/platform_input.h"
 #include "platform/platform_mdns.h"
 #include "platform/platform_task.h"
@@ -54,6 +55,7 @@ static void ui_task(void *arg) {
     bool ble_ready = false;
     for (;;) {
         platform_task_run_pending();
+        controller_ble_input_service();
         platform_input_process_events();
         rlcd_ui_process();
         if (atomic_exchange(&s_mdns_pending, false) && !mdns_ready) {

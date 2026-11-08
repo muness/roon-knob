@@ -137,3 +137,18 @@ void controller_ble_input_stats(controller_ble_input_stats_t *out) {
     if (!out) return;
     os_critical_enter(&s_mailbox_lock); *out=s_stats; os_critical_leave(&s_mailbox_lock);
 }
+
+#ifdef ESP_PLATFORM
+bool controller_ble_input_start(void) {
+    const rk_ble_hid_host_config_t config = {
+        .default_enabled = false,
+        .on_media_key = controller_ble_input_on_media_key,
+        .on_consumer_event = controller_ble_input_on_consumer_event,
+    };
+    const rk_ble_hid_host_result_t result = rk_ble_hid_host_init(&config);
+    if (result == RK_BLE_HID_HOST_OK || result == RK_BLE_HID_HOST_ERR_ALREADY_INITIALIZED)
+        return true;
+    ESP_LOGE(TAG, "BLE remote service failed to start: %s", rk_ble_hid_host_result_name(result));
+    return false;
+}
+#endif

@@ -47,3 +47,6 @@ CONFIG_LV_USE_ARABIC_PERSIAN_CHARS=y
 
 # A new OTA image must confirm itself (ota_confirm_boot) or the bootloader returns to the previous one.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Keep dynamic BLE allocations out of Wi-Fi and display DMA memory.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
