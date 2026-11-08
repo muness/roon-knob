@@ -1331,7 +1331,13 @@ static void process_event(const service_event_t *event) {
         rk_ble_media_key_t key;
         const bool pointer = event->data.input.usage == ESP_HID_USAGE_MOUSE;
         const bool consumer_control = event->data.input.usage == ESP_HID_USAGE_CCONTROL;
-        const bool mapped = consumer_control && rk_ble_hid_host_map_consumer_report(
+        /* Some HID hosts leave standard media selectors classified as Generic.
+         * Preserve transport for the fixed media usages without learning an
+         * arbitrary shortcut from an unclassified report. */
+        const bool generic_media = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
+            (event->data.input.len == 2 ||
+             (event->data.input.len == 3 && event->data.input.data[2] == 0));
+        const bool mapped = (consumer_control || generic_media) && rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
 
         bool learning = false;

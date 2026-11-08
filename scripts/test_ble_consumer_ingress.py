@@ -205,6 +205,13 @@ int main(void) {
     assert(sent_count==1);
     assert(s.status.recent_reports[1].consumer_control);
     reset();
+    down.data.input.usage=ESP_HID_USAGE_GENERIC;
+    down.data.input.data[0]=0xcd;
+    enqueue_consumer_event(&down);
+    drain_host();
+    assert(s.status.recent_reports[0].media_key==RK_BLE_MEDIA_KEY_PLAY_PAUSE);
+    assert(!s.status.recent_reports[0].consumer_control);
+    reset();
     down.data.input.report_id=3;
     down.data.input.usage=ESP_HID_USAGE_MOUSE;
     down.data.input.data[0]=1;
