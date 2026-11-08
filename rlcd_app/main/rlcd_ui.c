@@ -11,6 +11,7 @@
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <lvgl.h>
+#include <misc/cache/instance/lv_image_cache.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

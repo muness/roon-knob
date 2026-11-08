@@ -1419,8 +1419,9 @@ void render_semantic_family() {
 
     switch (family) {
     case KizzSemanticFamily::ARTWORK_IMMERSIVE:
-        if (!stackchan_draw_artwork(target, 0, 26, w, h - 57, true))
-        else stackchan_draw_performance_face(target, stackchan_current_face(lost), w, 0);
+        if (!stackchan_draw_artwork(target, 0, 26, w, h - 57, true)) {
+            stackchan_draw_performance_face(target, stackchan_current_face(lost), w, 0);
+        }
         target->fillRect(0, h - 31, w, 31, STACK_BG);
         stackchan_draw_marquee(target, s.title, 8, h - 25, w - 16, 1, STACK_INK, &s_stackchan_marquees[0]);
         break;
