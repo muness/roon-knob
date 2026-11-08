@@ -1942,7 +1942,7 @@ bool captive_portal_start_sta(void) {
   }
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  /* Fourteen Frame routes plus the three shared power-debug routes. */
+  /* Capacity for the Frame portal, display diagnostics, and shared power routes. */
   config.max_uri_handlers = 24;
   config.stack_size = PORTAL_HTTPD_STACK_SIZE;
 
