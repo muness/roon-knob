@@ -1266,10 +1266,8 @@ static esp_err_t sta_ble_shortcuts_handler(httpd_req_t *req) {
   }
   controller_shortcuts_page_t *page = heap_caps_malloc(sizeof(*page), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!page) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-  bridge_shortcuts_context_t context;
   cJSON *root = cJSON_CreateObject();
-  if (root && bridge_client_shortcuts_capture(&context) &&
-      bridge_client_shortcuts_fetch(&context, (int)offset, page)) {
+  if (root && bridge_client_shortcuts_fetch_for_settings((int)offset, page)) {
     cJSON_AddNumberToObject(root, "next", page->next_offset);
     cJSON *items = cJSON_AddArrayToObject(root, "items");
     for (int i = 0; items && i < page->count; ++i) {
@@ -1304,6 +1302,48 @@ static bool ble_button_custom_name(uint16_t usage, char *name, bool save) {
   return result == ESP_OK;
 }
 
+static esp_err_t sta_ble_bindings_handler(httpd_req_t *req) {
+  cJSON *root = cJSON_CreateObject();
+  cJSON *bindings = bridge_client_shortcut_bindings();
+  if (!root || !bindings) {
+    cJSON_Delete(bindings);
+    if (root) cJSON_AddStringToObject(root, "error", "Couldn’t load saved mappings from Hi-Fi Control.");
+    return send_ble_json(req, root);
+  }
+  cJSON *items = cJSON_AddArrayToObject(root, "items");
+  if (!items) {
+    cJSON_Delete(bindings);
+    cJSON_Delete(root);
+    return send_ble_json(req, NULL);
+  }
+  const cJSON *binding;
+  cJSON_ArrayForEach(binding, bindings) {
+    const cJSON *event = cJSON_GetObjectItemCaseSensitive(binding, "event");
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(binding, "shortcut_id");
+    const cJSON *name = cJSON_GetObjectItemCaseSensitive(binding, "shortcut_name");
+    if (!cJSON_IsString(event) || !cJSON_IsString(id)) continue;
+    const uint16_t usage = controller_shortcut_bindable_usage(event->valuestring);
+    if (!usage) continue;
+    const char *label = controller_shortcut_key_label(usage);
+    char custom[BLE_BUTTON_NAME_BYTES], key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+    if (!label && ble_button_custom_name(usage, custom, false)) label = custom;
+    if (!label) label = controller_shortcut_key_name(usage, key, sizeof(key));
+    cJSON *item = cJSON_CreateObject();
+    if (!item) {
+      cJSON_Delete(bindings);
+      cJSON_Delete(root);
+      return send_ble_json(req, NULL);
+    }
+    cJSON_AddItemToArray(items, item);
+    cJSON_AddStringToObject(item, "event", event->valuestring);
+    cJSON_AddStringToObject(item, "id", id->valuestring);
+    cJSON_AddStringToObject(item, "name", cJSON_IsString(name) ? name->valuestring : id->valuestring);
+    cJSON_AddStringToObject(item, "label", label);
+  }
+  cJSON_Delete(bindings);
+  return send_ble_json(req, root);
+}
+
 static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
   char type[32], body[768];
   if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
@@ -1320,7 +1360,17 @@ static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
   cJSON *request = cJSON_ParseWithOpts(body, NULL, true);
   cJSON *root = cJSON_CreateObject();
   const char *error = "Press a spare remote button first.";
-  if (root && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "learn"))) {
+  const cJSON *event = cJSON_GetObjectItemCaseSensitive(request, "event");
+  if (root && event) {
+    const cJSON *expected = cJSON_GetObjectItemCaseSensitive(request, "expected");
+    const cJSON *replacement = cJSON_GetObjectItemCaseSensitive(request, "shortcut");
+    error = "Choose a saved mapping and a shortcut, or remove the mapping.";
+    if (cJSON_IsString(event) && cJSON_IsString(expected) &&
+        (cJSON_IsString(replacement) || cJSON_IsNull(replacement))) {
+      error = bridge_client_edit_shortcut(event->valuestring, expected->valuestring,
+                                         replacement->valuestring);
+    }
+  } else if (root && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "learn"))) {
     uint32_t started;
     if (rk_ble_hid_host_begin_learn(&started)) {
       cJSON_AddNumberToObject(root, "started", started);
@@ -1469,7 +1519,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   char bridge_url[128] = "";
   bridge_client_get_bridge_url(bridge_url, sizeof(bridge_url));
 
-  size_t html_size = 20480;  // base64 favicon + brand stylesheet
+  size_t html_size = 24576;  // branding, mapping controls, and input history
   char *html = heap_caps_malloc(html_size,
                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!html) {
@@ -1493,6 +1543,7 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
     ".remote-nav a{margin:0;white-space:nowrap}"
     ".remote-nav [aria-current]{font-weight:600}"
     "#remote-status{margin-top:0}"
+    "#button-assign-start[hidden],#button-assign-more[hidden]{display:none}"
     ".remote-steps{display:flex;flex-wrap:wrap;gap:4px 28px;margin:0 0 12px;"
     "padding-left:22px;color:var(--pb-muted);font-size:14px}"
     ".remote-steps [aria-current]{color:var(--pb-text);font-weight:600}"
@@ -1643,12 +1694,14 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
   pos += snprintf(html + pos, html_size - pos, "</section>");
   if (pos >= (int)html_size) pos = (int)html_size - 1;
 
-  if (status.connected) {
+  {
     pos += snprintf(html + pos, html_size - pos,
       "<section class='card' aria-labelledby='button-assign-title'>"
-      "<h2 id='button-assign-title'>Assign a button</h2>"
-      "<p id='button-assign-status' role='status'>Choose a spare remote button to play a saved Library shortcut.</p>"
-      "<button id='button-assign-start' type='button'>Learn a button</button>"
+      "<h2 id='button-assign-title'>Button mappings</h2>"
+      "<p id='button-assign-list-status' role='status'>Loading saved mappings…</p>"
+      "<div id='button-assign-list'></div>"
+      "<p id='button-assign-status' role='status' tabindex='-1'>%s</p>"
+      "<button id='button-assign-start' type='button'%s>Learn a button</button>"
       "<div id='button-assign-picker' hidden>"
       "<div id='button-assign-name-row' hidden><label for='button-assign-name'>Button name (optional)</label>"
       "<input id='button-assign-name' type='text' maxlength='24' placeholder='e.g. Star'></div>"
@@ -1662,16 +1715,42 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "const get=id=>document.getElementById('button-assign-'+id);"
       "const start=get('start'),status=get('status'),picker=get('picker'),"
       "shortcut=get('shortcut'),save=get('save'),more=get('more'),report=get('report');"
-      "const name=get('name'),nameRow=get('name-row');let learned,label,next;"
+      "const name=get('name'),nameRow=get('name-row');let learned,label,next,editing;"
       "const read=async(url,body)=>{const r=await fetch(url,{cache:'no-store',"
-      "signal:AbortSignal.timeout(body?9000:5000),...(body?{method:'POST',"
+      "signal:AbortSignal.timeout(body?12000:6000),...(body?{method:'POST',"
       "headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});"
       "if(!r.ok)throw Error('Couldn’t reach the device. Try again.');"
       "const data=await r.json();if(data.error)throw Error(data.error);return data;};"
       "const load=async offset=>{const data=await read('/api/ble-shortcuts?offset='+offset);"
       "for(const item of data.items)shortcut.add(new Option(item.name,item.id));"
-      "next=data.next;more.hidden=next<0;save.disabled=!shortcut.options.length;};"
-      "start.onclick=async()=>{start.disabled=true;picker.hidden=true;report.hidden=true;"
+      "next=data.next;more.hidden=next<0;save.disabled=!shortcut.value;};"
+      "shortcut.onchange=()=>{save.disabled=!shortcut.value;};"
+      "const list=get('list'),listStatus=get('list-status');"
+      "const setBusy=busy=>{start.disabled=busy;list.inert=busy;};"
+      "const change=(item,value)=>read('/api/ble-assign',{event:item.event,expected:item.id,shortcut:value});"
+      "const refresh=async()=>{try{const {items}=await read('/api/ble-bindings');"
+      "list.replaceChildren();listStatus.textContent=items.length?'':'No saved button mappings.';"
+      "for(const item of items){const row=document.createElement('div');"
+      "const gesture=item.event.split(':')[1];"
+      "const title=item.label+(gesture==='press'?'':' ('+gesture+' press)');"
+      "const text=document.createElement('p');text.textContent=title+' → '+item.name;"
+      "const edit=document.createElement('button'),remove=document.createElement('button');"
+      "edit.type=remove.type='button';edit.textContent='Change shortcut';remove.textContent='Remove mapping';"
+      "edit.setAttribute('aria-label','Change shortcut for '+title);"
+      "remove.setAttribute('aria-label','Remove mapping for '+title);"
+      "edit.onclick=async()=>{setBusy(true);picker.hidden=true;report.hidden=true;learned=null;"
+      "editing=item;nameRow.hidden=true;shortcut.replaceChildren(new Option('Choose a shortcut',''));"
+      "try{await load(0);if(shortcut.options.length===1){status.textContent='No Library shortcuts available.';return;}"
+      "status.textContent='Choose a new shortcut for '+title+'.';picker.hidden=false;shortcut.focus();"
+      "}catch(e){status.textContent=e.message;}finally{setBusy(false);}};"
+      "remove.onclick=async()=>{if(!confirm('Remove the mapping for '+title+'?'))return;"
+      "setBusy(true);picker.hidden=true;report.hidden=true;learned=editing=null;"
+      "try{await change(item,null);status.textContent=title+' mapping removed.';await refresh();status.focus();}"
+      "catch(e){status.textContent=e.message;}finally{setBusy(false);}};"
+      "row.append(text,edit,' ',remove);list.append(row);}"
+      "}catch(e){list.replaceChildren();listStatus.textContent=e.message;}};"
+      "refresh();"
+      "start.onclick=async()=>{setBusy(true);picker.hidden=true;report.hidden=true;editing=null;"
       "shortcut.replaceChildren();learned=null;more.hidden=true;"
       "try{const {started}=await read('/api/ble-assign',{learn:true});"
       "status.textContent='Press the spare button you want to assign.';"
@@ -1697,19 +1776,22 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "await new Promise(resolve=>setTimeout(resolve,250));}"
       "if(!skipped)status.textContent='No button received. Try again.';"
       "}catch(e){status.textContent=e.message;}"
-      "finally{start.disabled=false;start.textContent='Learn another button';}};"
-      "more.onclick=async()=>{start.disabled=true;more.disabled=true;save.disabled=true;try{await load(next);}"
-      "catch(e){status.textContent=e.message;}finally{start.disabled=false;more.disabled=false;save.disabled=!shortcut.options.length;}};"
-      "save.onclick=async()=>{if(!learned||!shortcut.value)return;"
-      "start.disabled=true;save.disabled=true;more.disabled=true;shortcut.disabled=true;"
-      "const title=shortcut.selectedOptions[0].text,custom=learned.canName?name.value.trim():'';"
-      "try{const {notice}=await read('/api/ble-assign',{at:learned.at,usage:learned.usage,"
+      "finally{setBusy(false);start.textContent='Learn another button';}};"
+      "more.onclick=async()=>{setBusy(true);more.disabled=true;save.disabled=true;shortcut.disabled=true;try{await load(next);}"
+      "catch(e){status.textContent=e.message;}finally{setBusy(false);more.disabled=false;shortcut.disabled=false;save.disabled=!shortcut.value;}};"
+      "save.onclick=async()=>{if((!learned&&!editing)||!shortcut.value)return;"
+      "setBusy(true);save.disabled=true;more.disabled=true;shortcut.disabled=true;"
+      "const title=shortcut.selectedOptions[0].text,custom=learned?.canName?name.value.trim():'';"
+      "try{const {notice}=editing?await change(editing,shortcut.value):"
+      "await read('/api/ble-assign',{at:learned.at,usage:learned.usage,"
       "shortcut:shortcut.value,...(custom?{name:custom}:{})});"
-      "status.textContent=notice||(custom||label)+' assigned to '+title+'.';"
-      "picker.hidden=true;learned=null;start.focus();"
+      "status.textContent=notice||(editing?.label||custom||label)+' assigned to '+title+'.';"
+      "picker.hidden=true;learned=editing=null;await refresh();status.focus();"
       "}catch(e){status.textContent=e.message;}"
-      "finally{start.disabled=false;save.disabled=false;more.disabled=false;shortcut.disabled=false;}};"
-      "})();</script>");
+      "finally{setBusy(false);save.disabled=!shortcut.value;more.disabled=false;shortcut.disabled=false;}};"
+      "})();</script>",
+      status.connected ? "Choose a spare remote button to play a saved Library shortcut." : "",
+      status.connected ? "" : " hidden");
     if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
 
@@ -1971,6 +2053,9 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t ble_shortcuts = {.uri = "/api/ble-shortcuts", .method = HTTP_GET, .handler = sta_ble_shortcuts_handler};
   if (!register_uri_handler(&ble_shortcuts)) goto fail;
+
+  httpd_uri_t ble_bindings = {.uri = "/api/ble-bindings", .method = HTTP_GET, .handler = sta_ble_bindings_handler};
+  if (!register_uri_handler(&ble_bindings)) goto fail;
 
   httpd_uri_t ble_assign = {.uri = "/api/ble-assign", .method = HTTP_POST, .handler = sta_ble_assign_handler};
   if (!register_uri_handler(&ble_assign)) goto fail;
