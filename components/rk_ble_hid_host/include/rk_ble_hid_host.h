@@ -80,6 +80,7 @@ typedef struct {
     uint8_t report_id;
     uint8_t data[RK_BLE_HID_HOST_REPORT_BYTES];
     bool consumer_control;
+    bool learned;
 } rk_ble_recent_report_t;
 
 typedef struct {
@@ -164,6 +165,7 @@ rk_ble_hid_host_result_t rk_ble_hid_host_pair(const rk_ble_hid_host_device_t *de
 rk_ble_hid_host_result_t rk_ble_hid_host_forget(void);
 
 /** Copy the current status without exposing service-owned storage. */
+bool rk_ble_hid_host_begin_learn(uint32_t *started_ms);
 rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *out);
 
 /**

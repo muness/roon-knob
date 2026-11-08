@@ -165,6 +165,13 @@ int main(void) {
             assert(last_press_time==s.status.recent_reports[1].time_ms);
         }
     }
+    reset();
+    s_learn_started=clock_ms;
+    s_learn_until=clock_ms+12000;
+    report(0x223); clock_ms+=50; report(0); clock_ms+=400; tick();
+    drain_host(); controller_ble_input_service();
+    assert(s.status.recent_reports[1].learned);
+    assert(sent_count==0);
     puts("HID ingress and both deferred queues preserve gesture history; loss cancels");
 }
 '''

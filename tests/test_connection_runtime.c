@@ -98,13 +98,32 @@ int platform_http_get(const char *url, char **out, size_t *len) {
     return http_ok ? 0 : -1;
 }
 static const char *catalog_reply = "{}";
+static const char *button_map_reply;
+static unsigned button_map_writes;
 int platform_http_get_bounded(const char *url, size_t max_bytes, char **out, size_t *length) {
+    if (strstr(url, "/api/controllers/0123456789ab/shortcuts")) {
+        assert(button_map_reply);
+        *out = strdup(button_map_reply); *length = strlen(*out);
+        return 0;
+    }
     assert(strstr(url, "/api/shortcuts?offset="));
     assert(max_bytes <= 16384);
     *out = strdup(catalog_reply); *length = strlen(*out);
     return 0;
 }
-void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
+void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,button_map_reply ? "0123456789ab" : "abc"); }
+int platform_http_put_json(const char *url, const char *body, char **out, size_t *len) {
+    assert(strstr(url, "/api/controllers/0123456789ab/shortcuts"));
+    cJSON *root = cJSON_Parse(body);
+    assert(root);
+    cJSON *bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
+    assert(strcmp(cJSON_GetObjectItemCaseSensitive(bindings, "back:long")->valuestring, "sc_original") == 0);
+    assert(strcmp(cJSON_GetObjectItemCaseSensitive(bindings, "home:press")->valuestring, "sc_playlist") == 0);
+    cJSON_Delete(root);
+    ++button_map_writes;
+    *out = strdup("{}"); *len = 2;
+    return 0;
+}
 void platform_http_free(char *value) { free(value); }
 void platform_task_finish(void) {}
 static bool hold_shortcut_task, shortcut_task_start_fails;
@@ -279,6 +298,20 @@ static void test_shortcut_input_reports_what_the_bridge_says(void) {
 }
 /* The backend adapter owns delivery: non-blocking, one request at a time, and
  * nothing is sent from a connection that is not ready. */
+static void test_assignment_preserves_other_buttons(void) {
+    connect_for_shortcut();
+    button_map_reply = "{\"bindings\":[{\"event\":\"back:long\",\"shortcut_id\":\"sc_original\"}]}";
+    button_map_writes = 0;
+    assert(!bridge_client_assign_shortcut(0x223, "sc_playlist"));
+    assert(button_map_writes == 1);
+    button_map_reply = "{\"bindings\":[{\"event\":\"home:press\",\"shortcut_id\":\"sc_playlist\"}]}";
+    assert(!bridge_client_assign_shortcut(0x223, "sc_playlist"));
+    assert(bridge_client_assign_shortcut(0x223, "sc_other"));
+    assert(bridge_client_assign_shortcut(0xe9, "sc_playlist"));
+    assert(button_map_writes == 1);
+    button_map_reply = NULL;
+}
+
 static void test_shortcut_submit_is_single_flight_and_readiness_gated(void) {
     connect_for_shortcut();
     shortcut_posts = 0; shortcut_reply = "{\"code\":\"accepted\"}"; shortcut_http_ok = true;
@@ -1034,4 +1067,5 @@ int main(void) {
     test_failed_and_stale_candidates();
     test_shortcut_input_reports_what_the_bridge_says();
     test_shortcut_submit_is_single_flight_and_readiness_gated();
+    test_assignment_preserves_other_buttons();
 }

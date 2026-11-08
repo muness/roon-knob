@@ -40,6 +40,9 @@ bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
 bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
                                   const char *id, controller_shortcuts_page_t *out);
 
+/* Add a learned press to this controller's bridge-owned map. */
+const char *bridge_client_assign_shortcut(uint16_t usage, const char *id);
+
 /* Wake the polling worker after a display sleep/power-save interval. */
 void bridge_client_request_poll(void);
 bool bridge_client_execute_command(const controller_command_t *command);

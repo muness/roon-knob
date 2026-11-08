@@ -254,6 +254,7 @@ static void status_set_sleep_quiesced(bool quiesced) {
 static portMUX_TYPE s_input_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_input_session = 1, s_input_sequence, s_tracker_session;
 static bool s_input_faulted;
+static uint32_t s_learn_started, s_learn_until;
 
 static void cancel_consumer_ingress(void) {
     portENTER_CRITICAL(&s_input_lock);
@@ -288,6 +289,7 @@ static void enqueue_consumer_event(service_event_t *event) {
 static void status_set_connection(bool connected, const char *name) {
     xSemaphoreTake(s.status_lock, portMAX_DELAY);
     s.status.connected = connected;
+    if (!connected) s_learn_until = 0;
     copy_name(s.status.active_name, connected ? name : NULL);
     xSemaphoreGive(s.status_lock);
 }
@@ -1330,16 +1332,20 @@ static void process_event(const service_event_t *event) {
         const bool consumer_control =
             event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_home;
 
+        bool learning = false;
         if (s.status.connected && !is_stopping()) {
+            xSemaphoreTake(s.status_lock, portMAX_DELAY);
+            learning = s_learn_until && (int32_t)(event->input_time_ms - s_learn_started) >= 0 &&
+                       (int32_t)(s_learn_until - event->input_time_ms) > 0;
             rk_ble_recent_report_t report = {
                 .time_ms = event->input_time_ms,
-                .media_key = mapped && s.config.on_media_key ? key : RK_BLE_MEDIA_KEY_NONE,
+                .media_key = mapped ? key : RK_BLE_MEDIA_KEY_NONE,
+                .learned = learning,
                 .length = event->data.input.len,
                 .report_id = event->data.input.report_id,
                 .consumer_control = consumer_control,
             };
             memcpy(report.data, event->data.input.data, report.length);
-            xSemaphoreTake(s.status_lock, portMAX_DELAY);
             memmove(s.status.recent_reports + 1, s.status.recent_reports,
                     sizeof(s.status.recent_reports) - sizeof(report));
             s.status.recent_reports[0] = report;
@@ -1348,6 +1354,8 @@ static void process_event(const service_event_t *event) {
             }
             xSemaphoreGive(s.status_lock);
         }
+
+        if (learning) break;
 
         /* Report every Consumer Control key down and up, known or not, so the
          * controller can recognise long and double presses and a person can
@@ -1631,6 +1639,20 @@ rk_ble_hid_host_result_t rk_ble_hid_host_forget(void) {
     }
     const command_t command = {.type = COMMAND_FORGET};
     return enqueue_command(&command);
+}
+
+bool rk_ble_hid_host_begin_learn(uint32_t *started_ms) {
+    if (!s.status_lock || !started_ms) return false;
+    xSemaphoreTake(s.status_lock, portMAX_DELAY);
+    const bool connected = s.status.connected;
+    if (connected) {
+        s_learn_started = (uint32_t)(esp_timer_get_time() / 1000);
+        s_learn_until = s_learn_started + 12000;
+        *started_ms = s_learn_started;
+    }
+    xSemaphoreGive(s.status_lock);
+    if (connected) cancel_consumer_ingress();
+    return connected;
 }
 
 rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *out) {

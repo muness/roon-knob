@@ -1242,6 +1242,97 @@ static const char *ble_media_command_name(rk_ble_media_key_t key) {
   }
 }
 
+static esp_err_t send_ble_json(httpd_req_t *req, cJSON *root) {
+  char *body = root ? cJSON_PrintUnformatted(root) : NULL;
+  cJSON_Delete(root);
+  if (!body) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  const esp_err_t rc = httpd_resp_sendstr(req, body);
+  cJSON_free(body);
+  return rc;
+}
+
+static esp_err_t sta_ble_shortcuts_handler(httpd_req_t *req) {
+  char query[32], value[12];
+  long offset = 0;
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "offset", value, sizeof(value)) == ESP_OK) {
+    char *end;
+    offset = strtol(value, &end, 10);
+    if (*end || offset < 0 || offset > 100000)
+      return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid offset");
+  }
+  controller_shortcuts_page_t *page = heap_caps_malloc(sizeof(*page), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!page) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+  bridge_shortcuts_context_t context;
+  cJSON *root = cJSON_CreateObject();
+  if (root && bridge_client_shortcuts_capture(&context) &&
+      bridge_client_shortcuts_fetch(&context, (int)offset, page)) {
+    cJSON_AddNumberToObject(root, "next", page->next_offset);
+    cJSON *items = cJSON_AddArrayToObject(root, "items");
+    for (int i = 0; items && i < page->count; ++i) {
+      cJSON *item = cJSON_CreateObject();
+      if (!item) break;
+      cJSON_AddItemToArray(items, item);
+      cJSON_AddStringToObject(item, "id", page->items[i].id);
+      cJSON_AddStringToObject(item, "name", page->items[i].name);
+    }
+  } else if (root) {
+    cJSON_AddStringToObject(root, "error", "Couldn’t load Library shortcuts from Hi-Fi Control.");
+  }
+  free(page);
+  return send_ble_json(req, root);
+}
+
+static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
+  char type[32], body[160];
+  if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
+      strcmp(type, "application/json") != 0 || req->content_len >= sizeof(body)) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected a small JSON request");
+  }
+  size_t received = 0;
+  while (received < req->content_len) {
+    const int n = httpd_req_recv(req, body + received, req->content_len - received);
+    if (n <= 0) return ESP_FAIL;
+    received += (size_t)n;
+  }
+  body[received] = '\0';
+  cJSON *request = cJSON_ParseWithOpts(body, NULL, true);
+  cJSON *root = cJSON_CreateObject();
+  const char *error = "Press a spare remote button first.";
+  if (root && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "learn"))) {
+    uint32_t started;
+    if (rk_ble_hid_host_begin_learn(&started)) {
+      cJSON_AddNumberToObject(root, "started", started);
+      error = NULL;
+    } else error = "Connect the remote before assigning a button.";
+  } else if (root) {
+    const cJSON *at = cJSON_GetObjectItemCaseSensitive(request, "at");
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(request, "shortcut");
+    const cJSON *key = cJSON_GetObjectItemCaseSensitive(request, "usage");
+    rk_ble_hid_host_status_t status;
+    if (cJSON_IsNumber(at) && at->valuedouble >= 0 && at->valuedouble <= UINT32_MAX &&
+        cJSON_IsNumber(key) && key->valuedouble >= 1 && key->valuedouble <= UINT16_MAX &&
+        cJSON_IsString(id) &&
+        rk_ble_hid_host_status_copy(&status) == RK_BLE_HID_HOST_OK && status.connected) {
+      const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+      for (size_t i = 0; i < status.recent_report_count; ++i) {
+        const rk_ble_recent_report_t *report = &status.recent_reports[i];
+        if (!report->learned || !report->consumer_control || report->length < 2 ||
+            at->valuedouble != report->time_ms || now - report->time_ms > 120000) continue;
+        const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
+        if (key->valuedouble != usage) continue;
+        error = bridge_client_assign_shortcut(usage, id->valuestring);
+        break;
+      }
+    }
+  }
+  if (root && error) cJSON_AddStringToObject(root, "error", error);
+  cJSON_Delete(request);
+  return send_ble_json(req, root);
+}
+
 static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
   rk_ble_hid_host_status_t status;
   if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
@@ -1266,6 +1357,7 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
     if (!input) break;
     cJSON_AddItemToArray(inputs, input);
     cJSON_AddNumberToObject(input, "at", report->time_ms);
+    cJSON_AddBoolToObject(input, "learned", report->learned);
     cJSON_AddNumberToObject(input, "report", report->report_id);
     cJSON_AddStringToObject(input, "bytes", payload);
     const char *media = ble_media_command_name(report->media_key);
@@ -1276,6 +1368,8 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
       if (controller_shortcut_key_name(usage, key, sizeof(key))) {
         cJSON_AddNumberToObject(input, "usage", usage);
         cJSON_AddStringToObject(input, "key", key);
+        cJSON_AddBoolToObject(input, "assignable",
+            controller_shortcut_key_class(usage) == CONTROLLER_SHORTCUT_KEY_FREE);
       }
     }
   }
@@ -1511,43 +1605,62 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
 
   if (status.connected) {
     pos += snprintf(html + pos, html_size - pos,
-      "<section class='card' aria-labelledby='button-test-title'>"
-      "<h2 id='button-test-title'>Test a button</h2>"
-      "<p id='button-test-status' role='status'>Check what this device receives. Assigned buttons still run their actions.</p>"
-      "<button id='button-test-start' type='button'>Start button test</button>"
-      "<p id='button-test-map' hidden><a href='%s/knobs'>Assign a shortcut in Hi-Fi Control</a> "
-      "Open this controller’s Buttons and shortcuts and select the button under Recently heard.</p>"
-      "<details id='button-test-report' hidden><summary>Show report details</summary>"
-      "<p><code id='button-test-bytes'></code></p></details></section>"
+      "<section class='card' aria-labelledby='button-assign-title'>"
+      "<h2 id='button-assign-title'>Assign a button</h2>"
+      "<p id='button-assign-status' role='status'>Choose a spare remote button to play a saved Library shortcut.</p>"
+      "<button id='button-assign-start' type='button'>Learn a button</button>"
+      "<div id='button-assign-picker' hidden>"
+      "<label for='button-assign-shortcut'>Library shortcut</label>"
+      "<select id='button-assign-shortcut'></select>"
+      "<button id='button-assign-more' type='button' hidden>Load more shortcuts</button> "
+      "<button id='button-assign-save' type='button'>Save assignment</button></div>"
+      "<details id='button-assign-report' hidden><summary>Show report details</summary>"
+      "<p><code id='button-assign-bytes'></code></p></details></section>"
       "<script>(()=>{"
-      "const get=id=>document.getElementById('button-test-'+id);"
-      "const start=get('start'), status=get('status'), map=get('map'), report=get('report');"
-      "const read=async()=>{const r=await fetch('/api/ble-input',{cache:'no-store',"
-      "signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error();return r.json()};"
-      "const sleep=()=>new Promise(resolve=>setTimeout(resolve,250));"
-      "start.onclick=async()=>{"
-      "start.disabled=true;map.hidden=true;report.hidden=true;report.open=false;"
-      "try{const baseline=(await read()).now;const until=performance.now()+12000;let button;"
-      "status.textContent='Press the button you expected to work.';"
-      "while(performance.now()<until){const data=await read();"
-      "if(!data.connected){status.textContent='Remote disconnected. Reconnect it and try again.';return;}"
-      "if(!button)button=data.inputs.find(i=>((i.at-baseline)|0)>0);"
-      "if(button){const label=button.media||(button.key&&!button.key.startsWith('usage_')"
-      "?button.key[0].toUpperCase()+button.key.slice(1).replaceAll('_',' '):'Button');"
-      "report.hidden=false;get('bytes').textContent='Report '+button.report+' · '+button.bytes;"
-      "if(!button.key&&!button.media){status.textContent='Button received. This device couldn’t identify it.';return;}"
-      "if(button.media){status.textContent=label+' received.';return;}"
-      "const o=data.outcome;"
-      "if(o&&o.at===button.at&&o.usage===button.usage){"
-      "if(o.code==='unmapped'){status.textContent=label+' received. No action assigned.';map.hidden=%s;}"
-      "else if(o.code==='accepted')status.textContent=label+' received. The bridge accepted the action.';"
-      "else status.textContent=label+' received. '+(o.message||'The action couldn’t be confirmed.');"
-      "return;}status.textContent=label+' received. Waiting for the bridge…';}"
-      "await sleep();}"
-      "status.textContent=button?'Button received. No action result came back.':'No button received.';"
-      "}catch{status.textContent='Couldn’t check remote input. Try again.';}"
-      "finally{start.disabled=false;start.textContent='Test another button';}};})();</script>",
-      esc_bridge_url, esc_bridge_url[0] ? "false" : "true");
+      "const get=id=>document.getElementById('button-assign-'+id);"
+      "const start=get('start'),status=get('status'),picker=get('picker'),"
+      "shortcut=get('shortcut'),save=get('save'),more=get('more'),report=get('report');"
+      "let learned,label,next;"
+      "const read=async(url,body)=>{const r=await fetch(url,{cache:'no-store',"
+      "signal:AbortSignal.timeout(body?9000:5000),...(body?{method:'POST',"
+      "headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});"
+      "if(!r.ok)throw Error('Couldn’t reach the device. Try again.');"
+      "const data=await r.json();if(data.error)throw Error(data.error);return data;};"
+      "const load=async offset=>{const data=await read('/api/ble-shortcuts?offset='+offset);"
+      "for(const item of data.items)shortcut.add(new Option(item.name,item.id));"
+      "next=data.next;more.hidden=next<0;save.disabled=!shortcut.options.length;};"
+      "start.onclick=async()=>{start.disabled=true;picker.hidden=true;report.hidden=true;"
+      "shortcut.replaceChildren();learned=null;more.hidden=true;"
+      "try{const {started}=await read('/api/ble-assign',{learn:true});"
+      "status.textContent='Press the spare button you want to assign.';"
+      "const until=performance.now()+12000;"
+      "while(performance.now()<until){const data=await read('/api/ble-input');"
+      "if(!data.connected)throw Error('Remote disconnected. Reconnect it and try again.');"
+      "const input=data.inputs.find(i=>i.learned&&((i.at-started)|0)>=0);"
+      "if(input){"
+      "if(!input.key&&!input.media){report.hidden=false;"
+      "get('bytes').textContent='Report '+input.report+' · '+input.bytes;"
+      "status.textContent='Button received. This device couldn’t identify it. Try another button.';return;}"
+      "if(!input.assignable){status.textContent='That button already controls playback. Try a spare button.';return;}"
+      "learned=input;label=input.key.startsWith('usage_')?'This button':"
+      "input.key[0].toUpperCase()+input.key.slice(1).replaceAll('_',' ');"
+      "await load(0);"
+      "if(!shortcut.options.length){status.textContent='Pin a shortcut in Hi-Fi Control’s Library, then try again.';return;}"
+      "picker.hidden=false;status.textContent=label+' learned. Choose what it should play.';shortcut.focus();return;}"
+      "await new Promise(resolve=>setTimeout(resolve,250));}"
+      "status.textContent='No button received. Try again.';"
+      "}catch(e){status.textContent=e.message;}"
+      "finally{start.disabled=false;start.textContent='Learn another button';}};"
+      "more.onclick=async()=>{start.disabled=true;more.disabled=true;save.disabled=true;try{await load(next);}"
+      "catch(e){status.textContent=e.message;}finally{start.disabled=false;more.disabled=false;save.disabled=!shortcut.options.length;}};"
+      "save.onclick=async()=>{if(!learned||!shortcut.value)return;"
+      "start.disabled=true;save.disabled=true;more.disabled=true;shortcut.disabled=true;"
+      "const title=shortcut.selectedOptions[0].text;"
+      "try{await read('/api/ble-assign',{at:learned.at,usage:learned.usage,shortcut:shortcut.value});"
+      "status.textContent=label+' assigned to '+title+'.';picker.hidden=true;learned=null;start.focus();"
+      "}catch(e){status.textContent=e.message;}"
+      "finally{start.disabled=false;save.disabled=false;more.disabled=false;shortcut.disabled=false;}};"
+      "})();</script>");
     if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
 
@@ -1783,7 +1896,7 @@ bool captive_portal_start_sta(void) {
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   /* Fourteen Frame routes plus the three shared power-debug routes. */
-  config.max_uri_handlers = 20;
+  config.max_uri_handlers = 24;
   config.stack_size = PORTAL_HTTPD_STACK_SIZE;
 
   ESP_LOGI(TAG, "Starting STA web server on port %d", config.server_port);
@@ -1808,6 +1921,12 @@ bool captive_portal_start_sta(void) {
 
   httpd_uri_t ble_input = {.uri = "/api/ble-input", .method = HTTP_GET, .handler = sta_ble_input_handler};
   if (!register_uri_handler(&ble_input)) goto fail;
+
+  httpd_uri_t ble_shortcuts = {.uri = "/api/ble-shortcuts", .method = HTTP_GET, .handler = sta_ble_shortcuts_handler};
+  if (!register_uri_handler(&ble_shortcuts)) goto fail;
+
+  httpd_uri_t ble_assign = {.uri = "/api/ble-assign", .method = HTTP_POST, .handler = sta_ble_assign_handler};
+  if (!register_uri_handler(&ble_assign)) goto fail;
 
   httpd_uri_t ble_scan = {.uri = "/api/ble-scan", .method = HTTP_POST, .handler = sta_ble_scan_handler};
   if (!register_uri_handler(&ble_scan)) goto fail;
