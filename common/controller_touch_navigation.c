@@ -26,9 +26,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { BROWSE, PLAY, QUEUE, IMAGE, SHORTCUTS_FETCH, SHORTCUTS_PLAY };
+enum { BROWSE, PLAY, QUEUE, IMAGE, SHORTCUTS_FETCH, SHORTCUTS_PLAY, PREFETCH_NEXT, PREFETCH_PREVIOUS };
 #define HISTORY_MAX 8
-#define COVER_SIZE 132
+#define COVER_SIZE 48
+#define LIBRARY_PREFETCH_AHEAD (CONTROLLER_LIBRARY_PAGE_SIZE / 2)
 #define COVER_BYTES (COVER_SIZE * COVER_SIZE * 2)
 typedef struct {
   bridge_shortcuts_context_t shortcuts_context;
@@ -58,6 +59,7 @@ static char endpoint[128], zone[64], location[513];
 static struct {
   char location[513];
   int offset, selected_index;
+  char collection_ref[CONTROLLER_LIBRARY_HANDLE_SIZE];
 } history[HISTORY_MAX];
 static int depth, setting_index, menu_index, zone_index, zone_count;
 static int desired_absolute = -1;
@@ -68,8 +70,9 @@ static bridge_zone_t zone_rows[BRIDGE_CLIENT_MAX_ZONES];
 static char folder_name[301] = "Library";
 static bool pending_browse, carousel, rebuilding;
 static lv_obj_t *scroller, *home_button, *art_touch;
-static lv_obj_t *rows[BRIDGE_CLIENT_MAX_ZONES + 1];
-static lv_obj_t *cover_views[CONTROLLER_LIBRARY_PAGE_SIZE];
+#define TOUCH_ROW_COUNT ((CONTROLLER_LIBRARY_CAPACITY > BRIDGE_CLIENT_MAX_ZONES + 1) ? CONTROLLER_LIBRARY_CAPACITY : BRIDGE_CLIENT_MAX_ZONES + 1)
+static lv_obj_t *rows[TOUCH_ROW_COUNT];
+static lv_obj_t *cover_views[CONTROLLER_LIBRARY_CAPACITY];
 static char history_names[HISTORY_MAX][301];
 static lv_obj_t *overlay, *heading, *subtitle, *counter, *back, *primary,
     *secondary;
@@ -77,7 +80,43 @@ static struct {
   lv_image_dsc_t descriptor;
   char *pixels;
   bool attempted, failed;
-} covers[CONTROLLER_LIBRARY_PAGE_SIZE];
+} covers[CONTROLLER_LIBRARY_CAPACITY];
+static controller_library_page_t *cached_next, *cached_previous;
+static bool next_cached, previous_cached, prefetch_failed, prefetch_back;
+static int next_cached_offset, previous_cached_offset;
+static int leading_count, trailing_offset = -1;
+static bool waiting_selection;
+static int wanted_index;
+static bool pointer_scrolling;
+static int scroll_start_y;
+#define LIBRARY_VISIBLE_ROWS 9
+static struct { lv_obj_t *row; int index; unsigned epoch; } visible_rows[LIBRARY_VISIBLE_ROWS];
+static lv_obj_t *top_spacer, *bottom_spacer;
+static bool virtual_library, updating_visible;
+static unsigned library_data_epoch;
+static int visible_first = -1, visible_count = -1;
+static lv_obj_t *pressed_library_row;
+static int pressed_library_index;
+static unsigned pressed_library_epoch, pressed_library_generation;
+static void library_virtual_refresh(void);
+static int library_item_y(int index);
+static int library_row_height(int index);
+
+static char collection_ref[CONTROLLER_LIBRARY_HANDLE_SIZE];
+static void library_cache_invalidate(void) {
+  next_cached = previous_cached = prefetch_failed = prefetch_back = waiting_selection = false;
+  leading_count = 0;
+  trailing_offset = -1;
+}
+static bool library_busy(void) {
+  return busy && busy_kind != IMAGE && busy_kind != PREFETCH_NEXT && busy_kind != PREFETCH_PREVIOUS;
+}
+static int selected_source_offset(void) {
+  return trailing_offset >= 0 && selected_index >= leading_count ? trailing_offset : offset;
+}
+static int selected_source_index(void) {
+  return trailing_offset >= 0 && selected_index >= leading_count ? selected_index - leading_count : selected_index;
+}
 static bool chooser, library_failed;
 static int library_failed_kind;
 static char library_notice[256];
@@ -107,6 +146,8 @@ static void reset_library(void) {
   pending_mutation = -1;
   desired_absolute = -1;
   chooser = false;
+  collection_ref[0] = 0;
+  library_cache_invalidate();
   library_failed = false;
   library_notice[0] = 0;
   if (page) {
@@ -191,7 +232,7 @@ static void worker(void *arg) {
   }
 }
 static void clear_cover(void) {
-  for (int i = 0; i < CONTROLLER_LIBRARY_PAGE_SIZE; i++) {
+  for (int i = 0; i < CONTROLLER_LIBRARY_CAPACITY; i++) {
     if (cover_views[i])
       lv_image_set_src(cover_views[i], NULL);
     if (covers[i].pixels) {
@@ -260,21 +301,36 @@ static void change_screen(int next) {
   }
   render();
 }
+static void attach_cover(int i) {
+  lv_image_dsc_t *d = &covers[i].descriptor;
+  d->header.magic = LV_IMAGE_HEADER_MAGIC;
+  d->header.cf = LV_COLOR_FORMAT_RGB565;
+  d->header.w = d->header.h = COVER_SIZE;
+  d->header.stride = COVER_SIZE * 2;
+  d->data_size = COVER_BYTES;
+  d->data = (uint8_t *)covers[i].pixels;
+  if (cover_views[i]) lv_image_set_src(cover_views[i], d);
+}
 static void selected_cover(void) {
-  if (screen != CONTROLLER_SCREEN_LIBRARY || chooser || !carousel || !page ||
-      busy || pending_browse)
-    return;
-  /* At most 12 * 34,848 bytes in PSRAM; load the visible card and neighbours
-   * first. Each image is attempted once per library page, not every render. */
-  int candidates[] = {selected_index, selected_index - 1, selected_index + 1};
-  for (unsigned n = 0; n < sizeof(candidates) / sizeof(candidates[0]); n++) {
-    int i = candidates[n];
-    if (i >= 0 && i < page->count && !covers[i].attempted &&
-        *page->items[i].image) {
-      if (submit(IMAGE, NULL, page->items[i].image, i))
+  if (screen != CONTROLLER_SCREEN_LIBRARY || chooser || !page || busy || pending_browse || depth == 0) return;
+  /* Fetch only the focused/visible region and two neighboring entries. Cache
+   * bytes are bounded by the two-page data window, not the catalogue size. */
+  for (int step = -1; step < page->count; step++) {
+    int i = step < 0 ? selected_index : step;
+    if (i < 0 || i >= page->count || (i != selected_index && !rows[i] && abs(i - selected_index) > 2) ||
+        covers[i].attempted || !*page->items[i].image) continue;
+    for (int j = 0; j < page->count; j++) {
+      if (j != i && covers[j].pixels && !strcmp(page->items[j].image, page->items[i].image)) {
+        covers[i].pixels = heap_caps_calloc(1, COVER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         covers[i].attempted = true;
-      return;
+        if (covers[i].pixels) { memcpy(covers[i].pixels, covers[j].pixels, COVER_BYTES); attach_cover(i); }
+        else covers[i].failed = true;
+        break;
+      }
     }
+    if (covers[i].attempted) continue;
+    if (submit(IMAGE, NULL, page->items[i].image, i)) covers[i].attempted = true;
+    return;
   }
 }
 static void library_focus_labels(int index) {
@@ -302,14 +358,24 @@ static void library_focus_labels(int index) {
     }
   }
   if (counter && page->count)
-    lv_label_set_text_fmt(counter, "%d / %d%s", offset + selected_index + 1,
-                         offset + page->count, page->next_offset >= 0 ? "+" : "");
+    lv_label_set_text_fmt(counter, "%d", selected_source_offset() + selected_source_index() + 1);
 }
 static void focus_row(int index) {
-  if (!scroller || index < 0 || index >= BRIDGE_CLIENT_MAX_ZONES + 1 ||
+  if (screen == CONTROLLER_SCREEN_LIBRARY && virtual_library && page && index >= 0 && index < page->count) {
+    library_virtual_refresh();
+    int y = library_item_y(index), bottom = y + library_row_height(index);
+    int scroll = lv_obj_get_scroll_y(scroller), height = lv_obj_get_content_height(scroller);
+    if (y < scroll) lv_obj_scroll_to_y(scroller, y, LV_ANIM_ON);
+    else if (bottom > scroll + height) lv_obj_scroll_to_y(scroller, bottom - height, LV_ANIM_ON);
+    for (int i = 0; i < page->count; i++)
+      if (rows[i]) lv_obj_set_style_bg_color(rows[i], lv_color_hex(i == index ? 0x39434b : 0x181818), 0);
+    library_focus_labels(index);
+    return;
+  }
+  if (!scroller || index < 0 || index >= TOUCH_ROW_COUNT ||
       !rows[index])
     return;
-  for (int i = 0; i < BRIDGE_CLIENT_MAX_ZONES + 1; i++)
+  for (int i = 0; i < TOUCH_ROW_COUNT; i++)
     if (rows[i])
       lv_obj_set_style_bg_color(
           rows[i], lv_color_hex(i == index ? 0x39434b : 0x181818), 0);
@@ -334,50 +400,22 @@ static void move_item(int delta) {
     }
     return;
   }
-  if ((busy && busy_kind != IMAGE) || !page->count) return;
+  if (library_busy() || !page->count) return;
   library_notice[0] = 0;
   if (subtitle) lv_label_set_text(subtitle, "Turn or swipe");
-  int64_t next_wide = (int64_t)selected_index + delta;
-  int next = next_wide > INT_MAX - CONTROLLER_LIBRARY_PAGE_SIZE ? INT_MAX - CONTROLLER_LIBRARY_PAGE_SIZE : next_wide < -INT_MAX ? -INT_MAX : (int)next_wide;
-  if (next >= page->count) {
-    if (page->next_offset >= 0) {
-      int64_t absolute = (int64_t)page->next_offset + next - page->count;
-      desired_absolute = absolute > INT_MAX ? INT_MAX : (int)absolute;
-      offset = page->next_offset;
-      selected_index = 0;
-      pending_browse = true;
-      generation++;
-      clear_cover();
-      render();
-    } else {
-      selected_index = page->count - 1;
-      focus_row(selected_index);
-    }
-    return;
-  }
-  if (next < 0) {
-    if (offset > 0) {
-      desired_absolute = offset + next;
-      if (desired_absolute < 0)
-        desired_absolute = 0;
-      offset = offset > CONTROLLER_LIBRARY_PAGE_SIZE
-                   ? offset - CONTROLLER_LIBRARY_PAGE_SIZE
-                   : 0;
-      selected_index = CONTROLLER_LIBRARY_PAGE_SIZE - 1;
-      pending_browse = true;
-      generation++;
-      clear_cover();
-      render();
-    } else {
-      selected_index = 0;
-      focus_row(0);
-    }
-    return;
-  }
-  selected_index = next;
+  int64_t next = (int64_t)(waiting_selection ? wanted_index : selected_index) + delta;
+  if (next > 1000000) next = 1000000;
+  if (next < -1000000) next = -1000000;
+  prefetch_back = delta < 0 && offset > 0;
+  if (next < 0 && offset == 0) next = 0;
+  if (next >= page->count && page->next_offset < 0) next = page->count - 1;
+  waiting_selection = next < 0 || next >= page->count;
+  wanted_index = (int)next;
+  selected_index = next < 0 ? 0 : next >= page->count ? page->count - 1 : (int)next;
+  if (prefetch_failed) prefetch_failed = false; /* a deliberate scroll retries */
   focus_row(selected_index);
-  selected_cover();
 }
+
 static void back_action(void) {
   library_failed = false;
   library_notice[0] = 0;
@@ -395,6 +433,8 @@ static void back_action(void) {
     offset = history[depth].offset;
     selected_index = history[depth].selected_index;
     snprintf(folder_name, sizeof(folder_name), "%s", history_names[depth]);
+    snprintf(collection_ref, sizeof(collection_ref), "%s", history[depth].collection_ref);
+    library_cache_invalidate();
     generation++;
     pending_browse = true;
     clear_cover();
@@ -403,17 +443,10 @@ static void back_action(void) {
     change_screen(CONTROLLER_SCREEN_MENU);
 }
 static void open_item(void) {
-  if (pending_browse || (busy && busy_kind != IMAGE) || !page ||
+  if (pending_browse || library_busy() || !page ||
       selected_index >= page->count)
     return;
   controller_library_item_t *item = &page->items[selected_index];
-  if (*item->ref && !chooser) {
-    chooser = true;
-    library_failed = false;
-    library_notice[0] = 0;
-    render();
-    return;
-  }
   if (*item->location) {
     if (depth == HISTORY_MAX) {
       lv_label_set_text(subtitle, "Use Back before opening more folders.");
@@ -421,11 +454,14 @@ static void open_item(void) {
     }
     snprintf(history[depth].location, sizeof(history[depth].location), "%s",
              location);
-    history[depth].offset = offset;
-    history[depth].selected_index = selected_index;
+    history[depth].offset = selected_source_offset();
+    history[depth].selected_index = selected_source_index();
+    snprintf(history[depth].collection_ref, sizeof(history[depth].collection_ref), "%s", collection_ref);
     snprintf(history_names[depth], sizeof(history_names[depth]), "%s",
              folder_name);
     snprintf(folder_name, sizeof(folder_name), "%s", item->title);
+    snprintf(collection_ref, sizeof(collection_ref), "%s", item->ref);
+    library_cache_invalidate();
     depth++;
     chooser = false;
     desired_absolute = -1;
@@ -437,6 +473,8 @@ static void open_item(void) {
     render();
   } else if (*item->ref) {
     chooser = true;
+    library_failed = false;
+    library_notice[0] = 0;
     render();
   }
 }
@@ -731,25 +769,31 @@ static void tap(lv_event_t *event) {
     move_item(-selected_index - 1);
     return;
   }
-  if (pending_browse || (busy && busy_kind != IMAGE) || !page)
+  if (pending_browse || library_busy() || !page)
     return;
   if (action == ACTION_RETRY_LIBRARY) {
     library_failed = false;
     library_notice[0] = 0;
     chooser = false;
+    library_cache_invalidate();
     generation++;
     pending_browse = true;
     render();
     return;
   }
   if (library_failed) return;
-  if (!page->count) {
+  const char *play_ref = !chooser && *collection_ref ? collection_ref :
+                         page->count ? page->items[selected_index].ref : "";
+  if (!page->count && !((action == ACTION_PLAY || action == ACTION_QUEUE) && *play_ref)) {
     generation++;
     pending_browse = true;
     render();
     return;
   }
   if (action >= ACTION_ROW) {
+    if (virtual_library && (lv_event_get_target(event) != pressed_library_row ||
+        action - ACTION_ROW != pressed_library_index || library_data_epoch != pressed_library_epoch ||
+        generation != pressed_library_generation)) return;
     selected_index = action - ACTION_ROW;
     open_item();
     return;
@@ -763,7 +807,7 @@ static void tap(lv_event_t *event) {
     return;
   }
   if ((action == ACTION_PLAY || action == ACTION_QUEUE) &&
-      *page->items[selected_index].ref) {
+      *play_ref) {
     if (mutation_locked || pending_mutation >= 0)
       return;
     library_failed = false;
@@ -771,7 +815,7 @@ static void tap(lv_event_t *event) {
     pending_mutation = action == ACTION_PLAY ? PLAY : QUEUE;
     pending_mutation_generation = generation;
     snprintf(pending_ref, sizeof(pending_ref), "%s",
-             page->items[selected_index].ref);
+             play_ref);
     lv_label_set_text(subtitle, "Sending…");
     if (primary)
       lv_obj_add_state(primary, LV_STATE_DISABLED);
@@ -792,7 +836,6 @@ static lv_obj_t *button(lv_obj_t *parent, int x, int y, int w, int action) {
   lv_obj_add_event_cb(b, tap, LV_EVENT_CLICKED, (void *)(intptr_t)action);
   return b;
 }
-static bool pointer_scrolling;
 static void list_scroll(lv_event_t *event) {
   if (rebuilding || (carousel && screen == CONTROLLER_SCREEN_LIBRARY))
     return;
@@ -800,7 +843,10 @@ static void list_scroll(lv_event_t *event) {
     lv_indev_t *input = lv_indev_active();
     pointer_scrolling =
         input && lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER;
-    if (pointer_scrolling) library_focus_labels(-1);
+    if (pointer_scrolling) {
+      scroll_start_y = scroller ? lv_obj_get_scroll_y(scroller) : 0;
+      library_focus_labels(-1);
+    }
     return;
   }
   if (!pointer_scrolling || !scroller)
@@ -809,7 +855,7 @@ static void list_scroll(lv_event_t *event) {
   lv_area_t area;
   lv_obj_get_coords(scroller, &area);
   int center = (area.y1 + area.y2) / 2, nearest = -1, distance = 100000;
-  for (int i = 0; i < BRIDGE_CLIENT_MAX_ZONES + 1; i++)
+  for (int i = 0; i < TOUCH_ROW_COUNT; i++)
     if (rows[i]) {
       lv_area_t row;
       lv_obj_get_coords(rows[i], &row);
@@ -821,8 +867,11 @@ static void list_scroll(lv_event_t *event) {
     }
   if (nearest < 0)
     return;
-  if (screen == CONTROLLER_SCREEN_LIBRARY)
+  if (screen == CONTROLLER_SCREEN_LIBRARY) {
     selected_index = nearest;
+    prefetch_back = offset > 0 && lv_obj_get_scroll_y(scroller) < scroll_start_y;
+    if (prefetch_failed) prefetch_failed = false;
+  }
   else if (screen == CONTROLLER_SCREEN_MENU)
     menu_index = nearest;
   else if (screen == CONTROLLER_SCREEN_SETTINGS)
@@ -831,7 +880,7 @@ static void list_scroll(lv_event_t *event) {
     zone_index = nearest;
   else if (screen == CONTROLLER_SCREEN_SHORTCUTS)
     shortcut_index = nearest;
-  for (int i = 0; i < BRIDGE_CLIENT_MAX_ZONES + 1; i++)
+  for (int i = 0; i < TOUCH_ROW_COUNT; i++)
     if (rows[i])
       lv_obj_set_style_bg_color(
           rows[i], lv_color_hex(i == nearest ? 0x39434b : 0x181818), 0);
@@ -887,7 +936,7 @@ static lv_obj_t *list_row(const char *name, const char *detail, int action,
     lv_obj_set_style_text_color(d, lv_color_hex(0xb8c4cd), 0);
     lv_label_set_text(d, detail);
   }
-  if (index >= 0 && index < BRIDGE_CLIENT_MAX_ZONES + 1)
+  if (index >= 0 && index < TOUCH_ROW_COUNT)
     rows[index] = b;
   return b;
 }
@@ -902,6 +951,199 @@ static lv_obj_t *library_text(const char *text, const lv_font_t *font, uint32_t 
   lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
   lv_label_set_text(t, text);
   return t;
+}
+/* Cache data in PSRAM, but bound LVGL to nine reusable rows. Top/bottom
+ * spacers retain the complete scroll extent, so adding a response does not
+ * rebuild the list or take the pointer's scroll target away. */
+static int library_row_height(int index) {
+  int line = lv_font_get_line_height(platform_touch_font_small());
+  int height = *page->items[index].subtitle ? 2 * line + 8 : line + 16;
+  if (depth > 0 && *page->items[index].image && height < COVER_SIZE + 8) height = COVER_SIZE + 8;
+  return height;
+}
+static int library_item_y(int index) {
+  int y = 0;
+  for (int i = 0; i < index; i++) y += library_row_height(i) + 6;
+  return y;
+}
+static void library_row_pressed(lv_event_t *event) {
+  pressed_library_row = lv_event_get_target(event);
+  pressed_library_index = (int)(intptr_t)lv_event_get_user_data(event);
+  pressed_library_epoch = library_data_epoch;
+  pressed_library_generation = generation;
+}
+static void library_virtual_scroll(lv_event_t *event) {
+  (void)event;
+  library_virtual_refresh();
+}
+static lv_obj_t *library_spacer(void) {
+  lv_obj_t *o = lv_obj_create(scroller);
+  lv_obj_set_width(o, 252);
+  lv_obj_set_style_pad_all(o, 0, 0);
+  lv_obj_set_style_border_width(o, 0, 0);
+  lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
+  lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  return o;
+}
+static void library_virtual_refresh(void) {
+  if (!virtual_library || rebuilding || updating_visible || !page || !scroller) return;
+  int scroll = lv_obj_get_scroll_y(scroller), first = 0;
+  while (first + 1 < page->count && library_item_y(first + 1) <= scroll) first++;
+  first = first > 2 ? first - 2 : 0;
+  if (first + LIBRARY_VISIBLE_ROWS > page->count)
+    first = page->count > LIBRARY_VISIBLE_ROWS ? page->count - LIBRARY_VISIBLE_ROWS : 0;
+  if (first == visible_first && page->count == visible_count && visible_rows[0].epoch == library_data_epoch) return;
+  updating_visible = true;
+  memset(rows, 0, sizeof(rows));
+  memset(cover_views, 0, sizeof(cover_views));
+  int count = page->count - first;
+  if (count > LIBRARY_VISIBLE_ROWS) count = LIBRARY_VISIBLE_ROWS;
+  int top = library_item_y(first);
+  lv_obj_set_height(top_spacer, top ? top - 6 : 0);
+  if (top) lv_obj_remove_flag(top_spacer, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(top_spacer, LV_OBJ_FLAG_HIDDEN);
+  for (int slot = 0; slot < LIBRARY_VISIBLE_ROWS; slot++) {
+    lv_obj_t *row = visible_rows[slot].row;
+    if (slot >= count) { lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN); continue; }
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_HIDDEN);
+    int index = first + slot;
+    const controller_library_item_t *item = &page->items[index];
+    if (visible_rows[slot].index != index || visible_rows[slot].epoch != library_data_epoch) {
+      int old = visible_rows[slot].index;
+      lv_obj_remove_event_cb_with_user_data(row, tap, (void *)(intptr_t)(ACTION_ROW + old));
+      lv_obj_remove_event_cb(row, library_row_pressed);
+      lv_obj_add_event_cb(row, tap, LV_EVENT_CLICKED, (void *)(intptr_t)(ACTION_ROW + index));
+      lv_obj_add_event_cb(row, library_row_pressed, LV_EVENT_PRESSED, (void *)(intptr_t)index);
+      lv_obj_t *title = lv_obj_get_child(row, 0), *artist = lv_obj_get_child(row, 1);
+      lv_obj_t *image = lv_obj_get_child(row, 2);
+      bool thumbnail = depth > 0 && *item->image;
+      lv_obj_set_width(title, thumbnail ? 176 : 228);
+      lv_obj_set_width(artist, thumbnail ? 176 : 228);
+      lv_image_set_src(image, NULL);
+      if (thumbnail) {
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(image, LV_ALIGN_LEFT_MID, 4, 0);
+        if (covers[index].pixels) lv_image_set_src(image, &covers[index].descriptor);
+      } else lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+      char title_line[sizeof(item->title)], detail_line[sizeof(item->subtitle)];
+      snprintf(title_line, sizeof(title_line), "%s", item->title);
+      snprintf(detail_line, sizeof(detail_line), "%s", item->subtitle);
+      for (char *c = title_line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
+      for (char *c = detail_line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
+      lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+      lv_label_set_long_mode(artist, LV_LABEL_LONG_DOT);
+      lv_label_set_text(title, title_line); lv_label_set_text(artist, detail_line);
+      int line = lv_font_get_line_height(platform_touch_font_small());
+      lv_obj_set_height(title, line); lv_obj_set_height(artist, line);
+      lv_obj_align(title, LV_ALIGN_TOP_LEFT, thumbnail ? 60 : 8, *detail_line ? 0 : (library_row_height(index) - 8 - line) / 2);
+      lv_obj_align(artist, LV_ALIGN_TOP_LEFT, thumbnail ? 60 : 8, line);
+      if (*detail_line) lv_obj_remove_flag(artist, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(artist, LV_OBJ_FLAG_HIDDEN);
+      visible_rows[slot].index = index; visible_rows[slot].epoch = library_data_epoch;
+    }
+    lv_obj_set_height(row, library_row_height(index));
+    if (pending_browse || (busy && busy_kind == BROWSE) || library_failed) lv_obj_add_state(row, LV_STATE_DISABLED);
+    else lv_obj_remove_state(row, LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(row, lv_color_hex(index == selected_index ? 0x39434b : 0x181818), 0);
+    rows[index] = row;
+    if (depth > 0 && *item->image) cover_views[index] = lv_obj_get_child(row, 2);
+  }
+  int end = first + count;
+  int bottom = library_item_y(page->count) - library_item_y(end);
+  lv_obj_set_height(bottom_spacer, bottom ? bottom - 6 : 0);
+  if (bottom) lv_obj_remove_flag(bottom_spacer, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(bottom_spacer, LV_OBJ_FLAG_HIDDEN);
+  visible_first = first; visible_count = page->count;
+  updating_visible = false;
+  if (!pointer_scrolling) library_focus_labels(selected_index);
+}
+static bool library_pointer_down(void) {
+  lv_indev_t *input = NULL;
+  while ((input = lv_indev_get_next(input)))
+    if (lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER && lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED) return true;
+  return false;
+}
+static bool library_cache_apply(bool backwards) {
+  controller_library_page_t *cached = backwards ? cached_previous : cached_next;
+  if (!cached || !(backwards ? previous_cached : next_cached) || chooser || library_failed || pending_browse || !page->count) return false;
+  if (backwards ? !prefetch_back || selected_index > LIBRARY_PREFETCH_AHEAD : selected_index < page->count - LIBRARY_PREFETCH_AHEAD && !waiting_selection) return false;
+  int old_scroll = scroller ? lv_obj_get_scroll_y(scroller) : 0, shift = 0;
+  bool resume_scroll = scroller && lv_obj_is_scrolling(scroller);
+  if (backwards) {
+    if (pointer_scrolling || library_pointer_down()) return false;
+    if (leading_count) {
+      int drop = page->count - leading_count;
+      if (!cached_next) return false;
+      cached_next->count = drop; cached_next->next_offset = page->next_offset;
+      memcpy(cached_next->items, page->items + leading_count, drop * sizeof(page->items[0]));
+      next_cached_offset = trailing_offset; next_cached = true;
+      page->count = leading_count;
+    }
+    int add = cached->count;
+    if (add + page->count > CONTROLLER_LIBRARY_CAPACITY) return false;
+    clear_cover();
+    trailing_offset = offset;
+    memmove(page->items + add, page->items, page->count * sizeof(page->items[0]));
+    memcpy(page->items, cached->items, add * sizeof(page->items[0]));
+    page->next_offset = next_cached ? next_cached_offset : page->next_offset;
+    page->count += add; leading_count = add; offset = previous_cached_offset;
+    selected_index += add; if (waiting_selection) wanted_index += add;
+    previous_cached = false; prefetch_back = false;
+    shift = library_item_y(add);
+    library_data_epoch++;
+  } else {
+    int add = cached->count;
+    if (page->count + add > CONTROLLER_LIBRARY_CAPACITY) {
+      if (!leading_count || selected_index < leading_count || pointer_scrolling || library_pointer_down() || !cached_previous) return false;
+      int drop = leading_count;
+      cached_previous->count = drop; cached_previous->next_offset = trailing_offset;
+      memcpy(cached_previous->items, page->items, drop * sizeof(page->items[0]));
+      previous_cached_offset = offset; previous_cached = true;
+      shift = -library_item_y(drop);
+      clear_cover();
+      memmove(page->items, page->items + drop, (page->count - drop) * sizeof(page->items[0]));
+      page->count -= drop; offset = trailing_offset;
+      selected_index -= drop; if (waiting_selection) wanted_index -= drop;
+      leading_count = page->count;
+      library_data_epoch++;
+    } else if (!leading_count) leading_count = page->count;
+    trailing_offset = next_cached_offset;
+    memcpy(page->items + page->count, cached->items, add * sizeof(page->items[0]));
+    page->count += add; page->next_offset = cached->next_offset;
+    next_cached = false;
+  }
+  visible_count = -1;
+  library_virtual_refresh();
+  lv_obj_update_layout(scroller);
+  if (shift) {
+    lv_obj_scroll_to_y(scroller, old_scroll + shift < 0 ? 0 : old_scroll + shift, LV_ANIM_OFF);
+    library_virtual_refresh();
+  }
+  if (waiting_selection) {
+    selected_index = wanted_index < 0 ? 0 : wanted_index >= page->count ? page->count - 1 : wanted_index;
+    if (wanted_index >= 0 && wanted_index < page->count) waiting_selection = false;
+    if (wanted_index >= page->count && page->next_offset < 0) waiting_selection = false;
+    focus_row(selected_index);
+  } else if (shift && resume_scroll) focus_row(selected_index);
+  else library_focus_labels(selected_index);
+  if (subtitle) lv_label_set_text(subtitle, "");
+  return true;
+}
+static void library_prefetch(void) {
+  if (chooser || library_failed || pending_browse || !page->count || prefetch_failed) return;
+  if (!cached_next) cached_next = heap_caps_calloc(1, sizeof(*cached_next), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!cached_previous) cached_previous = heap_caps_calloc(1, sizeof(*cached_previous), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!cached_next || !cached_previous) {
+    prefetch_failed = true;
+    if (subtitle) lv_label_set_text(subtitle, "Memory low");
+    return;
+  }
+  if (library_cache_apply(prefetch_back)) return;
+  if (prefetch_back && offset > 0 && selected_index <= LIBRARY_PREFETCH_AHEAD && !previous_cached) {
+    submit(PREFETCH_PREVIOUS, NULL, NULL, offset > CONTROLLER_LIBRARY_PAGE_SIZE ? offset - CONTROLLER_LIBRARY_PAGE_SIZE : 0);
+  } else if (page->next_offset >= 0 && selected_index >= page->count - LIBRARY_PREFETCH_AHEAD && !next_cached) {
+    submit(PREFETCH_NEXT, NULL, NULL, page->next_offset);
+  }
 }
 static void render_library(void) {
   bool loading = pending_browse || (busy && busy_kind == BROWSE);
@@ -923,7 +1165,7 @@ static void render_library(void) {
   lv_obj_set_height(counter, lv_font_get_line_height(platform_touch_font_small()));
   lv_label_set_text(counter, "");
   scroller = lv_obj_create(overlay);
-  lv_obj_set_size(scroller, 276, chooser || library_failed ? 176 : 216);
+  lv_obj_set_size(scroller, 276, chooser || library_failed || *collection_ref ? 176 : 216);
   lv_obj_align(scroller, LV_ALIGN_TOP_MID, 0, 92);
   lv_obj_set_style_bg_opa(scroller, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(scroller, 0, 0);
@@ -955,16 +1197,9 @@ static void render_library(void) {
         lv_label_set_text(subtitle, "Check playback");
       }
     } else {
-      bool can_open = *item->location != 0, can_play = *item->ref != 0;
-      if (can_open) {
-        library_open = button(overlay, can_play ? -84 : 0, 274, can_play ? 80 : 112, ACTION_OPEN);
-        button_text(library_open, "Open");
-      }
-      if (can_play) {
-        primary = button(overlay, can_open ? 0 : -52, 274, can_open ? 80 : 96, ACTION_PLAY);
-        button_text(primary, "Play");
-        secondary = button(overlay, can_open ? 84 : 52, 274, can_open ? 80 : 96, ACTION_QUEUE);
-        button_text(secondary, "Queue");
+      if (*item->ref) {
+        primary = button(overlay, -52, 274, 96, ACTION_PLAY); button_text(primary, "Play");
+        secondary = button(overlay, 52, 274, 96, ACTION_QUEUE); button_text(secondary, "Queue");
       }
       lv_label_set_text(subtitle, sending ? "Sending…" : "Turn or swipe");
       if (sending || mutation_locked) {
@@ -975,36 +1210,33 @@ static void render_library(void) {
     }
   } else {
     if (page && page->count) {
-      for (int i = 0; i < page->count; i++) {
-        const controller_library_item_t *item = &page->items[i];
-        bool folder = *item->location && !*item->ref;
-        const char *detail = *item->subtitle ? item->subtitle : folder ? "Open collection" : "Play / Queue";
-        char title_line[sizeof(item->title)], detail_line[sizeof(item->subtitle)];
-        snprintf(title_line, sizeof(title_line), "%s", item->title);
-        snprintf(detail_line, sizeof(detail_line), "%s", detail);
-        for (char *c = title_line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
-        for (char *c = detail_line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
-        lv_obj_t *row = list_row(title_line, detail_line, ACTION_ROW + i, i);
-        int line = lv_font_get_line_height(platform_touch_font_small());
-        lv_obj_set_height(row, 2 * line + 8);
-        lv_obj_align(lv_obj_get_child(row, 0), LV_ALIGN_TOP_LEFT, 8, 0);
-        lv_obj_align(lv_obj_get_child(row, 1), LV_ALIGN_TOP_MID, 0, line);
-        if (folder) {
-          lv_obj_set_width(lv_obj_get_child(row, 0), 164);
-          lv_obj_t *cue;
-          label(&cue, row, 0, 56, platform_touch_font_small());
-          lv_obj_set_height(cue, line);
-          lv_obj_align(cue, LV_ALIGN_TOP_RIGHT, 0, 0);
-          lv_label_set_text(cue, "Open");
-        }
-        if (loading || library_failed) lv_obj_add_state(row, LV_STATE_DISABLED);
+      virtual_library = true;
+      visible_first = visible_count = -1;
+      memset(visible_rows, 0, sizeof(visible_rows));
+      top_spacer = library_spacer();
+      for (int slot = 0; slot < LIBRARY_VISIBLE_ROWS; slot++) {
+        lv_obj_t *row = button(scroller, 0, 0, 252, ACTION_ROW - 1);
+        lv_obj_t *artist;
+        label(&artist, row, 28, 228, platform_touch_font_small());
+        lv_obj_set_style_text_color(artist, lv_color_hex(0xb8c4cd), 0);
+        lv_obj_t *image = lv_image_create(row);
+        lv_obj_set_size(image, COVER_SIZE, COVER_SIZE);
+        lv_obj_set_style_bg_opa(image, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(image, lv_color_hex(0x181818), 0);
+        lv_obj_set_style_radius(image, 6, 0);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+        visible_rows[slot].row = row;
+        visible_rows[slot].index = -1;
       }
-      if (offset > 0) list_row("Previous page", NULL, ACTION_PREVIOUS, -1);
-      if (page->next_offset >= 0) list_row("More items", NULL, ACTION_NEXT, -1);
+      bottom_spacer = library_spacer();
+      lv_obj_add_event_cb(scroller, library_virtual_scroll, LV_EVENT_SCROLL, NULL);
+      /* Initial composition runs inside render's rebuild guard. */
+      bool guard = rebuilding; rebuilding = false;
+      library_virtual_refresh();
+      rebuilding = guard;
       if (library_failed) lv_obj_scroll_to_y(scroller, 0, LV_ANIM_OFF);
       else focus_row(selected_index);
-      lv_label_set_text_fmt(counter, "%d / %d%s", offset + selected_index + 1,
-                            offset + page->count, page->next_offset >= 0 ? "+" : "");
+      lv_label_set_text_fmt(counter, "%d", selected_source_offset() + selected_source_index() + 1);
     } else {
       library_text(loading ? "Opening your library…" : page && *page->notice ? page->notice : "No items in this collection.", platform_touch_font_small(), 0xeeeeee);
       if (!loading) {
@@ -1025,7 +1257,14 @@ static void render_library(void) {
         button_text(library_retry, "Retry library");
       }
     }
-    lv_label_set_text(subtitle, library_failed && library_failed_kind != BROWSE ? "Check playback" : library_failed ? "Refresh library" : loading ? "Loading…" : *library_notice ? library_notice : "Turn or swipe");
+    if (!library_failed && *collection_ref) {
+      primary = button(overlay, -52, 274, 96, ACTION_PLAY); button_text(primary, "Play");
+      secondary = button(overlay, 52, 274, 96, ACTION_QUEUE); button_text(secondary, "Queue");
+      if (sending || mutation_locked || loading) {
+        lv_obj_add_state(primary, LV_STATE_DISABLED); lv_obj_add_state(secondary, LV_STATE_DISABLED);
+      }
+    }
+    lv_label_set_text(subtitle, sending ? "Sending…" : library_failed && library_failed_kind != BROWSE ? "Check playback" : library_failed ? "Refresh library" : loading ? "Loading…" : *library_notice ? library_notice : "");
   }
   if (primary) lv_obj_set_height(primary, 44);
   if (secondary) lv_obj_set_height(secondary, 44);
@@ -1036,6 +1275,8 @@ static void render_library(void) {
 static void render(void) {
   ensure_overlay();
   rebuilding = true;
+  virtual_library = false;
+  pressed_library_row = NULL;
   /* Keep image descriptors stable while rebuilding widgets. */
   memset(cover_views, 0, sizeof(cover_views));
   memset(rows, 0, sizeof(rows));
@@ -1310,10 +1551,10 @@ static bool submit(int kind, const char *ref, const char *image,
       heap_caps_calloc(1, sizeof(*r), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!r)
     return false;
-  r->generation = kind == IMAGE ? generation : ++generation;
+  r->generation = kind == IMAGE || kind == PREFETCH_NEXT || kind == PREFETCH_PREVIOUS ? generation : ++generation;
   r->item_index = image_index;
   r->kind = kind;
-  r->offset = offset;
+  r->offset = kind == PREFETCH_NEXT || kind == PREFETCH_PREVIOUS ? image_index : offset;
   if (kind == SHORTCUTS_FETCH || kind == SHORTCUTS_PLAY) {
     r->offset = shortcut_offset;
     bool valid = kind == SHORTCUTS_FETCH ? bridge_client_shortcuts_capture(&r->shortcuts_context) :
@@ -1350,7 +1591,7 @@ static bool submit(int kind, const char *ref, const char *image,
     mutation_sent_ms = esp_timer_get_time() / 1000;
   }
   free(r);
-  if (kind != IMAGE) {
+  if (kind != IMAGE && kind != PREFETCH_NEXT && kind != PREFETCH_PREVIOUS) {
     clear_cover();
     render();
   }
@@ -1417,35 +1658,38 @@ void controller_touch_navigation_process(void) {
         int image_index = result->request.item_index;
         if (!result->ok && image_index >= 0 && image_index < page->count) {
           covers[image_index].failed = true;
-          if (cover_views[image_index]) {
-            lv_obj_t *card = lv_obj_get_parent(cover_views[image_index]);
-            if (lv_obj_get_child_count(card) > 2)
-              lv_label_set_text(lv_obj_get_child(card, 2), "No cover");
-          }
+
         }
         if (result->ok && screen == CONTROLLER_SCREEN_LIBRARY) {
           int i = result->request.item_index;
-          if (i >= 0 && i < page->count) {
+          if (i >= 0 && i < page->count && !strcmp(result->request.image, page->items[i].image)) {
             covers[i].pixels = result->pixels;
             result->pixels = NULL;
-            lv_image_dsc_t *d = &covers[i].descriptor;
-            d->header.magic = LV_IMAGE_HEADER_MAGIC;
-            d->header.cf = LV_COLOR_FORMAT_RGB565;
-            d->header.w = COVER_SIZE;
-            d->header.h = COVER_SIZE;
-            d->header.stride = COVER_SIZE * 2;
-            d->data_size = COVER_BYTES;
-            d->data = (uint8_t *)covers[i].pixels;
-            if (cover_views[i]) {
-              lv_image_set_src(cover_views[i], d);
-              lv_obj_t *card = lv_obj_get_parent(cover_views[i]);
-              if (lv_obj_get_child_count(card) > 2)
-                lv_obj_add_flag(lv_obj_get_child(card, 2), LV_OBJ_FLAG_HIDDEN);
+            attach_cover(i);
+          }
+        }
+      } else if (result->request.kind == PREFETCH_NEXT || result->request.kind == PREFETCH_PREVIOUS) {
+        bool backwards = result->request.kind == PREFETCH_PREVIOUS;
+        if (!strcmp(result->request.location, location)) {
+          filter_library(&result->page);
+          if (result->ok && result->page.count) {
+            if (backwards && cached_previous && result->request.offset < offset) {
+              *cached_previous = result->page; previous_cached_offset = result->request.offset; previous_cached = true;
+            } else if (!backwards && cached_next && result->request.offset == page->next_offset) {
+              *cached_next = result->page; next_cached_offset = result->request.offset; next_cached = true;
             }
+          } else if (result->ok && !backwards) {
+            page->next_offset = result->page.next_offset > result->request.offset ? result->page.next_offset : -1;
+            if (page->next_offset < 0) waiting_selection = false;
+          } else {
+            prefetch_failed = true;
+            if (subtitle) lv_label_set_text(subtitle, "Turn to retry");
           }
         }
       } else if (result->request.kind == BROWSE) {
         if (result->ok) {
+          library_cache_invalidate();
+          library_data_epoch++;
           *page = result->page;
           library_failed = false;
           library_notice[0] = 0;
@@ -1642,8 +1886,10 @@ void controller_touch_navigation_process(void) {
     } else if (pending_browse) {
       pending_browse = false;
       submit(BROWSE, NULL, NULL, -1);
-    } else
-      selected_cover();
+    } else {
+      library_prefetch();
+      if (!busy) selected_cover();
+    }
   }
 }
 bool controller_touch_navigation_encoder(int delta) {

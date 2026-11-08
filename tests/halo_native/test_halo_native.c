@@ -259,6 +259,22 @@ static void snapshot(const char *dir, const char *name) {
     }
   fclose(f);
 }
+static void fill_browse_page(controller_library_page_t *out, int base, int next) {
+  memset(out, 0, sizeof(*out));
+  out->count = CONTROLLER_LIBRARY_PAGE_SIZE;
+  out->next_offset = next;
+  for (int i = 0; i < out->count; i++) {
+    snprintf(out->items[i].title, sizeof(out->items[i].title), "Album %03d - the complete recording with a distinguishing edition suffix", base + i);
+    snprintf(out->items[i].subtitle, sizeof(out->items[i].subtitle), "Artist %03d", base + i);
+    snprintf(out->items[i].ref, sizeof(out->items[i].ref), "ref-%d", base + i);
+  }
+}
+static result_t *browse_reply(request_t request, int base, int next) {
+  result_t *r = calloc(1, sizeof(*r));
+  r->request = request; r->ok = true;
+  fill_browse_page(&r->page, base, next);
+  return r;
+}
 int main(int argc, char **argv) {
   const char *dir = argc > 1 ? argv[1] : NULL;
   lv_init();
@@ -458,8 +474,9 @@ int main(int argc, char **argv) {
         assert(title_box.y2 < artist_box.y1);
         assert(artist_box.y2 <= row_box.y2);
       } else {
-        assert(lv_obj_get_child_count(rows[i]) == 2);
-        assert(!strcmp(lv_label_get_text(lv_obj_get_child(rows[i], 1)), "Play / Queue"));
+        assert(lv_obj_get_child_count(rows[i]) == 3);
+        assert(lv_obj_has_flag(lv_obj_get_child(rows[i], 1), LV_OBJ_FLAG_HIDDEN));
+        assert(lv_obj_has_flag(lv_obj_get_child(rows[i], 2), LV_OBJ_FLAG_HIDDEN));
       }
     }
     /* Unfocused labels still ellipsize; focus restores the original text. */
@@ -553,44 +570,41 @@ int main(int argc, char **argv) {
   controller_touch_navigation_process();
   if (xQueueReceive(requests, &request, 0))
     assert(request.kind == IMAGE);
-  /* A saved playlist is both navigable and playable. Tapping it exposes
-   * actions; Play/Queue retain the collection ref, Open browses its location. */
-  busy = false;
-  mutation_locked = false;
-  chooser = false;
-  selected_index = 0;
-  page->count = 1;
+  /* Collections open on tap, including playable ones. Playback actions
+   * belong to the contents, with no Open labels or extra action screen. */
+  busy = mutation_locked = chooser = false;
+  selected_index = 0; page->count = 1;
   snprintf(page->items[0].title, sizeof(page->items[0].title), "Evening playlist");
+  page->items[0].subtitle[0] = 0;
   snprintf(page->items[0].location, sizeof(page->items[0].location), "playlist-location");
   snprintf(page->items[0].ref, sizeof(page->items[0].ref), "whole-playlist-ref");
   render();
+  assert(!library_open);
+  assert(lv_obj_has_flag(lv_obj_get_child(rows[0], 1), LV_OBJ_FLAG_HIDDEN));
   click(rows[0]);
-  assert(chooser && !pending_browse);
-  snapshot(dir, "playlist-actions");
-  click(secondary);
+  assert(pending_browse && !chooser && !strcmp(location, "playlist-location"));
   controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == BROWSE);
+  result_t *contents = calloc(1, sizeof(*contents));
+  contents->request = request; contents->ok = true;
+  contents->page.count = 1; contents->page.next_offset = -1;
+  snprintf(contents->page.items[0].title, sizeof(contents->page.items[0].title), "First track");
+  snprintf(contents->page.items[0].ref, sizeof(contents->page.items[0].ref), "track-ref");
+  assert(xQueueSend(results, &contents, 0)); controller_touch_navigation_process();
+  assert(!chooser && primary && secondary && !library_open);
+  snapshot(dir, "playlist-contents");
+  click(secondary); controller_touch_navigation_process();
   assert(xQueueReceive(requests, &request, 0));
   assert(request.kind == QUEUE && !strcmp(request.ref, "whole-playlist-ref"));
-  /* Detents during the sending screen must not dereference removed buttons. */
   assert(controller_touch_navigation_encoder(1));
-  busy = false;
-  mutation_locked = false;
-  pending_mutation = -1;
-  render();
-  click(primary);
-  controller_touch_navigation_process();
+  busy = mutation_locked = false; pending_mutation = -1; render();
+  click(primary); controller_touch_navigation_process();
   assert(xQueueReceive(requests, &request, 0));
   assert(request.kind == PLAY && !strcmp(request.ref, "whole-playlist-ref"));
-  busy = false;
-  mutation_locked = false;
-  pending_mutation = -1;
-  render();
-  /* Open is an explicitly labelled control, separate from metadata. */
-  assert(library_open);
-  click(library_open);
+  busy = mutation_locked = false; pending_mutation = -1;
+  back_action();
   assert(pending_browse && !chooser);
-  assert(!strcmp(location, "playlist-location"));
-  pending_browse = false;
+  pending_browse = false; collection_ref[0] = 0;
   page->items[0].location[0] = 0;
   /* A stale image result never attaches pixels to the new page. */
   busy = true;
@@ -608,32 +622,25 @@ int main(int argc, char **argv) {
   assert(!covers[0].pixels);
   xQueueReceive(requests, &request, 0);
   busy = false;
-  /* Excess detents survive a page boundary through the real result handler. */
-  page->count = 12;
-  page->next_offset = 12;
-  selected_index = 11;
-  offset = 0;
-  pending_browse = false;
-  controller_touch_navigation_encoder(3);
-  controller_touch_navigation_process();
+  /* A page boundary is a background append, not a loading screen. */
+  library_cache_invalidate();
+  page->count = 12; page->next_offset = 12; selected_index = 11; offset = 0;
+  pending_browse = false; render();
+  controller_touch_navigation_encoder(3); controller_touch_navigation_process();
   assert(xQueueReceive(requests, &request, 0));
-  assert(request.kind == BROWSE && request.offset == 12);
-  /* Separate actuator events arriving during IO must also survive. */
-  controller_touch_navigation_encoder(2);
-  controller_touch_navigation_encoder(-1);
+  assert(request.kind == PREFETCH_NEXT && request.offset == 12);
+  controller_touch_navigation_encoder(2); controller_touch_navigation_encoder(-1);
   result_t *next = calloc(1, sizeof(*next));
-  next->request = request;
-  next->ok = true;
-  next->page.count = 12;
-  next->page.next_offset = -1;
-  assert(xQueueSend(results, &next, 0));
-  controller_touch_navigation_process();
-  assert(offset == 12 && selected_index == 3);
+  next->request = request; next->ok = true; next->page.count = 12; next->page.next_offset = -1;
+  assert(xQueueSend(results, &next, 0)); controller_touch_navigation_process();
+  assert(offset == 0 && selected_index == 15 && page->count == 24);
+  assert(!pending_browse && !library_busy());
+  library_cache_invalidate();
   /* Duplicate artwork URLs retain the requested card index, never overwrite
    * the first card's owned pixels. */
   busy = false;
   pending_browse = false;
-  carousel = true;
+  depth = 1;
   selected_index = 2;
   page->count = 4;
   for (int i = 0; i < 4; i++)
@@ -1001,6 +1008,104 @@ int main(int argc, char **argv) {
   snapshot(dir, "library-browse-failed");
   click(library_retry); controller_touch_navigation_process();
   assert(xQueueReceive(requests, &request, 0) && request.kind == BROWSE);
+  change_screen(CONTROLLER_SCREEN_ARTWORK);
+  /* Full-sized responses and a continuous, bounded two-page window. */
+  while (xQueueReceive(requests, &request, 0)) {}
+  busy = pending_browse = mutation_locked = false;
+  reset_library(); screen = CONTROLLER_SCREEN_LIBRARY;
+  snprintf(location, sizeof(location), "cache-root");
+  fill_browse_page(page, 0, 50);
+  render(); advance(300);
+  assert(page->count == 50 && lv_obj_get_child_count(scroller) == LIBRARY_VISIBLE_ROWS + 2);
+  int allocated_rows = 0;
+  for (int i = 0; i < page->count; i++) if (rows[i]) allocated_rows++;
+  assert(allocated_rows == LIBRARY_VISIBLE_ROWS);
+  move_item(30); advance(1500);
+  lv_obj_t *stable_scroller = scroller, *stable_row = rows[30];
+  int stable_scroll = lv_obj_get_scroll_y(scroller);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0));
+  assert(request.kind == PREFETCH_NEXT && request.offset == 50);
+  assert(!pending_browse && !library_busy() && !lv_obj_has_state(rows[30], LV_STATE_DISABLED));
+  result_t *page_two = browse_reply(request, 50, 100);
+  assert(xQueueSend(results, &page_two, 0)); controller_touch_navigation_process();
+  assert(page->count == 100 && offset == 0 && selected_index == 30);
+  assert(scroller == stable_scroller && rows[30] == stable_row);
+  assert(lv_obj_get_scroll_y(scroller) == stable_scroll);
+  assert(!strcmp(page->items[99].ref, "ref-99"));
+  snapshot(dir, "continuous-100-items");
+  /* Advancing another response evicts one page, retaining the visible item. */
+  move_item(50); advance(1500);
+  assert(selected_index == 80 && rows[80]);
+  stable_scroll = lv_obj_get_scroll_y(scroller);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PREFETCH_NEXT && request.offset == 100);
+  result_t *page_three = browse_reply(request, 100, 150);
+  assert(xQueueSend(results, &page_three, 0)); controller_touch_navigation_process(); advance(50);
+  assert(page->count == 100 && offset == 50 && selected_index == 30);
+  assert(!strcmp(page->items[selected_index].ref, "ref-80"));
+  assert(previous_cached && previous_cached_offset == 0);
+  assert(lv_obj_get_scroll_y(scroller) == stable_scroll - library_item_y(50));
+  /* Returning one page uses RAM, without a foreground request or blank view. */
+  move_item(-25); advance(1500);
+  assert(selected_index == 5);
+  controller_touch_navigation_process(); advance(50);
+  assert(offset == 0 && selected_index == 55 && page->count == 100);
+  assert(!strcmp(page->items[selected_index].ref, "ref-55"));
+  assert(!busy && !pending_browse && !xQueueReceive(requests, &request, 0));
+  /* Background failure preserves usable rows; a deliberate scroll retries. */
+  move_item(45); advance(1500); controller_touch_navigation_process();
+  if (next_cached) { controller_touch_navigation_process(); }
+  if (xQueueReceive(requests, &request, 0)) { busy = false; }
+  library_cache_invalidate(); offset = 0; selected_index = 30;
+  fill_browse_page(page, 0, 50); library_data_epoch++; render(); advance(1500);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PREFETCH_NEXT);
+  result_t *cache_failure = calloc(1, sizeof(*cache_failure)); cache_failure->request = request;
+  assert(xQueueSend(results, &cache_failure, 0)); controller_touch_navigation_process();
+  assert(prefetch_failed && !library_failed && page->count == 50 && rows[30]);
+  assert(!lv_obj_has_state(rows[30], LV_STATE_DISABLED));
+  move_item(1); controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == PREFETCH_NEXT);
+  /* Navigating while prefetch is in flight fences its response completely. */
+  page->items[selected_index].location[0] = 0;
+  snprintf(page->items[selected_index].location, sizeof(page->items[selected_index].location), "child-route");
+  click(rows[selected_index]);
+  assert(pending_browse && !strcmp(location, "child-route"));
+  result_t *wrong_folder = browse_reply(request, 50, 100);
+  assert(xQueueSend(results, &wrong_folder, 0)); controller_touch_navigation_process();
+  assert(!next_cached);
+  assert(xQueueReceive(requests, &request, 0) && request.kind == BROWSE && !strcmp(request.location, "child-route"));
+  busy = pending_browse = false;
+  /* A pressed virtual row may not activate a new item after rebinding. */
+  reset_library(); screen = CONTROLLER_SCREEN_LIBRARY;
+  fill_browse_page(page, 0, -1); render(); advance(300);
+  lv_obj_t *held = rows[0];
+  input(180, 120, true, 80);
+  library_data_epoch++; library_virtual_refresh();
+  input(180, 120, false, 80);
+  assert(!chooser && !pending_browse && pending_mutation == -1);
+  (void)held;
+  /* Thumbnails only inside collections; duplicate image URLs reuse bytes. */
+  depth = 1; collection_ref[0] = 0;
+  for (int i = 0; i < page->count; i++)
+    snprintf(page->items[i].image, sizeof(page->items[i].image), "/api/collections/image?ref=shared-art");
+  library_data_epoch++; clear_cover(); render(); advance(300);
+  assert(cover_views[0] && !lv_obj_has_flag(cover_views[0], LV_OBJ_FLAG_HIDDEN));
+  assert(lv_obj_get_width(lv_obj_get_child(rows[0], 0)) == 176);
+  controller_touch_navigation_process();
+  assert(xQueueReceive(requests, &request, 0) && request.kind == IMAGE);
+  result_t *thumb = calloc(1, sizeof(*thumb));
+  thumb->request = request; thumb->ok = true; thumb->pixels = calloc(1, COVER_BYTES);
+  for (int i = 0; i < COVER_BYTES; i += 2) { thumb->pixels[i] = (char)0x00; thumb->pixels[i+1] = (char)0xf8; }
+  assert(xQueueSend(results, &thumb, 0)); controller_touch_navigation_process();
+  assert(covers[0].pixels && covers[1].pixels && covers[0].pixels != covers[1].pixels);
+  assert(covers[0].descriptor.header.w == 48 && covers[1].descriptor.header.h == 48);
+  assert(!xQueueReceive(requests, &request, 0)); /* no second HTTP request */
+  snapshot(dir, "collection-thumbnails");
+  lv_mem_monitor_t paging_memory; lv_mem_monitor(&paging_memory);
+  printf("50-item pages / 100 cached / %d reusable rows: LVGL %u%% used, %zu free bytes; data buffer %zu bytes, thumb %d bytes\n", LIBRARY_VISIBLE_ROWS, paging_memory.used_pct, paging_memory.free_size, sizeof(*page), COVER_BYTES);
+  assert(paging_memory.total_size <= 96 * 1024 && paging_memory.used_pct < 80);
   change_screen(CONTROLLER_SCREEN_ARTWORK);
   lv_mem_monitor_t memory;
   lv_mem_monitor(&memory);
