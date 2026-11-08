@@ -6,6 +6,12 @@
 #include "wifi_manager.h"
 
 #include <esp_log.h>
+#include "sdkconfig.h"
+#if CONFIG_RK_BLE_HID_HOST
+#include "rk_ble_hid_host.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 #include <nvs.h>
 
 static const char *TAG = "m5_terminal";
@@ -72,6 +78,23 @@ bool m5_terminal_power_debug_due(void) {
 void m5_terminal_power_note_display_sleep(void) { ++s_display_sleeps; }
 void m5_terminal_power_note_runtime_wake(void) { ++s_runtime_wakes; }
 
+#if CONFIG_RK_BLE_HID_HOST
+static bool quiesce_ble(void) {
+    rk_ble_hid_host_status_t status;
+    if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) return true;
+    if (rk_ble_hid_host_prepare_for_sleep() != RK_BLE_HID_HOST_OK) return false;
+    const uint64_t deadline = platform_millis() + 2000;
+    do {
+        if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK ||
+            status.state == RK_BLE_HID_HOST_STATE_ERROR) break;
+        if (status.quiesced_for_sleep) return true;
+        vTaskDelay(pdMS_TO_TICKS(25));
+    } while (platform_millis() < deadline);
+    (void)rk_ble_hid_host_cancel_sleep();
+    return false;
+}
+#endif
+
 bool m5_terminal_power_off(void) {
     s_force_at_ms = 0;
     increment(KEY_ATTEMPTS);
@@ -85,6 +108,14 @@ bool m5_terminal_power_off(void) {
         ESP_LOGE(TAG, "Terminal preflight rejected; remaining awake");
         return false;
     }
+#if CONFIG_RK_BLE_HID_HOST
+    if (!quiesce_ble()) {
+        write_value(KEY_ERROR, PLATFORM_POWER_PREFLIGHT_ERROR_BLE);
+        platform_power_evidence_note_error(PLATFORM_POWER_PREFLIGHT_ERROR_BLE);
+        ESP_LOGE(TAG, "BLE preflight rejected; remaining awake");
+        return false;
+    }
+#endif
     uint32_t flags = PLATFORM_POWER_PREFLIGHT_WAKE_SOURCES_SANITIZED;
     platform_input_shutdown();
     wifi_mgr_stop();

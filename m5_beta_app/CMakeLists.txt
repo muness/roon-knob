@@ -19,7 +19,7 @@ endif()
 
 set(PROJECT_VER "2.8.3")
 set(_sdkconfig_defaults
-    "sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults")
+    "${CMAKE_CURRENT_LIST_DIR}/../components/rk_ble_hid_host/sdkconfig.single_remote.defaults;sdkconfig.defaults;sdkconfig.${HIPHI_M5_TARGET}.defaults")
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 if(NOT HIPHI_KIZZ_WAKE_WORD)
     # Production has no voice endpoint. Keep model, AOT, TFLM and ESP-SR

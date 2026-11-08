@@ -41,8 +41,17 @@ bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
 bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
                                   const char *id, controller_shortcuts_page_t *out);
 
+/* Settings can list pins without a selected playback zone. */
+bool bridge_client_shortcuts_fetch_for_settings(int offset, controller_shortcuts_page_t *out);
+
 /* Add a learned press to this controller's bridge-owned map. */
 const char *bridge_client_assign_shortcut(uint16_t usage, const char *id);
+/* Returns an owned array of bridge binding records, or NULL on failure. */
+struct cJSON *bridge_client_shortcut_bindings(void);
+/* Change an existing binding only if it still points to expected_id. A NULL
+ * replacement removes it. */
+const char *bridge_client_edit_shortcut(const char *event, const char *expected_id,
+                                        const char *replacement);
 
 /* Wake the polling worker after a display sleep/power-save interval. */
 void bridge_client_request_poll(void);

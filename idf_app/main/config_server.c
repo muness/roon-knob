@@ -12,7 +12,7 @@
 #include "power_debug_web.h"
 #include "platform/platform_mdns.h"
 #include "bridge_client.h"
-#include "rk_ble_hid_host.h"
+#include "ble_remote_web.h"
 #include "wifi_manager.h"
 #include "wifi_portal_form.h"
 
@@ -45,13 +45,7 @@ static void apply_committed_wifi(bool reconnect) {
     }
 }
 
-static esp_err_t send_conflict(httpd_req_t *req, const char *message) {
-    httpd_resp_set_status(req, "409 Conflict");
-    httpd_resp_set_type(req, "text/plain");
-    httpd_resp_sendstr(req,
-                       message ? message : "Request conflicts with BLE state");
-    return ESP_FAIL;
-}
+
 
 // HTML page for config
 // Format args: brand_css, brand_header, current_bridge, status_class,
@@ -466,308 +460,6 @@ static esp_err_t wifi_remove_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-static esp_err_t redirect_to_ble(httpd_req_t *req) {
-    httpd_resp_set_status(req, "303 See Other");
-    /* Force one follow-up refresh even if the owner task has not consumed the
-     * command before the browser follows this redirect. */
-    httpd_resp_set_hdr(req, "Location", "/ble?watch=1");
-    httpd_resp_sendstr(req, "Redirecting...");
-    return ESP_OK;
-}
-
-static bool ble_watch_requested(httpd_req_t *req) {
-    char query[32];
-    char watch[4];
-    return httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
-           httpd_query_key_value(query, "watch", watch, sizeof(watch)) == ESP_OK &&
-           watch[0] == '1';
-}
-
-static bool ble_state_auto_updates(rk_ble_hid_host_state_t state) {
-    return state == RK_BLE_HID_HOST_STATE_STARTING ||
-           state == RK_BLE_HID_HOST_STATE_SCANNING ||
-           state == RK_BLE_HID_HOST_STATE_CONNECTING ||
-           state == RK_BLE_HID_HOST_STATE_STOPPING;
-}
-
-static esp_err_t ble_get_handler(httpd_req_t *req) {
-    rk_ble_hid_host_status_t status = {0};
-    if (rk_ble_hid_host_status_copy(&status) != RK_BLE_HID_HOST_OK) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "text/plain");
-        httpd_resp_sendstr(req, "BLE media remote is unavailable");
-        return ESP_FAIL;
-    }
-
-    rk_ble_hid_host_device_t results[RK_BLE_HID_HOST_MAX_RESULTS];
-    uint32_t scan_generation = 0;
-    size_t result_count = rk_ble_hid_host_scan_results_copy(
-        results, RK_BLE_HID_HOST_MAX_RESULTS, &scan_generation);
-
-    const size_t html_size = 24576;  /* room for the shared brand stylesheet */
-    char *html = heap_caps_malloc(html_size,
-                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!html) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Out of memory");
-        return ESP_FAIL;
-    }
-
-    const char *device_name =
-        status.active_name[0] ? status.active_name : status.bonded_name;
-    char escaped_name[RK_BLE_HID_HOST_NAME_MAX_LEN * 2] = "";
-    html_escape(device_name, escaped_name, sizeof(escaped_name));
-
-    const char *state_class = "idle";
-    const char *state_title = "Ready to pair";
-    const char *state_detail = "No remote is paired yet.";
-    if (!status.enabled || status.state == RK_BLE_HID_HOST_STATE_DISABLED) {
-        state_title = "BLE is off";
-        state_detail = "Turn it on when you want to connect a media remote.";
-    } else if (status.state == RK_BLE_HID_HOST_STATE_ERROR) {
-        state_class = "error";
-        state_title = "Bluetooth needs attention";
-        state_detail = "Restart the Dial, then try again.";
-    } else if (status.connected) {
-        state_class = "connected";
-        state_title = "Connected";
-        state_detail = escaped_name[0] ? escaped_name : "Paired media remote";
-    } else if (status.state == RK_BLE_HID_HOST_STATE_CONNECTING ||
-               status.bonded) {
-        state_class = "working";
-        state_title = "Reconnecting";
-        state_detail = escaped_name[0] ? escaped_name : "Paired media remote";
-    } else if (status.state == RK_BLE_HID_HOST_STATE_SCANNING) {
-        state_class = "working";
-        state_title = "Looking for remotes";
-        state_detail = "Keep your remote in pairing mode. This takes about five seconds.";
-    } else if (status.state == RK_BLE_HID_HOST_STATE_STARTING) {
-        state_class = "working";
-        state_title = "Starting Bluetooth";
-        state_detail = "The remote service will be ready shortly.";
-    } else if (status.state == RK_BLE_HID_HOST_STATE_STOPPING) {
-        state_class = "working";
-        state_title = "Turning off Bluetooth";
-        state_detail = "The remote service is shutting down.";
-    }
-    const bool auto_updates = ble_watch_requested(req) ||
-                              ble_state_auto_updates(status.state);
-
-    int pos = snprintf(
-        html, html_size,
-        "<!DOCTYPE html><html><head>"
-        "<meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>BLE Media Remote - " PLATFORM_PORTAL_PRODUCT_SLUG "</title>"
-        "<style>%s"
-        /* page-specific supplement on top of the shared brand stylesheet */
-        ".connection strong,.connection span{display:block}"
-        ".connection{align-items:flex-start}"
-        ".connection span:last-child{color:var(--pb-muted);margin-top:2px;"
-        "overflow-wrap:anywhere}"
-        ".dot{width:10px;height:10px;border-radius:50%%;background:var(--pb-muted);"
-        "margin-top:6px;flex:none}"
-        ".connected .dot{background:var(--pb-ok)}"
-        ".working .dot{background:var(--pb-warn);animation:pulse 1.4s ease-in-out infinite}"
-        ".error .dot{background:var(--pb-attention)}"
-        ".live{font-size:12px;color:var(--pb-muted);margin-top:8px}"
-        ".device span{overflow-wrap:anywhere}"
-        "@keyframes pulse{50%%{opacity:.35;transform:scale(.75)}}"
-        "@media(prefers-reduced-motion:reduce){.working .dot{animation:none}}"
-        "</style>%s</head><body><main>"
-        "%s"
-        "<a href='/'>← Back to Dial settings</a>"
-        "<h1>BLE Media Remote</h1>"
-        "<p class='lede'>Connect one physical Bluetooth remote to control media on this Dial.</p>"
-        "<div class='connection %s' role='status' aria-live='polite'>"
-        "<span class='dot' aria-hidden='true'></span><div><strong>%s</strong><span>%s</span>"
-        "%s</div></div>"
-        "<div class='actions'>"
-        "<form method='POST' action='/ble-enable'>"
-        "<input type='hidden' name='enabled' value='%d'>"
-        "<button type='submit' class='%s'>%s</button></form>",
-        PORTAL_BRAND_CSS,
-        auto_updates
-            ? "<script>if(location.search)history.replaceState(null,'','/ble');"
-              "setTimeout(function(){if(!document.hidden)location.reload()},1000);"
-              "document.addEventListener('visibilitychange',function(){if(!document.hidden)location.reload()});</script>"
-            : "",
-        portal_brand_header_html(),
-        state_class, state_title, state_detail,
-        auto_updates ? "<span class='live'>Updates automatically</span>" : "",
-        status.enabled ? 0 : 1,
-        status.enabled ? "danger" : "",
-        status.enabled ? "Turn off BLE" : "Turn on BLE");
-    if (pos < 0 || pos >= (int)html_size) {
-        free(html);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Page generation failed");
-        return ESP_FAIL;
-    }
-
-    if (status.enabled) {
-        if (status.bonded) {
-            pos += snprintf(
-                html + pos, html_size - (size_t)pos,
-                " <form method='POST' action='/ble-forget'>"
-                "<button type='submit' class='danger'>Forget remote</button></form>");
-        }
-        pos += snprintf(html + pos, html_size - (size_t)pos, "</div>");
-
-        if (status.bonded) {
-            pos += snprintf(
-                html + pos, html_size - (size_t)pos,
-                "<p class='hint'>To pair a different remote, forget this one first.</p>");
-        } else {
-            pos += snprintf(
-                html + pos, html_size - (size_t)pos,
-                "<h2>Pair a remote</h2>"
-                "<p class='hint'>Put the remote into pairing mode, then start a scan.</p>"
-                "<form method='POST' action='/ble-scan'>"
-                "<button type='submit'%s>%s</button></form>",
-                status.state == RK_BLE_HID_HOST_STATE_SCANNING ? " disabled" : "",
-                status.state == RK_BLE_HID_HOST_STATE_SCANNING
-                    ? "Scanning…" : "Scan for remotes");
-
-            if (status.state != RK_BLE_HID_HOST_STATE_SCANNING) {
-            for (size_t i = 0; i < result_count && pos < (int)html_size; i++) {
-                char escaped_result[RK_BLE_HID_HOST_NAME_MAX_LEN * 2];
-                html_escape(results[i].name, escaped_result,
-                            sizeof(escaped_result));
-                pos += snprintf(
-                    html + pos, html_size - (size_t)pos,
-                    "<div class='device'><span>%s</span>"
-                    "<form method='POST' action='/ble-pair'>"
-                    "<input type='hidden' name='idx' value='%u'>"
-                    "<input type='hidden' name='generation' value='%lu'>"
-                    "<button type='submit'>Pair this remote</button></form></div>",
-                    escaped_result, (unsigned)i,
-                    (unsigned long)scan_generation);
-            }
-                if (result_count == 0 && scan_generation > 0) {
-                    pos += snprintf(
-                        html + pos, html_size - (size_t)pos,
-                        "<p class='empty'>No remotes found. Keep the remote in pairing mode and scan again.</p>");
-                }
-            }
-        }
-    } else {
-        pos += snprintf(
-            html + pos, html_size - (size_t)pos,
-            "</div><p class='hint'>BLE stays off across restarts until you turn it on here.</p>");
-    }
-
-    if (pos < 0 || pos >= (int)html_size) {
-        pos = (int)html_size - 1;
-    }
-    pos += snprintf(
-        html + pos, html_size - (size_t)pos,
-        "<details class='technical'><summary>About this setting</summary>"
-        "<p>The Dial connects to a separate Bluetooth media remote. The Dial itself "
-        "does not appear as a remote to phones or computers.</p>%s%s%s</details>"
-        "%s</main></body></html>",
-        status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "<p>Technical error: " : "",
-        status.last_error != RK_BLE_HID_HOST_ERROR_NONE
-            ? rk_ble_hid_host_error_name(status.last_error) : "",
-        status.last_error != RK_BLE_HID_HOST_ERROR_NONE ? "</p>" : "",
-        portal_brand_footer_html());
-    if (pos < 0 || pos >= (int)html_size) {
-        pos = (int)html_size - 1;
-    }
-
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_send(req, html, pos);
-    free(html);
-    return ESP_OK;
-}
-
-static esp_err_t ble_enable_handler(httpd_req_t *req) {
-    char buf[32] = {0};
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
-        return ESP_FAIL;
-    }
-    buf[received] = '\0';
-
-    char enabled_text[4] = {0};
-    if (!get_form_field(buf, "enabled", enabled_text, sizeof(enabled_text)) ||
-        (strcmp(enabled_text, "0") != 0 && strcmp(enabled_text, "1") != 0)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid enabled value");
-        return ESP_FAIL;
-    }
-    rk_ble_hid_host_result_t result =
-        rk_ble_hid_host_set_enabled(enabled_text[0] == '1');
-    if (result != RK_BLE_HID_HOST_OK) {
-        return send_conflict(req, rk_ble_hid_host_result_name(result));
-    }
-    return redirect_to_ble(req);
-}
-
-static esp_err_t ble_scan_handler(httpd_req_t *req) {
-    rk_ble_hid_host_result_t result = rk_ble_hid_host_scan_start();
-    if (result != RK_BLE_HID_HOST_OK) {
-        return send_conflict(req, rk_ble_hid_host_result_name(result));
-    }
-    return redirect_to_ble(req);
-}
-
-static esp_err_t ble_pair_handler(httpd_req_t *req) {
-    char buf[96] = {0};
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
-        return ESP_FAIL;
-    }
-    buf[received] = '\0';
-
-    char idx_text[8] = {0};
-    char generation_text[16] = {0};
-    if (!get_form_field(buf, "idx", idx_text, sizeof(idx_text)) ||
-        !get_form_field(buf, "generation", generation_text,
-                        sizeof(generation_text))) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                            "Missing scan identity");
-        return ESP_FAIL;
-    }
-
-    char *end = NULL;
-    long idx = strtol(idx_text, &end, 10);
-    if (end == idx_text || *end != '\0' || idx < 0 ||
-        idx >= RK_BLE_HID_HOST_MAX_RESULTS) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
-        return ESP_FAIL;
-    }
-    end = NULL;
-    unsigned long requested_generation = strtoul(generation_text, &end, 10);
-    if (end == generation_text || *end != '\0') {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid generation");
-        return ESP_FAIL;
-    }
-
-    rk_ble_hid_host_device_t results[RK_BLE_HID_HOST_MAX_RESULTS];
-    uint32_t current_generation = 0;
-    size_t count = rk_ble_hid_host_scan_results_copy(
-        results, RK_BLE_HID_HOST_MAX_RESULTS, &current_generation);
-    if ((size_t)idx >= count || requested_generation != current_generation) {
-        return send_conflict(req, "Scan results changed; scan again");
-    }
-
-    rk_ble_hid_host_result_t result = rk_ble_hid_host_pair(&results[idx]);
-    if (result != RK_BLE_HID_HOST_OK) {
-        return send_conflict(req, rk_ble_hid_host_result_name(result));
-    }
-    return redirect_to_ble(req);
-}
-
-static esp_err_t ble_forget_handler(httpd_req_t *req) {
-    rk_ble_hid_host_result_t result = rk_ble_hid_host_forget();
-    if (result != RK_BLE_HID_HOST_OK) {
-        return send_conflict(req, rk_ble_hid_host_result_name(result));
-    }
-    return redirect_to_ble(req);
-}
-
 void config_server_start(void) {
     if (!http_server_lifecycle_lock()) {
         ESP_LOGE(TAG, "Could not acquire HTTP lifecycle lock");
@@ -790,8 +482,8 @@ void config_server_start(void) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 12;
-    config.stack_size = 8192;  // Increased for mDNS resolution during config save
+    config.max_uri_handlers = 7 + BLE_REMOTE_WEB_ROUTE_COUNT;
+    config.stack_size = 12288;  // Increased for mDNS resolution during config save
     // Note: max_req_hdr_len set via CONFIG_HTTPD_MAX_REQ_HDR_LEN in sdkconfig
 
     ESP_LOGI(TAG, "Starting config server on port %d", config.server_port);
@@ -832,40 +524,13 @@ void config_server_start(void) {
     };
     httpd_register_uri_handler(s_server, &wifi_remove);
 
-    httpd_uri_t ble_get = {
-        .uri = "/ble",
-        .method = HTTP_GET,
-        .handler = ble_get_handler,
-    };
-    httpd_register_uri_handler(s_server, &ble_get);
-
-    httpd_uri_t ble_enable = {
-        .uri = "/ble-enable",
-        .method = HTTP_POST,
-        .handler = ble_enable_handler,
-    };
-    httpd_register_uri_handler(s_server, &ble_enable);
-
-    httpd_uri_t ble_scan = {
-        .uri = "/ble-scan",
-        .method = HTTP_POST,
-        .handler = ble_scan_handler,
-    };
-    httpd_register_uri_handler(s_server, &ble_scan);
-
-    httpd_uri_t ble_pair = {
-        .uri = "/ble-pair",
-        .method = HTTP_POST,
-        .handler = ble_pair_handler,
-    };
-    httpd_register_uri_handler(s_server, &ble_pair);
-
-    httpd_uri_t ble_forget = {
-        .uri = "/ble-forget",
-        .method = HTTP_POST,
-        .handler = ble_forget_handler,
-    };
-    httpd_register_uri_handler(s_server, &ble_forget);
+    if (!ble_remote_web_register(s_server, "/")) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        http_server_lifecycle_release_locked(HTTP_SERVER_OWNER_CONFIG);
+        http_server_lifecycle_unlock();
+        return;
+    }
 
     if (!power_debug_web_register(s_server)) {
         ESP_LOGE(TAG, "Shared power-debug routes unavailable");

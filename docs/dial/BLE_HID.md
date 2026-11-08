@@ -10,7 +10,7 @@ a BLE keyboard/media controller. The two roles are opposites:
 
 | Role | This firmware | Peer |
 | --- | --- | --- |
-| BLE HID host | HiPhi Frame or HiPhi Dial | Physical media remote |
+| BLE HID host | HiPhi ESP32-S3 controllers | Physical media remote |
 | BLE HID device | Not implemented | Phone, computer, or TV |
 
 ESP32-S3 supports Bluetooth LE but not Classic Bluetooth. This feature neither
@@ -131,10 +131,15 @@ local remembered-device metadata, and deletes the NimBLE peer security record.
 
 1. Connect the controller to Wi-Fi.
 2. Open its settings page in a browser.
-3. On Dial, enable **BLE Media Remote** if it is disabled.
+3. On the **Bluetooth Remote** page, select **Turn on Bluetooth** if needed.
 4. Put the physical remote into pairing mode.
 5. Start a scan and select the remote.
 6. Confirm transport and volume keys operate the selected playback zone.
+
+The same **Bluetooth Remote** page lists saved **Button mappings** from
+Hi-Fi Control. Select **Change shortcut** to remap a button or **Delete
+mapping** to unassign it. These controls work with the remote disconnected.
+Standard media presses remain built-in controls.
 
 Pairing uses the BLE “Just Works” security model because these controllers and
 typical media remotes have no shared display/PIN-entry path. The bond is kept
