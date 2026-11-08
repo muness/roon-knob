@@ -362,11 +362,16 @@ static void library_focus_labels(int index) {
 }
 static void focus_row(int index) {
   if (screen == CONTROLLER_SCREEN_LIBRARY && virtual_library && page && index >= 0 && index < page->count) {
+    /* New objects do not have their final content height until layout runs.
+     * Reading it earlier scheduled a 72px scroll on an untouched first page. */
+    lv_obj_update_layout(scroller);
     library_virtual_refresh();
+    lv_obj_update_layout(scroller);
+    lv_anim_enable_t motion = rebuilding ? LV_ANIM_OFF : LV_ANIM_ON;
     int y = library_item_y(index), bottom = y + library_row_height(index);
     int scroll = lv_obj_get_scroll_y(scroller), height = lv_obj_get_content_height(scroller);
-    if (y < scroll) lv_obj_scroll_to_y(scroller, y, LV_ANIM_ON);
-    else if (bottom > scroll + height) lv_obj_scroll_to_y(scroller, bottom - height, LV_ANIM_ON);
+    if (y < scroll) lv_obj_scroll_to_y(scroller, y, motion);
+    else if (bottom > scroll + height) lv_obj_scroll_to_y(scroller, bottom - height, motion);
     for (int i = 0; i < page->count; i++)
       if (rows[i]) lv_obj_set_style_bg_color(rows[i], lv_color_hex(i == index ? 0x39434b : 0x181818), 0);
     library_focus_labels(index);
@@ -986,7 +991,7 @@ static lv_obj_t *library_spacer(void) {
   return o;
 }
 static void library_virtual_refresh(void) {
-  if (!virtual_library || rebuilding || updating_visible || !page || !scroller) return;
+  if (!virtual_library || updating_visible || !page || !scroller) return;
   int scroll = lv_obj_get_scroll_y(scroller), first = 0;
   while (first + 1 < page->count && library_item_y(first + 1) <= scroll) first++;
   first = first > 2 ? first - 2 : 0;

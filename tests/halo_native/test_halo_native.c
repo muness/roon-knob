@@ -1015,7 +1015,17 @@ int main(int argc, char **argv) {
   reset_library(); screen = CONTROLLER_SCREEN_LIBRARY;
   snprintf(location, sizeof(location), "cache-root");
   fill_browse_page(page, 0, 50);
-  render(); advance(300);
+  render();
+  lv_obj_update_layout(scroller);
+  advance(1600);
+  assert(lv_obj_get_scroll_y(scroller) == 0);
+  selected_index = 20;
+  render(); lv_obj_update_layout(scroller);
+  int restored_scroll = lv_obj_get_scroll_y(scroller);
+  assert(restored_scroll > 0 && rows[20]);
+  advance(1600);
+  assert(lv_obj_get_scroll_y(scroller) == restored_scroll);
+  selected_index = 0; render(); advance(100);
   assert(page->count == 50 && lv_obj_get_child_count(scroller) == LIBRARY_VISIBLE_ROWS + 2);
   int allocated_rows = 0;
   for (int i = 0; i < page->count; i++) if (rows[i]) allocated_rows++;
@@ -1067,6 +1077,9 @@ int main(int argc, char **argv) {
   assert(!lv_obj_has_state(rows[30], LV_STATE_DISABLED));
   move_item(1); controller_touch_navigation_process();
   assert(xQueueReceive(requests, &request, 0) && request.kind == PREFETCH_NEXT);
+  /* The read remains in flight, but the deliberate tap targets a settled
+   * row. A separate epoch test below covers a press during rebinding. */
+  advance(1500);
   /* Navigating while prefetch is in flight fences its response completely. */
   page->items[selected_index].location[0] = 0;
   snprintf(page->items[selected_index].location, sizeof(page->items[selected_index].location), "child-route");
