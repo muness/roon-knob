@@ -2096,39 +2096,19 @@ const char* bridge_client_get_artwork_url_for_format_and_scale(
 
 int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
                                 char **out, size_t *out_len) {
-    if (!out || width <= 0 || height <= 0) return -1;
-    *out = NULL;
-    if (out_len) *out_len = 0;
-    char url[512];
-    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
-                                                   height, 0, format)) {
-        return -1;
-    }
-    uint32_t cache_key = 2166136261u;
-    for (const unsigned char *p = (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
-        cache_key ^= *p;
-        cache_key *= 16777619u;
-    }
-    size_t len = strlen(url);
-    if (len + 20 < sizeof(url)) {
-        snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
-                 (unsigned)cache_key);
-    }
-    return platform_http_get_image(url, out, out_len);
+    artwork_viewport_t viewport = {width, height, ARTWORK_FIT};
+    return bridge_client_fetch_artwork_viewport(image_key, viewport, format, out, out_len);
 }
 
-int bridge_client_stream_artwork(const char *image_key, int width, int height,
-                                 const char *format, size_t max_bytes,
-                                 platform_http_stream_callback_t callback,
-                                 void *ctx, size_t *out_len) {
-    if (width <= 0 || height <= 0 || max_bytes == 0 || !callback) return -1;
-
-    char url[512];
-    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
-                                                   height, 0, format)) {
-        return -1;
+static bool build_artwork_request(char *url, size_t url_size, const char *image_key,
+                                  artwork_viewport_t viewport, const char *format) {
+    const char *scale = viewport.scale == ARTWORK_CIRCLE ? "circle" :
+                        viewport.scale == ARTWORK_COVER ? "cover" : "fit";
+    if (viewport.width <= 0 || viewport.height <= 0 ||
+        !bridge_client_get_artwork_url_for_format_and_scale(
+            url, url_size, viewport.width, viewport.height, 0, format, scale, 0)) {
+        return false;
     }
-
     uint32_t cache_key = 2166136261u;
     for (const unsigned char *p =
              (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
@@ -2136,9 +2116,28 @@ int bridge_client_stream_artwork(const char *image_key, int width, int height,
         cache_key *= 16777619u;
     }
     size_t len = strlen(url);
-    if (len + 20 >= sizeof(url)) return -1;
-    snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
-             (unsigned)cache_key);
+    if (len + 20 >= url_size) return false;
+    snprintf(url + len, url_size - len, "&cache_bust=%08x", (unsigned)cache_key);
+    return true;
+}
+
+int bridge_client_fetch_artwork_viewport(const char *image_key, artwork_viewport_t viewport,
+                                         const char *format, char **out, size_t *out_len) {
+    if (!out) return -1;
+    *out = NULL;
+    if (out_len) *out_len = 0;
+    char url[512];
+    if (!build_artwork_request(url, sizeof(url), image_key, viewport, format)) return -1;
+    return platform_http_get_image(url, out, out_len);
+}
+
+int bridge_client_stream_artwork(const char *image_key, artwork_viewport_t viewport,
+                                 const char *format, size_t max_bytes,
+                                 platform_http_stream_callback_t callback,
+                                 void *ctx, size_t *out_len) {
+    char url[512];
+    if (!max_bytes || !callback ||
+        !build_artwork_request(url, sizeof(url), image_key, viewport, format)) return -1;
     return platform_http_stream(url, max_bytes, callback, ctx, out_len);
 }
 

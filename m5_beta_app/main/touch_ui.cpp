@@ -68,15 +68,6 @@ constexpr uint32_t STACK_HOT = 0xff6b8f;
 constexpr uint32_t STACK_CONTROL = 0x252c38;
 constexpr int64_t STACKCHAN_TRANSCRIPT_TTL_US = 4000000;
 constexpr int64_t STACKCHAN_RESPONSE_TTL_US = 5000000;
-#if HIPHI_M5_TARGET_ID == 1 || HIPHI_M5_TARGET_ID == 2
-constexpr int STACKCHAN_ARTWORK_SIZE = 120;
-#elif HIPHI_M5_TARGET_ID == 3
-constexpr int STACKCHAN_ARTWORK_SIZE = 360;
-#else
-/* Kizz's Art mode is full-bleed on a 320x240 panel. Fetch at panel
- * width so the hero image is never enlarged from a postage-stamp source. */
-constexpr int STACKCHAN_ARTWORK_SIZE = 320;
-#endif
 constexpr int STACKCHAN_FACE_BOTTOM = 108;
 constexpr int STACKCHAN_VOLUME_TOP = 168;
 constexpr int STACKCHAN_TRANSPORT_TOP = 199;
@@ -153,8 +144,9 @@ struct State {
     char action_notice[32] = {};
     char artwork_key[128] = {};
     uint16_t *artwork_pixels = nullptr;
-    int artwork_width = 0;
-    int artwork_height = 0;
+    artwork_viewport_t artwork_viewport{};
+    artwork_viewport_t wanted_artwork{};
+    int64_t artwork_retry_at = 0;
     uint16_t art_timeout_sec = 0;
     uint16_t dim_timeout_sec = 0;
     uint16_t sleep_timeout_sec = 0;
@@ -760,144 +752,118 @@ bool stackchan_marquee_needed() {
            M5.Display.textWidth(s.album) > 302;
 }
 
-struct ArtworkJob { char key[128]; };
-struct ArtworkResult {
+struct ArtworkJob {
     char key[128];
-    uint16_t *pixels = nullptr;
+    artwork_viewport_t viewport;
+};
+
+struct ArtworkResult {
+    ArtworkJob request;
+    uint16_t *pixels;
 };
 
 void start_stackchan_artwork_fetch();
 
 void apply_stackchan_artwork(void *arg) {
-    ArtworkResult *result = static_cast<ArtworkResult *>(arg);
-    if (!result) {
-        s_artwork_loading.store(false);
-        return;
-    }
-    const bool current = std::strcmp(result->key, s.artwork_key) == 0;
+    auto *result = static_cast<ArtworkResult *>(arg);
+    const bool current = std::strcmp(result->request.key, s.artwork_key) == 0 &&
+        artwork_viewport_equal(result->request.viewport, s.wanted_artwork);
     if (current && result->pixels) {
         free(s.artwork_pixels);
         s.artwork_pixels = result->pixels;
-        s.artwork_width = STACKCHAN_ARTWORK_SIZE;
-        s.artwork_height = STACKCHAN_ARTWORK_SIZE;
+        s.artwork_viewport = result->request.viewport;
         result->pixels = nullptr;
         s.dirty = true;
-        ESP_LOGI(TAG, "Kizz artwork ready for '%s'", result->key);
     }
     free(result->pixels);
     free(result);
     s_artwork_loading.store(false);
-    if (!current && s.artwork_key[0]) start_stackchan_artwork_fetch();
+    if (!current) start_stackchan_artwork_fetch();
 }
 
 void stackchan_artwork_task(void *arg) {
-    ArtworkJob *job = static_cast<ArtworkJob *>(arg);
-    if (!job) {
-        s_artwork_loading.store(false);
-        vTaskDelete(nullptr);
-        return;
-    }
-    char url[384] = {};
-    const char *art_url = bridge_client_get_artwork_url_for_format(
-        url, sizeof(url), STACKCHAN_ARTWORK_SIZE, STACKCHAN_ARTWORK_SIZE, 0,
-        "rgb565");
-    if (art_url) {
-        uint32_t hash = 2166136261u;
-        for (const unsigned char *p =
-                 reinterpret_cast<const unsigned char *>(job->key); *p; ++p) {
-            hash ^= *p;
-            hash *= 16777619u;
-        }
-        const size_t used = std::strlen(url);
-        if (used < sizeof(url)) {
-            std::snprintf(url + used, sizeof(url) - used,
-                          "&cache_bust=%08" PRIx32, hash);
-        }
-    }
-    char *raw = nullptr;
-    size_t raw_len = 0;
-    constexpr size_t expected = STACKCHAN_ARTWORK_SIZE * STACKCHAN_ARTWORK_SIZE *
-                                sizeof(uint16_t);
+    auto *job = static_cast<ArtworkJob *>(arg);
+    auto *result = static_cast<ArtworkResult *>(calloc(1, sizeof(ArtworkResult)));
     bool posted = false;
-    if (art_url && platform_http_get_image(art_url, &raw, &raw_len) == 0 &&
-        raw && raw_len == expected) {
-        ArtworkResult *result = static_cast<ArtworkResult *>(
-            calloc(1, sizeof(*result)));
-        uint16_t *pixels = static_cast<uint16_t *>(malloc(expected));
-        if (result && pixels) {
-            std::memcpy(pixels, raw, expected);
-            /* The worker owns this result until it posts it. Do not use the
-             * UI copy helper here: that helper also mutates render state. */
-            std::snprintf(result->key, sizeof(result->key), "%s", job->key);
-            result->pixels = pixels;
-            if (platform_task_post_to_ui(apply_stackchan_artwork, result)) {
-                posted = true;
-                result = nullptr;
-                pixels = nullptr;
-            }
+    if (result) {
+        result->request = *job;
+        const size_t expected = static_cast<size_t>(job->viewport.width) *
+                                job->viewport.height * sizeof(uint16_t);
+        char *raw = nullptr;
+        size_t raw_len = 0;
+        if (bridge_client_fetch_artwork_viewport(job->key, job->viewport,
+                                                  "rgb565", &raw, &raw_len) == 0 &&
+            raw && raw_len == expected) {
+            result->pixels = reinterpret_cast<uint16_t *>(raw);
+            raw = nullptr;
         }
-        free(pixels);
-        free(result);
-    } else {
-        ESP_LOGW(TAG, "Kizz artwork fetch returned %zu bytes (expected %zu)",
-                 raw_len, expected);
+        platform_http_free(raw);
+        posted = platform_task_post_to_ui(apply_stackchan_artwork, result);
+        if (!posted) {
+            free(result->pixels);
+            free(result);
+        }
     }
-    platform_http_free(raw);
     free(job);
     if (!posted) s_artwork_loading.store(false);
     vTaskDelete(nullptr);
 }
 
 void start_stackchan_artwork_fetch() {
-    if (!s.artwork_key[0] || s_artwork_loading.exchange(true)) return;
-    ArtworkJob *job = static_cast<ArtworkJob *>(calloc(1, sizeof(*job)));
+    if (!s.artwork_key[0] || s.wanted_artwork.width <= 0 ||
+        (s.artwork_pixels && artwork_viewport_equal(s.artwork_viewport, s.wanted_artwork)) ||
+        esp_timer_get_time() < s.artwork_retry_at ||
+        s_artwork_loading.exchange(true)) return;
+    s.artwork_retry_at = esp_timer_get_time() + 3000000;
+    auto *job = static_cast<ArtworkJob *>(calloc(1, sizeof(ArtworkJob)));
     if (!job) {
         s_artwork_loading.store(false);
         return;
     }
     copy_text(job->key, sizeof(job->key), s.artwork_key);
-    /* Artwork fetches only use network/heap operations and never write flash.
-     * Keep this large, short-lived worker out of scarce internal RAM so the
-     * ESP-SR voice pipeline and UI task can coexist with album art. */
+    job->viewport = s.wanted_artwork;
+    /* Keep the artwork worker stack out of internal RAM. */
     if (platform_task_start_external_stack("stackchan_art", 16384,
                                            stackchan_artwork_task, job) != 0) {
         free(job);
         s_artwork_loading.store(false);
-        ESP_LOGW(TAG, "Could not start Kizz artwork worker");
+        ESP_LOGW(TAG, "Could not start artwork worker");
     }
 }
 
-void stackchan_draw_artwork(lgfx::LovyanGFX *target, int x, int y, int width,
-                            int height, bool muted = false) {
-    if (!s.artwork_pixels || s.artwork_width <= 0 || s.artwork_height <= 0 ||
-        width <= 0 || height <= 0 || width > 466) return;
-    uint16_t row[466];
-    int crop_width = s.artwork_width;
-    int crop_height = s.artwork_height;
-    if (width * s.artwork_height > height * s.artwork_width) {
-        crop_height = std::max(1, s.artwork_width * height / width);
-    } else {
-        crop_width = std::max(1, s.artwork_height * width / height);
+bool stackchan_draw_artwork(lgfx::LovyanGFX *target, int x, int y, int width,
+                            int height, bool muted = false,
+                            artwork_scale_t scale = ARTWORK_COVER) {
+    if (width <= 0 || height <= 0 || width > 466) return false;
+    const artwork_viewport_t viewport{
+        width, height, width == height && scale == ARTWORK_COVER ? ARTWORK_FIT : scale
+    };
+    if (!artwork_viewport_equal(s.wanted_artwork, viewport)) {
+        s.wanted_artwork = viewport;
+        s.artwork_retry_at = 0;
     }
-    const int src_x0 = (s.artwork_width - crop_width) / 2;
-    const int src_y0 = (s.artwork_height - crop_height) / 2;
+    if (!s.artwork_pixels || !artwork_viewport_equal(s.artwork_viewport, viewport)) {
+        start_stackchan_artwork_fetch();
+        return false;
+    }
+    if (!muted) {
+        target->pushImage(x, y, width, height, s.artwork_pixels);
+        return true;
+    }
+    uint16_t row[466];
     for (int dy = 0; dy < height; ++dy) {
-        const int sy = src_y0 + dy * crop_height / height;
-        const uint16_t *src = s.artwork_pixels + sy * s.artwork_width;
+        const uint16_t *src = s.artwork_pixels + dy * width;
         for (int dx = 0; dx < width; ++dx) {
-            uint16_t pixel = src[src_x0 + dx * crop_width / width];
-            if (muted) {
-                const uint16_t r = (pixel >> 11) & 0x1f;
-                const uint16_t g = (pixel >> 5) & 0x3f;
-                const uint16_t b = pixel & 0x1f;
-                pixel = static_cast<uint16_t>(((r * 25 / 100) << 11) |
-                                              ((g * 25 / 100) << 5) |
-                                              (b * 25 / 100));
-            }
-            row[dx] = pixel;
+            const uint16_t pixel = src[dx];
+            const uint16_t r = (pixel >> 11) & 0x1f;
+            const uint16_t g = (pixel >> 5) & 0x3f;
+            const uint16_t b = pixel & 0x1f;
+            row[dx] = static_cast<uint16_t>(((r / 4) << 11) |
+                                            ((g / 4) << 5) | (b / 4));
         }
         target->pushImage(x, y + dy, width, 1, row);
     }
+    return true;
 }
 
 bool load_body_enabled(bool *configured) {
@@ -1202,6 +1168,9 @@ void render_picker() {
     const int cx = M5.Display.width() / 2;
     const int cy = M5.Display.height() / 2;
     M5.Display.fillScreen(BG);
+    const int side = std::min(cx, cy) * 2;
+    stackchan_draw_artwork(&M5.Display, cx - side / 2, cy - side / 2,
+                            side, side, true, ARTWORK_CIRCLE);
     draw_battery();
     const float range = std::max(1.0f, s.volume_max - s.volume_min);
     const float ratio = std::max(0.0f, std::min(1.0f, (s.volume - s.volume_min) / range));
@@ -1221,6 +1190,8 @@ void render_picker() {
 [[maybe_unused]] void render_stick() {
     const int w = M5.Display.width();
     M5.Display.fillScreen(s.twist_armed ? 0x10251f : BG);
+    if (!s.twist_armed)
+        stackchan_draw_artwork(&M5.Display, 0, 8, w, M5.Display.height() - 8, true);
     M5.Display.fillRect(0, 0, w, 8, s.twist_armed ? HOT : ACCENT);
     draw_battery();
     draw_centered(s.twist_armed ? "TWIST LIVE" : "HOLD TO TWIST", 28, 1,
@@ -1239,6 +1210,9 @@ void render_picker() {
     const int w = M5.Display.width();
     const int h = M5.Display.height();
     M5.Display.fillScreen(BG);
+    const int side = std::min(w, h);
+    stackchan_draw_artwork(&M5.Display, (w - side) / 2, (h - side) / 2,
+                            side, side, true, ARTWORK_CIRCLE);
     draw_battery();
     M5.Display.fillCircle(w / 2, 90, 58, s.playing ? ACCENT : 0x252b38);
     draw_centered(s.playing ? ">" : "||", 90, 4, s.playing ? BG : MUTED);
@@ -1445,28 +1419,26 @@ void render_semantic_family() {
 
     switch (family) {
     case KizzSemanticFamily::ARTWORK_IMMERSIVE:
-        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 26, w, h - 26, true);
+        if (!stackchan_draw_artwork(target, 0, 26, w, h - 57, true))
         else stackchan_draw_performance_face(target, stackchan_current_face(lost), w, 0);
         target->fillRect(0, h - 31, w, 31, STACK_BG);
         stackchan_draw_marquee(target, s.title, 8, h - 25, w - 16, 1, STACK_INK, &s_stackchan_marquees[0]);
         break;
     case KizzSemanticFamily::ARTWORK_BOTTOM_TRANSPORT:
-        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 27, w, 139, true);
-        else stackchan_draw_center(target, "NO ARTWORK", w / 2, 96, 1, STACK_TERTIARY);
+        if (!stackchan_draw_artwork(target, 0, 27, w, 139, true)) stackchan_draw_center(target, "NO ARTWORK", w / 2, 96, 1, STACK_TERTIARY);
         stackchan_draw_marquee(target, s.title, 8, 170, w - 16, 1, STACK_INK, &s_stackchan_marquees[0]);
         semantic_button(target, 2, KizzSemanticAction::PreviousTrack, "PREV", false);
         semantic_button(target, 2, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
         semantic_button(target, 2, KizzSemanticAction::NextTrack, "NEXT", false);
         break;
     case KizzSemanticFamily::ARTWORK_SIDE_TRANSPORT:
-        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 27, 235, 207, true);
-        else stackchan_draw_center(target, "NO ARTWORK", 117, 120, 1, STACK_TERTIARY);
+        if (!stackchan_draw_artwork(target, 0, 27, 235, 207, true)) stackchan_draw_center(target, "NO ARTWORK", 117, 120, 1, STACK_TERTIARY);
         semantic_button(target, 3, KizzSemanticAction::PreviousTrack, "PREV", false);
         semantic_button(target, 3, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
         semantic_button(target, 3, KizzSemanticAction::NextTrack, "NEXT", false);
         break;
     case KizzSemanticFamily::ARTWORK_METADATA_BAND:
-        if (s.artwork_pixels) stackchan_draw_artwork(target, 0, 27, w, 126, true);
+        stackchan_draw_artwork(target, 0, 27, w, 126, true);
         target->fillRect(0, 153, w, h - 153, 0x101722);
         stackchan_draw_marquee(target, s.title, 9, 160, w - 18, 1, STACK_INK, &s_stackchan_marquees[0]);
         stackchan_draw_marquee(target, s.artist, 9, 179, w - 18, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
@@ -1474,7 +1446,7 @@ void render_semantic_family() {
         semantic_button(target, 4, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
         break;
     case KizzSemanticFamily::BALANCED_SPLIT:
-        if (s.artwork_pixels) stackchan_draw_artwork(target, 8, 39, 126, 126, true);
+        stackchan_draw_artwork(target, 8, 39, 126, 126, true);
         stackchan_draw_marquee(target, s.title, 146, 48, w - 154, 2, STACK_INK, &s_stackchan_marquees[0]);
         stackchan_draw_marquee(target, s.artist, 146, 77, w - 154, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
         stackchan_draw_marquee(target, s.album, 146, 98, w - 154, 1, STACK_TERTIARY, &s_stackchan_marquees[2]);
@@ -1487,7 +1459,7 @@ void render_semantic_family() {
         stackchan_draw_marquee(target, s.title, 10, 72, w - 20, 2, STACK_INK, &s_stackchan_marquees[0]);
         stackchan_draw_marquee(target, s.artist, 10, 110, w - 20, 1, STACK_SECONDARY, &s_stackchan_marquees[1]);
         stackchan_draw_marquee(target, s.album, 10, 133, w - 20, 1, STACK_TERTIARY, &s_stackchan_marquees[2]);
-        if (s.artwork_pixels) stackchan_draw_artwork(target, 12, 165, 58, 58);
+        stackchan_draw_artwork(target, 12, 165, 58, 58);
         semantic_button(target, 6, KizzSemanticAction::TogglePlayback, s.playing ? "PAUSE" : "PLAY", true);
         semantic_button(target, 6, KizzSemanticAction::NextTrack, "NEXT", false);
         break;
@@ -1556,10 +1528,8 @@ void render_stackchan_delight() {
     const uint32_t mood = connection_lost ? 0x160d12 : STACK_BG;
     target->fillScreen(mood);
 
-    if (s.artwork_pixels && !connection_lost && !reveal) {
-        stackchan_draw_artwork(target, 0, 0, w, h,
-                               !s.art_mode);
-    }
+    const bool artwork_drawn = !connection_lost && !reveal &&
+        stackchan_draw_artwork(target, 0, 0, w, h, !s.art_mode);
 
     if (reveal) {
         stackchan_draw_center(target, "NOW PLAYING", w / 2, 20, 1,
@@ -1592,8 +1562,7 @@ void render_stackchan_delight() {
 
     /* Dial's Art mode contract: the sleeve owns every pixel. It is a
      * persistent display state, not a controls timeout or another dashboard. */
-    if (s.art_mode && !s.voice_listening && s.artwork_pixels &&
-        !connection_lost) {
+    if (s.art_mode && !s.voice_listening && artwork_drawn) {
         stackchan_draw_voice_diagnostics(target, w, h);
         if (s_stackchan_canvas_ready) s_stackchan_canvas.pushSprite(0, 0);
         return;
@@ -2386,8 +2355,9 @@ extern "C" void touch_ui_set_artwork(const char *v){
     }
     copy_text(s.artwork_key,sizeof(s.artwork_key),key);
     free(s.artwork_pixels);s.artwork_pixels=nullptr;
-    s.artwork_width=0;s.artwork_height=0;s.dirty=true;
-    if(key[0])start_stackchan_artwork_fetch();
+    s.artwork_viewport = {};
+    s.artwork_retry_at = 0;
+    s.dirty = true;
 }
 extern "C" void touch_ui_post_artwork(const char *v){
     char *c=strdup(v?v:"");
@@ -2437,8 +2407,7 @@ extern "C" void touch_ui_update(const char *a,const char *b,const char *c,bool p
      * deduplicates the unchanged key, so retry from the next healthy metadata
      * update until the image is actually resident. The atomic loading guard
      * keeps this bounded to one worker at a time. */
-    if (s.artwork_key[0] && !s.artwork_pixels)
-        start_stackchan_artwork_fetch();
+    start_stackchan_artwork_fetch();
     if(playback_changed&&!changed)flash_action(p?"PLAY":"PAUSE");
     if (changed && p && s.online) {
 #if HIPHI_M5_TARGET_ID == 4

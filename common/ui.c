@@ -1466,20 +1466,15 @@ void ui_set_artwork(const char *image_key) {
         return;
     }
 
-    // Build artwork URL (request 360x360 to match display - no scaling needed)
-    // With PSRAM enabled, we can handle the full display resolution
-    char url[512];
-    if (!bridge_client_get_artwork_url(url, sizeof(url), SCREEN_SIZE, SCREEN_SIZE)) {
-        ESP_LOGW(UI_TAG, "Failed to build artwork URL");
-        return;
-    }
-
-    ESP_LOGI(UI_TAG, "Fetching artwork: %s", url);
-
-    // Fetch image data (JPEG)
+#ifdef ESP_PLATFORM
+    const artwork_viewport_t viewport = {SCREEN_SIZE, SCREEN_SIZE, ARTWORK_CIRCLE};
+#else
+    const artwork_viewport_t viewport = {SCREEN_SIZE, SCREEN_SIZE, ARTWORK_FIT};
+#endif
     char *img_data = NULL;
     size_t img_len = 0;
-    int ret = platform_http_get_image(url, &img_data, &img_len);
+    int ret = bridge_client_fetch_artwork_viewport(image_key, viewport, "rgb565",
+                                                   &img_data, &img_len);
 
     if (ret != 0 || !img_data || img_len == 0) {
         ESP_LOGW(UI_TAG, "Failed to fetch artwork (ret=%d, len=%zu)", ret, img_len);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "artwork_viewport.h"
 #include "controller_command.h"
 #include "controller_shortcuts.h"
 #include "controller_connection.h"
@@ -75,7 +76,9 @@ const char* bridge_client_get_artwork_url_for_format_and_scale(
     const char *format, const char *scale, int crop_limit_percent);
 int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
                                 char **out, size_t *out_len);
-int bridge_client_stream_artwork(const char *image_key, int width, int height,
+int bridge_client_fetch_artwork_viewport(const char *image_key, artwork_viewport_t viewport,
+                                         const char *format, char **out, size_t *out_len);
+int bridge_client_stream_artwork(const char *image_key, artwork_viewport_t viewport,
                                  const char *format, size_t max_bytes,
                                  platform_http_stream_callback_t callback,
                                  void *ctx, size_t *out_len);

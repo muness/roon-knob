@@ -305,6 +305,9 @@ void artwork_task(void *arg) {
     const uint32_t display_epoch = request.display_epoch;
     const int width = requested_art_mode ? FULL_ART : THUMB;
     const int height = width;
+    const artwork_viewport_t viewport{
+        width, height, requested_art_mode ? ARTWORK_COVER : ARTWORK_FIT
+    };
     const int dest_x = requested_art_mode ? 0 : 4;
     const int dest_y = requested_art_mode ? 0 : 18;
     const size_t expected = static_cast<size_t>(width) * height * sizeof(uint16_t);
@@ -327,7 +330,7 @@ void artwork_task(void *arg) {
             M5.Display.startWrite();
         }
         const int http_result = bridge_client_stream_artwork(
-            key, width, height, "rgb565", expected, artwork_stream_chunk, &stream,
+            key, viewport, "rgb565", expected, artwork_stream_chunk, &stream,
             &raw_len);
         const bool success = http_result == 0 && raw_len == expected &&
                              stream.tile_y == height && stream.tile_bytes == 0;
