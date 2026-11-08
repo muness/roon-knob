@@ -525,6 +525,7 @@
     "frame|frame_app/main/captive_portal.c|common/bridge_client.h",
     "frame|frame_app/main/captive_portal.c|common/controller_config.h",
     "frame|frame_app/main/captive_portal.c|common/controller_device_settings.h",
+    "frame|frame_app/main/captive_portal.c|common/controller_shortcut_key.h",
     "frame|frame_app/main/captive_portal.c|common/portal_brand.h",
     "frame|frame_app/main/captive_portal.c|common/portal_trace.h",
     "frame|frame_app/main/captive_portal.c|common/power_debug_web.h",
