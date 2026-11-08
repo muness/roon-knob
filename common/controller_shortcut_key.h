@@ -54,6 +54,8 @@ typedef struct {
  * usage this table does not know is "usage_%04x", so any key a remote sends can
  * still be mapped. Returns `buf`, or NULL when it cannot fit. */
 const char *controller_shortcut_key_name(uint16_t usage, char *buf, size_t len);
+/* Friendly label for a known Consumer usage. NULL for a learnable unnamed key. */
+const char *controller_shortcut_key_label(uint16_t usage);
 controller_shortcut_key_class_t controller_shortcut_key_class(uint16_t usage);
 const char *controller_shortcut_gesture_name(controller_shortcut_gesture_t gesture);
 

@@ -31,6 +31,11 @@ static void names(void) {
     /* A key the table does not know can still be mapped on the bridge. */
     assert(strcmp(controller_shortcut_key_name(UNKNOWN, buf, sizeof(buf)), "usage_0192") == 0);
     assert(controller_shortcut_key_name(0, buf, sizeof(buf)) == NULL);
+    for (uint16_t usage = 0x42; usage <= 0x45; ++usage)
+        assert(controller_shortcut_key_label(usage) != NULL);
+    assert(strcmp(controller_shortcut_key_label(0x43), "Down arrow") == 0);
+    assert(strcmp(controller_shortcut_key_name(0x43, buf, sizeof(buf)), "usage_0043") == 0);
+    assert(controller_shortcut_key_label(UNKNOWN) == NULL);
     char tiny[4];
     assert(controller_shortcut_key_name(PLAY_PAUSE, tiny, sizeof(tiny)) == NULL);
     assert(controller_shortcut_key_name(HOME, NULL, 0) == NULL);

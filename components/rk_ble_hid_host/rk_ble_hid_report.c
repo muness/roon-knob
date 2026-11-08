@@ -116,3 +116,54 @@ size_t rk_ble_consumer_tracker_update(rk_ble_consumer_tracker_t *tracker,
     tracker->down = usage;
     return count;
 }
+
+bool rk_ble_hid_report_is_consumer_array(const uint8_t *map, size_t len,
+                                        uint16_t report_id, size_t payload_len) {
+    if (!map || payload_len < 2 || payload_len > RK_BLE_HID_HOST_REPORT_BYTES) return false;
+    struct { uint32_t page, id, size, count, logical_min; } globals = {0}, stack[4];
+    size_t depth = 0, bits = 0;
+    uint32_t usage_min = 0;
+    bool has_usage_min = false;
+    for (size_t pos = 0; pos < len;) {
+        const uint8_t prefix = map[pos++];
+        const size_t width = (prefix & 3) == 3 ? 4 : (prefix & 3);
+        if (prefix == 0xfe || width > len - pos) return false;
+        uint32_t value = 0;
+        for (size_t i = 0; i < width; ++i) value |= (uint32_t)map[pos++] << (8 * i);
+        switch (prefix & 0xfc) {
+        case 0x04: globals.page = value; break;  /* Usage Page */
+        case 0x14: globals.logical_min = value; break; /* Logical Minimum */
+        case 0x18: usage_min = value; has_usage_min = true; break; /* Usage Minimum */
+        case 0x74: globals.size = value; break;  /* Report Size */
+        case 0x84: globals.id = value; break;    /* Report ID */
+        case 0x94: globals.count = value; break; /* Report Count */
+        case 0xa4: /* Push */
+            if (depth == sizeof(stack) / sizeof(stack[0])) return false;
+            stack[depth++] = globals;
+            break;
+        case 0xb4: /* Pop */
+            if (!depth) return false;
+            globals = stack[--depth];
+            break;
+        case 0x80: /* Input */
+            if (globals.id != report_id) break;
+            if (!globals.size || !globals.count ||
+                globals.count > (payload_len * 8 - bits) / globals.size) return false;
+            if (!bits) {
+                /* A Consumer selector whose values equal the usage IDs. */
+                if ((value & 7) || globals.page != 0x0c ||
+                    globals.size != 16 || globals.count != 1 ||
+                    !has_usage_min || usage_min != globals.logical_min ||
+                    usage_min > UINT16_MAX) return false;
+            } else if (!(value & 1)) {
+                /* Remaining bits are padding. */
+                return false;
+            }
+            bits += globals.size * globals.count;
+            break;
+        }
+        /* Local items apply only to the next Main item. */
+        if ((prefix & 0x0c) == 0) has_usage_min = false;
+    }
+    return depth == 0 && bits == payload_len * 8;
+}

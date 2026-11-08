@@ -595,6 +595,17 @@ static void hidh_event(void *handler_args, esp_event_base_t base, int32_t id, vo
         event.type = EVENT_INPUT;
         event.data.input.usage = event_data_hidh->input.usage;
         event.data.input.report_id = event_data_hidh->input.report_id;
+        if (event.data.input.usage == ESP_HID_USAGE_GENERIC) {
+            size_t map_count;
+            esp_hid_raw_report_map_t *maps;
+            const size_t map = event_data_hidh->input.map_index;
+            if (esp_hidh_dev_report_maps_get(event_data_hidh->input.dev, &map_count, &maps) == ESP_OK &&
+                map < map_count &&
+                rk_ble_hid_report_is_consumer_array(maps[map].data, maps[map].len,
+                    event_data_hidh->input.report_id, event_data_hidh->input.length)) {
+                event.data.input.usage = ESP_HID_USAGE_CCONTROL;
+            }
+        }
         event.data.input.len = event_data_hidh->input.length;
         if (event.data.input.len > sizeof(event.data.input.data)) {
             event.data.input.len = sizeof(event.data.input.data);
@@ -1319,18 +1330,9 @@ static void process_event(const service_event_t *event) {
         }
         rk_ble_media_key_t key;
         const bool pointer = event->data.input.usage == ESP_HID_USAGE_MOUSE;
-        const bool mapped = !pointer && rk_ble_hid_host_map_consumer_report(
+        const bool consumer_control = event->data.input.usage == ESP_HID_USAGE_CCONTROL;
+        const bool mapped = consumer_control && rk_ble_hid_host_map_consumer_report(
             event->data.input.data, event->data.input.len, &key);
-
-        /* The RM3 sends Home, menu arrows, and transport in its three-byte
-         * report 1. IDF can label it GENERIC. Keep other report IDs, including
-         * the stream seen in mouse mode, out of the consumer decoder. */
-        const bool rm3_consumer = event->data.input.usage == ESP_HID_USAGE_GENERIC &&
-            strcmp(s.status.active_name, "FiiO RM3") == 0 &&
-            event->data.input.report_id == 1 && event->data.input.len == 3 &&
-            event->data.input.data[2] == 0;
-        const bool consumer_control =
-            event->data.input.usage == ESP_HID_USAGE_CCONTROL || rm3_consumer;
 
         bool learning = false;
         if (s.status.connected && !is_stopping()) {
@@ -1358,23 +1360,8 @@ static void process_event(const service_event_t *event) {
 
         if (learning) break;
 
-        /* Report every Consumer Control key down and up, known or not, so the
-         * controller can recognise long and double presses and a person can
-         * map a key this firmware has no name for. Only reports ESP-IDF
-         * classified as Consumer Control, or that the bounded mapper accepted
-         * despite a GENERIC label (including the RM3 quirk above): a keyboard
-         * or mouse report would otherwise
-         * decode its first two bytes as a "usage". This runs in addition to
-         * the media-key path below, which is unchanged. */
-        const bool release_of_held_key =
-            !pointer && rk_ble_consumer_tracker_holding(&s.consumer) &&
-            event->data.input.len >= 2 && event->data.input.data[0] == 0 &&
-            event->data.input.data[1] == 0;
-        if (s.config.on_consumer_event && s.status.connected && !is_stopping() &&
-            (mapped || consumer_control || release_of_held_key)) {
-            /* `00 00` releases whichever key was held; the tracker supplies its
-             * usage. A GENERIC-labelled release of a held key is accepted too,
-             * otherwise the key would stay down forever. */
+        if (consumer_control && s.config.on_consumer_event &&
+            s.status.connected && !is_stopping()) {
             rk_ble_consumer_edge_t edges[2];
             const size_t count = rk_ble_consumer_tracker_update(
                 &s.consumer, event->data.input.data, event->data.input.len,
@@ -1388,18 +1375,7 @@ static void process_event(const service_event_t *event) {
             }
         }
 
-        /* ESP-IDF 5.5 can classify a valid Consumer Control report as GENERIC
-         * when its HID report-map metadata is incomplete. The proven Frame
-         * implementation decoded the payload directly. Preserve that behavior,
-         * but only for the exact media usages accepted by the bounded mapper. */
         if (mapped) {
-            if (event->data.input.usage != ESP_HID_USAGE_CCONTROL) {
-                ESP_LOGW(TAG,
-                         "Mapped media report despite ESP-IDF usage=%s "
-                         "report_id=%u",
-                         esp_hid_usage_str(event->data.input.usage),
-                         (unsigned)event->data.input.report_id);
-            }
             if (s.config.on_media_key && s.status.connected && !is_stopping()) {
                 ESP_LOGI(TAG, "Consumer Control report mapped to media key %d",
                          key);

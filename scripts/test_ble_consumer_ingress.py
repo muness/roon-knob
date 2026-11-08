@@ -141,15 +141,28 @@ int main(void) {
     s.status.connected=false;
     report(0xb5); drain_host();
     assert(s.status.recent_reports[0].data[0]==0x23);
-    /* Replay the captured RM3 Home packet and its generic release. The
-     * exact same bytes from another peer must remain diagnostic input. */
+    /* Descriptor-declared selectors are accepted regardless of peer or ID.
+     * Identical bytes from unclassified reports do not dispatch a shortcut. */
+    const uint8_t consumer_map[] = {
+        0x05,0x0c, 0x09,0x01, 0xa1,0x01, 0x85,0x07,
+        0x15,0x00, 0x19,0x00, 0x2a,0xff,0x03,
+        0x75,0x10, 0x95,0x01, 0x81,0x00,
+        0x75,0x08, 0x81,0x01, 0xc0
+    };
+    assert(rk_ble_hid_report_is_consumer_array(consumer_map, sizeof(consumer_map), 7, 3));
+    assert(!rk_ble_hid_report_is_consumer_array(consumer_map, sizeof(consumer_map), 1, 3));
+    assert(!rk_ble_hid_report_is_consumer_array(consumer_map, sizeof(consumer_map), 7, 2));
+    assert(!rk_ble_hid_report_is_consumer_array(consumer_map, sizeof(consumer_map)-2, 7, 3));
+    uint8_t pointer_map[sizeof(consumer_map)];
+    memcpy(pointer_map, consumer_map, sizeof(pointer_map));
+    pointer_map[1] = 0x01; /* Generic Desktop */
+    assert(!rk_ble_hid_report_is_consumer_array(pointer_map, sizeof(pointer_map), 7, 3));
     s.status.connected=true;
-    for (unsigned rm3=0; rm3<2; ++rm3) {
+    for (unsigned classified=0; classified<2; ++classified) {
         reset();
-        strcpy(s.status.active_name, rm3 ? "FiiO RM3" : "Other remote");
         service_event_t home={.type=EVENT_INPUT};
-        home.data.input.usage=ESP_HID_USAGE_GENERIC;
-        home.data.input.report_id=1;
+        home.data.input.usage=classified ? ESP_HID_USAGE_CCONTROL : ESP_HID_USAGE_GENERIC;
+        home.data.input.report_id=7;
         home.data.input.len=3;
         home.data.input.data[0]=0x23;
         home.data.input.data[1]=0x02;
@@ -159,9 +172,9 @@ int main(void) {
         enqueue_consumer_event(&home);
         clock_ms+=400; tick();
         drain_host(); controller_ble_input_service();
-        assert(sent_count==rm3);
-        assert(s.status.recent_reports[1].consumer_control==(bool)rm3);
-        if (rm3) {
+        assert(sent_count==classified);
+        assert(s.status.recent_reports[1].consumer_control==(bool)classified);
+        if (classified) {
             assert(last_gesture==CONTROLLER_SHORTCUT_GESTURE_PRESS);
             assert(last_press_time==s.status.recent_reports[1].time_ms);
         }
@@ -176,7 +189,8 @@ int main(void) {
     reset();
     s_learn_until=0;
     service_event_t down={.type=EVENT_INPUT};
-    down.data.input.report_id=1;
+    down.data.input.report_id=7;
+    down.data.input.usage=ESP_HID_USAGE_CCONTROL;
     down.data.input.len=3;
     down.data.input.data[0]=0x43;
     enqueue_consumer_event(&down);

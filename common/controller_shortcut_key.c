@@ -6,26 +6,35 @@
 typedef struct {
     uint16_t usage;
     const char *name;
+    const char *label;
     controller_shortcut_key_class_t key_class;
 } key_entry_t;
 
 /* Consumer Control usages (HID Usage Tables, page 0x0C). Names are what the
  * bridge's controller map stores, so renaming one breaks saved maps. */
 static const key_entry_t kKeys[] = {
-    {0x00cd, "play_pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b0, "play", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b1, "pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b5, "next", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b6, "previous", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00e9, "volume_up", CONTROLLER_SHORTCUT_KEY_RESERVED},
-    {0x00ea, "volume_down", CONTROLLER_SHORTCUT_KEY_RESERVED},
-    {0x00e2, "mute", CONTROLLER_SHORTCUT_KEY_RESERVED},
-    {0x00b7, "stop", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x00b3, "fast_forward", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x00b4, "rewind", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x0040, "menu", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x0223, "home", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x0224, "back", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x00cd, "play_pause", "Play / pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b0, "play", "Play", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b1, "pause", "Pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b5, "next", "Next", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b6, "previous", "Previous", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00e9, "volume_up", "Volume up", CONTROLLER_SHORTCUT_KEY_RESERVED},
+    {0x00ea, "volume_down", "Volume down", CONTROLLER_SHORTCUT_KEY_RESERVED},
+    {0x00e2, "mute", "Mute", CONTROLLER_SHORTCUT_KEY_RESERVED},
+    {0x00b7, "stop", "Stop", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x00b3, "fast_forward", "Fast forward", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x00b4, "rewind", "Rewind", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0040, "menu", "Menu", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0041, NULL, "Select", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0042, NULL, "Up arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0043, NULL, "Down arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0044, NULL, "Left arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0045, NULL, "Right arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0046, NULL, "Menu escape", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0047, NULL, "Menu value increase", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0048, NULL, "Menu value decrease", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0223, "home", "Home", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0224, "back", "Back", CONTROLLER_SHORTCUT_KEY_FREE},
 };
 
 static const key_entry_t *find_key(uint16_t usage) {
@@ -38,13 +47,18 @@ static const key_entry_t *find_key(uint16_t usage) {
 const char *controller_shortcut_key_name(uint16_t usage, char *buf, size_t len) {
     if (!buf || len == 0 || usage == 0) return NULL;
     const key_entry_t *known = find_key(usage);
-    int written = known ? snprintf(buf, len, "%s", known->name)
+    int written = known && known->name ? snprintf(buf, len, "%s", known->name)
                         : snprintf(buf, len, "usage_%04x", (unsigned)usage);
     if (written < 0 || (size_t)written >= len) {
         buf[0] = '\0';
         return NULL;
     }
     return buf;
+}
+
+const char *controller_shortcut_key_label(uint16_t usage) {
+    const key_entry_t *known = find_key(usage);
+    return known ? known->label : NULL;
 }
 
 controller_shortcut_key_class_t controller_shortcut_key_class(uint16_t usage) {

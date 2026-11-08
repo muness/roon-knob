@@ -1290,10 +1290,6 @@ static esp_err_t sta_ble_shortcuts_handler(httpd_req_t *req) {
  * bridge continues to identify assignments by the stable Consumer usage. */
 #define BLE_BUTTON_NAME_BYTES 97
 
-static const char *ble_button_standard_label(uint16_t usage) {
-  return usage == 0x0043 ? "Down arrow" : NULL;
-}
-
 static bool ble_button_custom_name(uint16_t usage, char *name, bool save) {
   char key[12];
   snprintf(key, sizeof(key), "usage_%04x", (unsigned)usage);
@@ -1347,14 +1343,11 @@ static esp_err_t sta_ble_assign_handler(httpd_req_t *req) {
             at->valuedouble != report->time_ms || now - report->time_ms > 120000) continue;
         const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
         if (key->valuedouble != usage) continue;
-        char button[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
         char custom[BLE_BUTTON_NAME_BYTES] = "";
         if (name) {
           if (!cJSON_IsString(name) || !name->valuestring[0] ||
               strlen(name->valuestring) >= sizeof(custom) ||
-              ble_button_standard_label(usage) ||
-              !controller_shortcut_key_name(usage, button, sizeof(button)) ||
-              strncmp(button, "usage_", 6) != 0) {
+              controller_shortcut_key_label(usage)) {
             error = "Choose a shorter name for this button.";
             break;
           }
@@ -1408,10 +1401,10 @@ static esp_err_t sta_ble_input_handler(httpd_req_t *req) {
       char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
       if (controller_shortcut_key_name(usage, key, sizeof(key))) {
         cJSON_AddNumberToObject(input, "usage", usage);
-        const char *label = ble_button_standard_label(usage);
+        const char *label = controller_shortcut_key_label(usage);
         char custom[BLE_BUTTON_NAME_BYTES];
         if (label) cJSON_AddStringToObject(input, "label", label);
-        else if (strncmp(key, "usage_", 6) == 0) {
+        else {
           cJSON_AddBoolToObject(input, "canName", true);
           if (ble_button_custom_name(usage, custom, false))
             cJSON_AddStringToObject(input, "label", custom);
@@ -1642,10 +1635,8 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       "<div class='actions'><form method='POST' action='/api/ble-scan'>"
       "<button>%s</button></form></div>"
       "<details><summary>How do I put my remote in pairing mode?</summary>"
-      "<p>Follow the remote maker’s instructions. For the FiiO RM3, hold Power "
-      "for about three seconds until the light flashes, then scan and select it.</p>"
-      "<p>Some remotes first appear by Bluetooth address, a string such as "
-      "<code>D8:2C:00:16:4F:F4</code>.</p></details>",
+      "<p>Follow the remote maker’s instructions to enter pairing mode, then scan and select it.</p>"
+      "<p>Some remotes first appear by Bluetooth address, a string of six pairs of letters and numbers.</p></details>",
       scan_generation ? "Scan again" : "Scan for remotes");
     if (pos >= (int)html_size) pos = (int)html_size - 1;
   }
@@ -1747,21 +1738,13 @@ static esp_err_t sta_ble_handler(httpd_req_t *req) {
       for (size_t i = 0; i < status.recent_report_count; ++i) {
         const rk_ble_recent_report_t *report = &status.recent_reports[i];
         const char *command = ble_media_command_name(report->media_key);
-        char button[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
         char custom[BLE_BUTTON_NAME_BYTES], escaped[6 * BLE_BUTTON_NAME_BYTES];
         if (!command && report->consumer_control && report->length >= 2) {
           const uint16_t usage = report->data[0] | ((uint16_t)report->data[1] << 8);
-          command = ble_button_standard_label(usage);
+          command = controller_shortcut_key_label(usage);
           if (!command && ble_button_custom_name(usage, custom, false)) {
             html_escape(custom, escaped, sizeof(escaped));
             command = escaped;
-          } else if (!command && controller_shortcut_key_name(usage, button, sizeof(button)) &&
-                     strncmp(button, "usage_", 6) != 0) {
-            button[0] = (char)(button[0] - 'a' + 'A');
-            for (char *c = button; *c; ++c) {
-              if (*c == '_') *c = ' ';
-            }
-            command = button;
           }
         }
         char payload[3 * RK_BLE_HID_HOST_REPORT_BYTES + 1] = "";
