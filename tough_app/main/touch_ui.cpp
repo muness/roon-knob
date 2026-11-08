@@ -46,8 +46,7 @@ constexpr uint32_t HIPHI_SUCCESS = 0x10b981;      // Online dot
 constexpr int kMaxZones = 32;
 constexpr int kMaxText = 128;
 constexpr int kMaxZoneId = 64;
-constexpr int kArtworkWidth = 240;
-constexpr int kArtworkHeight = 240;
+constexpr artwork_viewport_t kThumbnail = {112, 100, ARTWORK_FIT};
 constexpr uint8_t kNormalBrightness = 180;
 constexpr uint8_t kDimBrightness = 28;
 
@@ -85,8 +84,9 @@ struct UiState {
     bool dirty = true;
     char artwork_key[kMaxText] = {};
     uint16_t *artwork_pixels = nullptr;
-    int artwork_width = 0;
-    int artwork_height = 0;
+    artwork_viewport_t artwork_viewport{};
+    artwork_viewport_t wanted_artwork = kThumbnail;
+    int64_t artwork_retry_at = 0;
     PowerState power_state = PowerState::Normal;
     bool charging = false;
     uint32_t art_timeout_sec = 0;
@@ -245,13 +245,13 @@ void refresh_zone_label_presence(uint32_t now_ms) {
 
 struct ArtworkJob {
     char key[kMaxText];
+    artwork_viewport_t viewport;
 };
 
 struct ArtworkResult {
     char key[kMaxText];
     uint16_t *pixels;
-    int width;
-    int height;
+    artwork_viewport_t viewport;
 };
 
 void start_artwork_fetch(void);
@@ -263,15 +263,15 @@ void apply_artwork_result(void *arg) {
         return;
     }
 
-    const bool current = strcmp(result->key, s_state.artwork_key) == 0;
+    const bool current = strcmp(result->key, s_state.artwork_key) == 0 &&
+        artwork_viewport_equal(result->viewport, s_state.wanted_artwork);
     if (current && result->pixels) {
         free(s_state.artwork_pixels);
         s_state.artwork_pixels = result->pixels;
-        s_state.artwork_width = result->width;
-        s_state.artwork_height = result->height;
+        s_state.artwork_viewport = result->viewport;
         s_state.dirty = true;
         ESP_LOGI(TAG, "Artwork ready for '%s' (%dx%d)", result->key,
-                 result->width, result->height);
+                 result->viewport.width, result->viewport.height);
         result->pixels = nullptr;
     }
     free(result->pixels);
@@ -290,54 +290,27 @@ void artwork_fetch_task(void *arg) {
         return;
     }
 
-    char url[384];
-    const char *art_url = bridge_client_get_artwork_url_for_format(
-        url, sizeof(url), kArtworkWidth, kArtworkHeight, 0, "rgb565");
-    if (art_url) {
-        /* The bridge endpoint is keyed by zone and dimensions, while the
-         * response changes with the now-playing image key. Ensure an HTTP
-         * cache cannot hand us the previous track's pixels. The bridge may
-         * ignore this query parameter; proxies still see a distinct URL. */
-        uint32_t cache_key = 2166136261u;
-        for (const unsigned char *p =
-                 reinterpret_cast<const unsigned char *>(job->key); *p; ++p) {
-            cache_key ^= *p;
-            cache_key *= 16777619u;
-        }
-        const size_t url_len = strlen(url);
-        if (url_len < sizeof(url)) {
-            snprintf(url + url_len, sizeof(url) - url_len,
-                     "&cache_bust=%08" PRIx32, cache_key);
-        }
-        ESP_LOGI(TAG, "Fetching artwork key '%s'", job->key);
-    }
     char *raw = nullptr;
     size_t raw_len = 0;
-    const size_t expected = static_cast<size_t>(kArtworkWidth) *
-                            static_cast<size_t>(kArtworkHeight) * sizeof(uint16_t);
+    const size_t expected = static_cast<size_t>(job->viewport.width) *
+                            job->viewport.height * sizeof(uint16_t);
+    auto *result = static_cast<ArtworkResult *>(calloc(1, sizeof(ArtworkResult)));
     bool posted = false;
-    if (art_url && platform_http_get_image(art_url, &raw, &raw_len) == 0 &&
-        raw && raw_len == expected) {
-        ArtworkResult *result = static_cast<ArtworkResult *>(
-            calloc(1, sizeof(*result)));
-        uint16_t *pixels = static_cast<uint16_t *>(malloc(expected));
-        if (result && pixels) {
-            memcpy(pixels, raw, expected);
-            copy_text(result->key, sizeof(result->key), job->key);
-            result->pixels = pixels;
-            result->width = kArtworkWidth;
-            result->height = kArtworkHeight;
-            if (platform_task_post_to_ui(apply_artwork_result, result)) {
-                posted = true;
-                result = nullptr;
-                pixels = nullptr;
-            }
+    if (result) {
+        copy_text(result->key, sizeof(result->key), job->key);
+        result->viewport = job->viewport;
+        if (bridge_client_fetch_artwork_viewport(job->key, job->viewport,
+                                                  "rgb565", &raw, &raw_len) == 0 &&
+            raw && raw_len == expected) {
+            result->pixels = reinterpret_cast<uint16_t *>(raw);
+            raw = nullptr;
         }
-        free(pixels);
-        free(result);
-    } else {
-        ESP_LOGW(TAG, "Artwork fetch failed or returned %zu bytes (expected %zu)",
-                 raw_len, expected);
+        if (platform_task_post_to_ui(apply_artwork_result, result)) {
+            posted = true;
+        } else {
+            platform_http_free(reinterpret_cast<char *>(result->pixels));
+            free(result);
+        }
     }
     platform_http_free(raw);
     free(job);
@@ -349,15 +322,20 @@ void artwork_fetch_task(void *arg) {
 
 void start_artwork_fetch(void) {
     if (!s_state.artwork_key[0] ||
+        (s_state.artwork_pixels &&
+         artwork_viewport_equal(s_state.artwork_viewport, s_state.wanted_artwork)) ||
+        esp_timer_get_time() < s_state.artwork_retry_at ||
         s_artwork_loading.exchange(true)) {
         return;
     }
+    s_state.artwork_retry_at = esp_timer_get_time() + 3000000;
     ArtworkJob *job = static_cast<ArtworkJob *>(calloc(1, sizeof(*job)));
     if (!job) {
         s_artwork_loading.store(false);
         return;
     }
     copy_text(job->key, sizeof(job->key), s_state.artwork_key);
+    job->viewport = s_state.wanted_artwork;
     if (platform_task_start_internal_stack("m5_artwork", 16384,
                                            artwork_fetch_task, job) != 0) {
         free(job);
@@ -366,42 +344,14 @@ void start_artwork_fetch(void) {
     }
 }
 
-uint16_t dim_rgb565(uint16_t pixel) {
-    const uint16_t r = (pixel >> 11) & 0x1f;
-    const uint16_t g = (pixel >> 5) & 0x3f;
-    const uint16_t b = pixel & 0x1f;
-    return static_cast<uint16_t>(((r * 42 / 100) << 11) |
-                                 ((g * 42 / 100) << 5) |
-                                 (b * 42 / 100));
-}
-
-void draw_artwork_scaled(int x, int y, int width, int height, bool muted) {
-    if (!s_state.artwork_pixels || s_state.artwork_width <= 0 ||
-        s_state.artwork_height <= 0 || width <= 0 || height <= 0) {
-        return;
+bool draw_artwork(int x, int y, artwork_viewport_t viewport) {
+    if (!s_state.artwork_pixels ||
+        !artwork_viewport_equal(s_state.artwork_viewport, viewport)) {
+        return false;
     }
-    uint16_t row[320];
-    /* Scale-to-cover, then center-crop. Independent X/Y scaling visibly
-     * stretches album art, especially in the 320x240 Art mode. */
-    int crop_width = s_state.artwork_width;
-    int crop_height = s_state.artwork_height;
-    if (width * s_state.artwork_height > height * s_state.artwork_width) {
-        crop_height = std::max(1, s_state.artwork_width * height / width);
-    } else {
-        crop_width = std::max(1, s_state.artwork_height * width / height);
-    }
-    const int src_x0 = (s_state.artwork_width - crop_width) / 2;
-    const int src_y0 = (s_state.artwork_height - crop_height) / 2;
-    for (int dy = 0; dy < height; ++dy) {
-        const int sy = src_y0 + (dy * crop_height) / height;
-        const uint16_t *src = s_state.artwork_pixels + sy * s_state.artwork_width;
-        for (int dx = 0; dx < width; ++dx) {
-            const int sx = src_x0 + (dx * crop_width) / width;
-            uint16_t pixel = src[sx];
-            row[dx] = muted ? dim_rgb565(pixel) : pixel;
-        }
-        s_draw_target->pushImage(x, y + dy, width, 1, row);
-    }
+    s_draw_target->pushImage(x, y, viewport.width, viewport.height,
+                             s_state.artwork_pixels);
+    return true;
 }
 
 void set_power_state(PowerState state) {
@@ -507,8 +457,8 @@ void draw_main(void) {
     const int w = static_cast<int>(m5_platform_display_width());
     const int h = static_cast<int>(m5_platform_display_height());
     s_draw_target->fillScreen(0x101018);
-    if (s_state.artwork_pixels) {
-        draw_artwork_scaled(8, 34, 112, 100, false);
+    const bool artwork_drawn = draw_artwork(8, 34, kThumbnail);
+    if (artwork_drawn) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x5a5a68);
     }
 
@@ -520,7 +470,7 @@ void draw_main(void) {
         draw_scrolling_text(s_state.zone, 10, 7, w - 34, 2, 0x777777);
     }
     s_draw_target->fillCircle(w - 15, 15, 5, s_state.online ? HIPHI_SUCCESS : 0x666666);
-    if (!s_state.artwork_pixels) {
+    if (!artwork_drawn) {
         s_draw_target->drawRoundRect(8, 34, 112, 100, 6, 0x3a3a48);
         draw_center("No artwork", 64, 82, 1, 0x888888);
     }
@@ -554,7 +504,7 @@ void draw_art_mode(void) {
     const int w = static_cast<int>(m5_platform_display_width());
     const int h = static_cast<int>(m5_platform_display_height());
     s_draw_target->fillScreen(0x080808);
-    if (s_state.artwork_pixels) draw_artwork_scaled(0, 0, w, h, false);
+    draw_artwork(0, 0, {w, h, ARTWORK_COVER});
     s_draw_target->fillRectAlpha(0, h - 34, w, 34, 190, 0x101018);
     draw_scrolling_text(s_state.track, 10, h - 29, w - 20, 1, 0xfafafa);
     draw_scrolling_text(s_state.artist, 10, h - 14, w - 20, 1, 0xaaaaaa);
@@ -666,6 +616,17 @@ void redraw(void) {
         const uint32_t now_ms = (uint32_t)platform_millis();
         zone_label_policy_feed_controls_visible(&s_zone_policy, now_ms);
         refresh_zone_label_presence(now_ms);
+    }
+    if (screen == MainScreen::Main || screen == MainScreen::Art) {
+        const artwork_viewport_t viewport = screen == MainScreen::Art
+            ? artwork_viewport_t{static_cast<int>(m5_platform_display_width()),
+                                 static_cast<int>(m5_platform_display_height()), ARTWORK_COVER}
+            : kThumbnail;
+        if (!artwork_viewport_equal(s_state.wanted_artwork, viewport)) {
+            s_state.wanted_artwork = viewport;
+            s_state.artwork_retry_at = 0;
+        }
+        start_artwork_fetch();
     }
     s_last_screen = screen;
 
@@ -804,21 +765,13 @@ void set_network_on_ui(void *arg) {
 
 void set_artwork_impl(const char *image_key) {
     const char *key = image_key ? image_key : "";
-    if (strcmp(s_state.artwork_key, key) == 0) {
-        return;
-    }
+    if (strcmp(s_state.artwork_key, key) == 0) return;
     copy_text(s_state.artwork_key, sizeof(s_state.artwork_key), key);
-    if (!s_state.artwork_key[0]) {
-        free(s_state.artwork_pixels);
-        s_state.artwork_pixels = nullptr;
-        s_state.artwork_width = 0;
-        s_state.artwork_height = 0;
-        s_state.dirty = true;
-        return;
-    }
-    /* Keep the old image visible while the new one downloads. */
+    free(s_state.artwork_pixels);
+    s_state.artwork_pixels = nullptr;
+    s_state.artwork_viewport = {};
+    s_state.artwork_retry_at = 0;
     s_state.dirty = true;
-    start_artwork_fetch();
 }
 
 void set_artwork_on_ui(void *arg) {
@@ -867,6 +820,9 @@ extern "C" void touch_ui_process(void) {
     }
     refresh_zone_label_presence((uint32_t)platform_millis());
     redraw();
+    if (s_last_screen == MainScreen::Main || s_last_screen == MainScreen::Art) {
+        start_artwork_fetch();
+    }
 }
 
 extern "C" void touch_ui_set_status(bool online) {

@@ -11,7 +11,9 @@
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <lvgl.h>
+#include <misc/cache/instance/lv_image_cache.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "platform/platform_identity.h"
 #include "assets/hiphi_logo_lvgl.h"
@@ -20,11 +22,8 @@
 #define RLCD_PICKER_MAX_ZONES 18
 #define RLCD_CONTENT_WIDTH (RLCD_WIDTH - 28)
 #define RLCD_CONTENT_HEIGHT (RLCD_HEIGHT - 28)
-#define RLCD_ART_SOURCE_SIZE 400
 #define RLCD_ART_RENDER_WIDTH 340
-#define RLCD_ART_CROP_HEIGHT 166
-#define RLCD_ART_CROP_TOP 0
-#define RLCD_ART_CROP_LEFT 0
+#define RLCD_ART_RENDER_HEIGHT 166
 /* Content coordinates: these line up with the KEY and BOOT hardware columns. */
 #define RLCD_KEY_CONTROL_X 130
 #define RLCD_BOOT_CONTROL_X 246
@@ -75,10 +74,9 @@ static lv_obj_t *s_seek_bar;
 static uint8_t *s_draw_buffer;
 static lv_display_t *s_display;
 static lv_obj_t *s_screen;
-static uint8_t *s_artwork_data;
-static uint8_t *s_artwork_mono;
+static uint8_t *s_artwork_pixels;
 static lv_image_dsc_t s_artwork_dsc;
-static lv_image_dsc_t s_artwork_full_dsc;
+static artwork_viewport_t s_artwork_viewport;
 static bool s_art_mode;
 static bool s_art_mode_rendered;
 /* A controller full refresh must be paired with a full LVGL repaint.  The
@@ -133,85 +131,46 @@ static bool is_routine_message(const char *message) {
     return message && strncmp(message, prefix, strlen(prefix)) == 0;
 }
 
-static bool render_artwork_dither(void) {
-    const size_t expected = RLCD_ART_SOURCE_SIZE * RLCD_ART_SOURCE_SIZE * 2;
-    if (!s_artwork_data) return false;
-    if (!s_artwork_mono) {
-        s_artwork_mono = heap_caps_malloc(expected,
-                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (!s_artwork_mono) {
-        ESP_LOGE(TAG, "Could not allocate monochrome artwork cache");
-        return false;
-    }
-    uint64_t started = now_ms();
-    if (!rlcd_art_dither_rgb565(s_artwork_data, s_artwork_mono,
-                                RLCD_ART_SOURCE_SIZE, RLCD_ART_SOURCE_SIZE,
-                                RLCD_ART_DITHER_ATKINSON)) {
-        ESP_LOGE(TAG, "Atkinson artwork dither failed");
-        return false;
-    }
-    ESP_LOGI(TAG, "Rendered Atkinson artwork in %llu ms",
-             (unsigned long long)(now_ms() - started));
-    s_artwork_dsc.data = s_artwork_mono +
-        ((size_t)RLCD_ART_CROP_TOP * RLCD_ART_SOURCE_SIZE + RLCD_ART_CROP_LEFT) * 2;
-    s_artwork_dsc.header.w = RLCD_ART_RENDER_WIDTH;
-    s_artwork_dsc.header.h = RLCD_ART_CROP_HEIGHT;
-    s_artwork_dsc.data_size =
-        (size_t)RLCD_ART_SOURCE_SIZE * RLCD_ART_CROP_HEIGHT * 2;
-    s_artwork_full_dsc = s_artwork_dsc;
-    s_artwork_full_dsc.header.w = RLCD_ART_SOURCE_SIZE;
-    s_artwork_full_dsc.header.h = RLCD_HEIGHT;
-    s_artwork_full_dsc.data = s_artwork_mono;
-    s_artwork_full_dsc.data_size =
-        (size_t)RLCD_ART_SOURCE_SIZE * RLCD_HEIGHT * 2;
-    if (s_artwork) lv_obj_invalidate(s_artwork);
-    return true;
+static void clear_artwork(void) {
+    if (s_artwork_dsc.data) lv_image_cache_drop(&s_artwork_dsc);
+    s_artwork_dsc.data = NULL;
+    free(s_artwork_pixels);
+    s_artwork_pixels = NULL;
 }
 
-static bool load_artwork(void) {
-    char url[256];
+static bool load_artwork(artwork_viewport_t viewport) {
     char *image = NULL;
     size_t image_len = 0;
-    const size_t expected = RLCD_ART_SOURCE_SIZE * RLCD_ART_SOURCE_SIZE * 2;
-    const char *art_url = bridge_client_get_artwork_url_for_format(
-        url, sizeof(url), RLCD_ART_SOURCE_SIZE, RLCD_ART_SOURCE_SIZE, 0, "rgb565");
-    if (!art_url || platform_http_get_image(art_url, &image, &image_len) != 0 ||
+    const size_t expected = (size_t)viewport.width * viewport.height * 2;
+    if (bridge_client_fetch_artwork_viewport(s_view.image_key, viewport, "rgb565",
+                                              &image, &image_len) != 0 ||
         !image || image_len != expected) {
         platform_http_free(image);
         ESP_LOGW(TAG, "Artwork unavailable (%u bytes, expected %u)",
                  (unsigned)image_len, (unsigned)expected);
         return false;
     }
-    if (!s_artwork_data) {
-        s_artwork_data = heap_caps_malloc(expected, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (!s_artwork_data) {
+
+    clear_artwork();
+    uint8_t *mono = heap_caps_malloc(expected, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (mono && rlcd_art_dither_rgb565((const uint8_t *)image, mono, viewport.width,
+                                      viewport.height, RLCD_ART_DITHER_ATKINSON)) {
         platform_http_free(image);
-        ESP_LOGE(TAG, "Could not allocate artwork cache");
-        return false;
+        s_artwork_pixels = mono;
+    } else {
+        free(mono);
+        s_artwork_pixels = (uint8_t *)image;
     }
-    memcpy(s_artwork_data, image, expected);
-    platform_http_free(image);
     s_artwork_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     s_artwork_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-    s_artwork_dsc.header.flags = 0;
-    s_artwork_dsc.header.w = RLCD_ART_RENDER_WIDTH;
-    s_artwork_dsc.header.h = RLCD_ART_CROP_HEIGHT;
-    s_artwork_dsc.header.stride = RLCD_ART_SOURCE_SIZE * 2;
+    s_artwork_dsc.header.w = viewport.width;
+    s_artwork_dsc.header.h = viewport.height;
+    s_artwork_dsc.header.stride = viewport.width * 2;
     s_artwork_dsc.data_size = expected;
-    s_artwork_dsc.data = s_artwork_data;
-    if (!render_artwork_dither()) {
-        s_artwork_dsc.data = s_artwork_data +
-            ((size_t)RLCD_ART_CROP_TOP * RLCD_ART_SOURCE_SIZE + RLCD_ART_CROP_LEFT) * 2;
-        s_artwork_full_dsc = s_artwork_dsc;
-        s_artwork_full_dsc.header.w = RLCD_ART_SOURCE_SIZE;
-        s_artwork_full_dsc.header.h = RLCD_HEIGHT;
-        s_artwork_full_dsc.data = s_artwork_data;
-        s_artwork_full_dsc.data_size =
-            (size_t)RLCD_ART_SOURCE_SIZE * RLCD_HEIGHT * 2;
-    }
+    s_artwork_dsc.data = s_artwork_pixels;
+    s_artwork_viewport = viewport;
     lv_image_set_src(s_artwork, &s_artwork_dsc);
+    lv_obj_invalidate(s_artwork);
     return true;
 }
 
@@ -276,8 +235,8 @@ static void apply_view(void) {
         lv_obj_add_flag(s_play_control, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_artwork, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_pad_all(s_screen, 0, 0);
-        lv_obj_set_pos(s_artwork, -2, -2);
-        lv_image_set_src(s_artwork, &s_artwork_full_dsc);
+        lv_obj_set_pos(s_artwork, 0, 0);
+        lv_image_set_src(s_artwork, &s_artwork_dsc);
         s_art_mode_rendered = true;
     } else if (s_view.picker_visible) {
         lv_obj_set_style_pad_all(s_screen, 14, 0);
@@ -577,6 +536,19 @@ void rlcd_ui_process(void) {
     if (full_redraw) {
         lv_obj_invalidate(s_screen);
     }
+    if (s_view.image_key[0] && !s_view.usage_key_visible &&
+        !s_view.picker_visible && !s_view.setup_mode) {
+        const artwork_viewport_t viewport = s_art_mode
+            ? (artwork_viewport_t){RLCD_WIDTH, RLCD_HEIGHT, ARTWORK_COVER}
+            : (artwork_viewport_t){RLCD_ART_RENDER_WIDTH, RLCD_ART_RENDER_HEIGHT, ARTWORK_COVER};
+        if (!s_artwork_dsc.data ||
+            !artwork_viewport_equal(s_artwork_viewport, viewport)) {
+            if (!load_artwork(viewport)) {
+                clear_artwork();
+                s_art_mode = false;
+            }
+        }
+    }
     apply_view();
     /* This panel has no animations or touch input.  Do not run LVGL's normal
      * periodic render loop: it can invalidate and reflush autonomously.  A
@@ -599,7 +571,9 @@ void rlcd_ui_set_art_mode_timeout(uint32_t timeout_seconds) {
         now_ms() + (uint64_t)timeout_seconds * 1000ULL : 0;
     if (!timeout_seconds && s_art_mode) {
         s_art_mode = false;
+        s_art_mode_rendered = false;
         request_full_redraw();
+        mark_dirty();
     }
 }
 bool rlcd_ui_handle_activity(void) {
@@ -654,11 +628,7 @@ void rlcd_ui_set_setup_mode(bool enabled) {
 void rlcd_ui_set_artwork(const char *value) {
     const char *key = value ? value : "";
     if (!set_text_if_changed(s_view.image_key, sizeof(s_view.image_key), key)) return;
-    if (key[0] && !load_artwork()) {
-        s_artwork_dsc.data = NULL;
-    } else if (!key[0]) {
-        s_artwork_dsc.data = NULL;
-    }
+    clear_artwork();
     request_full_redraw();
     if (key[0] && s_art_mode_timeout_seconds) {
         s_art_mode_deadline_ms = now_ms() +
