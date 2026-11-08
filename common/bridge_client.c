@@ -1812,6 +1812,82 @@ bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
     return out->accepted;
 }
 
+const char *bridge_client_assign_shortcut(uint16_t usage, const char *id) {
+    char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+    if (!shortcut_id_valid(id) ||
+        controller_shortcut_key_class(usage) != CONTROLLER_SHORTCUT_KEY_FREE ||
+        !controller_shortcut_key_name(usage, key, sizeof(key))) return "Choose a spare button and shortcut.";
+
+    bridge_shortcuts_context_t context;
+    if (!bridge_client_shortcuts_capture(&context)) return "Hi-Fi Control is unavailable.";
+    char controller_id[13] = "";
+    platform_http_get_knob_id(controller_id, sizeof(controller_id));
+    if (strlen(controller_id) != 12 || strspn(controller_id, "0123456789abcdefABCDEF") != 12)
+        return "This controller has no valid identity.";
+
+    char url[256], event[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 7];
+    snprintf(url, sizeof(url), "%s/api/controllers/%s/shortcuts", context.endpoint.base, controller_id);
+    snprintf(event, sizeof(event), "%s:press", key);
+    char *response = NULL;
+    size_t length = 0;
+    const int rc = platform_http_get_bounded(url, 16384, &response, &length);
+    cJSON *view = rc == 0 ? response_document(response, length) : NULL;
+    platform_http_free(response);
+    const cJSON *bindings = cJSON_GetObjectItemCaseSensitive(view, "bindings");
+    cJSON *request = cJSON_CreateObject();
+    cJSON *map = request ? cJSON_AddObjectToObject(request, "bindings") : NULL;
+    const char *error = "Couldn’t read the button map from Hi-Fi Control.";
+    if (!map || !cJSON_IsArray(bindings)) goto done;
+    const cJSON *binding;
+    cJSON_ArrayForEach(binding, bindings) {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(binding, "event");
+        const cJSON *shortcut = cJSON_GetObjectItemCaseSensitive(binding, "shortcut_id");
+        if (!cJSON_IsString(name) || !cJSON_IsString(shortcut) ||
+            !shortcut_id_valid(shortcut->valuestring)) goto done;
+        if (!strcmp(name->valuestring, event)) {
+            error = !strcmp(shortcut->valuestring, id) ? NULL : "This button already has a shortcut.";
+            goto done;
+        }
+        if (!cJSON_AddStringToObject(map, name->valuestring, shortcut->valuestring)) goto done;
+    }
+    error = "Couldn’t confirm the assignment. Check Buttons and shortcuts in Hi-Fi Control.";
+    if (!cJSON_AddStringToObject(map, event, id)) goto done;
+    char *body = cJSON_PrintUnformatted(request);
+    if (!body) goto done;
+    response = NULL;
+    if (bridge_client_shortcuts_current(&context) &&
+        platform_http_put_json(url, body, &response, &length) == 0) error = NULL;
+    cJSON_free(body);
+    platform_http_free(response);
+done:
+    cJSON_Delete(request);
+    cJSON_Delete(view);
+    return error;
+}
+
+static bridge_shortcut_result_t s_latest_shortcut_result;
+
+bool bridge_client_latest_shortcut_result(bridge_shortcut_result_t *out) {
+    lock_state();
+    *out = s_latest_shortcut_result;
+    unlock_state();
+    return out->usage != 0;
+}
+
+static void record_shortcut_result(const controller_shortcut_event_t *event,
+                                   const char *code, const char *message) {
+    bridge_shortcut_result_t result = {
+        .press_time_ms = event->press_time_ms,
+        .usage = event->usage,
+        .gesture = event->gesture,
+    };
+    shortcut_text(result.code, sizeof(result.code), code);
+    shortcut_text(result.message, sizeof(result.message), message);
+    lock_state();
+    s_latest_shortcut_result = result;
+    unlock_state();
+}
+
 static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
                                    const shortcut_authority_t *authority) {
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
@@ -1831,6 +1907,7 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
     }
     if (ret != 0) {
         platform_http_free(resp);
+        record_shortcut_result(event, "uncertain", "The bridge did not confirm the action.");
         post_ui_message("Shortcut failed");
         return false;
     }
@@ -1843,6 +1920,10 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
         if (cJSON_IsString(item) && item->valuestring) code = item->valuestring;
     }
     const char *feedback = controller_shortcut_feedback_for_code(code);
+    const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+    if (!cJSON_IsString(message)) message = cJSON_GetObjectItemCaseSensitive(root, "error");
+    record_shortcut_result(event, code ? code : "uncertain",
+        cJSON_IsString(message) ? message->valuestring : feedback ? feedback : "");
     if (feedback) post_ui_message(feedback);
     const bool ok = code && (!strcmp(code, "accepted") || !strcmp(code, "unmapped"));
     cJSON_Delete(root);
@@ -1864,9 +1945,14 @@ static void shortcut_task(void *arg) {
 }
 
 bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+    return bridge_client_submit_shortcut_at(usage, gesture, 0);
+}
+
+bool bridge_client_submit_shortcut_at(uint16_t usage, uint8_t gesture, uint32_t press_time_ms) {
     const controller_shortcut_event_t event = {
         .usage = usage,
         .gesture = (controller_shortcut_gesture_t)gesture,
+        .press_time_ms = press_time_ms,
     };
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
     if (!controller_shortcut_build_body(&event, body, sizeof(body))) {

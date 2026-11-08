@@ -199,7 +199,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "rk_wifi_portal_resolve_ssid",
         "power_debug_web_register(s_server)",
         "#define PORTAL_HTTPD_STACK_SIZE 16384",
-        "config.max_uri_handlers = 20",
+        "config.max_uri_handlers = 24",
         "config.stack_size = PORTAL_HTTPD_STACK_SIZE;",
         "httpd_resp_send_chunk(req, chunk, HTTPD_RESP_USE_STRLEN)",
         "Portal stack headroom at request start",

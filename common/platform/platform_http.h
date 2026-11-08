@@ -27,6 +27,7 @@ int platform_http_stream(const char *url, size_t max_bytes,
                          size_t *out_len);
 int platform_http_get_image(const char *url, char **out, size_t *out_len);
 int platform_http_post_json(const char *url, const char *json, char **out, size_t *out_len);
+int platform_http_put_json(const char *url, const char *json, char **out, size_t *out_len);
 void platform_http_free(char *p);
 
 /**

@@ -9,6 +9,8 @@ extern "C" {
 #endif
 
 #define RK_BLE_HID_HOST_MAX_RESULTS 8
+#define RK_BLE_HID_HOST_RECENT_REPORTS 5
+#define RK_BLE_HID_HOST_REPORT_BYTES 16
 #define RK_BLE_HID_HOST_NAME_MAX_LEN 64
 
 /** Stable lifecycle states. STOPPING is observable until the NimBLE host exits. */
@@ -47,6 +49,7 @@ typedef enum {
     RK_BLE_HID_HOST_ERROR_STALE_SCAN,
     RK_BLE_HID_HOST_ERROR_TEARDOWN,
     RK_BLE_HID_HOST_ERROR_TEARDOWN_TIMEOUT,
+    RK_BLE_HID_HOST_ERROR_SECURITY,
 } rk_ble_hid_host_error_t;
 
 /** Immediate command result. Completion and detailed failures arrive in status. */
@@ -71,6 +74,17 @@ typedef struct {
 } rk_ble_hid_host_device_t;
 
 typedef struct {
+    uint32_t time_ms;
+    rk_ble_media_key_t media_key;
+    uint16_t length;
+    uint8_t report_id;
+    uint8_t data[RK_BLE_HID_HOST_REPORT_BYTES];
+    bool consumer_control;
+    bool pointer;
+    bool learned;
+} rk_ble_recent_report_t;
+
+typedef struct {
     bool enabled;
     bool connected;
     bool bonded;
@@ -84,6 +98,9 @@ typedef struct {
     char active_name[RK_BLE_HID_HOST_NAME_MAX_LEN];
     uint32_t scan_generation;
     size_t scan_count;
+    /* Most recent first, including reports that had no matching command. */
+    rk_ble_recent_report_t recent_reports[RK_BLE_HID_HOST_RECENT_REPORTS];
+    size_t recent_report_count;
 } rk_ble_hid_host_status_t;
 
 typedef void (*rk_ble_hid_host_media_callback_t)(rk_ble_media_key_t key, void *context);
@@ -149,7 +166,12 @@ rk_ble_hid_host_result_t rk_ble_hid_host_pair(const rk_ble_hid_host_device_t *de
 rk_ble_hid_host_result_t rk_ble_hid_host_forget(void);
 
 /** Copy the current status without exposing service-owned storage. */
+bool rk_ble_hid_host_begin_learn(uint32_t *started_ms);
 rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *out);
+
+/* Recognize a descriptor-defined 16-bit Consumer selector at bit zero. */
+bool rk_ble_hid_report_is_consumer_array(const uint8_t *map, size_t len,
+                                        uint16_t report_id, size_t payload_len);
 
 /**
  * Pure payload mapping independent of ESP-IDF's report usage classification.

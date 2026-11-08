@@ -7,8 +7,7 @@
 #define ESP_MAC_WIFI_STA 0
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
-#define HTTP_METHOD_GET 0
-#define HTTP_METHOD_POST 1
+typedef enum { HTTP_METHOD_GET, HTTP_METHOD_POST, HTTP_METHOD_PUT } esp_http_client_method_t;
 #define ESP_LOGD(...) ((void)0)
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)

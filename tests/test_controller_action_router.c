@@ -130,7 +130,8 @@ static struct { uint16_t usage; uint8_t gesture; } s_shortcuts[TEST_CAPACITY];
 static int s_shortcut_count;
 static bool s_shortcut_result = true;
 
-bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+bool bridge_client_submit_shortcut_at(uint16_t usage, uint8_t gesture, uint32_t press_time_ms) {
+    (void)press_time_ms;
     assert(s_shortcut_count < TEST_CAPACITY);
     s_shortcuts[s_shortcut_count].usage = usage;
     s_shortcuts[s_shortcut_count].gesture = gesture;

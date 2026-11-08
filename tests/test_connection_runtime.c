@@ -98,13 +98,32 @@ int platform_http_get(const char *url, char **out, size_t *len) {
     return http_ok ? 0 : -1;
 }
 static const char *catalog_reply = "{}";
+static const char *button_map_reply;
+static unsigned button_map_writes;
 int platform_http_get_bounded(const char *url, size_t max_bytes, char **out, size_t *length) {
+    if (strstr(url, "/api/controllers/0123456789ab/shortcuts")) {
+        assert(button_map_reply);
+        *out = strdup(button_map_reply); *length = strlen(*out);
+        return 0;
+    }
     assert(strstr(url, "/api/shortcuts?offset="));
     assert(max_bytes <= 16384);
     *out = strdup(catalog_reply); *length = strlen(*out);
     return 0;
 }
-void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,"abc"); }
+void platform_http_get_knob_id(char *out, size_t len) { (void)len; strcpy(out,button_map_reply ? "0123456789ab" : "abc"); }
+int platform_http_put_json(const char *url, const char *body, char **out, size_t *len) {
+    assert(strstr(url, "/api/controllers/0123456789ab/shortcuts"));
+    cJSON *root = cJSON_Parse(body);
+    assert(root);
+    cJSON *bindings = cJSON_GetObjectItemCaseSensitive(root, "bindings");
+    assert(strcmp(cJSON_GetObjectItemCaseSensitive(bindings, "back:long")->valuestring, "sc_original") == 0);
+    assert(strcmp(cJSON_GetObjectItemCaseSensitive(bindings, "home:press")->valuestring, "sc_playlist") == 0);
+    cJSON_Delete(root);
+    ++button_map_writes;
+    *out = strdup("{}"); *len = 2;
+    return 0;
+}
 void platform_http_free(char *value) { free(value); }
 void platform_task_finish(void) {}
 static bool hold_shortcut_task, shortcut_task_start_fails;
@@ -246,7 +265,7 @@ static void shortcut_send(const char *reply, bool http_ok, bool expect_ok,
                           const char *expect_message) {
     shortcut_reply = reply; shortcut_http_ok = http_ok; last_message[0] = 0;
     const unsigned before = shortcut_posts;
-    controller_shortcut_event_t event = {0x0223, CONTROLLER_SHORTCUT_GESTURE_LONG};
+    controller_shortcut_event_t event = {.usage=0x0223, .gesture=CONTROLLER_SHORTCUT_GESTURE_LONG};
     (void)expect_ok; /* the blocking send reports the bridge's verdict */
     shortcut_authority_t authority;
     assert(capture_shortcut_authority(&authority));
@@ -279,19 +298,37 @@ static void test_shortcut_input_reports_what_the_bridge_says(void) {
 }
 /* The backend adapter owns delivery: non-blocking, one request at a time, and
  * nothing is sent from a connection that is not ready. */
+static void test_assignment_preserves_other_buttons(void) {
+    connect_for_shortcut();
+    button_map_reply = "{\"bindings\":[{\"event\":\"back:long\",\"shortcut_id\":\"sc_original\"}]}";
+    button_map_writes = 0;
+    assert(!bridge_client_assign_shortcut(0x223, "sc_playlist"));
+    assert(button_map_writes == 1);
+    button_map_reply = "{\"bindings\":[{\"event\":\"home:press\",\"shortcut_id\":\"sc_playlist\"}]}";
+    assert(!bridge_client_assign_shortcut(0x223, "sc_playlist"));
+    assert(bridge_client_assign_shortcut(0x223, "sc_other"));
+    assert(bridge_client_assign_shortcut(0xe9, "sc_playlist"));
+    assert(button_map_writes == 1);
+    button_map_reply = NULL;
+}
+
 static void test_shortcut_submit_is_single_flight_and_readiness_gated(void) {
     connect_for_shortcut();
     shortcut_posts = 0; shortcut_reply = "{\"code\":\"accepted\"}"; shortcut_http_ok = true;
     hold_shortcut_task = true; shortcut_task_start_fails = false;
     atomic_store(&s_shortcut_busy, false);
 
-    assert(bridge_client_submit_shortcut(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG));
+    assert(bridge_client_submit_shortcut_at(0x0223, CONTROLLER_SHORTCUT_ACTION_GESTURE_LONG, 417));
     assert(shortcut_posts == 0 && held_shortcut_fn); /* returned before the request ran */
     /* A second press while one is out is dropped, not queued. */
     assert(!bridge_client_submit_shortcut(0x0224, CONTROLLER_SHORTCUT_ACTION_GESTURE_PRESS));
     held_shortcut_fn(held_shortcut_arg); /* the first completes */
     assert(shortcut_posts == 1);
     assert(strstr(shortcut_body, "\"home\""));
+    bridge_shortcut_result_t outcome;
+    assert(bridge_client_latest_shortcut_result(&outcome));
+    assert(outcome.usage == 0x0223 && outcome.press_time_ms == 417);
+    assert(strcmp(outcome.code, "accepted") == 0);
     hold_shortcut_task = false;
     /* ...and the adapter is free again. */
     assert(bridge_client_submit_shortcut(0x0224, CONTROLLER_SHORTCUT_ACTION_GESTURE_DOUBLE));
@@ -1030,4 +1067,5 @@ int main(void) {
     test_failed_and_stale_candidates();
     test_shortcut_input_reports_what_the_bridge_says();
     test_shortcut_submit_is_single_flight_and_readiness_gated();
+    test_assignment_preserves_other_buttons();
 }
