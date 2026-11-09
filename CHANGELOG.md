@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dial and Frame support BLE Media Remotes for playback control, including pairing and reconnecting saved remotes (#349). 🚀
+
 ## 2.8.3 — 2026-11-07
 
 - Frame reports the cause of failed panel power checks, retries recoverable I²C bus faults, and records what triggered each refresh (#332).
