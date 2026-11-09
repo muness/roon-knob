@@ -8,16 +8,16 @@
 
 **HiPhi by Open Horizon Labs** — [hiphi.audio](https://hiphi.audio/) · [Flash firmware](https://firmware.hiphi.audio/)
 
-Dedicated hi-fi controllers built from commodity ESP32 hardware. A HiPhi controller sits on your desk, your couch, or your wall and does one thing well: show what is playing and let you change it — transport, volume, zones — without opening a phone or a laptop. This repository holds the firmware for the whole family. Each target is a different piece of hardware running the same shared control core, talking to the same bridge, [Unified Hi-Fi Control](https://github.com/open-horizon-labs/unified-hifi-control), which connects to Roon, Lyrion Music Server (LMS), and OpenHome/UPnP renderers.
+Browse your library, start an album, turn the volume, and change rooms without reaching for your phone. **HiPhi** turns off-the-shelf ESP32 hardware into dedicated controllers for Roon, Lyrion Music Server (LMS), and OpenHome/UPnP through [Unified Hi-Fi Control](https://github.com/open-horizon-labs/unified-hifi-control).
+
+- **Dial:** browse your music library and start playback on the touchscreen, with a physical knob for volume.
+- **Frame:** keep the album cover on a color e-paper display. Dial and Frame also support BLE media remotes for playback control.
+- **More ways to listen:** use the same bridge from a browser, [Roku](roku/README.md), a [Garmin watch](https://apps.garmin.com/en-US/apps/c070e7ce-4ea1-4779-853d-56a8b080c1fa), or an [MCP-compatible AI client](https://hiphi.audio/mcp.html). Garmin connects through [HiPhi Cloud](https://app.hiphi.audio/); Roku installs through developer mode.
+
+The firmware and bridge are free for personal, noncommercial use. [Choose a controller](https://hiphi.audio/controllers.html), [get started](https://hiphi.audio/getting-started.html), or [support the project on Buy Me a Coffee](https://buymeacoffee.com/muness).
 
 [![HiPhi Dial demo](docs/images/hiphi-dial-photo.jpg)](https://photos.app.goo.gl/s5LpWqBTaXRihmjh7)
 *Click to watch a video demo of the HiPhi Dial*
-
-> **Firmware maturity:** the current v2.7 prerelease is **Alpha** across every
-> target because its exact artifacts still need physical regression testing.
-> HiPhi Frame builds are available for early testing,
-> but its current shared-stack firmware has not completed equivalent hardware
-> regression coverage.
 
 ## The Family
 
@@ -41,7 +41,7 @@ Pick a channel — Stable, Beta, or Alpha — from the [firmware channel chooser
 
 1. **Hardware**: one of the boards above. The Dial (~$50) is the flagship — buy it at [amazon](https://amzn.to/4pYZdiC) to support my work.
 2. **Music source**: Roon Core, Lyrion Music Server, or an OpenHome renderer on your network.
-3. **Docker host** (NAS, Raspberry Pi, always-on computer) to run the bridge.
+3. **A host for the bridge**: a NAS, Raspberry Pi, always-on computer, or an existing LMS or Home Assistant installation. See [installation options](https://github.com/open-horizon-labs/unified-hifi-control/blob/v4/INSTALL.md).
 
 > **New to this?** See the [Getting Started from Scratch](docs/usage/GETTING_STARTED.md) guide.
 
@@ -89,6 +89,9 @@ Controllers find the bridge automatically over mDNS. Each controller remembers t
 - **All targets** — [firmware flashing](docs/usage/FIRMWARE_FLASHING.md), [Wi-Fi provisioning](docs/usage/WIFI_PROVISIONING.md), [OTA updates](docs/usage/OTA_UPDATES.md)
 
 ## Features
+
+- On-Dial Library navigation and playback, with album and collection artwork
+- BLE media-remote pairing and saved-remote reconnect on Dial and Frame
 
 - Real-time now playing with album artwork on targets whose displays support it
 - Velocity-sensitive volume control on encoder targets
