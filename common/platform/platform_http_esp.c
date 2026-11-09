@@ -104,7 +104,7 @@ static bool response_complete(esp_http_client_handle_t client,
            esp_http_client_is_complete_data_received(client);
 }
 
-static int http_perform(const char *url, const char *body, size_t limit,
+static int http_perform(const char *url, esp_http_client_method_t method, const char *body, size_t limit,
                         bool image, char **out, size_t *out_len, bool *gzip) {
     if (out) *out = NULL;
     if (out_len) *out_len = 0;
@@ -115,7 +115,7 @@ static int http_perform(const char *url, const char *body, size_t limit,
     esp_http_client_config_t config = {
         .event_handler = response_header_event, .user_data = &headers,
         .url = url,
-        .method = body ? HTTP_METHOD_POST : HTTP_METHOD_GET,
+        .method = method,
         .timeout_ms = image ? 5000 : 3000,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -189,10 +189,13 @@ int platform_http_get(const char *url, char **out, size_t *out_len) {
     return platform_http_get_bounded(url, PLATFORM_HTTP_JSON_MAX_BYTES, out, out_len);
 }
 int platform_http_get_bounded(const char *url, size_t max_bytes, char **out, size_t *out_len) {
-    return http_perform(url, NULL, max_bytes, false, out, out_len, NULL);
+    return http_perform(url, HTTP_METHOD_GET, NULL, max_bytes, false, out, out_len, NULL);
 }
 int platform_http_post_json(const char *url, const char *json, char **out, size_t *out_len) {
-    return http_perform(url, json, PLATFORM_HTTP_JSON_MAX_BYTES, false, out, out_len, NULL);
+    return http_perform(url, HTTP_METHOD_POST, json, PLATFORM_HTTP_JSON_MAX_BYTES, false, out, out_len, NULL);
+}
+int platform_http_put_json(const char *url, const char *json, char **out, size_t *out_len) {
+    return http_perform(url, HTTP_METHOD_PUT, json, PLATFORM_HTTP_JSON_MAX_BYTES, false, out, out_len, NULL);
 }
 void platform_http_free(char *p) { free(p); }
 
@@ -330,7 +333,7 @@ int platform_http_get_image(const char *url, char **out, size_t *out_len) {
     if (out_len) *out_len = 0;
     size_t length = 0;
     bool gzip = false;
-    if (http_perform(url, NULL, HTTP_IMAGE_MAX_BYTES, true, out, &length, &gzip) != 0)
+    if (http_perform(url, HTTP_METHOD_GET, NULL, HTTP_IMAGE_MAX_BYTES, true, out, &length, &gzip) != 0)
         return -1;
     if (length == 0) goto fail;
     if (gzip || (length >= 2 && (uint8_t)(*out)[0] == 0x1f &&

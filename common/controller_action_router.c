@@ -217,8 +217,9 @@ bool controller_action_router_handle(const controller_action_t *action) {
             CONTROLLER_INTERACTION_CONTEXT_MEDIA) {
             return false;
         }
-        return bridge_client_submit_shortcut(action->value.shortcut.usage,
-                                             action->value.shortcut.gesture);
+        return bridge_client_submit_shortcut_at(action->value.shortcut.usage,
+                                                action->value.shortcut.gesture,
+                                                action->value.shortcut.press_time_ms);
 
     case CONTROLLER_ACTION_SYSTEM:
         return false;

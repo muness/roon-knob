@@ -6,26 +6,35 @@
 typedef struct {
     uint16_t usage;
     const char *name;
+    const char *label;
     controller_shortcut_key_class_t key_class;
 } key_entry_t;
 
 /* Consumer Control usages (HID Usage Tables, page 0x0C). Names are what the
  * bridge's controller map stores, so renaming one breaks saved maps. */
 static const key_entry_t kKeys[] = {
-    {0x00cd, "play_pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b0, "play", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b1, "pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b5, "next", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00b6, "previous", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
-    {0x00e9, "volume_up", CONTROLLER_SHORTCUT_KEY_RESERVED},
-    {0x00ea, "volume_down", CONTROLLER_SHORTCUT_KEY_RESERVED},
-    {0x00e2, "mute", CONTROLLER_SHORTCUT_KEY_RESERVED},
-    {0x00b7, "stop", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x00b3, "fast_forward", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x00b4, "rewind", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x0040, "menu", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x0223, "home", CONTROLLER_SHORTCUT_KEY_FREE},
-    {0x0224, "back", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x00cd, "play_pause", "Play / pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b0, "play", "Play", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b1, "pause", "Pause", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b5, "next", "Next", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00b6, "previous", "Previous", CONTROLLER_SHORTCUT_KEY_TRANSPORT},
+    {0x00e9, "volume_up", "Volume up", CONTROLLER_SHORTCUT_KEY_RESERVED},
+    {0x00ea, "volume_down", "Volume down", CONTROLLER_SHORTCUT_KEY_RESERVED},
+    {0x00e2, "mute", "Mute", CONTROLLER_SHORTCUT_KEY_RESERVED},
+    {0x00b7, "stop", "Stop", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x00b3, "fast_forward", "Fast forward", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x00b4, "rewind", "Rewind", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0040, "menu", "Menu", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0041, NULL, "Select", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0042, NULL, "Up arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0043, NULL, "Down arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0044, NULL, "Left arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0045, NULL, "Right arrow", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0046, NULL, "Menu escape", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0047, NULL, "Menu value increase", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0048, NULL, "Menu value decrease", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0223, "home", "Home", CONTROLLER_SHORTCUT_KEY_FREE},
+    {0x0224, "back", "Back", CONTROLLER_SHORTCUT_KEY_FREE},
 };
 
 static const key_entry_t *find_key(uint16_t usage) {
@@ -38,13 +47,45 @@ static const key_entry_t *find_key(uint16_t usage) {
 const char *controller_shortcut_key_name(uint16_t usage, char *buf, size_t len) {
     if (!buf || len == 0 || usage == 0) return NULL;
     const key_entry_t *known = find_key(usage);
-    int written = known ? snprintf(buf, len, "%s", known->name)
+    int written = known && known->name ? snprintf(buf, len, "%s", known->name)
                         : snprintf(buf, len, "usage_%04x", (unsigned)usage);
     if (written < 0 || (size_t)written >= len) {
         buf[0] = '\0';
         return NULL;
     }
     return buf;
+}
+
+uint16_t controller_shortcut_bindable_usage(const char *event) {
+    if (!event) return 0;
+    const char *separator = strchr(event, ':');
+    if (!separator || (strcmp(separator, ":press") && strcmp(separator, ":long") &&
+                       strcmp(separator, ":double"))) return 0;
+    const size_t length = separator - event;
+    for (size_t i = 0; i < sizeof(kKeys) / sizeof(kKeys[0]); ++i) {
+        const char *name = kKeys[i].name;
+        if (name && strlen(name) == length && !memcmp(event, name, length)) {
+            return kKeys[i].key_class == CONTROLLER_SHORTCUT_KEY_FREE ||
+                (kKeys[i].key_class == CONTROLLER_SHORTCUT_KEY_TRANSPORT &&
+                 !strcmp(separator, ":long")) ? kKeys[i].usage : 0;
+        }
+    }
+    if (length != 10 || memcmp(event, "usage_", 6)) return 0;
+    uint16_t usage = 0;
+    for (size_t i = 6; i < length; ++i) {
+        const char digit = event[i];
+        if (digit >= '0' && digit <= '9') usage = (usage << 4) | (digit - '0');
+        else if (digit >= 'a' && digit <= 'f') usage = (usage << 4) | (digit - 'a' + 10);
+        else return 0;
+    }
+    char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+    return controller_shortcut_key_name(usage, key, sizeof(key)) &&
+        strlen(key) == length && !memcmp(event, key, length) ? usage : 0;
+}
+
+const char *controller_shortcut_key_label(uint16_t usage) {
+    const key_entry_t *known = find_key(usage);
+    return known ? known->label : NULL;
 }
 
 controller_shortcut_key_class_t controller_shortcut_key_class(uint16_t usage) {
@@ -98,9 +139,10 @@ static bool reached(uint32_t now_ms, uint32_t deadline_ms) {
 }
 
 static void emit(controller_shortcut_event_t *out, size_t *count, uint16_t usage,
-                 controller_shortcut_gesture_t gesture) {
+                 controller_shortcut_gesture_t gesture, uint32_t press_time_ms) {
     out[*count].usage = usage;
     out[*count].gesture = gesture;
+    out[*count].press_time_ms = press_time_ms;
     ++*count;
 }
 
@@ -131,11 +173,12 @@ size_t controller_shortcut_gesture_on_key(
             state->long_sent = false;
             state->consumed = true; /* its release and hold must not repeat it */
             state->down_at_ms = now_ms;
-            emit(out, &count, usage, CONTROLLER_SHORTCUT_GESTURE_DOUBLE);
+            emit(out, &count, usage, CONTROLLER_SHORTCUT_GESTURE_DOUBLE, state->single_press_time_ms);
             return count;
         }
         if (state->single_pending) {
-            emit(out, &count, state->single_usage, CONTROLLER_SHORTCUT_GESTURE_PRESS);
+            emit(out, &count, state->single_usage, CONTROLLER_SHORTCUT_GESTURE_PRESS,
+                 state->single_press_time_ms);
             state->single_pending = false;
         }
         state->usage = usage;
@@ -152,6 +195,7 @@ size_t controller_shortcut_gesture_on_key(
         !state->consumed) {
         state->single_pending = true;
         state->single_usage = usage;
+        state->single_press_time_ms = state->down_at_ms;
         state->single_deadline_ms = now_ms + CONTROLLER_SHORTCUT_DOUBLE_WINDOW_MS;
     }
     state->usage = 0;
@@ -167,12 +211,14 @@ size_t controller_shortcut_gesture_poll(
         state->long_sent = true;
         out->usage = state->usage;
         out->gesture = CONTROLLER_SHORTCUT_GESTURE_LONG;
+        out->press_time_ms = state->down_at_ms;
         return 1;
     }
     if (state->single_pending && reached(now_ms, state->single_deadline_ms)) {
         state->single_pending = false;
         out->usage = state->single_usage;
         out->gesture = CONTROLLER_SHORTCUT_GESTURE_PRESS;
+        out->press_time_ms = state->single_press_time_ms;
         return 1;
     }
     return 0;

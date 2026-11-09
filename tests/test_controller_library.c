@@ -55,7 +55,7 @@ int main(void) {
   cJSON *r = cJSON_Parse(valid);
   cJSON *items = cJSON_GetObjectItemCaseSensitive(
       cJSON_GetObjectItemCaseSensitive(r, "data"), "items");
-  for (int i = 0; i < 12; i++)
+  for (int i = 0; i < CONTROLLER_LIBRARY_PAGE_SIZE; i++)
     cJSON_AddItemToArray(items,
                          cJSON_Duplicate(cJSON_GetArrayItem(items, 0), true));
   char *large = cJSON_PrintUnformatted(r);
@@ -76,7 +76,7 @@ int main(void) {
   assert(r);
   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(r, "location")->valuestring,
                  "opaque\"location"));
-  assert(cJSON_GetObjectItemCaseSensitive(r, "limit")->valueint == 12);
+  assert(cJSON_GetObjectItemCaseSensitive(r, "limit")->valueint == CONTROLLER_LIBRARY_PAGE_SIZE);
   cJSON_Delete(r);
   cJSON_free(body);
   assert(!controller_library_body("roon:z", "", 0, "ref", "delete"));

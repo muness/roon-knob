@@ -48,6 +48,11 @@ rk_ble_hid_host_result_t rk_ble_hid_host_forget(void) {
     return RK_BLE_HID_HOST_ERR_NOT_SUPPORTED;
 }
 
+bool rk_ble_hid_host_begin_learn(uint32_t *started_ms) {
+    (void)started_ms;
+    return false;
+}
+
 rk_ble_hid_host_result_t rk_ble_hid_host_status_copy(rk_ble_hid_host_status_t *out) {
     if (!out) {
         return RK_BLE_HID_HOST_ERR_INVALID_ARGUMENT;

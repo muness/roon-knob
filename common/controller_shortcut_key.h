@@ -47,12 +47,17 @@ typedef enum {
 typedef struct {
     uint16_t usage;
     controller_shortcut_gesture_t gesture;
+    uint32_t press_time_ms;
 } controller_shortcut_event_t;
 
 /* Key name the bridge's map uses: lowercase letters, digits, underscores. A
  * usage this table does not know is "usage_%04x", so any key a remote sends can
  * still be mapped. Returns `buf`, or NULL when it cannot fit. */
 const char *controller_shortcut_key_name(uint16_t usage, char *buf, size_t len);
+/* Friendly label for a known Consumer usage. NULL for a learnable unnamed key. */
+/* Decode a canonical saved event, returning zero for unsupported bindings. */
+uint16_t controller_shortcut_bindable_usage(const char *event);
+const char *controller_shortcut_key_label(uint16_t usage);
 controller_shortcut_key_class_t controller_shortcut_key_class(uint16_t usage);
 const char *controller_shortcut_gesture_name(controller_shortcut_gesture_t gesture);
 
@@ -77,6 +82,7 @@ typedef struct {
     bool single_pending;
     uint16_t single_usage;
     uint32_t single_deadline_ms;
+    uint32_t single_press_time_ms;
 } controller_shortcut_gesture_state_t;
 
 void controller_shortcut_gesture_reset(controller_shortcut_gesture_state_t *state);

@@ -16,6 +16,9 @@
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -69,7 +72,33 @@ static struct {
     uint64_t art_retry_after; // Earliest retry after a failed artwork request
     uint32_t art_retry_delay; // Exponential retry delay for the current key
     bool initial_draw_done; // First render after boot
+    bool refresh_had_artwork;
 } s_ui;
+
+typedef enum {
+    REFRESH_IDLE,
+    REFRESH_RUNNING,
+    REFRESH_COMPLETE,
+    REFRESH_FAILED,
+} refresh_state_t;
+
+static TaskHandle_t s_refresh_task;
+static _Atomic refresh_state_t s_refresh_state;
+
+static void refresh_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const bool refreshed = eink_display_refresh();
+        if (refreshed) {
+            frame_display_health_complete(platform_millis());
+            ESP_LOGI(TAG, "Full screen render complete");
+        }
+        atomic_store_explicit(&s_refresh_state,
+                              refreshed ? REFRESH_COMPLETE : REFRESH_FAILED,
+                              memory_order_release);
+    }
+}
 
 // ── Artwork cache (persists between renders to survive framebuffer clear) ──
 
@@ -318,13 +347,10 @@ static bool render_full_screen(const char *trigger) {
         draw_ble_icon(icon_x, icon_y, s_ui.ble_connected ? EINK_BLACK : EINK_RED);
     }
 
-    // Refresh the physical display
-    if (!eink_display_refresh()) {
-        s_ui.display_pref_dirty = true; // keep cached frame pending through backoff
-        return false;
-    }
-    frame_display_health_complete(platform_millis());
-    ESP_LOGI(TAG, "Full screen render complete");
+    // Hand the framebuffer to the panel task until it finishes.
+    s_ui.refresh_had_artwork = s_ui.image_key[0] != '\0';
+    atomic_store_explicit(&s_refresh_state, REFRESH_RUNNING, memory_order_release);
+    xTaskNotifyGive(s_refresh_task);
     return true;
 }
 
@@ -342,6 +368,10 @@ void eink_ui_init(void) {
     s_ui.last_render = 0;  // Allow first render immediately after debounce
     s_ui.last_change = 0;
 
+    if (xTaskCreate(refresh_task, "eink_refresh", 6144, NULL, 1, &s_refresh_task) != pdPASS) {
+        frame_display_health_fail("panel refresh task unavailable");
+        ESP_LOGE(TAG, "Could not start panel refresh task");
+    }
     ESP_LOGI(TAG, "E-ink UI initialized");
 }
 
@@ -523,7 +553,35 @@ void eink_ui_zone_picker_get_selected_id(char *out, size_t len) {
 }
 bool eink_ui_zone_picker_is_current_selection(void) { return true; }
 
+static void schedule_render_retry(void) {
+    if (s_ui.art_retry_delay == 0) {
+        s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
+    }
+    s_ui.art_retry_after = platform_millis() + s_ui.art_retry_delay;
+    ESP_LOGW(TAG, "Display retry scheduled in %u ms", (unsigned)s_ui.art_retry_delay);
+    if (s_ui.art_retry_delay < ART_RETRY_MAX_MS) {
+        uint32_t next_delay = s_ui.art_retry_delay * 2;
+        s_ui.art_retry_delay = next_delay > ART_RETRY_MAX_MS ? ART_RETRY_MAX_MS : next_delay;
+    }
+}
+
 void eink_ui_process(void) {
+    if (!s_refresh_task) return;
+    const refresh_state_t refresh = atomic_load_explicit(&s_refresh_state, memory_order_acquire);
+    if (refresh == REFRESH_RUNNING) return;
+    if (refresh != REFRESH_IDLE) {
+        atomic_store_explicit(&s_refresh_state, REFRESH_IDLE, memory_order_relaxed);
+        if (refresh == REFRESH_COMPLETE) {
+            s_ui.initial_draw_done = true;
+            s_ui.last_render = platform_millis();
+            s_ui.art_retry_after = 0;
+            s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
+        } else if (!s_ui.refresh_had_artwork || s_ui.image_key[0] || s_ui.dirty) {
+            s_ui.dirty = true;
+            s_ui.display_pref_dirty = true;
+            schedule_render_retry();
+        }
+    }
     if (!s_ui.dirty) return;
 
     uint64_t now = platform_millis();
@@ -567,29 +625,17 @@ void eink_ui_process(void) {
     if (render_full_screen(trigger)) {
         s_ui.dirty = false;
         s_ui.display_pref_dirty = false;
-        s_ui.art_retry_after = 0;
-        s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
-        s_ui.initial_draw_done = true;
-        s_ui.last_render = platform_millis();
     } else {
-        // Keep the new key pending, but avoid hammering UHC on every UI tick.
-        if (s_ui.art_retry_delay == 0) {
-            s_ui.art_retry_delay = ART_RETRY_INITIAL_MS;
-        }
-        s_ui.art_retry_after = platform_millis() + s_ui.art_retry_delay;
-        ESP_LOGW(TAG, "Artwork retry scheduled in %u ms",
-                 (unsigned)s_ui.art_retry_delay);
-        if (s_ui.art_retry_delay < ART_RETRY_MAX_MS) {
-            uint32_t next_delay = s_ui.art_retry_delay * 2;
-            s_ui.art_retry_delay = next_delay > ART_RETRY_MAX_MS
-                                       ? ART_RETRY_MAX_MS : next_delay;
-        }
+        schedule_render_retry();
     }
 }
 
 bool eink_ui_power_state_known(void) { return s_ui.power_state_known; }
 bool eink_ui_is_playing(void) { return s_ui.playing; }
-bool eink_ui_has_pending_refresh(void) { return s_ui.dirty; }
+bool eink_ui_has_pending_refresh(void) {
+    return s_ui.dirty ||
+           atomic_load_explicit(&s_refresh_state, memory_order_acquire) != REFRESH_IDLE;
+}
 
 // BLE status — updated piggyback on next now-playing refresh, never triggers its own
 void eink_ui_set_ble_status(bool connected) {

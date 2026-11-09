@@ -25,6 +25,7 @@ harness = r'''
 #include <cstdio>
 #include <cstdint>
 #include "kizz_semantic_layout.h"
+#include "artwork_viewport.h"
 using m5_platform_stackchan_volume_t = int;
 constexpr int M5_PLATFORM_STACKCHAN_VOLUME_LOW = 0;
 static kizz_semantic_context_t captured;
@@ -64,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='hiphi-ui-wake-') as directory:
         subprocess.run(['c++','-std=c++17','-Wall','-Wextra','-Werror',
                         '-fsanitize=address,undefined','-DHIPHI_M5_TARGET_ID=4',
                         f'-DHIPHI_KIZZ_WAKE_WORD={enabled}',
-                        '-I'+str(ROOT/'m5_beta_app/main'),str(cpp),'-o',str(executable)],check=True)
+                        '-I'+str(ROOT/'m5_beta_app/main'), '-I'+str(ROOT/'common'), str(cpp),'-o',str(executable)],check=True)
         subprocess.run([str(executable)],check=True)
 
 # Independently preprocess the whole UI conditional structure. OFF must remove

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "artwork_viewport.h"
 #include "controller_command.h"
 #include "controller_shortcuts.h"
 #include "controller_connection.h"
@@ -40,6 +41,18 @@ bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
 bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
                                   const char *id, controller_shortcuts_page_t *out);
 
+/* Settings can list pins without a selected playback zone. */
+bool bridge_client_shortcuts_fetch_for_settings(int offset, controller_shortcuts_page_t *out);
+
+/* Add a learned press to this controller's bridge-owned map. */
+const char *bridge_client_assign_shortcut(uint16_t usage, const char *id);
+/* Returns an owned array of bridge binding records, or NULL on failure. */
+struct cJSON *bridge_client_shortcut_bindings(void);
+/* Change an existing binding only if it still points to expected_id. A NULL
+ * replacement removes it. */
+const char *bridge_client_edit_shortcut(const char *event, const char *expected_id,
+                                        const char *replacement);
+
 /* Wake the polling worker after a display sleep/power-save interval. */
 void bridge_client_request_poll(void);
 bool bridge_client_execute_command(const controller_command_t *command);
@@ -52,6 +65,15 @@ bool bridge_client_execute_command(const controller_command_t *command);
  * own refusal is reported on the display when the request completes. `gesture`
  * is a CONTROLLER_SHORTCUT_ACTION_GESTURE_* value. */
 bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture);
+bool bridge_client_submit_shortcut_at(uint16_t usage, uint8_t gesture, uint32_t press_time_ms);
+typedef struct {
+    uint32_t press_time_ms;
+    uint16_t usage;
+    uint8_t gesture;
+    char code[32];
+    char message[192];
+} bridge_shortcut_result_t;
+bool bridge_client_latest_shortcut_result(bridge_shortcut_result_t *out);
 void bridge_client_set_network_ready(bool ready);
 const char* bridge_client_get_artwork_url(char *url_buf, size_t buf_len, int width, int height);
 const char* bridge_client_get_artwork_url_for_format(char *url_buf, size_t buf_len,
@@ -63,7 +85,9 @@ const char* bridge_client_get_artwork_url_for_format_and_scale(
     const char *format, const char *scale, int crop_limit_percent);
 int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
                                 char **out, size_t *out_len);
-int bridge_client_stream_artwork(const char *image_key, int width, int height,
+int bridge_client_fetch_artwork_viewport(const char *image_key, artwork_viewport_t viewport,
+                                         const char *format, char **out, size_t *out_len);
+int bridge_client_stream_artwork(const char *image_key, artwork_viewport_t viewport,
                                  const char *format, size_t max_bytes,
                                  platform_http_stream_callback_t callback,
                                  void *ctx, size_t *out_len);

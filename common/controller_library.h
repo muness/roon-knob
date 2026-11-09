@@ -1,7 +1,10 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
-#define CONTROLLER_LIBRARY_PAGE_SIZE 12
+#define CONTROLLER_LIBRARY_PAGE_SIZE 50
+/* Two server pages may be retained by the round touch browser. The wire
+ * decoder still accepts at most PAGE_SIZE entries per response. */
+#define CONTROLLER_LIBRARY_CAPACITY (2 * CONTROLLER_LIBRARY_PAGE_SIZE)
 #define CONTROLLER_LIBRARY_HANDLE_SIZE 513
 /* Provider handles are opaque, retained only for the current response. */
 typedef struct {
@@ -12,7 +15,7 @@ typedef struct {
   bool requires_input;
 } controller_library_item_t;
 typedef struct {
-  controller_library_item_t items[CONTROLLER_LIBRARY_PAGE_SIZE];
+  controller_library_item_t items[CONTROLLER_LIBRARY_CAPACITY];
   int count, next_offset;
   char notice[256];
   bool accepted;

@@ -31,6 +31,11 @@ static void names(void) {
     /* A key the table does not know can still be mapped on the bridge. */
     assert(strcmp(controller_shortcut_key_name(UNKNOWN, buf, sizeof(buf)), "usage_0192") == 0);
     assert(controller_shortcut_key_name(0, buf, sizeof(buf)) == NULL);
+    for (uint16_t usage = 0x42; usage <= 0x45; ++usage)
+        assert(controller_shortcut_key_label(usage) != NULL);
+    assert(strcmp(controller_shortcut_key_label(0x43), "Down arrow") == 0);
+    assert(strcmp(controller_shortcut_key_name(0x43, buf, sizeof(buf)), "usage_0043") == 0);
+    assert(controller_shortcut_key_label(UNKNOWN) == NULL);
     char tiny[4];
     assert(controller_shortcut_key_name(PLAY_PAUSE, tiny, sizeof(tiny)) == NULL);
     assert(controller_shortcut_key_name(HOME, NULL, 0) == NULL);
@@ -44,7 +49,7 @@ static void names(void) {
 
 static void body(void) {
     char out[CONTROLLER_SHORTCUT_BODY_CAPACITY];
-    controller_shortcut_event_t e = {HOME, CONTROLLER_SHORTCUT_GESTURE_LONG};
+    controller_shortcut_event_t e = {.usage=HOME, .gesture=CONTROLLER_SHORTCUT_GESTURE_LONG};
     assert(controller_shortcut_build_body(&e, out, sizeof(out)));
     assert(strcmp(out, "{\"key\":\"home\",\"gesture\":\"long\"}") == 0);
     e.usage = UNKNOWN;
@@ -244,7 +249,21 @@ static void feedback(void) {
     }
 }
 
+static void saved_binding_events_use_canonical_keys(void) {
+    assert(controller_shortcut_bindable_usage("home:press") == 0x0223);
+    assert(controller_shortcut_bindable_usage("usage_0042:double") == 0x0042);
+    assert(controller_shortcut_bindable_usage("usage_cafe:long") == 0xcafe);
+    assert(controller_shortcut_bindable_usage("play_pause:long") == 0x00cd);
+    assert(!controller_shortcut_bindable_usage("play_pause:press"));
+    assert(!controller_shortcut_bindable_usage("volume_up:long"));
+    assert(!controller_shortcut_bindable_usage("usage_00e9:press"));
+    assert(!controller_shortcut_bindable_usage("usage_0223:press"));
+    assert(!controller_shortcut_bindable_usage("usage_0000:press"));
+    assert(!controller_shortcut_bindable_usage("home:press:long"));
+}
+
 int main(void) {
+    saved_binding_events_use_canonical_keys();
     feedback();
     names();
     body();

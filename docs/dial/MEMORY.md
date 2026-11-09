@@ -109,6 +109,33 @@ display's DMA draw buffers or the UI task stack to PSRAM. LVGL may satisfy an
 individual object allocation from either registered pool, so feature sizing
 must use `lv_mem_monitor()` rather than assuming all widgets are external.
 
+## Shared Dial/HALO Library budget
+
+The continuous Library browser decodes at most 50 items per server response and
+retains at most 100 items in its active two-page window. The active model and
+lazily allocated next/previous response-cache models each use
+`sizeof(controller_library_page_t)` in explicit
+`MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT` allocations. Worker results are transient
+PSRAM allocations as well; include them and HTTP/parser storage when measuring
+peak use. These data bounds do not expand the LVGL widget budget.
+
+Only nine row widgets plus top/bottom spacers represent the window. Background
+prefetch starts with 25 entries remaining; page append/eviction preserves the
+scroller and visible anchor, and cached reverse navigation avoids a foreground
+reload. The native fifty-item/thumbnail fixture measured 34% LVGL utilization
+and 60,792 free bytes in the existing 96 KiB split pool; its regression requires
+less than 80% utilization. This is host fixture evidence, not an ESP heap or
+exact-artifact hardware qualification.
+
+Inside collections, each decoded 48×48 RGB565 thumbnail costs 4,608 pixel bytes
+in PSRAM. Fetching is limited to focused, visible and nearby entries; top-level
+navigation has no thumbnails. Pixel retention is bounded by the 100-item data
+window, so the worst-case retained pixel payload is 460,800 bytes, plus image
+descriptors and temporary decode/HTTP storage. A repeated URL avoids another
+HTTP fetch by copying existing bytes into a separately owned pixel buffer; it
+does not reduce that worst-case retained allocation. Preserve explicit bounds
+and release images when the window or browsing context changes.
+
 ## Payload lifecycle for adaptive UI
 
 Capacity is not permission to retain every representation. For a downloaded

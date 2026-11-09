@@ -1733,17 +1733,20 @@ static void shortcut_text(char *out, size_t capacity, const char *text) {
     out[n] = 0;
 }
 
-bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
-                                   int offset, controller_shortcuts_page_t *out) {
+static bool fetch_shortcuts(const bridge_request_endpoint_t *endpoint,
+                            const bridge_shortcuts_context_t *context,
+                            int offset, controller_shortcuts_page_t *out) {
     if (!out) return false;
     memset(out, 0, sizeof(*out)); out->next_offset = -1;
     snprintf(out->notice, sizeof(out->notice), "Shortcuts unavailable. Tap Retry.");
-    if (offset < 0 || !bridge_client_shortcuts_current(context)) return false;
+    if (offset < 0 || !bridge_client_request_endpoint_current(endpoint) ||
+        (context && !bridge_client_shortcuts_current(context))) return false;
     char url[256], *response = NULL; size_t length = 0;
-    snprintf(url, sizeof(url), "%s/api/shortcuts?offset=%d&limit=%d", context->endpoint.base,
+    snprintf(url, sizeof(url), "%s/api/shortcuts?offset=%d&limit=%d", endpoint->base,
              offset, CONTROLLER_SHORTCUTS_PAGE_SIZE);
     int rc = platform_http_get_bounded(url, 16384, &response, &length);
-    cJSON *root = rc == 0 && bridge_client_shortcuts_current(context)
+    cJSON *root = rc == 0 && bridge_client_request_endpoint_current(endpoint) &&
+        (!context || bridge_client_shortcuts_current(context))
         ? response_document(response, length) : NULL;
     const cJSON *version = cJSON_GetObjectItemCaseSensitive(root, "version");
     if (root && (!cJSON_IsNumber(version) || version->valuedouble != 1))
@@ -1776,6 +1779,17 @@ bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
     if (!ok) { out->count = 0; out->next_offset = -1; }
     else snprintf(out->notice, sizeof(out->notice), "%s", out->count ? "Tap to play in current zone" : "Add shortcuts in UHC Library.");
     return ok;
+}
+
+bool bridge_client_shortcuts_fetch(const bridge_shortcuts_context_t *context,
+                                   int offset, controller_shortcuts_page_t *out) {
+    return fetch_shortcuts(context ? &context->endpoint : NULL, context, offset, out);
+}
+
+bool bridge_client_shortcuts_fetch_for_settings(int offset, controller_shortcuts_page_t *out) {
+    bridge_request_endpoint_t endpoint;
+    return bridge_client_capture_request_endpoint(&endpoint) &&
+        fetch_shortcuts(&endpoint, NULL, offset, out);
 }
 
 bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
@@ -1812,6 +1826,127 @@ bool bridge_client_shortcuts_play(const bridge_shortcuts_context_t *context,
     return out->accepted;
 }
 
+static bool shortcut_bindings_url(bridge_request_endpoint_t *endpoint, char url[256]) {
+    if (!bridge_client_capture_request_endpoint(endpoint)) return false;
+    char controller_id[13] = "";
+    platform_http_get_knob_id(controller_id, sizeof(controller_id));
+    if (strlen(controller_id) != 12 || strspn(controller_id, "0123456789abcdefABCDEF") != 12)
+        return false;
+    snprintf(url, 256, "%s/api/controllers/%s/shortcuts", endpoint->base, controller_id);
+    return true;
+}
+
+static cJSON *read_shortcut_bindings(const bridge_request_endpoint_t *endpoint, const char *url) {
+    char *response = NULL;
+    size_t length = 0;
+    const int rc = platform_http_get_bounded(url, 16384, &response, &length);
+    cJSON *view = rc == 0 && bridge_client_request_endpoint_current(endpoint)
+        ? response_document(response, length) : NULL;
+    platform_http_free(response);
+    cJSON *bindings = cJSON_DetachItemFromObjectCaseSensitive(view, "bindings");
+    cJSON_Delete(view);
+    if (cJSON_IsArray(bindings)) return bindings;
+    cJSON_Delete(bindings);
+    return NULL;
+}
+
+cJSON *bridge_client_shortcut_bindings(void) {
+    bridge_request_endpoint_t endpoint;
+    char url[256];
+    return shortcut_bindings_url(&endpoint, url) ? read_shortcut_bindings(&endpoint, url) : NULL;
+}
+
+static const char *write_shortcut_binding(const char *event, const char *expected_id,
+                                          const char *id) {
+    bridge_request_endpoint_t endpoint;
+    char url[256];
+    if (!shortcut_bindings_url(&endpoint, url)) return "Hi-Fi Control is unavailable.";
+    cJSON *bindings = read_shortcut_bindings(&endpoint, url);
+    cJSON *request = cJSON_CreateObject();
+    cJSON *map = request ? cJSON_AddObjectToObject(request, "bindings") : NULL;
+    const char *error = "Couldn’t read the button map from Hi-Fi Control.";
+    if (!map || !cJSON_IsArray(bindings)) goto done;
+    bool found = false;
+    const cJSON *binding;
+    cJSON_ArrayForEach(binding, bindings) {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(binding, "event");
+        const cJSON *shortcut = cJSON_GetObjectItemCaseSensitive(binding, "shortcut_id");
+        if (!cJSON_IsString(name) || !cJSON_IsString(shortcut) ||
+            !shortcut_id_valid(shortcut->valuestring)) goto done;
+        if (!strcmp(name->valuestring, event)) {
+            if (found) goto done;
+            found = true;
+            if (!expected_id || strcmp(shortcut->valuestring, expected_id)) {
+                error = expected_id ? "This mapping changed. Reload the page and try again." :
+                    !strcmp(shortcut->valuestring, id) ? NULL : "This button already has a shortcut.";
+                goto done;
+            }
+            continue;
+        }
+        if (!cJSON_AddStringToObject(map, name->valuestring, shortcut->valuestring)) goto done;
+    }
+    if (expected_id && !found) {
+        error = "This mapping changed. Reload the page and try again.";
+        goto done;
+    }
+    error = "Couldn’t confirm the assignment. Check Buttons and shortcuts in Hi-Fi Control.";
+    if (id && !cJSON_AddStringToObject(map, event, id)) goto done;
+    char *body = cJSON_PrintUnformatted(request);
+    if (!body) goto done;
+    char *response = NULL;
+    size_t length = 0;
+    if (bridge_client_request_endpoint_current(&endpoint) &&
+        platform_http_put_json(url, body, &response, &length) == 0) error = NULL;
+    cJSON_free(body);
+    platform_http_free(response);
+done:
+    cJSON_Delete(request);
+    cJSON_Delete(bindings);
+    return error;
+}
+
+const char *bridge_client_assign_shortcut(uint16_t usage, const char *id) {
+    char key[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 1];
+    if (!shortcut_id_valid(id) ||
+        controller_shortcut_key_class(usage) != CONTROLLER_SHORTCUT_KEY_FREE ||
+        !controller_shortcut_key_name(usage, key, sizeof(key))) return "Choose a spare button and shortcut.";
+    char event[CONTROLLER_SHORTCUT_KEY_NAME_MAX + 7];
+    snprintf(event, sizeof(event), "%s:press", key);
+    return write_shortcut_binding(event, NULL, id);
+}
+
+const char *bridge_client_edit_shortcut(const char *event, const char *expected_id,
+                                        const char *replacement) {
+    const uint16_t usage = controller_shortcut_bindable_usage(event);
+    if (!usage || !shortcut_id_valid(expected_id) || (replacement && !shortcut_id_valid(replacement))) {
+        return "Choose a saved button mapping and a valid shortcut.";
+    }
+    return write_shortcut_binding(event, expected_id, replacement);
+}
+
+static bridge_shortcut_result_t s_latest_shortcut_result;
+
+bool bridge_client_latest_shortcut_result(bridge_shortcut_result_t *out) {
+    lock_state();
+    *out = s_latest_shortcut_result;
+    unlock_state();
+    return out->usage != 0;
+}
+
+static void record_shortcut_result(const controller_shortcut_event_t *event,
+                                   const char *code, const char *message) {
+    bridge_shortcut_result_t result = {
+        .press_time_ms = event->press_time_ms,
+        .usage = event->usage,
+        .gesture = event->gesture,
+    };
+    shortcut_text(result.code, sizeof(result.code), code);
+    shortcut_text(result.message, sizeof(result.message), message);
+    lock_state();
+    s_latest_shortcut_result = result;
+    unlock_state();
+}
+
 static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
                                    const shortcut_authority_t *authority) {
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
@@ -1831,6 +1966,7 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
     }
     if (ret != 0) {
         platform_http_free(resp);
+        record_shortcut_result(event, "uncertain", "The bridge did not confirm the action.");
         post_ui_message("Shortcut failed");
         return false;
     }
@@ -1843,6 +1979,10 @@ static bool send_shortcut_blocking(const controller_shortcut_event_t *event,
         if (cJSON_IsString(item) && item->valuestring) code = item->valuestring;
     }
     const char *feedback = controller_shortcut_feedback_for_code(code);
+    const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+    if (!cJSON_IsString(message)) message = cJSON_GetObjectItemCaseSensitive(root, "error");
+    record_shortcut_result(event, code ? code : "uncertain",
+        cJSON_IsString(message) ? message->valuestring : feedback ? feedback : "");
     if (feedback) post_ui_message(feedback);
     const bool ok = code && (!strcmp(code, "accepted") || !strcmp(code, "unmapped"));
     cJSON_Delete(root);
@@ -1864,9 +2004,14 @@ static void shortcut_task(void *arg) {
 }
 
 bool bridge_client_submit_shortcut(uint16_t usage, uint8_t gesture) {
+    return bridge_client_submit_shortcut_at(usage, gesture, 0);
+}
+
+bool bridge_client_submit_shortcut_at(uint16_t usage, uint8_t gesture, uint32_t press_time_ms) {
     const controller_shortcut_event_t event = {
         .usage = usage,
         .gesture = (controller_shortcut_gesture_t)gesture,
+        .press_time_ms = press_time_ms,
     };
     char body[CONTROLLER_SHORTCUT_BODY_CAPACITY];
     if (!controller_shortcut_build_body(&event, body, sizeof(body))) {
@@ -2010,39 +2155,19 @@ const char* bridge_client_get_artwork_url_for_format_and_scale(
 
 int bridge_client_fetch_artwork(const char *image_key, int width, int height, const char *format,
                                 char **out, size_t *out_len) {
-    if (!out || width <= 0 || height <= 0) return -1;
-    *out = NULL;
-    if (out_len) *out_len = 0;
-    char url[512];
-    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
-                                                   height, 0, format)) {
-        return -1;
-    }
-    uint32_t cache_key = 2166136261u;
-    for (const unsigned char *p = (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
-        cache_key ^= *p;
-        cache_key *= 16777619u;
-    }
-    size_t len = strlen(url);
-    if (len + 20 < sizeof(url)) {
-        snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
-                 (unsigned)cache_key);
-    }
-    return platform_http_get_image(url, out, out_len);
+    artwork_viewport_t viewport = {width, height, ARTWORK_FIT};
+    return bridge_client_fetch_artwork_viewport(image_key, viewport, format, out, out_len);
 }
 
-int bridge_client_stream_artwork(const char *image_key, int width, int height,
-                                 const char *format, size_t max_bytes,
-                                 platform_http_stream_callback_t callback,
-                                 void *ctx, size_t *out_len) {
-    if (width <= 0 || height <= 0 || max_bytes == 0 || !callback) return -1;
-
-    char url[512];
-    if (!bridge_client_get_artwork_url_for_format(url, sizeof(url), width,
-                                                   height, 0, format)) {
-        return -1;
+static bool build_artwork_request(char *url, size_t url_size, const char *image_key,
+                                  artwork_viewport_t viewport, const char *format) {
+    const char *scale = viewport.scale == ARTWORK_CIRCLE ? "circle" :
+                        viewport.scale == ARTWORK_COVER ? "cover" : "fit";
+    if (viewport.width <= 0 || viewport.height <= 0 ||
+        !bridge_client_get_artwork_url_for_format_and_scale(
+            url, url_size, viewport.width, viewport.height, 0, format, scale, 0)) {
+        return false;
     }
-
     uint32_t cache_key = 2166136261u;
     for (const unsigned char *p =
              (const unsigned char *)(image_key ? image_key : ""); *p; ++p) {
@@ -2050,9 +2175,28 @@ int bridge_client_stream_artwork(const char *image_key, int width, int height,
         cache_key *= 16777619u;
     }
     size_t len = strlen(url);
-    if (len + 20 >= sizeof(url)) return -1;
-    snprintf(url + len, sizeof(url) - len, "&cache_bust=%08x",
-             (unsigned)cache_key);
+    if (len + 20 >= url_size) return false;
+    snprintf(url + len, url_size - len, "&cache_bust=%08x", (unsigned)cache_key);
+    return true;
+}
+
+int bridge_client_fetch_artwork_viewport(const char *image_key, artwork_viewport_t viewport,
+                                         const char *format, char **out, size_t *out_len) {
+    if (!out) return -1;
+    *out = NULL;
+    if (out_len) *out_len = 0;
+    char url[512];
+    if (!build_artwork_request(url, sizeof(url), image_key, viewport, format)) return -1;
+    return platform_http_get_image(url, out, out_len);
+}
+
+int bridge_client_stream_artwork(const char *image_key, artwork_viewport_t viewport,
+                                 const char *format, size_t max_bytes,
+                                 platform_http_stream_callback_t callback,
+                                 void *ctx, size_t *out_len) {
+    char url[512];
+    if (!max_bytes || !callback ||
+        !build_artwork_request(url, sizeof(url), image_key, viewport, format)) return -1;
     return platform_http_stream(url, max_bytes, callback, ctx, out_len);
 }
 

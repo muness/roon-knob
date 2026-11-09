@@ -22,6 +22,8 @@ set(SRC_FILES
     "../../common/platform/platform_device_settings_none.c"
     "../../common/bridge_command_plan.c"
     "../../common/controller_shortcut_key.c"
+    "../../common/controller_ble_input.c"
+    "../../common/ble_remote_web.c"
     "../../common/bridge_client.c"
     "../../common/controller_connection.c"
     "../../common/platform/platform_mdns_endpoint.c"
@@ -46,7 +48,7 @@ set(SRC_FILES
 idf_component_register(SRCS ${SRC_FILES}
     INCLUDE_DIRS "." "../../include" "../../common" "../../tough_app/main"
     REQUIRES mdns esp_event esp_netif esp_timer esp_wifi wpa_supplicant m5_platform
-    PRIV_REQUIRES espcoredump app_update nvs_flash esp_http_client esp_http_server esp_app_format driver espressif__cjson)
+    PRIV_REQUIRES rk_ble_hid_host espcoredump app_update nvs_flash esp_http_client esp_http_server esp_app_format driver espressif__cjson)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY C_STANDARD 11)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD_REQUIRED ON)
