@@ -83,12 +83,12 @@ static void retry_and_scan_races(void) {
     assert(rk_pair_arm_retry(&m, true) == 8000);
     rk_pair_step(&m, RK_PAIR_CANCEL, 0);
     assert(rk_pair_step(&m, RK_PAIR_RETRY_DUE, 2) == RK_PAIR_IGNORED);
-    for (unsigned i = 0; i < 20; ++i) {
+    for (unsigned i = 0; i < 300; ++i) {
         const uint32_t expected = i < 4 ? 2000u << i : 30000u;
         assert(rk_pair_arm_retry(&m, true) == expected);
         assert(rk_pair_step(&m, RK_PAIR_RETRY_DUE, 2) == RK_PAIR_ACCEPTED);
     }
-    assert(rk_pair_arm_retry(&m, true) == 0);
+    assert(rk_pair_arm_retry(&m, true) == 30000);
 }
 
 int main(void) {
