@@ -119,8 +119,8 @@ You can build it, flash it, modify it, and run it on your own gear at home for f
 
 If you are an **installer, integrator, or dealer**, or you are **deploying it for clients**, **bundling it with hardware you sell**, or making it part of a **paid, hosted, or managed service**, you need a commercial license. See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
 
-Versions up to and including v2.2.2 were released under the [MIT License](LICENSE-MIT).
-
 ## Acknowledgments
 
-Thanks to **gTunes** from the Roon community for alpha testing, detailed feedback, and help with the velocity-sensitive volume control implementation.
+Thank you to the Roon and Lyrion Music Server communities for trying early builds, sharing how you listen at home, and reporting what works and what needs attention.
+
+Thanks also to everyone who tests controllers and remotes on real hardware, tracks down regressions, suggests improvements, and contributes code or documentation. Your feedback helps make HiPhi easier to set up and use across different rooms, devices, and music systems.
