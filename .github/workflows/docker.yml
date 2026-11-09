@@ -1732,6 +1732,7 @@ jobs:
     needs: [test-shared, build-idf, build-frame, build-rlcd, build-atom, build-halo, build-tough, build-m5-betas, build-knob-aux]
     if: github.event_name == 'pull_request'
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -2100,6 +2101,12 @@ jobs:
           keep_files: false
           cname: firmware.hiphi.audio
 
+      # A GITHUB_TOKEN push cannot trigger the publisher's push event.
+      - name: Trigger Pages publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages-publisher.yml --repo "$GITHUB_REPOSITORY" --ref gh-pages
+
       - name: Verify all deployed previews
         id: verify-preview
         env:
@@ -2264,6 +2271,7 @@ jobs:
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@v7
@@ -2518,6 +2526,12 @@ jobs:
           # The Pages publisher lives on this branch; the action otherwise deletes .github.
           exclude_assets: ''
           cname: firmware.hiphi.audio
+
+      # A GITHUB_TOKEN push cannot trigger the publisher's push event.
+      - name: Trigger Pages publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages-publisher.yml --repo "$GITHUB_REPOSITORY" --ref gh-pages
 
       - name: Verify every deployed firmware link
         env:

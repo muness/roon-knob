@@ -146,4 +146,27 @@ for path in (
     forbid(path, "Firefox are NOT supported")
     forbid(path, "Firefox don't support Web Serial")
 
-print("release hosting and component-isolation contracts OK")
+
+
+# GITHUB_TOKEN pushes do not start another push-triggered workflow. All three
+# writers must explicitly dispatch the publisher before waiting for public files.
+import re
+for path, job, verify in [
+    (".github/workflows/docker.yml", "deploy-pr-preview", "Verify all deployed previews"),
+    (".github/workflows/docker.yml", "deploy-pages", "Verify every deployed firmware link"),
+    (".github/workflows/firmware-site-preview.yml", "validate-and-preview", "Verify deployed site preview"),
+]:
+    text = (ROOT / path).read_text()
+    match = re.search(r"^  " + re.escape(job) + r":\n(.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)", text, re.M | re.S)
+    if not match:
+        raise SystemExit(f"{path}: missing job {job}")
+    body = match.group(1)
+    dispatch = "gh workflow run pages-publisher.yml --repo \"$GITHUB_REPOSITORY\" --ref gh-pages"
+    if "actions: write" not in body.split("    steps:")[0]:
+        raise SystemExit(f"{path}/{job}: publisher dispatch requires actions: write")
+    if body.count(dispatch) != 1 or not (body.index("peaceiris/actions-gh-pages") < body.index(dispatch) < body.index(verify)):
+        raise SystemExit(f"{path}/{job}: dispatch publisher after push and before verification")
+    if "GH_TOKEN: ${{ github.token }}" not in body:
+        raise SystemExit(f"{path}/{job}: missing authenticated publisher dispatch")
+
+print("release hosting, publisher dispatch and component-isolation contracts OK")
