@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 2.8.4 — 2026-11-08
+
 - Dial and Frame support BLE Media Remotes for playback control, including pairing and reconnecting saved remotes (#349). 🚀
 - Dial and HALO feature redesigned Library navigation, collection thumbnails and prefetching for smoother browsing. Fix scrolling position, short-page offsets, and overlapping title and artist labels (#337, #338).
+- Artwork is composed for each display’s visible area. Circular displays use attention-aware cropping when it improves face visibility. Requires UHC 4.0.2 for the new cropping behavior (#343).
 
 ## 2.8.3 — 2026-11-07
 
