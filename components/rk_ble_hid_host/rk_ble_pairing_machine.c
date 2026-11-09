@@ -11,9 +11,9 @@ bool rk_pair_draining(const rk_pair_machine_t *m) {
 }
 
 uint32_t rk_pair_arm_retry(rk_pair_machine_t *m, bool eligible) {
-    if (!eligible || !rk_pair_can_start(m) || m->retry_armed || m->retry_blocked ||
-        m->retry_attempts >= 20) return 0;
-    const uint8_t attempt = m->retry_attempts++;
+    if (!eligible || !rk_pair_can_start(m) || m->retry_armed || m->retry_blocked) return 0;
+    const uint8_t attempt = m->retry_attempts;
+    if (m->retry_attempts < 4) ++m->retry_attempts;
     m->retry_armed = true;
     return attempt >= 4 ? 30000 : (2000u << attempt);
 }
