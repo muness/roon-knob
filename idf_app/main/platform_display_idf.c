@@ -461,7 +461,7 @@ bool platform_display_register_lvgl_driver(void) {
 
     // Allocate and clear draw buffers in internal RAM (required for SPI DMA)
     // Note: PSRAM cannot be used with SPI LCD DMA transfers
-    size_t buf_size = LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(lv_color_t);
+    size_t buf_size = LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(uint16_t);
     void *buf1 = heap_caps_calloc(1, buf_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     void *buf2 = heap_caps_calloc(1, buf_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!buf1 || !buf2) {

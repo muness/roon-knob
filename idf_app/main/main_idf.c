@@ -35,10 +35,9 @@
 
 static const char *TAG = "main";
 
-// Shared navigation adds a 3,328-byte process frame and 9,728-byte render
-// frame before LVGL/runtime callees. Retain 32 KiB for these nested paths;
-// exact-artifact hardware high-water evidence is still required.
-#define UI_LOOP_STACK_SIZE (32 * 1024)
+// The shared navigation reuses its zone buffer instead of placing a full
+// zone list on the UI stack. Retain margin for LVGL and runtime callees.
+#define UI_LOOP_STACK_SIZE (20 * 1024)
 #define UI_LOOP_CORE 1
 #define LVGL_PSRAM_POOL_SIZE (72 * 1024)
 #define EXPERIMENT_ENCODER_GPIO_A GPIO_NUM_8
