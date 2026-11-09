@@ -16,6 +16,11 @@
 #include "src/misc/cache/instance/lv_image_header_cache.h"
 #include "ui.h"
 #include "wifi_manager.h"
+#ifdef ESP_PLATFORM
+#include <esp_attr.h>
+#else
+#define EXT_RAM_BSS_ATTR
+#endif
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -66,7 +71,7 @@ static int desired_absolute = -1;
 static bool connection_refresh_pending;
 static uint64_t connection_observed_before;
 static int64_t connection_refresh_ms, connection_status_ms;
-static bridge_zone_t zone_rows[BRIDGE_CLIENT_MAX_ZONES];
+static EXT_RAM_BSS_ATTR bridge_zone_t zone_rows[BRIDGE_CLIENT_MAX_ZONES];
 static char folder_name[301] = "Library";
 static bool pending_browse, carousel, rebuilding;
 static lv_obj_t *scroller, *home_button, *art_touch;
@@ -1361,11 +1366,10 @@ static void render(void) {
     list_row("Library", NULL, ACTION_LIBRARY, 1);
     char current[64] = "", name[100] = "Pick a zone";
     bridge_client_get_current_zone_id(current, sizeof(current));
-    bridge_zone_t zs[BRIDGE_CLIENT_MAX_ZONES];
-    int n = bridge_client_get_zones(zs, BRIDGE_CLIENT_MAX_ZONES);
+    int n = bridge_client_get_zones(zone_rows, BRIDGE_CLIENT_MAX_ZONES);
     for (int i = 0; i < n; i++)
-      if (!strcmp(zs[i].id, current))
-        snprintf(name, sizeof(name), "Zone: %s", zs[i].name);
+      if (!strcmp(zone_rows[i].id, current))
+        snprintf(name, sizeof(name), "Zone: %s", zone_rows[i].name);
     list_row(name, NULL, ACTION_ZONES, 2);
     list_row("Settings", NULL, ACTION_SETTINGS, 3);
 
@@ -1373,10 +1377,9 @@ static void render(void) {
   } else if (screen == CONTROLLER_SCREEN_SHORTCUTS) {
     lv_label_set_text(heading, "Shortcuts");
     char zone_name[100] = "Choose a zone first";
-    bridge_zone_t zs[BRIDGE_CLIENT_MAX_ZONES];
-    int n = bridge_client_get_zones(zs, BRIDGE_CLIENT_MAX_ZONES);
+    int n = bridge_client_get_zones(zone_rows, BRIDGE_CLIENT_MAX_ZONES);
     for (int i = 0; i < n; i++)
-      if (!strcmp(zs[i].id, zone)) snprintf(zone_name, sizeof(zone_name), "Play in %s", zs[i].name);
+      if (!strcmp(zone_rows[i].id, zone)) snprintf(zone_name, sizeof(zone_name), "Play in %s", zone_rows[i].name);
     lv_label_set_text(subtitle, busy ? (busy_kind == SHORTCUTS_PLAY ? "Sending…" : "Loading…") : pending_shortcuts ? "Loading…" : zone_name);
     if (shortcuts && !busy && !pending_shortcuts) {
       for (int i = 0; i < shortcuts->count; i++)

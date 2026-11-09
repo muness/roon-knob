@@ -39,7 +39,7 @@ static esp_timer_handle_t s_lvgl_tick_timer = NULL;
 /* Two 36-row DMA buffers consumed 51,840 bytes and left Wi-Fi with no
  * DMA-capable heap once BLE was connected. Twenty-four rows retains partial,
  * double-buffered rendering while returning 17,280 bytes to the radio path. */
-#define LVGL_BUF_HEIGHT 24
+#define LVGL_BUF_HEIGHT 12
 #define PIN_NUM_LCD_CS      ((gpio_num_t)14)
 #define PIN_NUM_LCD_PCLK    ((gpio_num_t)13)
 #define PIN_NUM_LCD_DATA0   ((gpio_num_t)15)
@@ -461,7 +461,7 @@ bool platform_display_register_lvgl_driver(void) {
 
     // Allocate and clear draw buffers in internal RAM (required for SPI DMA)
     // Note: PSRAM cannot be used with SPI LCD DMA transfers
-    size_t buf_size = LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(lv_color_t);
+    size_t buf_size = LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(uint16_t);
     void *buf1 = heap_caps_calloc(1, buf_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     void *buf2 = heap_caps_calloc(1, buf_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!buf1 || !buf2) {
