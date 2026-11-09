@@ -16,6 +16,11 @@
 #include "src/misc/cache/instance/lv_image_header_cache.h"
 #include "ui.h"
 #include "wifi_manager.h"
+#ifdef ESP_PLATFORM
+#include <esp_attr.h>
+#else
+#define EXT_RAM_BSS_ATTR
+#endif
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -66,7 +71,7 @@ static int desired_absolute = -1;
 static bool connection_refresh_pending;
 static uint64_t connection_observed_before;
 static int64_t connection_refresh_ms, connection_status_ms;
-static bridge_zone_t zone_rows[BRIDGE_CLIENT_MAX_ZONES];
+static EXT_RAM_BSS_ATTR bridge_zone_t zone_rows[BRIDGE_CLIENT_MAX_ZONES];
 static char folder_name[301] = "Library";
 static bool pending_browse, carousel, rebuilding;
 static lv_obj_t *scroller, *home_button, *art_touch;
